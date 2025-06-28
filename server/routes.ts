@@ -14,6 +14,7 @@ import bcrypt from "bcryptjs";
 import { tmeApi } from "./tme-api";
 import { ebayApi } from "./ebay-api";
 import { createSimpleUKListingXML } from "./ebay-uk-config";
+import { createBasicUKListingXML } from "./ebay-basic-uk-config";
 import { createTestListingXML } from "./ebay-test-listing";
 import { createListingWithExternalImageXML } from "./ebay-external-image";
 import { ebayOAuth } from "./ebay-oauth";
@@ -1330,6 +1331,100 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({
         success: false,
         error: error instanceof Error ? error.message : "Test listing failed"
+      });
+    }
+  });
+
+  // Basic eBay UK listing with simplified shipping
+  app.post("/api/ebay/list-basic-uk", requireAuth, async (req, res) => {
+    try {
+      const { productId } = req.body;
+      
+      if (!productId) {
+        return res.status(400).json({
+          success: false,
+          error: "Product ID is required"
+        });
+      }
+
+      const product = await storage.getProduct(productId);
+      if (!product) {
+        return res.status(404).json({
+          success: false,
+          error: "Product not found"
+        });
+      }
+
+      const { ebayOAuth } = await import('./ebay-oauth');
+      const authToken = await ebayOAuth.getValidAccessToken();
+      const xmlBody = createBasicUKListingXML(product, authToken);
+      
+      console.log("Generated Basic UK XML:", xmlBody);
+      
+      const response = await fetch('https://api.ebay.com/ws/api.dll', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/xml',
+          'X-EBAY-API-SITEID': '3',
+          'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
+          'X-EBAY-API-CALL-NAME': 'AddFixedPriceItem',
+          'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
+          'X-EBAY-API-APP-NAME': process.env.EBAY_APP_ID!,
+          'X-EBAY-API-CERT-NAME': process.env.EBAY_CERT_ID!
+        },
+        body: xmlBody
+      });
+
+      const responseText = await response.text();
+      console.log("eBay Basic UK Response:", responseText);
+      
+      // Parse response for success/failure
+      const isSuccessful = responseText.includes('<Ack>Success</Ack>');
+      const itemIdMatch = responseText.match(/<ItemID>(\d+)<\/ItemID>/);
+      const itemId = itemIdMatch ? itemIdMatch[1] : null;
+      
+      if (isSuccessful && itemId) {
+        await storage.updateProduct(productId, {
+          listedOnEbay: true,
+          ebayItemId: itemId
+        });
+
+        await storage.createSyncLog({
+          source: "ebay",
+          operation: "product_listing",
+          status: "success",
+          message: `Product successfully listed on eBay UK! Item ID: ${itemId}`,
+          details: JSON.stringify({
+            productId,
+            itemId,
+            marketplace: "eBay UK",
+            currency: "GBP"
+          })
+        });
+
+        res.json({
+          success: true,
+          itemId,
+          message: "Product successfully listed on eBay UK!",
+          url: `https://www.ebay.co.uk/itm/${itemId}`
+        });
+      } else {
+        const errorMatch = responseText.match(/<ShortMessage>(.*?)<\/ShortMessage>/) ||
+                          responseText.match(/<LongMessage>(.*?)<\/LongMessage>/);
+        const errorMessage = errorMatch ? errorMatch[1] : 'Unknown error occurred';
+        
+        res.json({
+          success: false,
+          error: "Listing failed",
+          details: errorMessage,
+          fullResponse: responseText
+        });
+      }
+    } catch (error) {
+      console.error("eBay Basic UK listing failed:", error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Listing failed"
       });
     }
   });
