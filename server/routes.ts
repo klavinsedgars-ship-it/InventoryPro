@@ -325,6 +325,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/ebay/policies", requireAuth, async (req, res) => {
+    try {
+      const result = await ebayApi.getBusinessPolicies();
+      res.json(result);
+    } catch (error) {
+      console.error("Failed to fetch eBay policies:", error);
+      res.status(500).json({ 
+        success: false, 
+        message: (error as Error).message || "Failed to fetch eBay policies",
+        error: (error as Error).message
+      });
+    }
+  });
+
   app.get("/api/ebay/categories", requireAuth, async (req, res) => {
     try {
       const categories = await ebayApi.getEbayCategories();
