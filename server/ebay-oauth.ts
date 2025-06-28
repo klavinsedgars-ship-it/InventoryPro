@@ -79,7 +79,7 @@ export class EbayOAuthService {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: authorizationCode,
-        redirect_uri: process.env.EBAY_REDIRECT_URI || 'https://developer.ebay.com/DevZone/account/'
+        redirect_uri: 'KarlisVi-Fullio-PRD-dd4af8740-15820439'
       })
     });
 
@@ -164,18 +164,12 @@ export class EbayOAuthService {
    */
   generateAuthUrl(state?: string): string {
     const clientId = process.env.EBAY_APP_ID;
-    const redirectUri = process.env.EBAY_REDIRECT_URI || 'https://developer.ebay.com/DevZone/account/';
+    const redirectUri = 'KarlisVi-Fullio-PRD-dd4af8740-15820439'; // Use RuName instead
     
     const scopes = [
-      'https://api.ebay.com/oauth/api_scope/sell.marketing.readonly',
-      'https://api.ebay.com/oauth/api_scope/sell.marketing',
-      'https://api.ebay.com/oauth/api_scope/sell.inventory.readonly',
       'https://api.ebay.com/oauth/api_scope/sell.inventory',
-      'https://api.ebay.com/oauth/api_scope/sell.account.readonly',
-      'https://api.ebay.com/oauth/api_scope/sell.account',
-      'https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly',
       'https://api.ebay.com/oauth/api_scope/sell.fulfillment',
-      'https://api.ebay.com/oauth/api_scope/sell.analytics.readonly'
+      'https://api.ebay.com/oauth/api_scope/sell.account'
     ].join(' ');
 
     const params = new URLSearchParams({
@@ -183,7 +177,7 @@ export class EbayOAuthService {
       redirect_uri: redirectUri,
       response_type: 'code',
       scope: scopes,
-      state: state || 'random_state_string'
+      state: state || 'auth_state'
     });
 
     return `https://auth.ebay.com/oauth2/authorize?${params.toString()}`;
