@@ -13,21 +13,27 @@ export function createSimpleUSListingXML(product: any, authToken: string, imageU
     <StartPrice currencyID="USD">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
     <Quantity>${product.stock || 1}</Quantity>
     <ListingDuration>GTC</ListingDuration>
+    <Country>US</Country>
     <Currency>USD</Currency>
     <DispatchTimeMax>3</DispatchTimeMax>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
-    <SellerProfiles>
-      <SellerShippingProfile>
-        <ShippingProfileID>234560863019</ShippingProfileID>
-      </SellerShippingProfile>
-      <SellerPaymentProfile>
-        <PaymentProfileID>216006444019</PaymentProfileID>
-      </SellerPaymentProfile>
-      <SellerReturnProfile>
-        <ReturnProfileID>209734982019</ReturnProfileID>
-      </SellerReturnProfile>
-    </SellerProfiles>
+    <ShippingDetails>
+      <ShippingType>Flat</ShippingType>
+      <ShippingServiceOptions>
+        <ShippingServicePriority>1</ShippingServicePriority>
+        <ShippingService>USPSMedia</ShippingService>
+        <ShippingServiceCost>5.99</ShippingServiceCost>
+      </ShippingServiceOptions>
+    </ShippingDetails>
+    <PaymentMethods>PayPal</PaymentMethods>
+    <PayPalEmailAddress>payments@example.com</PayPalEmailAddress>
+    <ReturnPolicy>
+      <ReturnsAcceptedOption>ReturnsAccepted</ReturnsAcceptedOption>
+      <RefundOption>MoneyBack</RefundOption>
+      <ReturnsWithinOption>Days_30</ReturnsWithinOption>
+      <ShippingCostPaidByOption>Buyer</ShippingCostPaidByOption>
+    </ReturnPolicy>
     ${imageUrl ? `<PictureDetails>
       <PictureURL>${imageUrl}</PictureURL>
     </PictureDetails>` : ''}
