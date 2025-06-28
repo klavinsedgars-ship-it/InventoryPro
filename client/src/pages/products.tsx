@@ -519,6 +519,15 @@ export function Products({ user }: ProductsProps) {
                           <Button 
                             variant="outline" 
                             size="sm"
+                            onClick={() => externalImageMutation.mutate(product.id)}
+                            disabled={externalImageMutation.isPending}
+                            className="text-orange-600 hover:text-orange-900"
+                          >
+                            {externalImageMutation.isPending ? "Testing..." : "Test Ext Image"}
+                          </Button>
+                          <Button 
+                            variant="outline" 
+                            size="sm"
                             onClick={() => usListingMutation.mutate(product.id)}
                             disabled={usListingMutation.isPending}
                             className="text-blue-600 hover:text-blue-900"
