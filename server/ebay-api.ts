@@ -332,9 +332,11 @@ export class EbayApiService {
     <ListingDuration>GTC</ListingDuration>
     <Country>GB</Country>
     <Currency>GBP</Currency>
-    <ItemLocation>Riga, Latvia</ItemLocation>
-    <DispatchTimeMax>3</DispatchTimeMax>
+    <Location>Riga, Latvia</Location>
     <ListingType>FixedPriceItem</ListingType>
+    <ConditionID>1000</ConditionID>
+    <DispatchTimeMax>3</DispatchTimeMax>
+    <ItemLocation>Riga, Latvia</ItemLocation>
     <ConditionID>1000</ConditionID>
     <PictureDetails>
       <PictureURL>https://images.unsplash.com/photo-1553062407-98eeb64c6a62</PictureURL>
