@@ -10,6 +10,7 @@ import { Categories } from "@/pages/categories";
 import { Marketplaces } from "@/pages/marketplaces";
 import { TMESync } from "@/pages/sync";
 import { Settings } from "@/pages/settings";
+import { Reports } from "@/pages/reports";
 import { Login } from "@/pages/login";
 import NotFound from "@/pages/not-found";
 
@@ -77,6 +78,7 @@ function AppContent() {
       <Route path="/marketplaces" component={() => <Marketplaces user={user} />} />
       <Route path="/sync" component={() => <TMESync user={user} />} />
       <Route path="/categories" component={() => <Categories user={user} />} />
+      <Route path="/reports" component={() => <Reports user={user} />} />
       <Route path="/settings" component={() => <Settings user={user} />} />
       <Route component={NotFound} />
     </Switch>
