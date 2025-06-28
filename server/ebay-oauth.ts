@@ -59,9 +59,19 @@ export class EbayOAuthService {
   }
 
   /**
+   * Force reload token from environment (for when token is updated)
+   */
+  reloadTokenFromEnvironment(): void {
+    this.loadTokenFromEnvironment();
+  }
+
+  /**
    * Get a valid access token, refreshing if necessary
    */
   async getValidAccessToken(): Promise<string> {
+    // Force reload from environment to get fresh token
+    this.reloadTokenFromEnvironment();
+    
     if (this.currentToken && this.isTokenValid()) {
       return this.currentToken.access_token;
     }
