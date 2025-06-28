@@ -15,10 +15,12 @@ export function createMinimalUKListingXML(product: any, authToken: string): stri
     <ListingDuration>GTC</ListingDuration>
     <Country>GB</Country>
     <Currency>GBP</Currency>
+    <Location>Riga, Latvia</Location>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
     <DispatchTimeMax>3</DispatchTimeMax>
     <ItemLocation>Riga, Latvia</ItemLocation>
+    <PostalCode>LV-1010</PostalCode>
     <SellerProfiles>
       <SellerShippingProfile>
         <ShippingProfileID>142140832019</ShippingProfileID>
