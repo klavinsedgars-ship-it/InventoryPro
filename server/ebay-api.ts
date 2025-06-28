@@ -181,20 +181,20 @@ export class EbayApiService {
       try {
         // Create XML request for eBay Trading API
         // First verify the item structure with VerifyAddItem
-        const verifyXmlRequest = this.createVerifyItemXML(listingData);
+        const verifyXmlRequest = await this.createVerifyItemXML(listingData);
         console.log("Verifying item with eBay API first...");
         
         let response: string;
         try {
-          const verifyResponse = await this.makeTradingApiRequest(verifyXmlRequest);
+          const verifyResponse = await this.makeTradingApiRequest(verifyXmlRequest, 'VerifyAddFixedPriceItem');
           console.log("VerifyAddItem response:", verifyResponse);
           
           // If verification succeeds, proceed with actual listing
-          const xmlRequest = this.createAddItemXML(listingData);
+          const xmlRequest = await this.createAddItemXML(listingData);
           console.log("Generated XML:", xmlRequest);
           console.log("Making eBay Trading API call with XML request");
           
-          response = await this.makeTradingApiRequest(xmlRequest);
+          response = await this.makeTradingApiRequest(xmlRequest, 'AddFixedPriceItem');
         } catch (verifyError) {
           console.log("VerifyAddItem failed:", verifyError);
           throw verifyError;
@@ -450,16 +450,16 @@ export class EbayApiService {
       .replace(/'/g, '&#39;');
   }
 
-  private async makeTradingApiRequest(xmlBody: string): Promise<string> {
+  private async makeTradingApiRequest(xmlBody: string, callName: string = 'AddFixedPriceItem'): Promise<string> {
     const tradingUrl = this.isProduction ? this.tradingApiUrl : this.sandboxTradingApiUrl;
     console.log("Using eBay environment:", this.isProduction ? "PRODUCTION" : "SANDBOX");
     
     console.log("Making eBay API request to:", tradingUrl);
+    console.log("API Call Name:", callName);
     console.log("Request headers:", {
       'X-EBAY-API-DEV-NAME': this.credentials.devId ? 'SET' : 'MISSING',
       'X-EBAY-API-APP-NAME': this.credentials.appId ? 'SET' : 'MISSING',
-      'X-EBAY-API-CERT-NAME': this.credentials.certId ? 'SET' : 'MISSING',
-      'EBAY_USER_TOKEN': process.env.EBAY_USER_TOKEN ? 'SET' : 'MISSING'
+      'X-EBAY-API-CERT-NAME': this.credentials.certId ? 'SET' : 'MISSING'
     });
     
     const response = await fetch(tradingUrl, {
@@ -470,7 +470,7 @@ export class EbayApiService {
         'X-EBAY-API-DEV-NAME': this.credentials.devId,
         'X-EBAY-API-APP-NAME': this.credentials.appId,
         'X-EBAY-API-CERT-NAME': this.credentials.certId,
-        'X-EBAY-API-CALL-NAME': 'AddFixedPriceItem',
+        'X-EBAY-API-CALL-NAME': callName,
         'X-EBAY-API-SITEID': this.siteId
       },
       body: xmlBody
