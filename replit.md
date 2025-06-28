@@ -146,6 +146,9 @@ Changelog:
 - June 28, 2025. Updated German business policy IDs: Shipping 263978529019, Payment 216006440019, Return 263978527019
 - June 28, 2025. Added eBay image upload functionality with automatic Arduino product image integration
 - June 28, 2025. Business policies now accepted by eBay Germany API, only image upload remaining for complete listings
+- June 28, 2025. Successfully switched to eBay US marketplace with working business policies (Return: 209734982019, Shipping: 234560863019, Payment: 216006444019)
+- June 28, 2025. Integrated automatic image upload feature for test listings using Arduino Uno R3 image from attached assets
+- June 28, 2025. eBay US integration 95% complete - business policies working, only image upload permissions needed for full production
 ```
 
 ## User Preferences
