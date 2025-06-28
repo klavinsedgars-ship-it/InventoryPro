@@ -179,11 +179,25 @@ export class EbayApiService {
 
       try {
         // Create XML request for eBay Trading API
-        const xmlRequest = this.createAddItemXML(listingData);
-        console.log("Generated XML:", xmlRequest);
-        console.log("Making eBay Trading API call with XML request");
+        // First verify the item structure with VerifyAddItem
+        const verifyXmlRequest = this.createVerifyItemXML(listingData);
+        console.log("Verifying item with eBay API first...");
         
-        const response = await this.makeTradingApiRequest(xmlRequest);
+        let response: string;
+        try {
+          const verifyResponse = await this.makeTradingApiRequest(verifyXmlRequest);
+          console.log("VerifyAddItem response:", verifyResponse);
+          
+          // If verification succeeds, proceed with actual listing
+          const xmlRequest = this.createAddItemXML(listingData);
+          console.log("Generated XML:", xmlRequest);
+          console.log("Making eBay Trading API call with XML request");
+          
+          response = await this.makeTradingApiRequest(xmlRequest);
+        } catch (verifyError) {
+          console.log("VerifyAddItem failed:", verifyError);
+          throw verifyError;
+        }
         
         // Parse XML response to get ItemID
         const itemIdMatch = response.match(/<ItemID>(\d+)<\/ItemID>/);
@@ -310,6 +324,52 @@ export class EbayApiService {
 
 
 
+  private createVerifyItemXML(listingData: any): string {
+    const userToken = process.env.EBAY_USER_TOKEN;
+    if (!userToken) {
+      throw new Error("eBay User Token is required for listing products");
+    }
+    
+    return `<?xml version="1.0" encoding="utf-8"?>
+<VerifyAddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${userToken}</eBayAuthToken>
+  </RequesterCredentials>
+  <Item>
+    <Title>${this.escapeXml(listingData.title)}</Title>
+    <Description><![CDATA[${listingData.description}]]></Description>
+    <PrimaryCategory>
+      <CategoryID>58277</CategoryID>
+    </PrimaryCategory>
+    <StartPrice currencyID="GBP">${listingData.startPrice}</StartPrice>
+    <Quantity>${listingData.quantity}</Quantity>
+    <ListingDuration>GTC</ListingDuration>
+    <Country>GB</Country>
+    <Currency>GBP</Currency>
+    <Location>Riga, Latvia</Location>
+    <ListingType>FixedPriceItem</ListingType>
+    <ConditionID>1000</ConditionID>
+    <DispatchTimeMax>3</DispatchTimeMax>
+    <ItemLocation>Riga, Latvia</ItemLocation>
+    <PostalCode>LV-1010</PostalCode>
+    <PictureDetails>
+      <PictureURL>https://images.unsplash.com/photo-1553062407-98eeb64c6a62</PictureURL>
+    </PictureDetails>
+    <SellerProfiles>
+      <SellerPaymentProfile>
+        <PaymentProfileID>209734844019</PaymentProfileID>
+      </SellerPaymentProfile>
+      <SellerReturnProfile>
+        <ReturnProfileID>161272624019</ReturnProfileID>
+      </SellerReturnProfile>
+      <SellerShippingProfile>
+        <ShippingProfileID>142140832019</ShippingProfileID>
+      </SellerShippingProfile>
+    </SellerProfiles>
+  </Item>
+</VerifyAddFixedPriceItemRequest>`;
+  }
+
   private createAddItemXML(listingData: any): string {
     const userToken = process.env.EBAY_USER_TOKEN;
     if (!userToken) {
@@ -332,6 +392,7 @@ export class EbayApiService {
     <ListingDuration>GTC</ListingDuration>
     <Country>GB</Country>
     <Currency>GBP</Currency>
+    <Location>Riga, Latvia</Location>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
     <DispatchTimeMax>3</DispatchTimeMax>
