@@ -322,34 +322,34 @@ export function Products({ user }: ProductsProps) {
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-8">
                         <Checkbox
                           checked={selectedProducts.size === filteredProducts.length && filteredProducts.length > 0}
                           onCheckedChange={handleSelectAll}
                         />
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Product
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">
                         SKU
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">
                         Category
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
                         Price
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
                         Stock
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
                         Status
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Marketplaces
+                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">
+                        Markets
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Actions
                       </th>
                     </tr>
@@ -357,55 +357,54 @@ export function Products({ user }: ProductsProps) {
                   <tbody className="bg-white divide-y divide-gray-200">
                     {filteredProducts.map((product) => (
                       <tr key={product.id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-2 py-3 whitespace-nowrap">
                           <Checkbox
                             checked={selectedProducts.has(product.id)}
                             onCheckedChange={() => handleSelectProduct(product.id)}
                           />
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-3 py-3 whitespace-nowrap">
                           <div className="flex items-center">
-                            <div className="h-10 w-10 bg-gray-200 rounded-lg mr-3 flex-shrink-0"></div>
+                            <div className="h-8 w-8 bg-gray-200 rounded mr-2 flex-shrink-0"></div>
                             <div className="min-w-0">
-                              <div className="text-sm font-medium text-gray-900 truncate">
+                              <div className="text-sm font-medium text-gray-900 truncate max-w-48">
                                 {product.name}
                               </div>
-                              <div className="text-sm text-gray-500">{product.ean || "No EAN"}</div>
+                              <div className="text-xs text-gray-500">{product.ean || "No EAN"}</div>
                             </div>
                           </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-900">
                           {product.sku}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-500">
                           {product.category}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-900">
                           {formatCurrency(product.salePrice)}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-900">
                           {product.stock}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-2 py-3 whitespace-nowrap">
                           <Badge 
                             variant="secondary" 
-                            className={getStatusColor(product.status)}
+                            className={`text-xs ${getStatusColor(product.status)}`}
                           >
-                            {product.status === 'out_of_stock' ? 'Out of Stock' : 
+                            {product.status === 'out_of_stock' ? 'Out' : 
                              product.status.charAt(0).toUpperCase() + product.status.slice(1)}
                           </Badge>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          <div className="flex items-center space-x-2">
+                        <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-500">
+                          <div className="flex items-center space-x-1">
                             {product.listedOnEbay && (
                               <div className="flex items-center space-x-1">
-                                <Badge variant="outline" className="text-xs">eBay</Badge>
+                                <Badge variant="outline" className="text-xs px-1">eB</Badge>
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  className="h-6 w-6 p-0"
+                                  className="h-5 w-5 p-0"
                                   onClick={() => {
-                                    // Generate eBay search URL based on product name and SKU
                                     const searchQuery = encodeURIComponent(`${product.name} ${product.sku}`);
                                     const ebayUrl = `https://www.ebay.com/sch/i.html?_nkw=${searchQuery}`;
                                     window.open(ebayUrl, '_blank');
@@ -418,13 +417,12 @@ export function Products({ user }: ProductsProps) {
                             )}
                             {product.listedOnAmazon && (
                               <div className="flex items-center space-x-1">
-                                <Badge variant="outline" className="text-xs">Amazon</Badge>
+                                <Badge variant="outline" className="text-xs px-1">Am</Badge>
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  className="h-6 w-6 p-0"
+                                  className="h-5 w-5 p-0"
                                   onClick={() => {
-                                    // Generate Amazon search URL based on product name and SKU
                                     const searchQuery = encodeURIComponent(`${product.name} ${product.sku}`);
                                     const amazonUrl = `https://www.amazon.com/s?k=${searchQuery}`;
                                     window.open(amazonUrl, '_blank');
@@ -436,11 +434,12 @@ export function Products({ user }: ProductsProps) {
                               </div>
                             )}
                             {!product.listedOnEbay && !product.listedOnAmazon && (
-                              <span className="text-gray-400">None</span>
+                              <span className="text-gray-400 text-xs">-</span>
                             )}
                           </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                        <td className="px-3 py-3 whitespace-nowrap text-sm font-medium">
+                          <div className="flex flex-wrap gap-1">
                           <Button 
                             variant="ghost" 
                             size="sm"
@@ -475,6 +474,7 @@ export function Products({ user }: ProductsProps) {
                           >
                             Delete
                           </Button>
+                          </div>
                         </td>
                       </tr>
                     ))}
