@@ -144,9 +144,13 @@ export function Products({ user }: ProductsProps) {
           description: "Product successfully removed from eBay marketplace.",
         });
       } else {
+        // Handle failed unlisting response
+        const isTokenExpired = data.message?.includes('token is hard expired') || data.message?.includes('expired');
         toast({
-          title: "Unlisting Failed", 
-          description: data.message || "Failed to unlist product from eBay.",
+          title: isTokenExpired ? "eBay Token Expired" : "Unlisting Failed",
+          description: isTokenExpired 
+            ? "Cannot unlist product - eBay token expired. Product remains listed on eBay. Please refresh your eBay token in Settings."
+            : (data.message || "Failed to unlist product from eBay."),
           variant: "destructive",
         });
       }
@@ -154,9 +158,13 @@ export function Products({ user }: ProductsProps) {
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
     },
     onError: (error: any) => {
+      const isTokenExpired = error?.message?.includes('token is hard expired') || error?.message?.includes('expired');
+      
       toast({
-        title: "Error",
-        description: error.message || "Failed to unlist product from eBay.",
+        title: isTokenExpired ? "eBay Token Expired" : "Unlist Failed",
+        description: isTokenExpired 
+          ? "Cannot unlist product - eBay token expired. Product remains listed on eBay. Please refresh your eBay token in Settings."
+          : (error.message || "Failed to unlist product from eBay."),
         variant: "destructive",
       });
     },

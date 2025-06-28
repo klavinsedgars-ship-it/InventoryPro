@@ -118,10 +118,24 @@ export function Marketplaces({ user }: MarketplacesProps) {
     mutationFn: (productId: number) => apiRequest("POST", "/api/ebay/unlist", { productId }),
     onSuccess: (response: any, productId: number) => {
       const product = products.find(p => p.id === productId);
-      toast({
-        title: "Product Unlisted",
-        description: response.message || `Successfully unlisted "${product?.name}" from eBay.`,
-      });
+      
+      if (response.success) {
+        toast({
+          title: "Product Unlisted",
+          description: response.message || `Successfully unlisted "${product?.name}" from eBay.`,
+        });
+      } else {
+        // Handle failed unlisting response
+        const isTokenExpired = response.message?.includes('token is hard expired') || response.message?.includes('expired');
+        toast({
+          title: isTokenExpired ? "eBay Token Expired" : "Unlist Failed",
+          description: isTokenExpired 
+            ? `Cannot unlist "${product?.name}" - eBay token expired. Product remains listed on eBay. Please refresh your eBay token in Settings.`
+            : (response.message || `Failed to unlist "${product?.name}" from eBay.`),
+          variant: "destructive",
+        });
+      }
+      
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
     },
