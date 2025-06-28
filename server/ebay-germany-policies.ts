@@ -7,11 +7,11 @@ export interface GermanBusinessPolicies {
   return: string;
 }
 
-// German business policy IDs from eBay.de account
+// German business policy IDs from eBay.de account (Updated)
 export const GERMAN_BUSINESS_POLICIES: GermanBusinessPolicies = {
-  shipping: "DE_216006551019", // German shipping policy
-  payment: "DE_216006440019",  // German payment policy
-  return: "DE_216006441019"    // German return policy
+  shipping: "263978529019", // German shipping policy
+  payment: "216006440019",  // German payment policy
+  return: "263978527019"    // German return policy
 };
 
 export function createGermanShippingPolicyXML() {

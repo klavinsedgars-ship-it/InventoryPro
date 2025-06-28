@@ -639,6 +639,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Test eBay credentials
+  app.get("/api/ebay/test-credentials", requireAuth, async (req, res) => {
+    try {
+      const credentials = {
+        devId: process.env.EBAY_DEV_ID,
+        appId: process.env.EBAY_APP_ID,
+        certId: process.env.EBAY_CERT_ID,
+        userToken: process.env.EBAY_USER_TOKEN ? "present" : "missing"
+      };
+      
+      res.json({
+        success: true,
+        credentials: credentials,
+        message: "Credential check completed"
+      });
+      
+    } catch (error) {
+      console.error("Credential check failed:", error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Credential check failed"
+      });
+    }
+  });
+
   // Check available business policies
   app.get("/api/ebay/check-policies", requireAuth, async (req, res) => {
     try {
@@ -679,7 +704,127 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // eBay Germany listing without business policies
+  // eBay Germany listing simplified (no business policies)
+  app.post("/api/ebay/list-simple", requireAuth, async (req, res) => {
+    try {
+      const { productId } = req.body;
+      
+      if (!productId) {
+        return res.status(400).json({
+          success: false,
+          error: "Product ID is required"
+        });
+      }
+
+      const product = await storage.getProduct(productId);
+      if (!product) {
+        return res.status(404).json({
+          success: false,
+          error: "Product not found"
+        });
+      }
+
+      // Minimal German listing XML (no business policies)
+      const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
+<AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${process.env.EBAY_USER_TOKEN}</eBayAuthToken>
+  </RequesterCredentials>
+  <Item>
+    <Title>${product.name} - Arduino Mikrocontroller</Title>
+    <Description><![CDATA[Hochwertige Elektronikkomponente für Entwicklungsprojekte. Arduino kompatibel.]]></Description>
+    <PrimaryCategory>
+      <CategoryID>58277</CategoryID>
+    </PrimaryCategory>
+    <StartPrice currencyID="EUR">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
+    <Quantity>${product.stock || 1}</Quantity>
+    <ListingDuration>GTC</ListingDuration>
+    <Country>DE</Country>
+    <Currency>EUR</Currency>
+    <Location>Germany</Location>
+    <PostalCode>10115</PostalCode>
+    <DispatchTimeMax>2</DispatchTimeMax>
+    <ListingType>FixedPriceItem</ListingType>
+    <ConditionID>1000</ConditionID>
+    <PaymentMethods>PayPal</PaymentMethods>
+    <PayPalEmailAddress>test@example.com</PayPalEmailAddress>
+    <ShippingDetails>
+      <ShippingType>Flat</ShippingType>
+      <ShippingServiceOptions>
+        <ShippingServicePriority>1</ShippingServicePriority>
+        <ShippingService>Other</ShippingService>
+        <ShippingServiceCost currencyID="EUR">0.00</ShippingServiceCost>
+        <FreeShipping>true</FreeShipping>
+      </ShippingServiceOptions>
+    </ShippingDetails>
+    <ReturnPolicy>
+      <ReturnsAcceptedOption>ReturnsNotAccepted</ReturnsAcceptedOption>
+    </ReturnPolicy>
+    <ItemLocation>Germany</ItemLocation>
+  </Item>
+</AddFixedPriceItemRequest>`;
+
+      const response = await fetch('https://api.ebay.com/ws/api.dll', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/xml',
+          'X-EBAY-API-SITEID': '77',
+          'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
+          'X-EBAY-API-CALL-NAME': 'AddFixedPriceItem',
+          'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
+          'X-EBAY-API-APP-NAME': process.env.EBAY_APP_ID!,
+          'X-EBAY-API-CERT-NAME': process.env.EBAY_CERT_ID!
+        },
+        body: xmlBody
+      });
+      
+      const responseText = await response.text();
+      
+      // Parse results
+      const isSuccessful = responseText.includes('<Ack>Success</Ack>');
+      const hasItemId = responseText.includes('<ItemID>');
+      const itemIdMatch = responseText.match(/<ItemID>(\d+)<\/ItemID>/);
+      const itemId = itemIdMatch ? itemIdMatch[1] : null;
+      
+      if (isSuccessful && itemId) {
+        // Update product with eBay listing status
+        await storage.updateProduct(product.id, {
+          listedOnEbay: true,
+          ebayItemId: itemId
+        });
+        
+        res.json({
+          success: true,
+          listingResult: {
+            itemId: itemId,
+            ebayUrl: `https://www.ebay.de/itm/${itemId}`,
+            message: "Product successfully listed on eBay Germany!",
+            product: {
+              id: product.id,
+              name: product.name,
+              price: product.salePrice,
+              currency: "EUR"
+            }
+          }
+        });
+      } else {
+        res.json({
+          success: false,
+          error: "Listing failed",
+          details: responseText
+        });
+      }
+      
+    } catch (error) {
+      console.error("eBay simple listing failed:", error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Simple listing failed"
+      });
+    }
+  });
+
+  // eBay Germany listing with business policies
   app.post("/api/ebay/list-germany", requireAuth, async (req, res) => {
     try {
       const { productId } = req.body;
@@ -723,13 +868,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     <ConditionID>1000</ConditionID>
     <SellerProfiles>
       <SellerShippingProfile>
-        <ShippingProfileID>216006551019</ShippingProfileID>
+        <ShippingProfileID>263978529019</ShippingProfileID>
       </SellerShippingProfile>
       <SellerPaymentProfile>
         <PaymentProfileID>216006440019</PaymentProfileID>
       </SellerPaymentProfile>
       <SellerReturnProfile>
-        <ReturnProfileID>216006441019</ReturnProfileID>
+        <ReturnProfileID>263978527019</ReturnProfileID>
       </SellerReturnProfile>
     </SellerProfiles>
     <ItemSpecifics>
