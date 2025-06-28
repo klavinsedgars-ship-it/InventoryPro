@@ -265,6 +265,80 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // eBay API routes
+  app.post("/api/ebay/list", requireAuth, async (req, res) => {
+    try {
+      const { productId, listingDetails } = req.body;
+      const result = await ebayApi.listProduct(productId, listingDetails);
+      res.json(result);
+    } catch (error) {
+      console.error("eBay listing failed:", error);
+      res.status(500).json({ 
+        success: false, 
+        message: (error as Error).message || "eBay listing failed",
+        error: (error as Error).message
+      });
+    }
+  });
+
+  app.post("/api/ebay/bulk-list", requireAuth, async (req, res) => {
+    try {
+      const { productIds, categoryId } = req.body;
+      const result = await ebayApi.bulkListProducts(productIds, categoryId);
+      res.json(result);
+    } catch (error) {
+      console.error("eBay bulk listing failed:", error);
+      res.status(500).json({ 
+        success: false, 
+        message: (error as Error).message || "eBay bulk listing failed",
+        error: (error as Error).message
+      });
+    }
+  });
+
+  app.post("/api/ebay/unlist", requireAuth, async (req, res) => {
+    try {
+      const { productId } = req.body;
+      const result = await ebayApi.unlistProduct(productId);
+      res.json(result);
+    } catch (error) {
+      console.error("eBay unlisting failed:", error);
+      res.status(500).json({ 
+        success: false, 
+        message: (error as Error).message || "eBay unlisting failed",
+        error: (error as Error).message
+      });
+    }
+  });
+
+  app.get("/api/ebay/test", requireAuth, async (req, res) => {
+    try {
+      const result = await ebayApi.testConnection();
+      res.json(result);
+    } catch (error) {
+      console.error("eBay test failed:", error);
+      res.status(500).json({ 
+        success: false, 
+        message: (error as Error).message || "eBay test failed",
+        error: (error as Error).message
+      });
+    }
+  });
+
+  app.get("/api/ebay/categories", requireAuth, async (req, res) => {
+    try {
+      const categories = await ebayApi.getEbayCategories();
+      res.json({ success: true, categories });
+    } catch (error) {
+      console.error("eBay categories fetch failed:", error);
+      res.status(500).json({ 
+        success: false, 
+        message: (error as Error).message || "Failed to fetch eBay categories",
+        error: (error as Error).message
+      });
+    }
+  });
+
   // Marketplace listing routes
   app.post("/api/marketplace/list", requireAuth, async (req, res) => {
     try {
@@ -276,24 +350,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const results = [];
       for (const productId of productIds) {
-        const product = await storage.getProduct(productId);
-        if (product) {
-          const updateData: any = {};
-          if (marketplaces.includes('ebay')) {
-            updateData.listedOnEbay = true;
+        if (marketplaces.includes('ebay')) {
+          const ebayResult = await ebayApi.listProduct(productId, {});
+          if (ebayResult.success) {
+            results.push({ productId, marketplace: 'ebay', success: true });
           }
-          if (marketplaces.includes('amazon')) {
-            updateData.listedOnAmazon = true;
+        }
+        if (marketplaces.includes('amazon')) {
+          // Amazon integration would go here
+          const product = await storage.getProduct(productId);
+          if (product) {
+            await storage.updateProduct(productId, { listedOnAmazon: true });
+            results.push({ productId, marketplace: 'amazon', success: true });
           }
-          
-          const updated = await storage.updateProduct(productId, updateData);
-          results.push(updated);
         }
       }
 
       res.json({ 
         message: `Successfully listed ${results.length} products on ${marketplaces.join(', ')}`,
-        products: results 
+        results 
       });
     } catch (error) {
       res.status(500).json({ message: "Failed to list products" });

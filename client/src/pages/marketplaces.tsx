@@ -59,6 +59,44 @@ export function Marketplaces({ user }: MarketplacesProps) {
     },
   });
 
+  const ebayBulkListMutation = useMutation({
+    mutationFn: (data: { productIds: number[], categoryId?: string }) => 
+      apiRequest("POST", "/api/ebay/bulk-list", data),
+    onSuccess: (response) => {
+      toast({
+        title: "eBay Listing Completed",
+        description: `Successfully listed ${response.listedCount} of ${response.totalProducts} products on eBay.`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
+      setSelectedProducts([]);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "eBay Listing Failed",
+        description: error?.message || "Failed to list products on eBay.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const ebayTestMutation = useMutation({
+    mutationFn: () => apiRequest("GET", "/api/ebay/test"),
+    onSuccess: (response) => {
+      toast({
+        title: "eBay Connection Test",
+        description: response.message || "eBay API connection successful.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "eBay Connection Failed",
+        description: error?.message || "Failed to connect to eBay API.",
+        variant: "destructive",
+      });
+    },
+  });
+
   // Filter products based on search term
   const filteredProducts = products.filter(product =>
     product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -90,9 +128,9 @@ export function Marketplaces({ user }: MarketplacesProps) {
       });
       return;
     }
-    listProductsMutation.mutate({
+    ebayBulkListMutation.mutate({
       productIds: selectedProducts,
-      marketplaces: ["ebay"]
+      categoryId: "175673" // Default electronics category
     });
   };
 

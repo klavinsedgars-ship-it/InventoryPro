@@ -307,8 +307,7 @@ export class EbayApiService {
       
       await storage.updateProduct(productId, {
         listedOnEbay: false,
-        ebayItemId: null,
-        updatedAt: new Date()
+        ebayItemId: null
       });
 
       await storage.createSyncLog({
