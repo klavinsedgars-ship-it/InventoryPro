@@ -199,77 +199,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // TME sync routes
   app.post("/api/sync/tme", requireAuth, async (req, res) => {
     try {
-      // Simulate TME API data sync with realistic updates
-      const products = await storage.getProducts();
-      const tmeProducts = products.filter(p => p.tmeProductId);
+      const { tmeApi } = await import("./tme-api");
+      const { searchQuery = "arduino", limit = 10 } = req.body;
       
-      let updatedCount = 0;
-      let priceUpdates = 0;
-      let stockUpdates = 0;
-
-      // Simulate price and stock updates for TME products
-      for (const product of tmeProducts) {
-        const shouldUpdate = Math.random() > 0.3; // 70% chance of update
-        if (shouldUpdate) {
-          const updates: any = {};
-          
-          // Simulate price fluctuations (±5%)
-          if (Math.random() > 0.5) {
-            const currentPrice = parseFloat(product.supplierPrice);
-            const fluctuation = (Math.random() - 0.5) * 0.1; // ±5%
-            const newPrice = currentPrice * (1 + fluctuation);
-            updates.supplierPrice = newPrice.toFixed(2);
-            priceUpdates++;
-          }
-          
-          // Simulate stock updates
-          if (Math.random() > 0.4) {
-            const stockChange = Math.floor((Math.random() - 0.5) * 20); // ±10 units
-            const newStock = Math.max(0, product.stock + stockChange);
-            updates.stock = newStock;
-            
-            // Update status based on stock
-            if (newStock === 0) {
-              updates.status = 'out_of_stock';
-            } else if (newStock < 20) {
-              updates.status = 'low_stock';
-            } else {
-              updates.status = 'active';
-            }
-            stockUpdates++;
-          }
-          
-          if (Object.keys(updates).length > 0) {
-            await storage.updateProduct(product.id, updates);
-            updatedCount++;
-          }
-        }
-      }
-
-      // Create detailed sync log
-      const message = `Synchronized ${updatedCount} products: ${priceUpdates} price updates, ${stockUpdates} stock updates`;
-      await storage.createSyncLog({
-        source: "tme",
-        status: "success",
-        message
-      });
-
-      res.json({ 
-        message: "TME sync completed successfully",
-        details: {
-          totalProducts: tmeProducts.length,
-          updatedProducts: updatedCount,
-          priceUpdates,
-          stockUpdates
-        }
-      });
+      const result = await tmeApi.syncProductsFromTME(searchQuery, limit);
+      res.json(result);
     } catch (error) {
-      await storage.createSyncLog({
-        source: "tme",
-        status: "error",
-        message: "TME sync failed: " + (error as Error).message
+      console.error("TME sync failed:", error);
+      res.status(500).json({ 
+        success: false, 
+        message: error.message || "TME sync failed",
+        error: error.message
       });
-      res.status(500).json({ message: "Failed to sync with TME" });
+    }
+  });
+
+  app.post("/api/sync/tme/prices", requireAuth, async (req, res) => {
+    try {
+      const { tmeApi } = await import("./tme-api");
+      const { symbols } = req.body;
+      
+      const result = await tmeApi.updateProductPricesAndStock(symbols);
+      res.json(result);
+    } catch (error) {
+      console.error("TME price sync failed:", error);
+      res.status(500).json({ 
+        success: false, 
+        message: error.message || "TME price sync failed",
+        error: error.message
+      });
     }
   });
 

@@ -28,6 +28,11 @@ export const products = pgTable("products", {
   listedOnAmazon: boolean("listed_on_amazon").default(false),
   excludeFromListing: boolean("exclude_from_listing").default(false),
   tmeProductId: text("tme_product_id"),
+  supplier: text("supplier").default("manual"), // manual, TME, etc.
+  supplierProductId: text("supplier_product_id"),
+  imageUrl: text("image_url"),
+  dataSheetUrl: text("datasheet_url"),
+  productUrl: text("product_url"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -49,8 +54,10 @@ export const marketplaceSettings = pgTable("marketplace_settings", {
 export const syncLogs = pgTable("sync_logs", {
   id: serial("id").primaryKey(),
   source: text("source").notNull(), // tme, ebay, amazon
-  status: text("status").notNull(), // success, error, pending
+  operation: text("operation").default("sync"), // sync_start, sync_complete, price_update, etc.
+  status: text("status").notNull(), // success, error, pending, in_progress
   message: text("message"),
+  details: text("details"), // JSON string for additional data
   syncedAt: timestamp("synced_at").defaultNow(),
 });
 
