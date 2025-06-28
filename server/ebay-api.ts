@@ -348,15 +348,34 @@ export class EbayApiService {
     <ListingDuration>GTC</ListingDuration>
     <Country>US</Country>
     <Currency>USD</Currency>
-    <Location>New York, NY</Location>
+    <Location>United States</Location>
     <PostalCode>10001</PostalCode>
     <DispatchTimeMax>1</DispatchTimeMax>
+    <Site>US</Site>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
     <PictureDetails>
       <PhotoDisplay>SuperSize</PhotoDisplay>
       <PictureURL>https://images.unsplash.com/photo-1553062407-98eeb64c6a62?w=400</PictureURL>
     </PictureDetails>
+    <ShippingDetails>
+      <ShippingType>Flat</ShippingType>
+      <ShippingServiceOptions>
+        <ShippingServicePriority>1</ShippingServicePriority>
+        <ShippingService>USPSMedia</ShippingService>
+        <ShippingServiceCost currencyID="USD">4.99</ShippingServiceCost>
+        <ShippingServiceAdditionalCost currencyID="USD">2.50</ShippingServiceAdditionalCost>
+        <ShipToLocation>US</ShipToLocation>
+        <ShipToLocation>Worldwide</ShipToLocation>
+      </ShippingServiceOptions>
+      <InternationalShippingServiceOption>
+        <ShippingServicePriority>1</ShippingServicePriority>
+        <ShippingService>USPSFirstClassMailInternational</ShippingService>
+        <ShippingServiceCost currencyID="USD">12.99</ShippingServiceCost>
+        <ShippingServiceAdditionalCost currencyID="USD">5.99</ShippingServiceAdditionalCost>
+        <ShipToLocation>Worldwide</ShipToLocation>
+      </InternationalShippingServiceOption>
+    </ShippingDetails>
     <SellerProfiles>
       <SellerShippingProfile>
         <ShippingProfileID>209735065019</ShippingProfileID>
@@ -382,6 +401,7 @@ export class EbayApiService {
         <Value>A000066</Value>
       </NameValueList>
     </ItemSpecifics>
+    <ItemLocation>United States</ItemLocation>
   </Item>
 </AddFixedPriceItemRequest>`;
   }

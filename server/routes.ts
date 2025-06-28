@@ -518,6 +518,113 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // eBay location verification test
+  app.post("/api/ebay/verify-listing", requireAuth, async (req, res) => {
+    try {
+      const { productId } = req.body;
+      
+      if (!productId) {
+        return res.status(400).json({
+          success: false,
+          error: "Product ID is required"
+        });
+      }
+
+      const product = await storage.getProduct(productId);
+      if (!product) {
+        return res.status(404).json({
+          success: false,
+          error: "Product not found"
+        });
+      }
+
+      // Use VerifyAddItem instead of AddItem to test configuration without listing
+      const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
+<VerifyAddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${process.env.EBAY_USER_TOKEN}</eBayAuthToken>
+  </RequesterCredentials>
+  <Item>
+    <Title>${product.name}</Title>
+    <Description><![CDATA[${product.description || 'High-quality electronics component'}]]></Description>
+    <PrimaryCategory>
+      <CategoryID>58277</CategoryID>
+    </PrimaryCategory>
+    <StartPrice currencyID="USD">${product.price}</StartPrice>
+    <Quantity>1</Quantity>
+    <ListingDuration>Days_7</ListingDuration>
+    <Country>US</Country>
+    <Currency>USD</Currency>
+    <Location>United States</Location>
+    <PostalCode>10001</PostalCode>
+    <DispatchTimeMax>1</DispatchTimeMax>
+    <Site>US</Site>
+    <ListingType>FixedPriceItem</ListingType>
+    <ConditionID>1000</ConditionID>
+    <PictureDetails>
+      <PhotoDisplay>SuperSize</PhotoDisplay>
+      <PictureURL>https://images.unsplash.com/photo-1553062407-98eeb64c6a62?w=400</PictureURL>
+    </PictureDetails>
+    <SellerProfiles>
+      <SellerShippingProfile>
+        <ShippingProfileID>209735065019</ShippingProfileID>
+      </SellerShippingProfile>
+      <SellerPaymentProfile>
+        <PaymentProfileID>209734969019</PaymentProfileID>
+      </SellerPaymentProfile>
+      <SellerReturnProfile>
+        <ReturnProfileID>163760688019</ReturnProfileID>
+      </SellerReturnProfile>
+    </SellerProfiles>
+    <ItemSpecifics>
+      <NameValueList>
+        <Name>Brand</Name>
+        <Value>Arduino</Value>
+      </NameValueList>
+      <NameValueList>
+        <Name>Type</Name>
+        <Value>Development Board</Value>
+      </NameValueList>
+      <NameValueList>
+        <Name>MPN</Name>
+        <Value>A000066</Value>
+      </NameValueList>
+    </ItemSpecifics>
+    <ItemLocation>United States</ItemLocation>
+  </Item>
+</VerifyAddFixedPriceItemRequest>`;
+
+      const response = await ebayApi.makeTradingApiRequest(xmlBody);
+      
+      // Parse verification results
+      const isSuccessful = response.includes('<Ack>Success</Ack>');
+      const hasLocationError = response.includes('forward-deployed') || response.includes('Overseas Warehouse');
+      const hasCategoryError = response.includes('Invalid category') || response.includes('not a leaf category');
+      
+      res.json({
+        success: isSuccessful,
+        verification: {
+          categoryValid: !hasCategoryError,
+          locationValid: !hasLocationError,
+          overallValid: isSuccessful,
+          rawResponse: response.substring(0, 1000) // First 1000 chars for debugging
+        },
+        message: isSuccessful ? 
+          "Listing configuration verified successfully" : 
+          hasLocationError ? "Location policy restriction detected" :
+          hasCategoryError ? "Category validation failed" :
+          "Other validation issues detected"
+      });
+      
+    } catch (error) {
+      console.error("eBay verification failed:", error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Verification failed"
+      });
+    }
+  });
+
   // Marketplace listing routes
   app.post("/api/marketplace/list", requireAuth, async (req, res) => {
     try {
