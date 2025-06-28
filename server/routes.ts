@@ -446,7 +446,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               'X-EBAY-API-APP-NAME': process.env.EBAY_APP_ID || '',
               'X-EBAY-API-CERT-NAME': process.env.EBAY_CERT_ID || '',
               'X-EBAY-API-CALL-NAME': 'VerifyAddItem',
-              'X-EBAY-API-SITEID': '0'
+              'X-EBAY-API-SITEID': '3'
             },
             body: testXml
           });
@@ -604,7 +604,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
-          'X-EBAY-API-SITEID': '0',
+          'X-EBAY-API-SITEID': '3',
           'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
           'X-EBAY-API-CALL-NAME': 'VerifyAddFixedPriceItem',
           'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
@@ -684,7 +684,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
-          'X-EBAY-API-SITEID': '0',
+          'X-EBAY-API-SITEID': '3',
           'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
           'X-EBAY-API-CALL-NAME': 'GetSellerProfiles',
           'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
@@ -774,7 +774,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
-          'X-EBAY-API-SITEID': '0',
+          'X-EBAY-API-SITEID': '3',
           'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
           'X-EBAY-API-CALL-NAME': 'AddFixedPriceItem',
           'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
@@ -863,7 +863,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml; charset=utf-8',
-          'X-EBAY-API-SITEID': '0',
+          'X-EBAY-API-SITEID': '3',
           'X-EBAY-API-COMPATIBILITY-LEVEL': '1419',
           'X-EBAY-API-CALL-NAME': 'UploadSiteHostedPictures',
           'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
@@ -947,7 +947,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml; charset=utf-8',
-          'X-EBAY-API-SITEID': '77',
+          'X-EBAY-API-SITEID': '3',
           'X-EBAY-API-COMPATIBILITY-LEVEL': '1419',
           'X-EBAY-API-CALL-NAME': 'AddFixedPriceItem',
           'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
@@ -1005,7 +1005,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
-          'X-EBAY-API-SITEID': '0',
+          'X-EBAY-API-SITEID': '3',
           'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
           'X-EBAY-API-CALL-NAME': 'VerifyAddFixedPriceItem',
           'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
@@ -1131,9 +1131,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { ebayOAuth } = await import('./ebay-oauth');
       const authToken = await ebayOAuth.getValidAccessToken();
 
-      // Create US listing XML using minimal working configuration
-      const { createMinimalUSListingXML } = await import('./ebay-minimal-config');
-      const xmlBody = createMinimalUSListingXML(product, authToken);
+      // Create UK listing XML using minimal working configuration
+      const { createMinimalUKListingXML } = await import('./ebay-minimal-config');
+      const xmlBody = createMinimalUKListingXML(product, authToken);
       
       // Debug: Log the actual XML being sent
       console.log("Generated XML:", xmlBody);
@@ -1142,7 +1142,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
-          'X-EBAY-API-SITEID': '0',
+          'X-EBAY-API-SITEID': '3',
           'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
           'X-EBAY-API-CALL-NAME': 'AddFixedPriceItem',
           'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
@@ -1279,7 +1279,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
-          'X-EBAY-API-SITEID': '0',
+          'X-EBAY-API-SITEID': '3',
           'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
           'X-EBAY-API-CALL-NAME': 'VerifyAddFixedPriceItem',
           'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,

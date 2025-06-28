@@ -108,7 +108,7 @@ export class EbayApiService {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
-          'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US',
+          'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB',
         },
         body: body ? JSON.stringify(body) : undefined,
       });
@@ -386,7 +386,7 @@ export class EbayApiService {
         <Value>A000066</Value>
       </NameValueList>
     </ItemSpecifics>
-    <ItemLocation>United States</ItemLocation>
+    <ItemLocation>London, UK</ItemLocation>
   </Item>
 </AddFixedPriceItemRequest>`;
   }
@@ -681,7 +681,7 @@ export class EbayApiService {
         'X-EBAY-API-APP-NAME': this.credentials.appId,
         'X-EBAY-API-CERT-NAME': this.credentials.certId,
         'X-EBAY-API-CALL-NAME': 'GetUser',
-        'X-EBAY-API-SITEID': '0'
+        'X-EBAY-API-SITEID': '3'
       },
       body: xmlBody
     });

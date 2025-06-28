@@ -20,17 +20,21 @@ export function createMinimalUKListingXML(product: any, authToken: string): stri
     <DispatchTimeMax>3</DispatchTimeMax>
     <ItemLocation>London, UK</ItemLocation>
     <PostalCode>SW1A 1AA</PostalCode>
-    <SellerProfiles>
-      <SellerShippingProfile>
-        <ShippingProfileID>234560863019</ShippingProfileID>
-      </SellerShippingProfile>
-      <SellerPaymentProfile>
-        <PaymentProfileID>216006444019</PaymentProfileID>
-      </SellerPaymentProfile>
-      <SellerReturnProfile>
-        <ReturnProfileID>209734982019</ReturnProfileID>
-      </SellerReturnProfile>
-    </SellerProfiles>
+    <ShippingDetails>
+      <ShippingType>Flat</ShippingType>
+      <ShippingServiceOptions>
+        <ShippingServicePriority>1</ShippingServicePriority>
+        <ShippingService>UK_RoyalMailSecondClass</ShippingService>
+        <ShippingServiceCost>2.99</ShippingServiceCost>
+      </ShippingServiceOptions>
+    </ShippingDetails>
+    <PaymentMethods>PayPal</PaymentMethods>
+    <ReturnPolicy>
+      <ReturnsAcceptedOption>ReturnsAccepted</ReturnsAcceptedOption>
+      <RefundOption>MoneyBack</RefundOption>
+      <ReturnsWithinOption>Days_30</ReturnsWithinOption>
+      <ShippingCostPaidByOption>Buyer</ShippingCostPaidByOption>
+    </ReturnPolicy>
     <PictureDetails>
       <PictureURL>https://images.unsplash.com/photo-1553062407-98eeb64c6a62</PictureURL>
     </PictureDetails>
