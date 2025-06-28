@@ -97,23 +97,29 @@ export function Products({ user }: ProductsProps) {
 
   const bulkListToEbayMutation = useMutation({
     mutationFn: async (productIds: number[]) => {
-      const promises = productIds.map(id => 
-        apiRequest("PATCH", `/api/products/${id}`, { listedOnEbay: true })
-      );
-      return Promise.all(promises);
+      return apiRequest("POST", "/api/ebay/bulk-list", { productIds });
     },
-    onSuccess: () => {
-      toast({
-        title: "Bulk Operation Completed",
-        description: `${selectedProducts.size} products listed on eBay.`,
-      });
+    onSuccess: (data: any) => {
+      if (data.success && data.listedCount > 0) {
+        toast({
+          title: "Bulk eBay Listing Completed",
+          description: `${data.listedCount} of ${data.totalProducts} products successfully listed on eBay.`,
+        });
+      } else {
+        toast({
+          title: "Bulk Listing Issues",
+          description: `${data.failedCount || data.totalProducts} products failed to list. Check individual results.`,
+          variant: "destructive",
+        });
+      }
       setSelectedProducts(new Set());
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
     },
     onError: (error: any) => {
       toast({
         title: "Error",
-        description: error.message || "Failed to list products on eBay.",
+        description: error.message || "Failed to connect to eBay API.",
         variant: "destructive",
       });
     },

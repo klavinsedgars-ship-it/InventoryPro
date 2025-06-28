@@ -90,7 +90,7 @@ export function EditBeforeListingModal({
       });
 
       // Then list to marketplace
-      const endpoint = marketplace === "ebay" ? "/api/ebay/list-us" : "/api/amazon/list";
+      const endpoint = marketplace === "ebay" ? "/api/ebay/list-uk" : "/api/amazon/list";
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -108,6 +108,7 @@ export function EditBeforeListingModal({
     },
     onSuccess: (response: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
       onOpenChange(false);
       
       if (response.success) {
