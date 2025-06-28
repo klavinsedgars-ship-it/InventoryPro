@@ -475,6 +475,137 @@ export class EbayApiService {
     };
   }
 
+  async getEbayCategories(): Promise<any[]> {
+    try {
+      console.log('Fetching eBay categories...');
+      const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
+<GetCategoriesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${process.env.EBAY_USER_TOKEN}</eBayAuthToken>
+  </RequesterCredentials>
+  <CategorySiteID>0</CategorySiteID>
+  <DetailLevel>ReturnAll</DetailLevel>
+  <LevelLimit>4</LevelLimit>
+  <ViewAllNodes>true</ViewAllNodes>
+</GetCategoriesRequest>`;
+
+      const response = await this.makeTradingApiRequest(xmlBody);
+      
+      // Parse XML response to extract categories
+      const categories = this.parseEbayCategories(response);
+      console.log(`Found ${categories.length} total categories`);
+      
+      // Filter for electronics/technology categories
+      const electronicsCategories = categories.filter(cat => 
+        cat.name.toLowerCase().includes('electronic') ||
+        cat.name.toLowerCase().includes('computer') ||
+        cat.name.toLowerCase().includes('component') ||
+        cat.name.toLowerCase().includes('microcontroller') ||
+        cat.name.toLowerCase().includes('arduino') ||
+        cat.name.toLowerCase().includes('development') ||
+        cat.name.toLowerCase().includes('board') ||
+        cat.parentPath?.toLowerCase().includes('electronic') ||
+        cat.parentPath?.toLowerCase().includes('computer')
+      );
+
+      console.log(`Found ${electronicsCategories.length} electronics categories`);
+      return electronicsCategories;
+    } catch (error) {
+      console.error('Error fetching eBay categories:', error);
+      return [];
+    }
+  }
+
+  private parseEbayCategories(xmlResponse: string): any[] {
+    const categories: any[] = [];
+    
+    try {
+      // Simple XML parsing for category extraction
+      const categoryMatches = xmlResponse.match(/<Category>[\s\S]*?<\/Category>/g) || [];
+      
+      for (const categoryXml of categoryMatches) {
+        const categoryIdMatch = categoryXml.match(/<CategoryID>(\d+)<\/CategoryID>/);
+        const categoryNameMatch = categoryXml.match(/<CategoryName><!\[CDATA\[(.*?)\]\]><\/CategoryName>/);
+        const categoryLevelMatch = categoryXml.match(/<CategoryLevel>(\d+)<\/CategoryLevel>/);
+        const leafCategoryMatch = categoryXml.match(/<LeafCategory>(true|false)<\/LeafCategory>/);
+        const parentIdMatch = categoryXml.match(/<CategoryParentID>(\d+)<\/CategoryParentID>/);
+        
+        if (categoryIdMatch && categoryNameMatch) {
+          const category = {
+            id: categoryIdMatch[1],
+            name: categoryNameMatch[1],
+            level: categoryLevelMatch ? parseInt(categoryLevelMatch[1]) : 0,
+            isLeaf: leafCategoryMatch ? leafCategoryMatch[1] === 'true' : false,
+            parentId: parentIdMatch ? parentIdMatch[1] : null,
+            parentPath: '' // Will be populated later
+          };
+          
+          categories.push(category);
+        }
+      }
+      
+      // Build parent paths
+      for (const category of categories) {
+        if (category.parentId) {
+          const parent = categories.find(c => c.id === category.parentId);
+          if (parent) {
+            category.parentPath = parent.name;
+          }
+        }
+      }
+      
+    } catch (error) {
+      console.error('Error parsing categories:', error);
+    }
+    
+    return categories;
+  }
+
+  async findBestCategoryForProduct(productTitle: string): Promise<{ id: string; name: string; path: string } | null> {
+    try {
+      const categories = await this.getEbayCategories();
+      
+      // Search for best matching leaf categories
+      const searchTerms = productTitle.toLowerCase().split(' ');
+      
+      let bestMatch = null;
+      let highestScore = 0;
+      
+      for (const category of categories) {
+        if (!category.isLeaf) continue; // Only consider leaf categories
+        
+        let score = 0;
+        const categoryText = (category.name + ' ' + category.parentPath).toLowerCase();
+        
+        // Score based on keyword matches
+        for (const term of searchTerms) {
+          if (categoryText.includes(term)) {
+            score += term.length; // Longer matches get higher scores
+          }
+        }
+        
+        // Bonus for electronics-related categories
+        if (categoryText.includes('electronic') || categoryText.includes('computer')) {
+          score += 10;
+        }
+        
+        if (score > highestScore) {
+          highestScore = score;
+          bestMatch = {
+            id: category.id,
+            name: category.name,
+            path: category.parentPath + ' > ' + category.name
+          };
+        }
+      }
+      
+      return bestMatch;
+    } catch (error) {
+      console.error('Error finding best category:', error);
+      return null;
+    }
+  }
+
   async getBusinessPolicies(): Promise<any> {
     try {
       const userToken = process.env.EBAY_USER_TOKEN;

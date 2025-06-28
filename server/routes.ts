@@ -353,6 +353,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Find best category for a product
+  app.post("/api/ebay/find-category", requireAuth, async (req, res) => {
+    try {
+      const { productTitle } = req.body;
+      
+      if (!productTitle) {
+        return res.status(400).json({
+          success: false,
+          error: "Product title is required"
+        });
+      }
+
+      const bestCategory = await ebayApi.findBestCategoryForProduct(productTitle);
+      
+      if (bestCategory) {
+        res.json({ 
+          success: true, 
+          category: bestCategory
+        });
+      } else {
+        res.json({ 
+          success: false, 
+          error: "No suitable category found" 
+        });
+      }
+    } catch (error) {
+      console.error("Failed to find category:", error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to find category"
+      });
+    }
+  });
+
   // Marketplace listing routes
   app.post("/api/marketplace/list", requireAuth, async (req, res) => {
     try {
