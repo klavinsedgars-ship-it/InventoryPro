@@ -47,7 +47,11 @@ export function Pricing({ user }: PricingProps) {
     queryKey: ["/api/products"],
   });
 
-  const { data: pricingTiers = [], isLoading: tiersLoading } = useQuery({
+  const { data: pricingTiers, isLoading: tiersLoading } = useQuery<{
+    tiers: PricingTier[];
+    config: { isValid: boolean; errors: string[] };
+    isValid: boolean;
+  }>({
     queryKey: ["/api/pricing/tiers"],
   });
 
@@ -142,7 +146,7 @@ export function Pricing({ user }: PricingProps) {
     ? products 
     : products.filter(p => p.category === categoryFilter);
 
-  const categories = [...new Set(products.map(p => p.category))];
+  const categories = Array.from(new Set(products.map(p => p.category)));
 
   if (productsLoading) {
     return <div className="flex items-center justify-center p-8">Loading pricing data...</div>;
@@ -424,7 +428,7 @@ export function Pricing({ user }: PricingProps) {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {!tiersLoading && pricingTiers.tiers && (
+              {!tiersLoading && pricingTiers?.tiers && (
                 <div className="space-y-4">
                   {pricingTiers.tiers.map((tier: PricingTier, index: number) => (
                     <div key={index} className="border rounded-lg p-4">

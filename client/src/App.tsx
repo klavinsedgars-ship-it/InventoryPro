@@ -86,6 +86,7 @@ function AppContent() {
       <Route path="/marketplaces" component={() => <Marketplaces user={user} />} />
       <Route path="/sync" component={() => <TMESync user={user} />} />
       <Route path="/categories" component={() => <Categories user={user} />} />
+      <Route path="/pricing" component={() => <Pricing user={user} />} />
       <Route path="/reports" component={() => <Reports user={user} />} />
       <Route path="/settings" component={() => <Settings user={user} />} />
       <Route component={NotFound} />

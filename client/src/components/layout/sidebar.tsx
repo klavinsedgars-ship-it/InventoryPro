@@ -8,7 +8,8 @@ import {
   FolderTree, 
   Settings,
   Box,
-  BarChart3
+  BarChart3,
+  Calculator
 } from "lucide-react";
 
 const navigation = [
@@ -17,6 +18,7 @@ const navigation = [
   { name: 'Marketplaces', href: '/marketplaces', icon: ShoppingCart },
   { name: 'TME Sync', href: '/sync', icon: RefreshCw },
   { name: 'Categories', href: '/categories', icon: FolderTree },
+  { name: 'Pricing', href: '/pricing', icon: Calculator },
   { name: 'Reports', href: '/reports', icon: BarChart3 },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
