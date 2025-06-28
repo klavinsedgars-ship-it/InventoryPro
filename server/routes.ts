@@ -831,7 +831,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const path = require('path');
       
       // Read the Arduino image file
-      const imagePath = path.join(process.cwd(), 'attached_assets', 'A000066_03.front_934x700_1751105238959.webp');
+      const imagePath = path.join(process.cwd(), 'attached_assets', 'Arduino_Uno_-_R3_1751105386641.jpg');
       const imageBuffer = fs.readFileSync(imagePath);
       const base64Image = imageBuffer.toString('base64');
 
@@ -906,7 +906,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       let imageUrl = null;
       try {
-        const imagePath = path.join(process.cwd(), 'attached_assets', 'A000066_03.front_934x700_1751105238959.webp');
+        const imagePath = path.join(process.cwd(), 'attached_assets', 'Arduino_Uno_-_R3_1751105386641.jpg');
         const imageBuffer = fs.readFileSync(imagePath);
         const base64Image = imageBuffer.toString('base64');
 
