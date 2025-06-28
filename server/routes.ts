@@ -13,7 +13,7 @@ import { ZodError } from "zod";
 import bcrypt from "bcryptjs";
 import { tmeApi } from "./tme-api";
 import { ebayApi } from "./ebay-api";
-import { createSimpleUSListingXML } from "./ebay-us-config";
+import { createSimpleUKListingXML } from "./ebay-uk-config";
 import { createTestListingXML } from "./ebay-test-listing";
 import { createListingWithExternalImageXML } from "./ebay-external-image";
 import { ebayOAuth } from "./ebay-oauth";
@@ -414,12 +414,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     <PrimaryCategory>
       <CategoryID>${categoryId}</CategoryID>
     </PrimaryCategory>
-    <StartPrice currencyID="USD">24.99</StartPrice>
+    <StartPrice currencyID="GBP">24.99</StartPrice>
     <Quantity>1</Quantity>
     <ListingDuration>GTC</ListingDuration>
-    <Country>US</Country>
-    <Currency>USD</Currency>
-    <Location>New York, NY</Location>
+    <Country>GB</Country>
+    <Currency>GBP</Currency>
+    <Location>London, UK</Location>
     <PostalCode>10001</PostalCode>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
@@ -556,15 +556,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     <PrimaryCategory>
       <CategoryID>58277</CategoryID>
     </PrimaryCategory>
-    <StartPrice currencyID="USD">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
+    <StartPrice currencyID="GBP">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
     <Quantity>1</Quantity>
     <ListingDuration>Days_7</ListingDuration>
-    <Country>US</Country>
-    <Currency>USD</Currency>
-    <Location>United States</Location>
+    <Country>GB</Country>
+    <Currency>GBP</Currency>
+    <Location>London, UK</Location>
     <PostalCode>10001</PostalCode>
     <DispatchTimeMax>1</DispatchTimeMax>
-    <Site>US</Site>
+    <Site>GB</Site>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
     <PictureDetails>
@@ -596,7 +596,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         <Value>A000066</Value>
       </NameValueList>
     </ItemSpecifics>
-    <ItemLocation>United States</ItemLocation>
+    <ItemLocation>London, UK</ItemLocation>
   </Item>
 </VerifyAddFixedPriceItemRequest>`;
 
@@ -710,7 +710,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // eBay US listing simplified (no business policies)
+  // eBay UK listing simplified (no business policies)
   app.post("/api/ebay/list-simple", requireAuth, async (req, res) => {
     try {
       const { productId } = req.body;
@@ -742,7 +742,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     <PrimaryCategory>
       <CategoryID>58277</CategoryID>
     </PrimaryCategory>
-    <StartPrice currencyID="USD">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
+    <StartPrice currencyID="GBP">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
     <Quantity>${product.stock || 1}</Quantity>
     <ListingDuration>GTC</ListingDuration>
     <Country>DE</Country>
@@ -759,14 +759,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       <ShippingServiceOptions>
         <ShippingServicePriority>1</ShippingServicePriority>
         <ShippingService>Other</ShippingService>
-        <ShippingServiceCost currencyID="USD">0.00</ShippingServiceCost>
+        <ShippingServiceCost currencyID="GBP">0.00</ShippingServiceCost>
         <FreeShipping>true</FreeShipping>
       </ShippingServiceOptions>
     </ShippingDetails>
     <ReturnPolicy>
       <ReturnsAcceptedOption>ReturnsNotAccepted</ReturnsAcceptedOption>
     </ReturnPolicy>
-    <ItemLocation>New York, NY</ItemLocation>
+    <ItemLocation>London, UK</ItemLocation>
   </Item>
 </AddFixedPriceItemRequest>`;
 
@@ -804,7 +804,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           listingResult: {
             itemId: itemId,
             ebayUrl: `https://www.ebay.de/itm/${itemId}`,
-            message: "Product successfully listed on eBay US!",
+            message: "Product successfully listed on eBay UK!",
             product: {
               id: product.id,
               name: product.name,
@@ -1092,7 +1092,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { ebayOAuth } = await import('./ebay-oauth');
       const authToken = await ebayOAuth.getValidAccessToken();
       const imageUrl = "https://images.unsplash.com/photo-1553062407-98eeb64c6a62";
-      const xmlBody = createSimpleUSListingXML(product, authToken, imageUrl);
+      const xmlBody = createSimpleUKListingXML(product, authToken, imageUrl);
       
       res.json({
         success: true,
@@ -1104,7 +1104,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // eBay US listing with business policies and uploaded image
+  // eBay UK listing with business policies and uploaded image
   app.post("/api/ebay/list-us", requireAuth, async (req, res) => {
     try {
       const { productId } = req.body;
@@ -1172,7 +1172,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           listingResult: {
             itemId: itemId,
             ebayUrl: `https://www.ebay.de/itm/${itemId}`,
-            message: "Product successfully listed on eBay US!",
+            message: "Product successfully listed on eBay UK!",
             product: {
               id: product.id,
               name: product.name,
@@ -1191,7 +1191,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
     } catch (error) {
-      console.error("eBay US listing failed:", error);
+      console.error("eBay UK listing failed:", error);
       res.status(500).json({
         success: false,
         error: error instanceof Error ? error.message : "Germany listing failed"
@@ -1231,7 +1231,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     <PrimaryCategory>
       <CategoryID>58277</CategoryID>
     </PrimaryCategory>
-    <StartPrice currencyID="USD">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
+    <StartPrice currencyID="GBP">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
     <Quantity>${product.stock || 1}</Quantity>
     <ListingDuration>Days_7</ListingDuration>
     <Country>DE</Country>
@@ -1271,7 +1271,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         <Value>A000066</Value>
       </NameValueList>
     </ItemSpecifics>
-    <ItemLocation>United States</ItemLocation>
+    <ItemLocation>London, UK</ItemLocation>
   </Item>
 </VerifyAddFixedPriceItemRequest>`;
 
