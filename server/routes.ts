@@ -1040,6 +1040,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Test minimal eBay listing
+  app.post("/api/ebay/test-minimal", requireAuth, async (req, res) => {
+    try {
+      const { productId } = req.body;
+      const product = await storage.getProduct(productId);
+      if (!product) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+      
+      const { ebayOAuth } = await import('./ebay-oauth');
+      const authToken = await ebayOAuth.getValidAccessToken();
+      const { createMinimalUSListingXML } = await import('./ebay-minimal-config');
+      const xmlBody = createMinimalUSListingXML(product, authToken);
+      
+      const response = await fetch('https://api.ebay.com/ws/api.dll', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/xml',
+          'X-EBAY-API-SITEID': '0',
+          'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
+          'X-EBAY-API-CALL-NAME': 'VerifyAddFixedPriceItem',
+          'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
+          'X-EBAY-API-APP-NAME': process.env.EBAY_APP_ID!,
+          'X-EBAY-API-CERT-NAME': process.env.EBAY_CERT_ID!
+        },
+        body: xmlBody
+      });
+
+      const responseText = await response.text();
+      
+      res.json({
+        success: true,
+        xml: xmlBody,
+        response: responseText
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to test listing" });
+    }
+  });
+
   // Debug XML generation for eBay
   app.post("/api/ebay/debug-xml", requireAuth, async (req, res) => {
     try {

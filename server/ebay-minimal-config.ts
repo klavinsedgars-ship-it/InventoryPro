@@ -1,6 +1,6 @@
 export function createMinimalUSListingXML(product: any, authToken: string): string {
   return `<?xml version="1.0" encoding="utf-8"?>
-<AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+<VerifyAddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
     <eBayAuthToken>${authToken}</eBayAuthToken>
   </RequesterCredentials>
@@ -19,5 +19,5 @@ export function createMinimalUSListingXML(product: any, authToken: string): stri
     <ConditionID>1000</ConditionID>
     <DispatchTimeMax>3</DispatchTimeMax>
   </Item>
-</AddFixedPriceItemRequest>`;
+</VerifyAddFixedPriceItemRequest>`;
 }
