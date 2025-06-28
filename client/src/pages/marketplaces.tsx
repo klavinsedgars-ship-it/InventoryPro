@@ -62,10 +62,10 @@ export function Marketplaces({ user }: MarketplacesProps) {
   const ebayBulkListMutation = useMutation({
     mutationFn: (data: { productIds: number[], categoryId?: string }) => 
       apiRequest("POST", "/api/ebay/bulk-list", data),
-    onSuccess: (response) => {
+    onSuccess: (response: any) => {
       toast({
         title: "eBay Listing Completed",
-        description: `Successfully listed ${response.listedCount} of ${response.totalProducts} products on eBay.`,
+        description: `Successfully listed ${response.listedCount || 0} of ${response.totalProducts || 0} products on eBay.`,
       });
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
@@ -82,7 +82,7 @@ export function Marketplaces({ user }: MarketplacesProps) {
 
   const ebayTestMutation = useMutation({
     mutationFn: () => apiRequest("GET", "/api/ebay/test"),
-    onSuccess: (response) => {
+    onSuccess: (response: any) => {
       toast({
         title: "eBay Connection Test",
         description: response.message || "eBay API connection successful.",
