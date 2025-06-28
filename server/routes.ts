@@ -307,6 +307,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Debug endpoint to check current token
+  app.get("/api/debug/token-check", async (req, res) => {
+    try {
+      const currentToken = process.env.EBAY_USER_TOKEN;
+      res.json({
+        hasToken: !!currentToken,
+        tokenPrefix: currentToken ? currentToken.substring(0, 50) : 'none',
+        tokenLength: currentToken ? currentToken.length : 0
+      });
+    } catch (error) {
+      res.json({ error: (error as Error).message });
+    }
+  });
+
   app.post("/api/ebay/unlist", requireAuth, async (req, res) => {
     try {
       const { productId } = req.body;
