@@ -163,7 +163,6 @@ export class EbayOAuthService {
    * Generate OAuth authorization URL for user consent
    */
   generateAuthUrl(state?: string): string {
-    const baseUrl = this.getApiUrl();
     const clientId = process.env.EBAY_APP_ID;
     const redirectUri = process.env.EBAY_REDIRECT_URI || 'https://developer.ebay.com/DevZone/account/';
     
@@ -187,7 +186,7 @@ export class EbayOAuthService {
       state: state || 'random_state_string'
     });
 
-    return `${baseUrl}/oauth/api_scope/authorize?${params.toString()}`;
+    return `https://auth.ebay.com/oauth2/authorize?${params.toString()}`;
   }
 
   /**
