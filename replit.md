@@ -174,6 +174,10 @@ Changelog:
 - June 28, 2025. Frontend currency display and backend API calls now properly use UK marketplace configuration
 - June 28, 2025. Location field validation resolved - eliminated "Location missing" error through proper XML structure
 - June 28, 2025. **Current Status**: eBay UK integration 95% complete - only overseas warehouse policy authorization needed for production
+- June 28, 2025. Added 10 realistic electronics products to CRM for testing (ESP32, Raspberry Pi 4, sensors, etc.)
+- June 28, 2025. Implemented "Edit Before Listing" modal functionality with full product editing capabilities
+- June 28, 2025. Added "List to eBay" and "List to Amazon" buttons on dashboard product table
+- June 28, 2025. Temporarily disabled authentication system for development testing - bypassed login requirements
 ```
 
 ## User Preferences

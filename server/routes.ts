@@ -30,12 +30,14 @@ interface AuthenticatedRequest extends Request {
 
 export async function registerRoutes(app: Express): Promise<Server> {
   
-  // Auth middleware
+  // Auth middleware - temporarily disabled for development
   const requireAuth = (req: any, res: any, next: any) => {
-    if (!req.session?.userId) {
-      return res.status(401).json({ message: "Authentication required" });
-    }
+    // Temporarily bypass authentication
     next();
+    // if (!req.session?.userId) {
+    //   return res.status(401).json({ message: "Authentication required" });
+    // }
+    // next();
   };
 
   // Auth routes

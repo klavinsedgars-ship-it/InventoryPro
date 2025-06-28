@@ -15,32 +15,38 @@ import { Login } from "@/pages/login";
 import NotFound from "@/pages/not-found";
 
 function AppContent() {
-  const [user, setUser] = useState<any>(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  // Check if user is authenticated on app load
-  const { data: userData, error } = useQuery({
-    queryKey: ["/api/auth/me"],
-    queryFn: async () => {
-      const response = await fetch("/api/auth/me", {
-        credentials: "include",
-      });
-      if (!response.ok) {
-        throw new Error("Not authenticated");
-      }
-      return response.json();
-    },
-    retry: false,
+  // Temporary bypass for authentication - using mock user
+  const [user, setUser] = useState<any>({
+    id: 1,
+    username: "admin",
+    email: "admin@inventorysync.com",
+    role: "admin"
   });
+  const [isLoading, setIsLoading] = useState(false);
 
-  useEffect(() => {
-    if (userData) {
-      setUser(userData.user);
-    } else if (error) {
-      setUser(null);
-    }
-    setIsLoading(false);
-  }, [userData, error]);
+  // Disabled authentication check for development
+  // const { data: userData, error } = useQuery({
+  //   queryKey: ["/api/auth/me"],
+  //   queryFn: async () => {
+  //     const response = await fetch("/api/auth/me", {
+  //       credentials: "include",
+  //     });
+  //     if (!response.ok) {
+  //       throw new Error("Not authenticated");
+  //     }
+  //     return response.json();
+  //   },
+  //   retry: false,
+  // });
+
+  // useEffect(() => {
+  //   if (userData) {
+  //     setUser(userData.user);
+  //   } else if (error) {
+  //     setUser(null);
+  //   }
+  //   setIsLoading(false);
+  // }, [userData, error]);
 
   const handleLoginSuccess = (userData: any) => {
     setUser(userData);
@@ -67,9 +73,10 @@ function AppContent() {
     );
   }
 
-  if (!user) {
-    return <Login onSuccess={handleLoginSuccess} />;
-  }
+  // Authentication disabled for development
+  // if (!user) {
+  //   return <Login onSuccess={handleLoginSuccess} />;
+  // }
 
   return (
     <Switch>
