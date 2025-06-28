@@ -1060,9 +1060,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // For now, proceed without automatic image upload to test business policies
-      // Image upload can be done manually using the "Upload Image" button
-      let imageUrl = null;
+      // Use a simple image URL without query parameters to avoid XML parsing issues
+      let imageUrl = "https://images.unsplash.com/photo-1553062407-98eeb64c6a62";
 
       // Use Trading API compatible token - get it from OAuth service
       const { ebayOAuth } = await import('./ebay-oauth');
