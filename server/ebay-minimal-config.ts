@@ -24,11 +24,12 @@ export function createMinimalUKListingXML(product: any, authToken: string): stri
       <ShippingType>Flat</ShippingType>
       <ShippingServiceOptions>
         <ShippingServicePriority>1</ShippingServicePriority>
-        <ShippingService>UK_RoyalMailSecondClass</ShippingService>
-        <ShippingServiceCost>2.99</ShippingServiceCost>
+        <ShippingService>UK_StandardDelivery</ShippingService>
+        <ShippingServiceCost currencyID="GBP">3.99</ShippingServiceCost>
       </ShippingServiceOptions>
     </ShippingDetails>
     <PaymentMethods>PayPal</PaymentMethods>
+    <PayPalEmailAddress>test@example.com</PayPalEmailAddress>
     <ReturnPolicy>
       <ReturnsAcceptedOption>ReturnsAccepted</ReturnsAcceptedOption>
       <RefundOption>MoneyBack</RefundOption>
