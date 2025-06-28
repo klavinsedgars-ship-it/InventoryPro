@@ -18,7 +18,7 @@ export function createMinimalUSListingXML(product: any, authToken: string): stri
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
     <DispatchTimeMax>3</DispatchTimeMax>
-
+    <ItemLocation>USA</ItemLocation>
     <SellerProfiles>
       <SellerShippingProfile>
         <ShippingProfileID>234560863019</ShippingProfileID>

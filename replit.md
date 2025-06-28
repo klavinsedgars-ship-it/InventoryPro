@@ -154,6 +154,10 @@ Changelog:
 - June 28, 2025. Implemented comprehensive eBay OAuth 2.0 system with automatic token refresh functionality
 - June 28, 2025. Added OAuth status endpoints and authorization flow - ready for production token management
 - June 28, 2025. System technically complete - only requires eBay refresh token to enable production listings
+- June 28, 2025. BREAKTHROUGH: Solved overseas warehouse blocking error using minimal XML configuration approach
+- June 28, 2025. Eliminated region-based business policy conflicts that triggered location mismatch errors
+- June 28, 2025. eBay US marketplace integration now accepts API calls without overseas warehouse restrictions
+- June 28, 2025. Working solution confirmed - system ready for production US listings with proper location configuration
 ```
 
 ## User Preferences
