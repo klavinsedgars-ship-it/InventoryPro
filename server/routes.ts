@@ -877,7 +877,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         <ReturnProfileID>263978527019</ReturnProfileID>
       </SellerReturnProfile>
     </SellerProfiles>
-
+    <PictureDetails>
+      <PictureURL>https://docs.arduino.cc/static/6ec5e4c2a6c0e9e46389d4f6dc924073/ABX00027-iso.jpg</PictureURL>
+    </PictureDetails>
     <ItemSpecifics>
       <NameValueList>
         <Name>Marke</Name>
