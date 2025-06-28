@@ -344,14 +344,12 @@ export class EbayApiService {
     <StartPrice currencyID="GBP">${listingData.startPrice}</StartPrice>
     <Quantity>${listingData.quantity}</Quantity>
     <ListingDuration>GTC</ListingDuration>
-    <Country>GB</Country>
+    <Country>LV</Country>
     <Currency>GBP</Currency>
     <Location>Riga, Latvia</Location>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
     <DispatchTimeMax>3</DispatchTimeMax>
-    <ItemLocation>Riga, Latvia</ItemLocation>
-    <PostalCode>LV-1010</PostalCode>
     <PictureDetails>
       <PictureURL>https://images.unsplash.com/photo-1553062407-98eeb64c6a62</PictureURL>
     </PictureDetails>
@@ -390,14 +388,12 @@ export class EbayApiService {
     <StartPrice currencyID="GBP">${listingData.startPrice}</StartPrice>
     <Quantity>${listingData.quantity}</Quantity>
     <ListingDuration>GTC</ListingDuration>
-    <Country>GB</Country>
+    <Country>LV</Country>
     <Currency>GBP</Currency>
     <Location>Riga, Latvia</Location>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
     <DispatchTimeMax>3</DispatchTimeMax>
-    <ItemLocation>Riga, Latvia</ItemLocation>
-    <PostalCode>LV-1010</PostalCode>
     <PictureDetails>
       <PictureURL>https://images.unsplash.com/photo-1553062407-98eeb64c6a62</PictureURL>
     </PictureDetails>
@@ -431,7 +427,7 @@ export class EbayApiService {
         <Value>A000066</Value>
       </NameValueList>
     </ItemSpecifics>
-    <ItemLocation>London, UK</ItemLocation>
+
   </Item>
 </AddFixedPriceItemRequest>`;
   }

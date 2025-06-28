@@ -418,10 +418,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     <StartPrice currencyID="GBP">24.99</StartPrice>
     <Quantity>1</Quantity>
     <ListingDuration>GTC</ListingDuration>
-    <Country>GB</Country>
+    <Country>LV</Country>
     <Currency>GBP</Currency>
-    <Location>London, UK</Location>
-    <PostalCode>10001</PostalCode>
+    <Location>Riga, Latvia</Location>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
     <SellerProfiles>
@@ -560,10 +559,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     <StartPrice currencyID="GBP">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
     <Quantity>1</Quantity>
     <ListingDuration>Days_7</ListingDuration>
-    <Country>GB</Country>
+    <Country>LV</Country>
     <Currency>GBP</Currency>
-    <Location>London, UK</Location>
-    <PostalCode>10001</PostalCode>
+    <Location>Riga, Latvia</Location>
     <DispatchTimeMax>1</DispatchTimeMax>
     <Site>GB</Site>
     <ListingType>FixedPriceItem</ListingType>
@@ -749,7 +747,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     <Country>DE</Country>
     <Currency>EUR</Currency>
     <Location>Germany</Location>
-    <PostalCode>10115</PostalCode>
     <DispatchTimeMax>2</DispatchTimeMax>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
@@ -1238,7 +1235,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     <Country>DE</Country>
     <Currency>EUR</Currency>
     <Location>Germany</Location>
-    <PostalCode>10115</PostalCode>
     <DispatchTimeMax>1</DispatchTimeMax>
     <Site>Germany</Site>
     <ListingType>FixedPriceItem</ListingType>
