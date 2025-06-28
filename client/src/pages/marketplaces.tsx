@@ -63,10 +63,19 @@ export function Marketplaces({ user }: MarketplacesProps) {
     mutationFn: (data: { productIds: number[], categoryId?: string }) => 
       apiRequest("POST", "/api/ebay/bulk-list", data),
     onSuccess: (response: any) => {
-      toast({
-        title: "eBay Listing Completed",
-        description: `Successfully listed ${response.listedCount || 0} of ${response.totalProducts || 0} products on eBay.`,
-      });
+      console.log("Marketplaces eBay listing response:", response);
+      if (response.success && response.listedCount > 0) {
+        toast({
+          title: "eBay Listing Completed",
+          description: `Successfully listed ${response.listedCount} of ${response.totalProducts} products on eBay.`,
+        });
+      } else {
+        toast({
+          title: "eBay Listing Issues",
+          description: `${response.failedCount || response.totalProducts || 0} products failed to list. Check individual results.`,
+          variant: "destructive",
+        });
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
       setSelectedProducts([]);

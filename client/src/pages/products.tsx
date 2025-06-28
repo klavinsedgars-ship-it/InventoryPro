@@ -100,6 +100,7 @@ export function Products({ user }: ProductsProps) {
       return apiRequest("POST", "/api/ebay/bulk-list", { productIds });
     },
     onSuccess: (data: any) => {
+      console.log("Bulk listing response:", data);
       if (data.success && data.listedCount > 0) {
         toast({
           title: "Bulk eBay Listing Completed",
