@@ -7,7 +7,8 @@ import {
   RefreshCw, 
   FolderTree, 
   Settings,
-  Box
+  Box,
+  BarChart3
 } from "lucide-react";
 
 const navigation = [
@@ -16,6 +17,7 @@ const navigation = [
   { name: 'Marketplaces', href: '/marketplaces', icon: ShoppingCart },
   { name: 'TME Sync', href: '/sync', icon: RefreshCw },
   { name: 'Categories', href: '/categories', icon: FolderTree },
+  { name: 'Reports', href: '/reports', icon: BarChart3 },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
