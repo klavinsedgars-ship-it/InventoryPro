@@ -14,6 +14,7 @@ import bcrypt from "bcryptjs";
 import { tmeApi } from "./tme-api";
 import { ebayApi } from "./ebay-api";
 import { findValidEbayCategory, getCategoryNameById } from "./ebay-category-finder";
+import { findBestCategoryForProduct, explainCategoryChoice, categorizeBatch } from "./product-category-matcher";
 
 // Type for authenticated requests
 interface AuthenticatedRequest extends Request {
@@ -483,6 +484,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({
         success: false,
         error: error instanceof Error ? error.message : "Category testing failed"
+      });
+    }
+  });
+
+  // Intelligent product categorization
+  app.post("/api/ebay/categorize-products", requireAuth, async (req, res) => {
+    try {
+      const { products } = req.body;
+      
+      if (!products || !Array.isArray(products)) {
+        return res.status(400).json({
+          success: false,
+          error: "Products array is required"
+        });
+      }
+
+      // Use working category 293 as valid category
+      const validCategories = ['293', '58285', '42184', '155973'];
+      const categorizedProducts = categorizeBatch(products, validCategories);
+      
+      res.json({
+        success: true,
+        categorizedProducts,
+        workingCategory: '293' // Electronics category that works
+      });
+    } catch (error) {
+      console.error("Product categorization failed:", error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Categorization failed"
       });
     }
   });

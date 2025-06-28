@@ -3,13 +3,13 @@ import { COMMON_ELECTRONICS_CATEGORIES } from './ebay-category-finder';
 // Product keyword mapping to eBay categories
 export const PRODUCT_CATEGORY_MAPPING = {
   // Arduino and Development Boards
-  arduino: ['172524', '38268', '58278', '155973'],
-  microcontroller: ['172524', '38268', '58278', '155973'],
-  development: ['172524', '38268', '58278'],
-  board: ['172524', '38268', '58278', '155973'],
-  'raspberry pi': ['172524', '38268'],
-  esp32: ['172524', '38268', '58278'],
-  esp8266: ['172524', '38268', '58278'],
+  arduino: ['293', '58285', '42184', '155973'],
+  microcontroller: ['293', '58285', '42184', '155973'],
+  development: ['293', '58285', '42184'],
+  board: ['293', '58285', '42184', '155973'],
+  'raspberry pi': ['293', '58285', '42184'],
+  esp32: ['293', '58285', '42184'],
+  esp8266: ['293', '58285', '42184'],
   
   // Electronic Components
   resistor: ['155973', '58058', '58277'],
@@ -58,19 +58,20 @@ export const PRODUCT_CATEGORY_MAPPING = {
 };
 
 // Category priority mapping (higher priority = more specific)
-export const CATEGORY_PRIORITY = {
-  '172524': 10, // Arduino Compatible - highest priority for Arduino products
-  '38268': 9,   // Development Boards - high priority for dev boards
-  '58278': 8,   // Circuit Boards & Prototyping
-  '155973': 7,  // Electronic Components - General (good fallback)
+export const CATEGORY_PRIORITY: { [key: string]: number } = {
+  '293': 10,    // Electronics - WORKING CATEGORY!
+  '42184': 9,   // Electronic Components 
+  '58285': 8,   // Development Boards & Kits
+  '155973': 7,  // Electronic Components - General
   '58058': 6,   // Electronic Components & Semiconductors
-  '181079': 5,  // Integrated Circuits (ICs)
-  '92074': 4,   // Electronic Modules
+  '4205': 5,    // Integrated Circuits/Chips
+  '85066': 4,   // Electrical Equipment & Supplies
   '175673': 3,  // Computer Components & Parts
-  '58277': 2,   // Electronic Components - Mixed Lots
-  '14927': 2,   // Computer Cables & Connectors
-  '18961': 2,   // Electronic Test Equipment
-  '1745': 1,    // Consumer Electronics (lowest priority)
+  '31388': 2,   // Wholesale Lots - Electronics
+  '64671': 2,   // Electronic Test Equipment
+  '1452': 1,    // Resistors (specific components)
+  '1453': 1,    // Capacitors (specific components)
+  '1454': 1,    // Semiconductors (specific components)
   '11176': 1    // Electronics - Other (fallback)
 };
 
