@@ -158,10 +158,11 @@ export class TMEApiService {
       
       // Log sync start
       await storage.createSyncLog({
+        source: "tme",
         operation: "sync_start",
         status: "in_progress",
         message: `Starting TME product sync for "${searchQuery}"`,
-        details: { query: searchQuery, limit }
+        details: JSON.stringify({ query: searchQuery, limit })
       });
 
       // Search for products
@@ -170,10 +171,11 @@ export class TMEApiService {
 
       if (products.length === 0) {
         await storage.createSyncLog({
+          source: "tme",
           operation: "sync_complete",
           status: "warning",
           message: `No products found for query "${searchQuery}"`,
-          details: { query: searchQuery, productsFound: 0 }
+          details: JSON.stringify({ query: searchQuery, productsFound: 0 })
         });
         return { success: true, productsProcessed: 0, message: "No products found" };
       }
@@ -207,7 +209,8 @@ export class TMEApiService {
             sku: tmeProduct.Symbol,
             description: `${tmeProduct.Producer} - ${tmeProduct.Description}`,
             category: "Electronics", // Default category, could be mapped from TME categories
-            price: price?.PriceValue || 0,
+            supplierPrice: (price?.PriceValue || 0).toString(),
+            salePrice: ((price?.PriceValue || 0) * 1.2).toString(), // 20% markup
             stock: stock?.Amount || 0,
             imageUrl: tmeProduct.Photo || tmeProduct.Thumbnail || null,
             supplier: "TME",
@@ -218,10 +221,7 @@ export class TMEApiService {
 
           if (existingProduct) {
             // Update existing product
-            await storage.updateProduct(existingProduct.id, {
-              ...productData,
-              updatedAt: new Date(),
-            });
+            await storage.updateProduct(existingProduct.id, productData);
             updatedCount++;
           } else {
             // Create new product
@@ -233,26 +233,28 @@ export class TMEApiService {
         } catch (error) {
           console.error(`Error processing product ${tmeProduct.Symbol}:`, error);
           await storage.createSyncLog({
+            source: "tme",
             operation: "product_error",
             status: "error",
             message: `Error processing product ${tmeProduct.Symbol}`,
-            details: { symbol: tmeProduct.Symbol, error: error.message }
+            details: JSON.stringify({ symbol: tmeProduct.Symbol, error: (error as Error).message })
           });
         }
       }
 
       // Log successful completion
       await storage.createSyncLog({
+        source: "tme",
         operation: "sync_complete",
         status: "success",
         message: `TME sync completed: ${createdCount} created, ${updatedCount} updated`,
-        details: {
+        details: JSON.stringify({
           query: searchQuery,
           totalProducts: products.length,
           processed: processedCount,
           created: createdCount,
           updated: updatedCount
-        }
+        })
       });
 
       console.log(`TME sync completed: ${createdCount} created, ${updatedCount} updated`);
@@ -269,10 +271,11 @@ export class TMEApiService {
       console.error("TME sync failed:", error);
       
       await storage.createSyncLog({
+        source: "tme",
         operation: "sync_error",
         status: "error",
-        message: `TME sync failed: ${error.message}`,
-        details: { error: error.message, query: searchQuery }
+        message: `TME sync failed: ${(error as Error).message}`,
+        details: JSON.stringify({ error: (error as Error).message, query: searchQuery })
       });
 
       throw error;
@@ -334,10 +337,11 @@ export class TMEApiService {
       }
 
       await storage.createSyncLog({
+        source: "tme",
         operation: "price_stock_update",
         status: "success",
         message: `Updated prices and stock for ${updatedCount} products`,
-        details: { symbols: symbols.slice(0, 10), totalUpdated: updatedCount }
+        details: JSON.stringify({ symbols: symbols.slice(0, 10), totalUpdated: updatedCount })
       });
 
       return {
