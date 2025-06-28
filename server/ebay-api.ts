@@ -326,12 +326,13 @@ export class EbayApiService {
 
 
   private createVerifyItemXML(listingData: any): string {
-    const userToken = process.env.EBAY_USER_TOKEN;
+    // Use fresh Auth n Auth token directly
+    const userToken = "v^1.1#i^1#f^0#p^3#I^3#r^1#t^Ul4xMF83OjFCN0M0NTkxQkNFNTUyRUE0MjE4REMyMjcyODdDOTg5XzFfMSNFXjI2MA==";
     if (!userToken) {
       throw new Error("eBay Auth n Auth token is required for listing products");
     }
     
-    console.log("createVerifyItemXML - Using Auth n Auth token:", userToken.startsWith("v^1.1#i^1#f^0"));
+    console.log("createVerifyItemXML - Using fresh Auth n Auth token:", userToken.startsWith("v^1.1#i^1#f^0"));
     
     return `<?xml version="1.0" encoding="utf-8"?>
 <VerifyAddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -372,14 +373,14 @@ export class EbayApiService {
   }
 
   private createAddItemXML(listingData: any): string {
-    // Use Auth n Auth token directly from environment
-    const userToken = process.env.EBAY_USER_TOKEN;
+    // Use fresh Auth n Auth token directly
+    const userToken = "v^1.1#i^1#f^0#p^3#I^3#r^1#t^Ul4xMF83OjFCN0M0NTkxQkNFNTUyRUE0MjE4REMyMjcyODdDOTg5XzFfMSNFXjI2MA==";
     if (!userToken) {
       throw new Error("eBay Auth n Auth token is required for listing products");
     }
     
     // Debug: Log token details for troubleshooting
-    console.log("createAddItemXML - Auth n Auth token prefix:", userToken.substring(0, 50));
+    console.log("createAddItemXML - Fresh Auth n Auth token prefix:", userToken.substring(0, 50));
     console.log("createAddItemXML - Token length:", userToken.length);
     console.log("createAddItemXML - Fresh Auth n Auth token check:", userToken.startsWith("v^1.1#i^1#f^0"));
     
