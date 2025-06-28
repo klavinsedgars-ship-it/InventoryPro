@@ -1040,6 +1040,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Debug XML generation for eBay
+  app.post("/api/ebay/debug-xml", requireAuth, async (req, res) => {
+    try {
+      const { productId } = req.body;
+      const product = await storage.getProduct(productId);
+      if (!product) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+      
+      const { ebayOAuth } = await import('./ebay-oauth');
+      const authToken = await ebayOAuth.getValidAccessToken();
+      const imageUrl = "https://images.unsplash.com/photo-1553062407-98eeb64c6a62";
+      const xmlBody = createSimpleUSListingXML(product, authToken, imageUrl);
+      
+      res.json({
+        success: true,
+        xml: xmlBody,
+        product: product
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to generate XML" });
+    }
+  });
+
   // eBay US listing with business policies and uploaded image
   app.post("/api/ebay/list-us", requireAuth, async (req, res) => {
     try {
@@ -1073,7 +1097,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
-          'X-EBAY-API-SITEID': '77',
+          'X-EBAY-API-SITEID': '0',
           'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
           'X-EBAY-API-CALL-NAME': 'AddFixedPriceItem',
           'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
