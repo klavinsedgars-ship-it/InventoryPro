@@ -831,7 +831,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/ebay/upload-image", requireAuth, async (req, res) => {
     try {
       // Read the Arduino image file
-      const imagePath = path.join(process.cwd(), 'attached_assets', 'Arduino_Uno_-_R3_1751106460097.jpg');
+      const imagePath = path.join(process.cwd(), 'attached_assets', 'Arduino_Uno_-_R3_1751105386641.jpg');
       const imageBuffer = fs.readFileSync(imagePath);
       const base64Image = imageBuffer.toString('base64');
 
@@ -903,7 +903,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // First upload the image to eBay automatically
       let imageUrl = null;
       try {
-        const imagePath = path.join(process.cwd(), 'attached_assets', 'Arduino_Uno_-_R3_1751106460097.jpg');
+        const imagePath = path.join(process.cwd(), 'attached_assets', 'Arduino_Uno_-_R3_1751105386641.jpg');
         const imageBuffer = fs.readFileSync(imagePath);
         const base64Image = imageBuffer.toString('base64');
 
