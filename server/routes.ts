@@ -639,6 +639,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Check available business policies
+  app.get("/api/ebay/check-policies", requireAuth, async (req, res) => {
+    try {
+      const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
+<GetSellerProfilesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${process.env.EBAY_USER_TOKEN}</eBayAuthToken>
+  </RequesterCredentials>
+</GetSellerProfilesRequest>`;
+
+      const response = await fetch('https://api.ebay.com/ws/api.dll', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/xml',
+          'X-EBAY-API-SITEID': '77',
+          'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
+          'X-EBAY-API-CALL-NAME': 'GetSellerProfiles',
+          'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
+          'X-EBAY-API-APP-NAME': process.env.EBAY_APP_ID!,
+          'X-EBAY-API-CERT-NAME': process.env.EBAY_CERT_ID!
+        },
+        body: xmlBody
+      });
+      
+      const responseText = await response.text();
+      
+      res.json({
+        success: true,
+        policies: responseText
+      });
+      
+    } catch (error) {
+      console.error("Policy check failed:", error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Policy check failed"
+      });
+    }
+  });
+
   // eBay Germany listing without business policies
   app.post("/api/ebay/list-germany", requireAuth, async (req, res) => {
     try {
@@ -681,17 +721,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     <DispatchTimeMax>2</DispatchTimeMax>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
-    <SellerProfiles>
-      <SellerShippingProfile>
-        <ShippingProfileID>DE_216006551019</ShippingProfileID>
-      </SellerShippingProfile>
-      <SellerPaymentProfile>
-        <PaymentProfileID>DE_216006440019</PaymentProfileID>
-      </SellerPaymentProfile>
-      <SellerReturnProfile>
-        <ReturnProfileID>DE_216006441019</ReturnProfileID>
-      </SellerReturnProfile>
-    </SellerProfiles>
+    <PaymentMethods>PayPal</PaymentMethods>
+    <PayPalEmailAddress>seller@example.com</PayPalEmailAddress>
+    <ShippingDetails>
+      <ShippingType>Flat</ShippingType>
+      <ShippingServiceOptions>
+        <ShippingServicePriority>1</ShippingServicePriority>
+        <ShippingService>DE_StandardInternational</ShippingService>
+        <ShippingServiceCost currencyID="EUR">4.99</ShippingServiceCost>
+        <ShipToLocation>DE</ShipToLocation>
+        <ShipToLocation>Europe</ShipToLocation>
+      </ShippingServiceOptions>
+    </ShippingDetails>
+    <ReturnPolicy>
+      <ReturnsAcceptedOption>ReturnsAccepted</ReturnsAcceptedOption>
+      <RefundOption>MoneyBack</RefundOption>
+      <ReturnsWithinOption>Days_30</ReturnsWithinOption>
+      <ShippingCostPaidByOption>Buyer</ShippingCostPaidByOption>
+    </ReturnPolicy>
     <ItemSpecifics>
       <NameValueList>
         <Name>Marke</Name>
