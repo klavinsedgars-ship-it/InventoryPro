@@ -357,6 +357,14 @@ export class EbayApiService {
     <PictureDetails>
       <PictureURL>https://images.unsplash.com/photo-1553062407-98eeb64c6a62</PictureURL>
     </PictureDetails>
+    <ShippingDetails>
+      <ShippingType>Flat</ShippingType>
+      <ShippingServiceOptions>
+        <ShippingServicePriority>1</ShippingServicePriority>
+        <ShippingService>UK_RoyalMailSecondClassStandard</ShippingService>
+        <ShippingServiceCost currencyID="GBP">3.50</ShippingServiceCost>
+      </ShippingServiceOptions>
+    </ShippingDetails>
     <SellerProfiles>
       <SellerPaymentProfile>
         <PaymentProfileID>209734844019</PaymentProfileID>
@@ -364,9 +372,6 @@ export class EbayApiService {
       <SellerReturnProfile>
         <ReturnProfileID>161272624019</ReturnProfileID>
       </SellerReturnProfile>
-      <SellerShippingProfile>
-        <ShippingProfileID>142140832019</ShippingProfileID>
-      </SellerShippingProfile>
     </SellerProfiles>
   </Item>
 </VerifyAddFixedPriceItemRequest>`;
@@ -408,12 +413,12 @@ export class EbayApiService {
       <PictureURL>https://images.unsplash.com/photo-1553062407-98eeb64c6a62</PictureURL>
     </PictureDetails>
     <ShippingDetails>
-      <ShippingType>NotSpecified</ShippingType>
-      <SellerProfiles>
-        <SellerShippingProfile>
-          <ShippingProfileID>142140832019</ShippingProfileID>
-        </SellerShippingProfile>
-      </SellerProfiles>
+      <ShippingType>Flat</ShippingType>
+      <ShippingServiceOptions>
+        <ShippingServicePriority>1</ShippingServicePriority>
+        <ShippingService>UK_RoyalMailSecondClassStandard</ShippingService>
+        <ShippingServiceCost currencyID="GBP">3.50</ShippingServiceCost>
+      </ShippingServiceOptions>
     </ShippingDetails>
     <SellerProfiles>
       <SellerPaymentProfile>
