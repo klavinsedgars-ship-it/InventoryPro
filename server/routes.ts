@@ -762,7 +762,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     <ReturnPolicy>
       <ReturnsAcceptedOption>ReturnsNotAccepted</ReturnsAcceptedOption>
     </ReturnPolicy>
-    <ItemLocation>Germany</ItemLocation>
+    <ItemLocation>New York, NY</ItemLocation>
   </Item>
 </AddFixedPriceItemRequest>`;
 
@@ -925,17 +925,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     <DispatchTimeMax>2</DispatchTimeMax>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
-    <SellerProfiles>
-      <SellerShippingProfile>
-        <ShippingProfileID>263978529019</ShippingProfileID>
-      </SellerShippingProfile>
-      <SellerPaymentProfile>
-        <PaymentProfileID>216006440019</PaymentProfileID>
-      </SellerPaymentProfile>
-      <SellerReturnProfile>
-        <ReturnProfileID>263978527019</ReturnProfileID>
-      </SellerReturnProfile>
-    </SellerProfiles>
+    <ShippingDetails>
+      <ShippingType>Flat</ShippingType>
+      <ShippingServiceOptions>
+        <ShippingServicePriority>1</ShippingServicePriority>
+        <ShippingService>USPSGround</ShippingService>
+        <ShippingServiceCost>4.99</ShippingServiceCost>
+      </ShippingServiceOptions>
+    </ShippingDetails>
+    <PaymentMethods>PayPal</PaymentMethods>
+    <ReturnPolicy>
+      <ReturnsAcceptedOption>ReturnsAccepted</ReturnsAcceptedOption>
+      <ReturnsWithinOption>Days_30</ReturnsWithinOption>
+      <ShippingCostPaidByOption>Buyer</ShippingCostPaidByOption>
+    </ReturnPolicy>
     ${imageUrl ? `<PictureDetails>
       <PictureURL>${imageUrl}</PictureURL>
     </PictureDetails>` : ''}
@@ -946,14 +949,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       </NameValueList>
       <NameValueList>
         <Name>Typ</Name>
-        <Value>Entwicklerboard</Value>
+        <Value>Development Board</Value>
       </NameValueList>
       <NameValueList>
         <Name>Modell</Name>
         <Value>Uno R3</Value>
       </NameValueList>
     </ItemSpecifics>
-    <ItemLocation>Germany</ItemLocation>
+    <ItemLocation>New York, NY</ItemLocation>
   </Item>
 </AddFixedPriceItemRequest>`;
 
