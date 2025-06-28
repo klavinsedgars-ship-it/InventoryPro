@@ -12,13 +12,13 @@ export function createListingWithExternalImageXML(product: any, externalImageUrl
     <PrimaryCategory>
       <CategoryID>58277</CategoryID>
     </PrimaryCategory>
-    <StartPrice currencyID="USD">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
+    <StartPrice currencyID="EUR">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
     <Quantity>${product.stock || 1}</Quantity>
     <ListingDuration>GTC</ListingDuration>
-    <Country>US</Country>
-    <Currency>USD</Currency>
-    <Location>New York, NY</Location>
-    <PostalCode>10001</PostalCode>
+    <Country>DE</Country>
+    <Currency>EUR</Currency>
+    <Location>Berlin, Germany</Location>
+    <PostalCode>10115</PostalCode>
     <DispatchTimeMax>2</DispatchTimeMax>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
@@ -27,13 +27,13 @@ export function createListingWithExternalImageXML(product: any, externalImageUrl
     </PictureDetails>
     <SellerProfiles>
       <SellerShippingProfile>
-        <ShippingProfileID>234560863019</ShippingProfileID>
+        <ShippingProfileID>263978529019</ShippingProfileID>
       </SellerShippingProfile>
       <SellerPaymentProfile>
-        <PaymentProfileID>216006444019</PaymentProfileID>
+        <PaymentProfileID>216006440019</PaymentProfileID>
       </SellerPaymentProfile>
       <SellerReturnProfile>
-        <ReturnProfileID>209734982019</ReturnProfileID>
+        <ReturnProfileID>263978527019</ReturnProfileID>
       </SellerReturnProfile>
     </SellerProfiles>
     <ItemSpecifics>
