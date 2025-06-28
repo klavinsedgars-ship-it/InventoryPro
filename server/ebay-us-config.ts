@@ -22,13 +22,13 @@ export function createSimpleUSListingXML(product: any): string {
     <ConditionID>1000</ConditionID>
     <SellerProfiles>
       <SellerShippingProfile>
-        <ShippingProfileID>YOUR_US_SHIPPING_POLICY_ID</ShippingProfileID>
+        <ShippingProfileID>234560863019</ShippingProfileID>
       </SellerShippingProfile>
       <SellerPaymentProfile>
-        <PaymentProfileID>YOUR_US_PAYMENT_POLICY_ID</PaymentProfileID>
+        <PaymentProfileID>216006444019</PaymentProfileID>
       </SellerPaymentProfile>
       <SellerReturnProfile>
-        <ReturnProfileID>YOUR_US_RETURN_POLICY_ID</ReturnProfileID>
+        <ReturnProfileID>209734982019</ReturnProfileID>
       </SellerReturnProfile>
     </SellerProfiles>
     <ItemSpecifics>
