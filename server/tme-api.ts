@@ -165,8 +165,31 @@ export class TMEApiService {
         details: JSON.stringify({ query: searchQuery, limit })
       });
 
-      // Search for products
-      const products = await this.searchProducts(searchQuery, limit);
+      let products;
+      try {
+        // Try to search for products from TME API
+        products = await this.searchProducts(searchQuery, limit);
+      } catch (apiError) {
+        console.log("TME API unavailable, providing helpful error message");
+        
+        await storage.createSyncLog({
+          source: "tme",
+          operation: "api_error",
+          status: "error",
+          message: "TME API authentication failed. Please verify credentials.",
+          details: JSON.stringify({ 
+            error: (apiError as Error).message,
+            suggestion: "Verify TME API token, customer number, and contact number in environment variables"
+          })
+        });
+
+        return {
+          success: false,
+          message: "TME API authentication failed. Please verify your TME credentials are correctly configured.",
+          suggestion: "Check that TME_API_TOKEN, TME_CUSTOMER_NUMBER, and TME_CONTACT_NUMBER environment variables are set correctly.",
+          productsProcessed: 0
+        };
+      }
       console.log(`Found ${products.length} products from TME`);
 
       if (products.length === 0) {
@@ -354,10 +377,11 @@ export class TMEApiService {
       console.error("Price/stock update failed:", error);
       
       await storage.createSyncLog({
+        source: "tme",
         operation: "price_stock_error",
         status: "error",
-        message: `Price/stock update failed: ${error.message}`,
-        details: { error: error.message }
+        message: `Price/stock update failed: ${(error as Error).message}`,
+        details: JSON.stringify({ error: (error as Error).message })
       });
 
       throw error;
