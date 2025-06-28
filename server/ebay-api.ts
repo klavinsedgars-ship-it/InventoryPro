@@ -53,6 +53,8 @@ export class EbayApiService {
   private credentials: EbayCredentials;
   private baseUrl = "https://api.ebay.com";
   private sandboxUrl = "https://api.sandbox.ebay.com";
+  private tradingApiUrl = "https://api.ebay.com/ws/api.dll";
+  private sandboxTradingApiUrl = "https://api.sandbox.ebay.com/ws/api.dll";
   private authToken?: EbayAuthToken;
   private isProduction = process.env.NODE_ENV === "production";
 
@@ -172,7 +174,7 @@ export class EbayApiService {
         throw new Error("Product not found");
       }
 
-      // Prepare listing data
+      // Prepare listing data for eBay Trading API
       const listingData = {
         title: listingDetails.title || product.name,
         description: listingDetails.description || product.description || `${product.name} - High quality electronics component`,
@@ -188,34 +190,82 @@ export class EbayApiService {
         }
       };
 
-      // Note: This is a simplified example. Real eBay API requires more complex listing structure
-      // For demo purposes, we'll simulate a successful listing
-      const mockItemId = `ITEM_${Date.now()}`;
-
-      // Update product with eBay listing status
-      await storage.updateProduct(productId, {
-        listedOnEbay: true,
-        ebayItemId: mockItemId
+      // Make actual eBay API call to list the product
+      console.log("Attempting to list product on eBay:", {
+        productId,
+        title: listingData.title,
+        price: listingData.startPrice,
+        categoryId: listingData.categoryId
       });
 
-      // Log the listing activity
-      await storage.createSyncLog({
-        source: "ebay",
-        operation: "product_listing",
-        status: "success",
-        message: `Successfully listed product "${product.name}" on eBay`,
-        details: JSON.stringify({
-          productId,
-          itemId: mockItemId,
-          listingData
-        })
-      });
+      try {
+        // Create XML request for eBay Trading API
+        const xmlRequest = this.createAddItemXML(listingData);
+        console.log("Making eBay Trading API call with XML request");
+        
+        const response = await this.makeTradingApiRequest(xmlRequest);
+        
+        // Parse XML response to get ItemID
+        const itemIdMatch = response.match(/<ItemID>(\d+)<\/ItemID>/);
+        const itemId = itemIdMatch ? itemIdMatch[1] : null;
+        
+        if (!itemId) {
+          // Check for errors in response
+          const errorMatch = response.match(/<ShortMessage>(.*?)<\/ShortMessage>/);
+          const errorMessage = errorMatch ? errorMatch[1] : 'Unknown eBay API error';
+          throw new Error(`eBay listing failed: ${errorMessage}`);
+        }
+        
+        console.log("eBay listing successful:", { itemId, productId });
 
-      return {
-        success: true,
-        itemId: mockItemId,
-        message: `Product "${product.name}" successfully listed on eBay`
-      };
+        // Update product with actual eBay item ID
+        await storage.updateProduct(productId, {
+          listedOnEbay: true,
+          ebayItemId: itemId
+        });
+
+        // Log the successful listing
+        await storage.createSyncLog({
+          source: "ebay",
+          operation: "product_listing",
+          status: "success",
+          message: `Successfully listed product "${product.name}" on eBay with Item ID: ${itemId}`,
+          details: JSON.stringify({
+            productId,
+            itemId,
+            listingData,
+            ebayResponse: response
+          })
+        });
+
+        return {
+          success: true,
+          itemId,
+          message: `Product "${product.name}" successfully listed on eBay with Item ID: ${itemId}`
+        };
+
+      } catch (ebayError) {
+        console.error("eBay API listing failed:", ebayError);
+        
+        // Log the failed listing attempt
+        await storage.createSyncLog({
+          source: "ebay",
+          operation: "product_listing",
+          status: "error",
+          message: `Failed to list product "${product.name}" on eBay: ${(ebayError as Error).message}`,
+          details: JSON.stringify({
+            productId,
+            listingData,
+            error: (ebayError as Error).message
+          })
+        });
+
+        return {
+          success: false,
+          message: `Failed to list on eBay: ${(ebayError as Error).message}`,
+          errors: [(ebayError as Error).message]
+        };
+      }
 
     } catch (error) {
       console.error("eBay listing failed:", error);
@@ -237,6 +287,77 @@ export class EbayApiService {
         errors: [(error as Error).message]
       };
     }
+  }
+
+  private createAddItemXML(listingData: any): string {
+    return `<?xml version="1.0" encoding="utf-8"?>
+<AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${this.credentials.appId}</eBayAuthToken>
+  </RequesterCredentials>
+  <Item>
+    <Title>${this.escapeXml(listingData.title)}</Title>
+    <Description><![CDATA[${listingData.description}]]></Description>
+    <PrimaryCategory>
+      <CategoryID>${listingData.categoryId}</CategoryID>
+    </PrimaryCategory>
+    <StartPrice currencyID="USD">${listingData.startPrice}</StartPrice>
+    <Quantity>${listingData.quantity}</Quantity>
+    <ListingDuration>${listingData.listingDuration}</ListingDuration>
+    <ConditionID>1000</ConditionID>
+    <Country>US</Country>
+    <Currency>USD</Currency>
+    <DispatchTimeMax>1</DispatchTimeMax>
+    <ListingType>FixedPriceItem</ListingType>
+    <PaymentMethods>PayPal</PaymentMethods>
+    <ShippingDetails>
+      <ShippingType>Flat</ShippingType>
+      <ShippingServiceOptions>
+        <ShippingServicePriority>1</ShippingServicePriority>
+        <ShippingService>USPSMedia</ShippingService>
+        <ShippingServiceCost currencyID="USD">${listingData.shippingDetails.shippingServiceCost}</ShippingServiceCost>
+      </ShippingServiceOptions>
+    </ShippingDetails>
+    <ReturnPolicy>
+      <ReturnsAcceptedOption>ReturnsAccepted</ReturnsAcceptedOption>
+      <RefundOption>MoneyBack</RefundOption>
+      <ReturnsWithinOption>Days_30</ReturnsWithinOption>
+    </ReturnPolicy>
+  </Item>
+</AddFixedPriceItemRequest>`;
+  }
+
+  private escapeXml(text: string): string {
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  private async makeTradingApiRequest(xmlBody: string): Promise<string> {
+    const tradingUrl = this.isProduction ? this.tradingApiUrl : this.sandboxTradingApiUrl;
+    
+    const response = await fetch(tradingUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/xml',
+        'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
+        'X-EBAY-API-DEV-NAME': this.credentials.devId,
+        'X-EBAY-API-APP-NAME': this.credentials.appId,
+        'X-EBAY-API-CERT-NAME': this.credentials.certId,
+        'X-EBAY-API-CALL-NAME': 'AddFixedPriceItem',
+        'X-EBAY-API-SITEID': '0'
+      },
+      body: xmlBody
+    });
+
+    if (!response.ok) {
+      throw new Error(`eBay Trading API request failed: ${response.status} ${response.statusText}`);
+    }
+
+    return await response.text();
   }
 
   async bulkListProducts(productIds: number[], categoryId?: string): Promise<{
