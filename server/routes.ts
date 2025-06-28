@@ -11,6 +11,8 @@ import {
 } from "@shared/schema";
 import { ZodError } from "zod";
 import bcrypt from "bcryptjs";
+import { tmeApi } from "./tme-api";
+import { ebayApi } from "./ebay-api";
 
 // Type for authenticated requests
 interface AuthenticatedRequest extends Request {

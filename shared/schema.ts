@@ -27,6 +27,8 @@ export const products = pgTable("products", {
   listedOnEbay: boolean("listed_on_ebay").default(false),
   listedOnAmazon: boolean("listed_on_amazon").default(false),
   excludeFromListing: boolean("exclude_from_listing").default(false),
+  ebayItemId: text("ebay_item_id"),
+  amazonAsin: text("amazon_asin"),
   tmeProductId: text("tme_product_id"),
   supplier: text("supplier").default("manual"), // manual, TME, etc.
   supplierProductId: text("supplier_product_id"),
