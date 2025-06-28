@@ -143,6 +143,9 @@ Changelog:
 - June 28, 2025. Created comprehensive category mapping for Arduino, development boards, and electronic components
 - June 28, 2025. Systematically tested 14+ eBay categories and discovered 58277 (Electronic Components - Other) as verified working leaf category
 - June 28, 2025. Completed comprehensive eBay listing validation - system ready for production electronics listings
+- June 28, 2025. Updated German business policy IDs: Shipping 263978529019, Payment 216006440019, Return 263978527019
+- June 28, 2025. Added eBay image upload functionality with automatic Arduino product image integration
+- June 28, 2025. Business policies now accepted by eBay Germany API, only image upload remaining for complete listings
 ```
 
 ## User Preferences

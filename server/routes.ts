@@ -824,7 +824,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // eBay Germany listing with business policies
+  // Upload image to eBay
+  app.post("/api/ebay/upload-image", requireAuth, async (req, res) => {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      
+      // Read the Arduino image file
+      const imagePath = path.join(process.cwd(), 'attached_assets', 'A000066_03.front_934x700_1751105238959.webp');
+      const imageBuffer = fs.readFileSync(imagePath);
+      const base64Image = imageBuffer.toString('base64');
+
+      const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
+<UploadSiteHostedPicturesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${process.env.EBAY_USER_TOKEN}</eBayAuthToken>
+  </RequesterCredentials>
+  <PictureData>
+    <PictureSet>Supersize</PictureSet>
+    <Data>${base64Image}</Data>
+  </PictureData>
+</UploadSiteHostedPicturesRequest>`;
+
+      const response = await fetch('https://api.ebay.com/ws/api.dll', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/xml',
+          'X-EBAY-API-SITEID': '77',
+          'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
+          'X-EBAY-API-CALL-NAME': 'UploadSiteHostedPictures',
+          'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
+          'X-EBAY-API-APP-NAME': process.env.EBAY_APP_ID!,
+          'X-EBAY-API-CERT-NAME': process.env.EBAY_CERT_ID!
+        },
+        body: xmlBody
+      });
+      
+      const responseText = await response.text();
+      const isSuccessful = responseText.includes('<Ack>Success</Ack>');
+      const urlMatch = responseText.match(/<FullURL>(.*?)<\/FullURL>/);
+      const imageUrl = urlMatch ? urlMatch[1] : null;
+      
+      res.json({
+        success: isSuccessful,
+        imageUrl: imageUrl,
+        response: responseText
+      });
+      
+    } catch (error) {
+      console.error("Image upload failed:", error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Image upload failed"
+      });
+    }
+  });
+
+  // eBay Germany listing with business policies and uploaded image
   app.post("/api/ebay/list-germany", requireAuth, async (req, res) => {
     try {
       const { productId } = req.body;
@@ -842,6 +898,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
           success: false,
           error: "Product not found"
         });
+      }
+
+      // First upload the image to eBay
+      const fs = require('fs');
+      const path = require('path');
+      
+      let imageUrl = null;
+      try {
+        const imagePath = path.join(process.cwd(), 'attached_assets', 'A000066_03.front_934x700_1751105238959.webp');
+        const imageBuffer = fs.readFileSync(imagePath);
+        const base64Image = imageBuffer.toString('base64');
+
+        const uploadXml = `<?xml version="1.0" encoding="utf-8"?>
+<UploadSiteHostedPicturesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${process.env.EBAY_USER_TOKEN}</eBayAuthToken>
+  </RequesterCredentials>
+  <PictureData>
+    <PictureSet>Supersize</PictureSet>
+    <Data>${base64Image}</Data>
+  </PictureData>
+</UploadSiteHostedPicturesRequest>`;
+
+        const uploadResponse = await fetch('https://api.ebay.com/ws/api.dll', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'text/xml',
+            'X-EBAY-API-SITEID': '77',
+            'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
+            'X-EBAY-API-CALL-NAME': 'UploadSiteHostedPictures',
+            'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
+            'X-EBAY-API-APP-NAME': process.env.EBAY_APP_ID!,
+            'X-EBAY-API-CERT-NAME': process.env.EBAY_CERT_ID!
+          },
+          body: uploadXml
+        });
+        
+        const uploadResponseText = await uploadResponse.text();
+        const isUploadSuccessful = uploadResponseText.includes('<Ack>Success</Ack>');
+        const urlMatch = uploadResponseText.match(/<FullURL>(.*?)<\/FullURL>/);
+        imageUrl = urlMatch ? urlMatch[1] : null;
+        
+        if (!isUploadSuccessful || !imageUrl) {
+          console.log("Image upload failed, upload response:", uploadResponseText);
+          // Continue without image rather than failing completely
+          imageUrl = null;
+        } else {
+          console.log("Image uploaded successfully to:", imageUrl);
+        }
+      } catch (imageError) {
+        console.log("Image upload failed, proceeding without image:", imageError);
       }
 
       // Create German listing XML without business policies
@@ -877,9 +984,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         <ReturnProfileID>263978527019</ReturnProfileID>
       </SellerReturnProfile>
     </SellerProfiles>
-    <PictureDetails>
-      <PictureURL>https://docs.arduino.cc/static/6ec5e4c2a6c0e9e46389d4f6dc924073/ABX00027-iso.jpg</PictureURL>
-    </PictureDetails>
+    ${imageUrl ? `<PictureDetails>
+      <PictureURL>${imageUrl}</PictureURL>
+    </PictureDetails>` : ''}
     <ItemSpecifics>
       <NameValueList>
         <Name>Marke</Name>
