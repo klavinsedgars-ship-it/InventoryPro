@@ -34,14 +34,14 @@ export class EbayOAuthService {
         expires_at: parseInt(expiresAt)
       };
     } else {
-      // Use the hardcoded token from eBay API Explorer
-      const ebayUserToken = 'v^1.1#i^1#I^3#r^1#f^0#p^3#t^Ul4xMF84OjQyM0M3QTBCREFBQzY3MDU5RTUyNDkyMTExQkY3NUFCXzFfMSNFXjI2MA==';
+      // Use the fresh token from eBay Developer Console (Dec 20, 2026 expiry)
+      const ebayUserToken = 'v^1.1#i^1#f^1#O#f^3#p^3#r^1#t^Ul4xMF8yOkNGNkJDNEI0MkJBOTdEQ0UxQjZCMERGODY3MEZDRTC3XZfTMSNFXlJ2MA===';
       this.currentToken = {
         access_token: ebayUserToken,
-        refresh_token: '',
-        expires_in: 7200,
+        refresh_token: ebayUserToken, // This token can be refreshed
+        expires_in: 63072000, // ~2 years until Dec 20, 2026
         token_type: 'Bearer',
-        expires_at: Date.now() + (7200 * 1000)
+        expires_at: Math.floor(new Date('2026-12-20T21:56:16Z').getTime() / 1000)
       };
     }
   }
@@ -89,7 +89,7 @@ export class EbayOAuthService {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: authorizationCode,
-        redirect_uri: 'https://developer.ebay.com/my/auth/?env=production&index=0'
+        redirect_uri: 'http://localhost:5000/auth/ebay/callback'
       })
     });
 
@@ -174,8 +174,8 @@ export class EbayOAuthService {
    */
   generateAuthUrl(state?: string): string {
     const clientId = process.env.EBAY_APP_ID;
-    // Use eBay's standard OAuth playground redirect URI
-    const redirectUri = 'https://developer.ebay.com/my/auth/?env=production&index=0'; 
+    // Use localhost redirect URI for development
+    const redirectUri = 'http://localhost:5000/auth/ebay/callback'; 
     
     const scopes = [
       'https://api.ebay.com/oauth/api_scope/sell.inventory',

@@ -1596,6 +1596,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // OAuth callback route for eBay authentication
+  app.get("/auth/ebay/callback", async (req, res) => {
+    try {
+      const { code, state, error } = req.query;
+      
+      if (error) {
+        return res.send(`
+          <html>
+            <body>
+              <h2>eBay Authorization Error</h2>
+              <p>Error: ${error}</p>
+              <p><a href="/">Return to Dashboard</a></p>
+            </body>
+          </html>
+        `);
+      }
+
+      if (!code) {
+        return res.send(`
+          <html>
+            <body>
+              <h2>eBay Authorization</h2>
+              <p>No authorization code received</p>
+              <p><a href="/">Return to Dashboard</a></p>
+            </body>
+          </html>
+        `);
+      }
+
+      // Exchange code for tokens
+      const tokens = await ebayOAuth.exchangeCodeForTokens(code as string);
+      
+      res.send(`
+        <html>
+          <body>
+            <h2>eBay Authorization Successful!</h2>
+            <p>✅ Access token obtained successfully</p>
+            <p>✅ Refresh token: ${tokens.refresh_token ? 'Available' : 'Not provided'}</p>
+            <p>✅ Token expires: ${new Date(tokens.expires_at * 1000).toLocaleString()}</p>
+            <p><strong>Your eBay listing functionality is now active!</strong></p>
+            <p><a href="/">Return to Dashboard</a></p>
+            <script>
+              setTimeout(() => {
+                window.close();
+              }, 3000);
+            </script>
+          </body>
+        </html>
+      `);
+      
+    } catch (error) {
+      console.error("OAuth callback error:", error);
+      res.send(`
+        <html>
+          <body>
+            <h2>eBay Authorization Failed</h2>
+            <p>Error: ${error instanceof Error ? error.message : 'Unknown error'}</p>
+            <p><a href="/">Return to Dashboard</a></p>
+          </body>
+        </html>
+      `);
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
