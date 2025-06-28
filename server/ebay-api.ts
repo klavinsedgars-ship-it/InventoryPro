@@ -180,8 +180,8 @@ export class EbayApiService {
       try {
         // Create XML request for eBay Trading API
         const xmlRequest = this.createAddItemXML(listingData);
+        console.log("Generated XML:", xmlRequest);
         console.log("Making eBay Trading API call with XML request");
-        console.log("XML Request (first 200 chars):", xmlRequest.substring(0, 200));
         
         const response = await this.makeTradingApiRequest(xmlRequest);
         
@@ -332,11 +332,11 @@ export class EbayApiService {
     <ListingDuration>GTC</ListingDuration>
     <Country>GB</Country>
     <Currency>GBP</Currency>
-    <Location>Latvia</Location>
-    <PostalCode>LV-1010</PostalCode>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
     <DispatchTimeMax>3</DispatchTimeMax>
+    <Location>Latvia</Location>
+    <PostalCode>LV-1010</PostalCode>
     <ItemLocation>Riga, Latvia</ItemLocation>
     <PictureDetails>
       <PictureURL>https://images.unsplash.com/photo-1553062407-98eeb64c6a62</PictureURL>
