@@ -33,6 +33,7 @@ export function ProductModal({ isOpen, onClose, product }: ProductModalProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [calculatedMargin, setCalculatedMargin] = useState<string>("0");
+  const [marginTierInfo, setMarginTierInfo] = useState<{ tier: string; percentage: string } | null>(null);
 
   const { data: categories = [] } = useQuery<Category[]>({
     queryKey: ["/api/categories"],
@@ -76,6 +77,16 @@ export function ProductModal({ isOpen, onClose, product }: ProductModalProps) {
         listedOnAmazon: product.listedOnAmazon,
         excludeFromListing: product.excludeFromListing,
       });
+
+      // Set dynamic pricing information if available
+      if (product.marginTier && product.marginPercentage) {
+        setMarginTierInfo({
+          tier: product.marginTier,
+          percentage: product.marginPercentage
+        });
+      } else {
+        setMarginTierInfo(null);
+      }
     } else {
       form.reset({
         name: "",
@@ -92,6 +103,7 @@ export function ProductModal({ isOpen, onClose, product }: ProductModalProps) {
         listedOnAmazon: false,
         excludeFromListing: false,
       });
+      setMarginTierInfo(null);
     }
   }, [product, form]);
 
@@ -300,13 +312,29 @@ export function ProductModal({ isOpen, onClose, product }: ProductModalProps) {
 
               <div>
                 <Label htmlFor="margin">Margin (%)</Label>
-                <Input 
-                  id="margin"
-                  value={calculatedMargin}
-                  readOnly
-                  className="mt-1 bg-gray-50"
-                />
-                <p className="text-xs text-gray-500 mt-1">Calculated automatically based on pricing</p>
+                {marginTierInfo ? (
+                  <div className="space-y-2">
+                    <Input 
+                      id="margin"
+                      value={`${marginTierInfo.percentage}% (${marginTierInfo.tier})`}
+                      readOnly
+                      className="mt-1 bg-blue-50 border-blue-200 text-blue-800"
+                    />
+                    <p className="text-xs text-blue-600 mt-1">
+                      ✓ Dynamic pricing tier applied - {marginTierInfo.tier} margin
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <Input 
+                      id="margin"
+                      value={calculatedMargin}
+                      readOnly
+                      className="mt-1 bg-gray-50"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Manual calculation - consider applying dynamic pricing</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
