@@ -20,21 +20,17 @@ export function createSimpleUSListingXML(product: any): string {
     <DispatchTimeMax>2</DispatchTimeMax>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
-    <ShippingDetails>
-      <ShippingType>Flat</ShippingType>
-      <ShippingServiceOptions>
-        <ShippingServicePriority>1</ShippingServicePriority>
-        <ShippingService>ShippingMethodStandard</ShippingService>
-        <ShippingServiceCost>4.99</ShippingServiceCost>
-      </ShippingServiceOptions>
-    </ShippingDetails>
-    <PaymentMethods>PayPal</PaymentMethods>
-    <PayPalEmailAddress>payments@example.com</PayPalEmailAddress>
-    <ReturnPolicy>
-      <ReturnsAcceptedOption>ReturnsAccepted</ReturnsAcceptedOption>
-      <ReturnsWithinOption>Days_30</ReturnsWithinOption>
-      <ShippingCostPaidByOption>Buyer</ShippingCostPaidByOption>
-    </ReturnPolicy>
+    <SellerProfiles>
+      <SellerShippingProfile>
+        <ShippingProfileID>YOUR_US_SHIPPING_POLICY_ID</ShippingProfileID>
+      </SellerShippingProfile>
+      <SellerPaymentProfile>
+        <PaymentProfileID>YOUR_US_PAYMENT_POLICY_ID</PaymentProfileID>
+      </SellerPaymentProfile>
+      <SellerReturnProfile>
+        <ReturnProfileID>YOUR_US_RETURN_POLICY_ID</ReturnProfileID>
+      </SellerReturnProfile>
+    </SellerProfiles>
     <ItemSpecifics>
       <NameValueList>
         <Name>Brand</Name>
