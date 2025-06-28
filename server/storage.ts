@@ -97,277 +97,69 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  private initializeSampleProducts() {
-    const sampleProducts = [
-      {
-        name: "Arduino Uno R3 Microcontroller Board",
-        sku: "ARD-UNO-R3",
-        ean: "7501234567890",
-        category: "Electronics",
-        description: "Official Arduino Uno R3 with USB cable. Perfect for beginners and prototyping.",
-        supplierPrice: "15.50",
-        salePrice: "24.99",
-        stock: 150,
-        weight: 25,
-        status: "active",
-        listedOnEbay: true,
-        listedOnAmazon: true,
-        excludeFromListing: false,
-        tmeProductId: "TME001"
-      },
-      {
-        name: "Raspberry Pi 4 Model B 8GB RAM",
-        sku: "RPI4-8GB",
-        ean: "7501234567891", 
-        category: "Electronics",
-        description: "Latest Raspberry Pi 4 with 8GB RAM, dual 4K display support, Gigabit Ethernet.",
-        supplierPrice: "68.00",
-        salePrice: "89.99",
-        stock: 75,
-        weight: 46,
-        status: "active",
-        listedOnEbay: true,
-        listedOnAmazon: false,
-        excludeFromListing: false,
-        tmeProductId: "TME002"
-      },
-      {
-        name: "ESP32 Development Board WiFi Bluetooth",
-        sku: "ESP32-DEV",
-        ean: "7501234567892",
-        category: "Electronics",
-        description: "ESP32 dual-core microcontroller with WiFi and Bluetooth capabilities.",
-        supplierPrice: "8.20",
-        salePrice: "14.99",
-        stock: 0,
-        weight: 10,
-        status: "out_of_stock",
-        listedOnEbay: false,
-        listedOnAmazon: false,
-        excludeFromListing: false,
-        tmeProductId: "TME003"
-      },
-      {
-        name: "Breadboard 830 Point Solderless",
-        sku: "BB-830",
-        ean: "7501234567893",
-        category: "Accessories",
-        description: "High-quality solderless breadboard with 830 tie points for prototyping.",
-        supplierPrice: "3.50",
-        salePrice: "7.99",
-        stock: 200,
-        weight: 15,
-        status: "active",
-        listedOnEbay: true,
-        listedOnAmazon: true,
-        excludeFromListing: false,
-        tmeProductId: "TME004"
-      },
-      {
-        name: "LED Strip 5050 RGB 5m Waterproof",
-        sku: "LED-5050-5M",
-        ean: "7501234567894",
-        category: "Electronics",
-        description: "Waterproof RGB LED strip with remote control and power adapter included.",
-        supplierPrice: "12.80",
-        salePrice: "19.99",
-        stock: 45,
-        weight: 120,
-        status: "active",
-        listedOnEbay: false,
-        listedOnAmazon: true,
-        excludeFromListing: false,
-        tmeProductId: "TME005"
-      },
-      {
-        name: "Servo Motor SG90 9g Micro",
-        sku: "SERVO-SG90",
-        ean: "7501234567895",
-        category: "Electronics",
-        description: "Lightweight micro servo motor for RC applications and robotics projects.",
-        supplierPrice: "2.30",
-        salePrice: "4.99",
-        stock: 300,
-        weight: 9,
-        status: "active",
-        listedOnEbay: true,
-        listedOnAmazon: false,
-        excludeFromListing: false,
-        tmeProductId: "TME006"
-      },
-      {
-        name: "LCD Display 16x2 Character Blue Backlight",
-        sku: "LCD-16X2-BLUE",
-        ean: "7501234567896",
-        category: "Electronics",
-        description: "16x2 character LCD display with blue backlight and I2C interface module.",
-        supplierPrice: "6.40",
-        salePrice: "11.99",
-        stock: 80,
-        weight: 35,
-        status: "active",
-        listedOnEbay: true,
-        listedOnAmazon: true,
-        excludeFromListing: false,
-        tmeProductId: "TME007"
-      },
-      {
-        name: "Ultrasonic Sensor HC-SR04",
-        sku: "US-HCSR04",
-        ean: "7501234567897",
-        category: "Electronics",
-        description: "Ultrasonic distance sensor with 2cm-400cm range for Arduino projects.",
-        supplierPrice: "1.80",
-        salePrice: "3.99",
-        stock: 120,
-        weight: 8,
-        status: "active",
-        listedOnEbay: false,
-        listedOnAmazon: false,
-        excludeFromListing: false,
-        tmeProductId: "TME008"
-      }
-    ];
-
-    sampleProducts.forEach(product => {
-      this.createProduct(product);
-    });
-  }
-
-  private initializeSampleSyncLogs() {
-    const now = new Date();
-    const sampleLogs = [
-      {
-        source: "tme",
-        status: "success",
-        message: "Successfully synchronized 8 products from TME catalog",
-      },
-      {
-        source: "tme", 
-        status: "success",
-        message: "Product prices updated for 6 items",
-      },
-      {
-        source: "ebay",
-        status: "success", 
-        message: "Uploaded 5 products to eBay marketplace",
-      },
-      {
-        source: "amazon",
-        status: "error",
-        message: "API rate limit exceeded. Retry scheduled for next hour",
-      },
-      {
-        source: "tme",
-        status: "success",
-        message: "Stock levels updated for all active products",
-      }
-    ];
-
-    // Create logs with different timestamps (going back in time)
-    sampleLogs.forEach((log, index) => {
-      const logDate = new Date(now.getTime() - (index * 2 * 60 * 60 * 1000)); // 2 hours apart
-      const syncLog = {
-        ...log,
-        syncedAt: logDate
-      };
-      
-      // Manually create the log with custom timestamp
-      const id = this.currentSyncLogId++;
-      const fullLog = { 
-        ...syncLog, 
-        id, 
-        syncedAt: logDate 
-      };
-      this.syncLogs.set(id, fullLog as any);
-    });
-  }
-
-  // Users
+  // User methods
   async getUser(id: number): Promise<User | undefined> {
-    return this.users.get(id);
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user || undefined;
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(user => user.username === username);
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user || undefined;
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(user => user.email === email);
+    const [user] = await db.select().from(users).where(eq(users.email, email));
+    return user || undefined;
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const id = this.currentUserId++;
-    const user: User = { 
-      ...insertUser, 
-      id, 
-      createdAt: new Date() 
-    };
-    this.users.set(id, user);
+    const [user] = await db
+      .insert(users)
+      .values(insertUser)
+      .returning();
     return user;
   }
 
-  // Products
+  // Product methods
   async getProducts(): Promise<Product[]> {
-    return Array.from(this.products.values()).sort((a, b) => 
-      new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime()
-    );
+    return await db.select().from(products).orderBy(desc(products.createdAt));
   }
 
   async getProduct(id: number): Promise<Product | undefined> {
-    return this.products.get(id);
+    const [product] = await db.select().from(products).where(eq(products.id, id));
+    return product || undefined;
   }
 
   async getProductBySku(sku: string): Promise<Product | undefined> {
-    return Array.from(this.products.values()).find(product => product.sku === sku);
+    const [product] = await db.select().from(products).where(eq(products.sku, sku));
+    return product || undefined;
   }
 
   async createProduct(insertProduct: InsertProduct): Promise<Product> {
-    const id = this.currentProductId++;
-    const now = new Date();
-    
-    // Calculate margin if not provided
-    const supplierPrice = Number(insertProduct.supplierPrice);
-    const salePrice = Number(insertProduct.salePrice);
-    const margin = insertProduct.margin || 
-      (salePrice > 0 ? ((salePrice - supplierPrice) / salePrice * 100).toFixed(2) : "0");
-
-    const product: Product = { 
-      ...insertProduct,
-      id,
-      margin: margin.toString(),
-      createdAt: now,
-      updatedAt: now
-    };
-    this.products.set(id, product);
+    const [product] = await db
+      .insert(products)
+      .values(insertProduct)
+      .returning();
     return product;
   }
 
   async updateProduct(id: number, updateData: Partial<InsertProduct>): Promise<Product | undefined> {
-    const existing = this.products.get(id);
-    if (!existing) return undefined;
-
-    // Recalculate margin if prices changed
-    const supplierPrice = Number(updateData.supplierPrice || existing.supplierPrice);
-    const salePrice = Number(updateData.salePrice || existing.salePrice);
-    const margin = salePrice > 0 ? ((salePrice - supplierPrice) / salePrice * 100).toFixed(2) : "0";
-
-    const updated: Product = {
-      ...existing,
-      ...updateData,
-      margin: margin,
-      updatedAt: new Date()
-    };
-    this.products.set(id, updated);
-    return updated;
+    const [updated] = await db
+      .update(products)
+      .set({ ...updateData, updatedAt: new Date() })
+      .where(eq(products.id, id))
+      .returning();
+    return updated || undefined;
   }
 
   async deleteProduct(id: number): Promise<boolean> {
-    return this.products.delete(id);
+    const result = await db.delete(products).where(eq(products.id, id));
+    return result.rowCount > 0;
   }
 
   async getProductsByCategory(category: string): Promise<Product[]> {
-    return Array.from(this.products.values()).filter(product => product.category === category);
+    return await db.select().from(products).where(eq(products.category, category));
   }
 
   async getProductsWithFilters(filters: {
@@ -378,71 +170,59 @@ export class DatabaseStorage implements IStorage {
     minStock?: number;
     maxStock?: number;
   }): Promise<Product[]> {
-    let products = Array.from(this.products.values());
-
-    if (filters.category) {
-      products = products.filter(p => p.category === filters.category);
+    let query = db.select().from(products);
+    
+    const conditions = [];
+    if (filters.category) conditions.push(eq(products.category, filters.category));
+    if (filters.status) conditions.push(eq(products.status, filters.status));
+    if (filters.listedOnEbay !== undefined) conditions.push(eq(products.listedOnEbay, filters.listedOnEbay));
+    if (filters.listedOnAmazon !== undefined) conditions.push(eq(products.listedOnAmazon, filters.listedOnAmazon));
+    if (filters.minStock !== undefined) conditions.push(gte(products.stock, filters.minStock));
+    if (filters.maxStock !== undefined) conditions.push(lte(products.stock, filters.maxStock));
+    
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions));
     }
-    if (filters.status) {
-      products = products.filter(p => p.status === filters.status);
-    }
-    if (filters.listedOnEbay !== undefined) {
-      products = products.filter(p => p.listedOnEbay === filters.listedOnEbay);
-    }
-    if (filters.listedOnAmazon !== undefined) {
-      products = products.filter(p => p.listedOnAmazon === filters.listedOnAmazon);
-    }
-    if (filters.minStock !== undefined) {
-      products = products.filter(p => p.stock >= filters.minStock!);
-    }
-    if (filters.maxStock !== undefined) {
-      products = products.filter(p => p.stock <= filters.maxStock!);
-    }
-
-    return products.sort((a, b) => 
-      new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime()
-    );
+    
+    return await query.orderBy(desc(products.createdAt));
   }
 
-  // Categories
+  // Category methods
   async getCategories(): Promise<Category[]> {
-    return Array.from(this.categories.values());
+    return await db.select().from(categories);
   }
 
   async createCategory(insertCategory: InsertCategory): Promise<Category> {
-    const id = this.currentCategoryId++;
-    const category: Category = { ...insertCategory, id };
-    this.categories.set(id, category);
+    const [category] = await db
+      .insert(categories)
+      .values(insertCategory)
+      .returning();
     return category;
   }
 
-  // Marketplace Settings
+  // Marketplace settings methods
   async getMarketplaceSettings(marketplace: string): Promise<MarketplaceSettings[]> {
-    return Array.from(this.marketplaceSettings.values()).filter(s => s.marketplace === marketplace);
+    return await db.select().from(marketplaceSettings).where(eq(marketplaceSettings.marketplace, marketplace));
   }
 
   async setMarketplaceSetting(insertSetting: InsertMarketplaceSettings): Promise<MarketplaceSettings> {
-    const id = this.currentMarketplaceSettingsId++;
-    const setting: MarketplaceSettings = { ...insertSetting, id };
-    this.marketplaceSettings.set(id, setting);
+    const [setting] = await db
+      .insert(marketplaceSettings)
+      .values(insertSetting)
+      .returning();
     return setting;
   }
 
-  // Sync Logs
+  // Sync log methods
   async getSyncLogs(limit = 50): Promise<SyncLog[]> {
-    const logs = Array.from(this.syncLogs.values())
-      .sort((a, b) => new Date(b.syncedAt!).getTime() - new Date(a.syncedAt!).getTime());
-    return logs.slice(0, limit);
+    return await db.select().from(syncLogs).orderBy(desc(syncLogs.syncedAt)).limit(limit);
   }
 
   async createSyncLog(insertLog: InsertSyncLog): Promise<SyncLog> {
-    const id = this.currentSyncLogId++;
-    const log: SyncLog = { 
-      ...insertLog, 
-      id, 
-      syncedAt: new Date() 
-    };
-    this.syncLogs.set(id, log);
+    const [log] = await db
+      .insert(syncLogs)
+      .values(insertLog)
+      .returning();
     return log;
   }
 
@@ -454,17 +234,16 @@ export class DatabaseStorage implements IStorage {
     totalRevenue: number;
     outOfStock: number;
   }> {
-    const products = Array.from(this.products.values());
+    const allProducts = await db.select().from(products);
     
-    const totalProducts = products.length;
-    const ebayListings = products.filter(p => p.listedOnEbay).length;
-    const amazonListings = products.filter(p => p.listedOnAmazon).length;
-    const outOfStock = products.filter(p => p.stock === 0).length;
+    const totalProducts = allProducts.length;
+    const ebayListings = allProducts.filter(p => p.listedOnEbay).length;
+    const amazonListings = allProducts.filter(p => p.listedOnAmazon).length;
+    const outOfStock = allProducts.filter(p => p.stock === 0).length;
     
-    // Calculate estimated revenue (this would be actual sales data in real app)
-    const totalRevenue = products.reduce((sum, product) => {
-      const revenue = Number(product.salePrice) * (product.stock * 0.1); // Simulate 10% sold
-      return sum + revenue;
+    const totalRevenue = allProducts.reduce((sum, product) => {
+      const price = parseFloat(product.salePrice) || 0;
+      return sum + (price * product.stock);
     }, 0);
 
     return {

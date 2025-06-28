@@ -24,10 +24,11 @@ This is a minimalistic web-based CRM application for inventory and marketplace m
 - **API Design**: RESTful endpoints with consistent error handling
 
 ### Database Design
-- **Primary Database**: PostgreSQL via Neon Database
+- **Primary Database**: PostgreSQL (Replit Database)
 - **Schema Management**: Drizzle Kit for migrations and schema management
 - **Tables**: Users, Products, Categories, Marketplace Settings, Sync Logs
 - **Authentication**: Session-based with bcrypt password hashing
+- **Storage Layer**: DatabaseStorage class replaces MemStorage for production data persistence
 
 ## Key Components
 
@@ -117,6 +118,8 @@ Changelog:
 - June 28, 2025. Created comprehensive Settings page with all marketplace integrations
 - June 28, 2025. Added session management with Express sessions and MemoryStore
 - June 28, 2025. Added sample sync logs and improved application data completeness
+- June 28, 2025. Replaced MemStorage with PostgreSQL database using Drizzle ORM
+- June 28, 2025. Successfully migrated to production-ready database with all tables created
 ```
 
 ## User Preferences
