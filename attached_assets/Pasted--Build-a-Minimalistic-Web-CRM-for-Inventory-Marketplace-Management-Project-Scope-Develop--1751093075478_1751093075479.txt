@@ -1,0 +1,82 @@
+**Build a Minimalistic Web CRM for Inventory & Marketplace Management**
+
+**Project Scope:**
+Develop a fast, minimalistic, and modern web-based CRM in Python (or Node.js) for managing inventory, syncing with TME supplier via API, and listing products on eBay and Amazon. The platform should be clean (white UI, minimal distractions), responsive, and well-organized for both admins and users.
+
+---
+
+### 1. Admin & User Management
+- User login/logout
+- Change password, edit profile
+- User roles: Admin / User (permissions)
+
+### 2. Dashboard
+- Show:
+  - Total supplier products
+  - Total listed on eBay
+  - Total listed on Amazon
+  - Quick links for sync/listing actions
+
+### 3. Supplier API Integration (TME)
+- Connect to TME supplier API
+- Fetch product data (name, SKU, EAN, price, stock, images, categories, etc.)
+- Store data in local database (SQLite, PostgreSQL, etc.)
+- Daily automatic sync (CRON)
+- Manual “Sync Now” button
+
+### 4. Product Management (CRUD)
+- Add, view, edit, delete products
+- Advanced filtering (date, category, supplier/sale price, SKU, EAN, stock, margin, etc.)
+- Mass select products for bulk actions
+
+### 5. Marketplace Integration
+- **eBay API** and **Amazon SP-API/MWS** integration
+- List/unlist/edit products individually or in bulk
+- Choose marketplaces, shipping plans, return policies per product
+- Mark products: Selling/Not Selling/Out of Stock
+- Exclude permanently from listings
+- Auto-sync changes to listings (title, price, stock, images)
+
+### 6. Product Update Module
+- Edit details on a dedicated page or popup
+- Auto-sync changes to marketplaces
+- Sync images and descriptions
+
+### 7. Bulk Upload Tool
+- CSV/XML import support for products
+- Bulk edit (prices, categories, status)
+
+### 8. Category Mapping
+- Match supplier categories to eBay/Amazon
+- Save custom mappings
+
+### 9. Shipping & Margin Rules
+- Define shipping rules by product or globally (by weight, category, etc.)
+- Set fixed/dynamic margins by price range or custom per product
+- Override defaults as needed
+
+### 10. Marketplace Settings
+- eBay: PayPal, shipping, return policy, etc.
+- Amazon: shipping plan, return policy
+
+### 11. Commission Calculation
+- Amazon: Referral + selling fee = net payout
+- eBay: eBay + PayPal fee = net payout
+
+### 12. Product Customization Popup/Module
+- Edit title, SKU, qty, price, margin, weight, EAN/UPC, category, images
+- Instant update and sync
+
+---
+
+**Requirements:**
+- Modern, minimal, white UI (no clutter)
+- Responsive and fast
+- Clean, scalable code structure
+- Experience with Amazon SP-API & eBay API required
+- All features tested and bug-free
+
+**Additional:**
+- Please propose a timeline and estimate after review.
+- Highlight any additional features that can improve automation or efficiency.
+
