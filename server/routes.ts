@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, Request } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { 
@@ -11,6 +11,11 @@ import {
 } from "@shared/schema";
 import { ZodError } from "zod";
 
+// Type for authenticated requests
+interface AuthenticatedRequest extends Request {
+  session: any;
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   
   // Auth middleware
@@ -20,14 +25,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     next();
   };
-
-  // Session configuration
-  app.use((req: any, res, next) => {
-    if (!req.session) {
-      req.session = {};
-    }
-    next();
-  });
 
   // Auth routes
   app.post("/api/auth/login", async (req, res) => {
@@ -39,7 +36,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
-      req.session.userId = user.id;
+      (req.session as any).userId = user.id;
       const { password: _, ...userWithoutPassword } = user;
       res.json({ user: userWithoutPassword });
     } catch (error) {
@@ -51,13 +48,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/auth/logout", (req, res) => {
-    req.session = null;
-    res.json({ message: "Logged out successfully" });
+    req.session.destroy((err: any) => {
+      if (err) {
+        return res.status(500).json({ message: "Could not log out" });
+      }
+      res.json({ message: "Logged out successfully" });
+    });
   });
 
   app.get("/api/auth/me", requireAuth, async (req, res) => {
     try {
-      const user = await storage.getUser(req.session.userId);
+      const user = await storage.getUser((req.session as any).userId);
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
