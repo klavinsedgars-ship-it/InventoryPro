@@ -160,16 +160,7 @@ export class EbayApiService {
     }
   }
 
-  async getEbayCategories(): Promise<any[]> {
-    try {
-      // Get eBay categories for listing products
-      const response = await this.makeRequest('/commerce/taxonomy/v1/category_tree/0');
-      return response.rootCategoryNode?.childCategoryTreeNodes || [];
-    } catch (error) {
-      console.error("Failed to fetch eBay categories:", error);
-      return [];
-    }
-  }
+
 
   async listProduct(productId: number, listingDetails: Partial<EbayListingRequest>): Promise<EbayApiResponse> {
     try {
@@ -333,26 +324,7 @@ export class EbayApiService {
     }
   }
 
-  async getEbayCategories(): Promise<any[]> {
-    try {
-      const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
-<GetCategoriesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${process.env.EBAY_USER_TOKEN}</eBayAuthToken>
-  </RequesterCredentials>
-  <CategorySiteID>0</CategorySiteID>
-  <DetailLevel>ReturnAll</DetailLevel>
-  <LevelLimit>3</LevelLimit>
-</GetCategoriesRequest>`;
 
-      const response = await this.makeTradingApiRequest(xmlBody);
-      console.log('Categories response:', response.substring(0, 1000));
-      return [];
-    } catch (error) {
-      console.error('Error fetching eBay categories:', error);
-      return [];
-    }
-  }
 
   private createAddItemXML(listingData: any): string {
     const userToken = process.env.EBAY_USER_TOKEN;
@@ -369,7 +341,7 @@ export class EbayApiService {
     <Title>${this.escapeXml(listingData.title)}</Title>
     <Description><![CDATA[${listingData.description}]]></Description>
     <PrimaryCategory>
-      <CategoryID>183067</CategoryID>
+      <CategoryID>181079</CategoryID>
     </PrimaryCategory>
     <StartPrice currencyID="USD">${listingData.startPrice}</StartPrice>
     <Quantity>${listingData.quantity}</Quantity>
