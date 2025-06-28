@@ -327,49 +327,27 @@ export class EbayApiService {
     <PrimaryCategory>
       <CategoryID>58277</CategoryID>
     </PrimaryCategory>
-    <StartPrice currencyID="EUR">${listingData.startPrice}</StartPrice>
+    <StartPrice currencyID="GBP">${listingData.startPrice}</StartPrice>
     <Quantity>${listingData.quantity}</Quantity>
     <ListingDuration>GTC</ListingDuration>
-    <Country>DE</Country>
-    <Currency>EUR</Currency>
-    <Location>Germany</Location>
-    <PostalCode>10115</PostalCode>
-    <DispatchTimeMax>1</DispatchTimeMax>
-    <Site>Germany</Site>
+    <Country>GB</Country>
+    <Currency>GBP</Currency>
+    <ItemLocation>Riga, Latvia</ItemLocation>
+    <DispatchTimeMax>3</DispatchTimeMax>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
     <PictureDetails>
-      <PhotoDisplay>SuperSize</PhotoDisplay>
-      <PictureURL>https://images.unsplash.com/photo-1553062407-98eeb64c6a62?w=400</PictureURL>
+      <PictureURL>https://images.unsplash.com/photo-1553062407-98eeb64c6a62</PictureURL>
     </PictureDetails>
-    <ShippingDetails>
-      <ShippingType>Flat</ShippingType>
-      <ShippingServiceOptions>
-        <ShippingServicePriority>1</ShippingServicePriority>
-        <ShippingService>DE_DHLPaket</ShippingService>
-        <ShippingServiceCost currencyID="EUR">4.99</ShippingServiceCost>
-        <ShippingServiceAdditionalCost currencyID="EUR">2.50</ShippingServiceAdditionalCost>
-        <ShipToLocation>DE</ShipToLocation>
-        <ShipToLocation>Europe</ShipToLocation>
-        <ShipToLocation>Worldwide</ShipToLocation>
-      </ShippingServiceOptions>
-      <InternationalShippingServiceOption>
-        <ShippingServicePriority>1</ShippingServicePriority>
-        <ShippingService>DE_DHLPaketInternational</ShippingService>
-        <ShippingServiceCost currencyID="EUR">12.99</ShippingServiceCost>
-        <ShippingServiceAdditionalCost currencyID="EUR">5.99</ShippingServiceAdditionalCost>
-        <ShipToLocation>Worldwide</ShipToLocation>
-      </InternationalShippingServiceOption>
-    </ShippingDetails>
     <SellerProfiles>
       <SellerShippingProfile>
-        <ShippingProfileID>209735065019</ShippingProfileID>
+        <ShippingProfileID>142140832019</ShippingProfileID>
       </SellerShippingProfile>
       <SellerPaymentProfile>
-        <PaymentProfileID>209734969019</PaymentProfileID>
+        <PaymentProfileID>209734844019</PaymentProfileID>
       </SellerPaymentProfile>
       <SellerReturnProfile>
-        <ReturnProfileID>163760688019</ReturnProfileID>
+        <ReturnProfileID>161272624019</ReturnProfileID>
       </SellerReturnProfile>
     </SellerProfiles>
     <ItemSpecifics>
