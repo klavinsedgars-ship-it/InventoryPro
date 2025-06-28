@@ -721,24 +721,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     <DispatchTimeMax>2</DispatchTimeMax>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
-    <PaymentMethods>PayPal</PaymentMethods>
-    <PayPalEmailAddress>seller@example.com</PayPalEmailAddress>
-    <ShippingDetails>
-      <ShippingType>Flat</ShippingType>
-      <ShippingServiceOptions>
-        <ShippingServicePriority>1</ShippingServicePriority>
-        <ShippingService>DE_StandardInternational</ShippingService>
-        <ShippingServiceCost currencyID="EUR">4.99</ShippingServiceCost>
-        <ShipToLocation>DE</ShipToLocation>
-        <ShipToLocation>Europe</ShipToLocation>
-      </ShippingServiceOptions>
-    </ShippingDetails>
-    <ReturnPolicy>
-      <ReturnsAcceptedOption>ReturnsAccepted</ReturnsAcceptedOption>
-      <RefundOption>MoneyBack</RefundOption>
-      <ReturnsWithinOption>Days_30</ReturnsWithinOption>
-      <ShippingCostPaidByOption>Buyer</ShippingCostPaidByOption>
-    </ReturnPolicy>
+    <SellerProfiles>
+      <SellerShippingProfile>
+        <ShippingProfileID>216006551019</ShippingProfileID>
+      </SellerShippingProfile>
+      <SellerPaymentProfile>
+        <PaymentProfileID>216006440019</PaymentProfileID>
+      </SellerPaymentProfile>
+      <SellerReturnProfile>
+        <ReturnProfileID>216006441019</ReturnProfileID>
+      </SellerReturnProfile>
+    </SellerProfiles>
     <ItemSpecifics>
       <NameValueList>
         <Name>Marke</Name>
