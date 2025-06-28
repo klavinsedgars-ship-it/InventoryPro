@@ -55,7 +55,7 @@ export class EbayApiService {
   private sandboxUrl = "https://api.sandbox.ebay.com";
   private tradingApiUrl = "https://api.ebay.com/ws/api.dll";
   private sandboxTradingApiUrl = "https://api.sandbox.ebay.com/ws/api.dll";
-  private siteId = "0"; // eBay US site ID
+  private siteId = "3"; // eBay UK site ID
   private authToken?: EbayAuthToken;
   private isProduction = true; // Force production for OAuth token testing
 

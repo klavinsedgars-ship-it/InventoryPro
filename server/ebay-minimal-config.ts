@@ -1,4 +1,4 @@
-export function createMinimalUSListingXML(product: any, authToken: string): string {
+export function createMinimalUKListingXML(product: any, authToken: string): string {
   return `<?xml version="1.0" encoding="utf-8"?>
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
@@ -10,16 +10,16 @@ export function createMinimalUSListingXML(product: any, authToken: string): stri
     <PrimaryCategory>
       <CategoryID>58277</CategoryID>
     </PrimaryCategory>
-    <StartPrice currencyID="USD">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
+    <StartPrice currencyID="GBP">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
     <Quantity>${product.stock || 1}</Quantity>
     <ListingDuration>GTC</ListingDuration>
-    <Country>US</Country>
-    <Currency>USD</Currency>
+    <Country>GB</Country>
+    <Currency>GBP</Currency>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
     <DispatchTimeMax>3</DispatchTimeMax>
-    <ItemLocation>New York, NY</ItemLocation>
-    <PostalCode>10001</PostalCode>
+    <ItemLocation>London, UK</ItemLocation>
+    <PostalCode>SW1A 1AA</PostalCode>
     <SellerProfiles>
       <SellerShippingProfile>
         <ShippingProfileID>234560863019</ShippingProfileID>

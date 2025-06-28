@@ -1051,14 +1051,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const { ebayOAuth } = await import('./ebay-oauth');
       const authToken = await ebayOAuth.getValidAccessToken();
-      const { createMinimalUSListingXML } = await import('./ebay-minimal-config');
-      const xmlBody = createMinimalUSListingXML(product, authToken);
+      const { createMinimalUKListingXML } = await import('./ebay-minimal-config');
+      const xmlBody = createMinimalUKListingXML(product, authToken);
       
       const response = await fetch('https://api.ebay.com/ws/api.dll', {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
-          'X-EBAY-API-SITEID': '0',
+          'X-EBAY-API-SITEID': '3',
           'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
           'X-EBAY-API-CALL-NAME': 'VerifyAddFixedPriceItem',
           'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
