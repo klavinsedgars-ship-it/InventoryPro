@@ -1064,8 +1064,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Image upload can be done manually using the "Upload Image" button
       let imageUrl = null;
 
+      // Get OAuth token from the OAuth service
+      const { ebayOAuth } = await import('./ebay-oauth');
+      const authToken = await ebayOAuth.getValidAccessToken();
+
       // Create US listing XML using simplified configuration with image
-      const xmlBody = createSimpleUSListingXML(product, imageUrl);
+      const xmlBody = createSimpleUSListingXML(product, authToken, imageUrl);
       const response = await fetch('https://api.ebay.com/ws/api.dll', {
         method: 'POST',
         headers: {

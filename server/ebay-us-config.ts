@@ -1,8 +1,8 @@
-export function createSimpleUSListingXML(product: any, imageUrl?: string | null): string {
+export function createSimpleUSListingXML(product: any, authToken: string, imageUrl?: string | null): string {
   return `<?xml version="1.0" encoding="utf-8"?>
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
-    <eBayAuthToken>${process.env.EBAY_USER_TOKEN}</eBayAuthToken>
+    <eBayAuthToken>${authToken}</eBayAuthToken>
   </RequesterCredentials>
   <Item>
     <Title>${product.name} - Arduino Microcontroller Board</Title>
