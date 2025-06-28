@@ -13,6 +13,7 @@ import { ZodError } from "zod";
 import bcrypt from "bcryptjs";
 import { tmeApi } from "./tme-api";
 import { ebayApi } from "./ebay-api";
+import { findValidEbayCategory, getCategoryNameById } from "./ebay-category-finder";
 
 // Type for authenticated requests
 interface AuthenticatedRequest extends Request {
@@ -383,6 +384,105 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({
         success: false,
         error: error instanceof Error ? error.message : "Failed to find category"
+      });
+    }
+  });
+
+  // Test and find valid eBay category
+  app.post("/api/ebay/test-categories", requireAuth, async (req, res) => {
+    try {
+      console.log('Starting systematic eBay category testing...');
+      
+      const testCategory = async (categoryId: string): Promise<boolean> => {
+        try {
+          // Create a minimal test XML request to validate category
+          const testXml = `<?xml version="1.0" encoding="utf-8"?>
+<VerifyAddItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${process.env.EBAY_USER_TOKEN}</eBayAuthToken>
+  </RequesterCredentials>
+  <Item>
+    <Title>Test Arduino Board</Title>
+    <Description>Test listing for category validation</Description>
+    <PrimaryCategory>
+      <CategoryID>${categoryId}</CategoryID>
+    </PrimaryCategory>
+    <StartPrice currencyID="USD">24.99</StartPrice>
+    <Quantity>1</Quantity>
+    <ListingDuration>GTC</ListingDuration>
+    <Country>US</Country>
+    <Currency>USD</Currency>
+    <Location>New York, NY</Location>
+    <PostalCode>10001</PostalCode>
+    <ListingType>FixedPriceItem</ListingType>
+    <ConditionID>1000</ConditionID>
+    <SellerProfiles>
+      <SellerShippingProfile>
+        <ShippingProfileID>209735065019</ShippingProfileID>
+      </SellerShippingProfile>
+      <SellerPaymentProfile>
+        <PaymentProfileID>209734969019</PaymentProfileID>
+      </SellerPaymentProfile>
+      <SellerReturnProfile>
+        <ReturnProfileID>163760688019</ReturnProfileID>
+      </SellerReturnProfile>
+    </SellerProfiles>
+  </Item>
+</VerifyAddItemRequest>`;
+
+          const response = await fetch('https://api.ebay.com/ws/api.dll', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'text/xml; charset=utf-8',
+              'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
+              'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID || '',
+              'X-EBAY-API-APP-NAME': process.env.EBAY_APP_ID || '',
+              'X-EBAY-API-CERT-NAME': process.env.EBAY_CERT_ID || '',
+              'X-EBAY-API-CALL-NAME': 'VerifyAddItem',
+              'X-EBAY-API-SITEID': '0'
+            },
+            body: testXml
+          });
+
+          const responseText = await response.text();
+          
+          // Check for category-related errors
+          const hasInvalidCategoryError = responseText.includes('Invalid category') ||
+                                        responseText.includes('not a leaf category') ||
+                                        responseText.includes('Gemstone Type');
+          
+          const hasSuccess = responseText.includes('<Ack>Success</Ack>') ||
+                           responseText.includes('<Ack>Warning</Ack>');
+          
+          console.log(`Category ${categoryId}: ${hasSuccess && !hasInvalidCategoryError ? 'VALID' : 'INVALID'}`);
+          
+          return hasSuccess && !hasInvalidCategoryError;
+        } catch (error) {
+          console.log(`Category ${categoryId} test failed:`, error);
+          return false;
+        }
+      };
+
+      const validCategoryId = await findValidEbayCategory(testCategory);
+      
+      if (validCategoryId) {
+        res.json({
+          success: true,
+          categoryId: validCategoryId,
+          categoryName: getCategoryNameById(validCategoryId),
+          message: `Found valid eBay category: ${validCategoryId}`
+        });
+      } else {
+        res.json({
+          success: false,
+          message: 'No valid category found. Manual category research required.'
+        });
+      }
+    } catch (error) {
+      console.error("Category testing failed:", error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Category testing failed"
       });
     }
   });
