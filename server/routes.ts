@@ -831,7 +831,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/ebay/upload-image", requireAuth, async (req, res) => {
     try {
       // Read the Arduino image file
-      const imagePath = path.join(process.cwd(), 'attached_assets', 'Arduino_Uno_-_R3_1751105386641.jpg');
+      const imagePath = path.join(process.cwd(), 'attached_assets', 'Arduino_Uno_-_R3_1751106460097.jpg');
       const imageBuffer = fs.readFileSync(imagePath);
       const base64Image = imageBuffer.toString('base64');
 
@@ -900,12 +900,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Note: Image upload can be done manually using the "Upload Image" button
-      // For now, we'll list without images to test the business policy integration
+      // First upload the image to eBay automatically
       let imageUrl = null;
+      try {
+        const imagePath = path.join(process.cwd(), 'attached_assets', 'Arduino_Uno_-_R3_1751106460097.jpg');
+        const imageBuffer = fs.readFileSync(imagePath);
+        const base64Image = imageBuffer.toString('base64');
 
-      // Create US listing XML using simplified configuration  
-      const xmlBody = createSimpleUSListingXML(product);
+        const uploadXml = `<?xml version="1.0" encoding="utf-8"?>
+<UploadSiteHostedPicturesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${process.env.EBAY_USER_TOKEN}</eBayAuthToken>
+  </RequesterCredentials>
+  <PictureData>
+    <PictureSet>Supersize</PictureSet>
+    <Data>${base64Image}</Data>
+  </PictureData>
+</UploadSiteHostedPicturesRequest>`;
+
+        const uploadResponse = await fetch('https://api.ebay.com/ws/api.dll', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'text/xml',
+            'X-EBAY-API-SITEID': '0',
+            'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
+            'X-EBAY-API-CALL-NAME': 'UploadSiteHostedPictures',
+            'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
+            'X-EBAY-API-APP-NAME': process.env.EBAY_APP_ID!,
+            'X-EBAY-API-CERT-NAME': process.env.EBAY_CERT_ID!
+          },
+          body: uploadXml
+        });
+        
+        const uploadResponseText = await uploadResponse.text();
+        const isUploadSuccessful = uploadResponseText.includes('<Ack>Success</Ack>');
+        const urlMatch = uploadResponseText.match(/<FullURL>(.*?)<\/FullURL>/);
+        imageUrl = urlMatch ? urlMatch[1] : null;
+        
+        if (!isUploadSuccessful || !imageUrl) {
+          console.log("Image upload failed, upload response:", uploadResponseText);
+          // Continue without image rather than failing completely
+          imageUrl = null;
+        } else {
+          console.log("Image uploaded successfully to:", imageUrl);
+        }
+      } catch (imageError) {
+        console.log("Image upload failed, proceeding without image:", imageError);
+      }
+
+      // Create US listing XML using simplified configuration with image
+      const xmlBody = createSimpleUSListingXML(product, imageUrl);
       const response = await fetch('https://api.ebay.com/ws/api.dll', {
         method: 'POST',
         headers: {

@@ -1,4 +1,4 @@
-export function createSimpleUSListingXML(product: any): string {
+export function createSimpleUSListingXML(product: any, imageUrl?: string | null): string {
   return `<?xml version="1.0" encoding="utf-8"?>
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
@@ -31,6 +31,9 @@ export function createSimpleUSListingXML(product: any): string {
         <ReturnProfileID>209734982019</ReturnProfileID>
       </SellerReturnProfile>
     </SellerProfiles>
+    ${imageUrl ? `<PictureDetails>
+      <PictureURL>${imageUrl}</PictureURL>
+    </PictureDetails>` : ''}
     <ItemSpecifics>
       <NameValueList>
         <Name>Brand</Name>
