@@ -163,6 +163,52 @@ export function Marketplaces({ user }: MarketplacesProps) {
     }
   };
 
+  const bulkUnlistEbayMutation = useMutation({
+    mutationFn: async (productIds: number[]) => {
+      const results = [];
+      for (const productId of productIds) {
+        try {
+          const response = await apiRequest("POST", "/api/ebay/unlist", { productId });
+          const data = await response.json();
+          results.push({ productId, success: data.success, message: data.message });
+        } catch (error: any) {
+          results.push({ productId, success: false, message: error.message });
+        }
+      }
+      return results;
+    },
+    onSuccess: (results: any[]) => {
+      const successful = results.filter(r => r.success).length;
+      const failed = results.filter(r => !r.success).length;
+      
+      if (successful > 0) {
+        toast({
+          title: "Bulk Unlisting Complete",
+          description: `Successfully unlisted ${successful} product${successful !== 1 ? 's' : ''} from eBay${failed > 0 ? `, ${failed} failed` : ''}.`,
+        });
+      }
+      
+      if (failed > 0 && successful === 0) {
+        toast({
+          title: "Bulk Unlisting Failed",
+          description: `Failed to unlist ${failed} product${failed !== 1 ? 's' : ''} from eBay.`,
+          variant: "destructive",
+        });
+      }
+      
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
+      setSelectedProducts([]);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Bulk Unlisting Error",
+        description: error.message || "Failed to unlist products from eBay.",
+        variant: "destructive",
+      });
+    },
+  });
+
   // Filter products based on search term
   const filteredProducts = products.filter(product =>
     product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -230,6 +276,34 @@ export function Marketplaces({ user }: MarketplacesProps) {
     });
   };
 
+  const handleBulkUnlistFromEbay = () => {
+    const ebayListedProducts = selectedProducts.filter(id => {
+      const product = products.find(p => p.id === id);
+      return product && product.listedOnEbay;
+    });
+
+    if (ebayListedProducts.length === 0) {
+      toast({
+        title: "No eBay Listings Selected",
+        description: "Please select products that are currently listed on eBay.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const productNames = ebayListedProducts.map(id => 
+      products.find(p => p.id === id)?.name
+    ).filter(Boolean).slice(0, 3);
+    
+    const confirmMessage = ebayListedProducts.length === 1 
+      ? `Are you sure you want to unlist "${productNames[0]}" from eBay?`
+      : `Are you sure you want to unlist ${ebayListedProducts.length} products from eBay?\n\nIncluding: ${productNames.join(', ')}${ebayListedProducts.length > 3 ? '...' : ''}`;
+
+    if (window.confirm(confirmMessage)) {
+      bulkUnlistEbayMutation.mutate(ebayListedProducts);
+    }
+  };
+
   const eligibleForEbay = selectedProducts.filter(id => {
     const product = products.find(p => p.id === id);
     return product && !product.listedOnEbay && !product.excludeFromListing && product.stock > 0;
@@ -238,6 +312,11 @@ export function Marketplaces({ user }: MarketplacesProps) {
   const eligibleForAmazon = selectedProducts.filter(id => {
     const product = products.find(p => p.id === id);
     return product && !product.listedOnAmazon && !product.excludeFromListing && product.stock > 0;
+  }).length;
+
+  const eligibleForEbayUnlisting = selectedProducts.filter(id => {
+    const product = products.find(p => p.id === id);
+    return product && product.listedOnEbay;
   }).length;
 
   return (
@@ -317,6 +396,15 @@ export function Marketplaces({ user }: MarketplacesProps) {
                 >
                   <Upload className="w-4 h-4 mr-2" />
                   List on Both
+                </Button>
+                <Button
+                  onClick={handleBulkUnlistFromEbay}
+                  disabled={eligibleForEbayUnlisting === 0 || bulkUnlistEbayMutation.isPending}
+                  variant="destructive"
+                  className="bg-red-600 hover:bg-red-700"
+                >
+                  <X className="w-4 h-4 mr-2" />
+                  Unlist from eBay ({eligibleForEbayUnlisting})
                 </Button>
               </div>
             </div>
