@@ -942,7 +942,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.json({
           success: false,
           error: "Listing failed",
-          details: responseText.substring(0, 1000)
+          details: responseText,
+          fullResponse: responseText.length > 2000 ? responseText.substring(0, 2000) + "..." : responseText
         });
       }
       
