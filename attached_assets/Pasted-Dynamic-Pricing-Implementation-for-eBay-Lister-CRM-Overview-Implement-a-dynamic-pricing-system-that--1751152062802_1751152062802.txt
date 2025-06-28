@@ -1,0 +1,142 @@
+Dynamic Pricing Implementation for eBay Lister CRM
+Overview
+Implement a dynamic pricing system that automatically calculates selling prices based on supplier cost with tiered margin percentages.
+Pricing Tiers Structure
+Tier 1: €1.00 - €5.00
+
+Margin: 500%
+Formula: Supplier Price × 6.00
+Example: €3.00 → €18.00
+
+Tier 2: €5.01 - €9.99
+
+Margin: 300%
+Formula: Supplier Price × 4.00
+Example: €7.50 → €30.00
+
+Tier 3: €10.00 - €15.00
+
+Margin: 200%
+Formula: Supplier Price × 3.00
+Example: €12.00 → €36.00
+
+Tier 4: €15.01 - €25.00
+
+Margin: 150%
+Formula: Supplier Price × 2.50
+Example: €20.00 → €50.00
+
+Tier 5: €25.01 - €50.00
+
+Margin: 100%
+Formula: Supplier Price × 2.00
+Example: €35.00 → €70.00
+
+Tier 6: €50.01 - €100.00
+
+Margin: 75%
+Formula: Supplier Price × 1.75
+Example: €75.00 → €131.25
+
+Tier 7: €100.01+
+
+Margin: 50%
+Formula: Supplier Price × 1.50
+Example: €150.00 → €225.00
+
+Implementation Requirements
+1. Core Function Structure
+javascriptfunction calculateDynamicPrice(supplierPrice) {
+    // Input validation
+    // Tier determination logic
+    // Price calculation
+    // Return formatted price
+}
+2. Database Schema Updates
+
+Add supplier_price field (DECIMAL(10,2))
+Add calculated_price field (DECIMAL(10,2))
+Add margin_tier field (VARCHAR(20))
+Add margin_percentage field (DECIMAL(5,2))
+Add price_updated_at timestamp
+
+3. User Interface Components
+
+Bulk Price Update: Button to recalculate all product prices
+Individual Price Override: Allow manual price adjustments
+Pricing Preview: Show before/after prices when importing products
+Margin Display: Show applied margin percentage in product list
+Price History: Track price changes over time
+
+4. Business Logic Features
+
+Minimum Price Floor: Set absolute minimum selling price (e.g., €2.00)
+Maximum Price Ceiling: Cap prices at reasonable levels
+Rounding Rules: Round to nearest €0.05 or €0.99 endings
+Competitive Pricing: Optional integration with eBay price comparison
+Seasonal Adjustments: Ability to apply temporary margin multipliers
+
+5. Automation Features
+
+Auto-update on Import: Calculate prices when importing supplier catalogs
+Scheduled Repricing: Daily/weekly price updates based on supplier changes
+Price Change Notifications: Alert when prices change significantly
+Batch Processing: Handle large product catalogs efficiently
+
+6. Configuration Settings
+javascriptconst PRICING_CONFIG = {
+    tiers: [
+        { min: 1.00, max: 5.00, multiplier: 6.00, label: "Ultra High" },
+        { min: 5.01, max: 9.99, multiplier: 4.00, label: "Very High" },
+        { min: 10.00, max: 15.00, multiplier: 3.00, label: "High" },
+        { min: 15.01, max: 25.00, multiplier: 2.50, label: "Medium-High" },
+        { min: 25.01, max: 50.00, multiplier: 2.00, label: "Medium" },
+        { min: 50.01, max: 100.00, multiplier: 1.75, label: "Low-Medium" },
+        { min: 100.01, max: 999999, multiplier: 1.50, label: "Low" }
+    ],
+    minPrice: 2.00,
+    maxPrice: 10000.00,
+    roundingRule: "nearest_99" // or "nearest_05", "no_rounding"
+}
+7. Error Handling
+
+Handle invalid supplier prices (negative, zero, non-numeric)
+Log pricing calculation errors
+Fallback to manual pricing if calculation fails
+Validate calculated prices against business rules
+
+8. Reporting & Analytics
+
+Margin Analysis: Report showing profit margins by product category
+Price Distribution: Charts showing price ranges and volumes
+Competitor Comparison: Track pricing vs market rates
+Profitability Metrics: Calculate potential profits based on pricing
+
+9. Integration Points
+
+Supplier API: Auto-update when supplier prices change
+eBay API: Push calculated prices to listings
+Inventory Management: Sync with stock levels
+Accounting System: Export pricing data for financial records
+
+10. Testing Requirements
+
+Unit tests for pricing calculation function
+Edge case testing (boundary values)
+Performance testing with large datasets
+User acceptance testing for UI components
+
+Implementation Priority
+
+Phase 1: Core pricing calculation function
+Phase 2: Database schema and basic UI
+Phase 3: Bulk operations and automation
+Phase 4: Advanced features and reporting
+Phase 5: Integration and optimization
+
+Success Metrics
+
+Pricing accuracy: 100% correct calculations
+Processing speed: <2 seconds for 1000 products
+User adoption: 90% of products using dynamic pricing
+Profit improvement: Measurable margin increase

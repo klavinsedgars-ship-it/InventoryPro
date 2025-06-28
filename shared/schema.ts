@@ -20,9 +20,14 @@ export const products = pgTable("products", {
   description: text("description"),
   supplierPrice: decimal("supplier_price", { precision: 10, scale: 2 }).notNull(),
   salePrice: decimal("sale_price", { precision: 10, scale: 2 }).notNull(),
+  calculatedPrice: decimal("calculated_price", { precision: 10, scale: 2 }), // auto-calculated price
+  marginTier: text("margin_tier"), // tier label (e.g., "Ultra High", "Medium")
+  marginPercentage: decimal("margin_percentage", { precision: 5, scale: 2 }), // applied margin %
+  priceUpdatedAt: timestamp("price_updated_at"), // last price calculation
+  useCalculatedPrice: boolean("use_calculated_price").default(true), // use dynamic vs manual pricing
   stock: integer("stock").notNull().default(0),
   weight: integer("weight"), // in grams
-  margin: decimal("margin", { precision: 5, scale: 2 }), // percentage
+  margin: decimal("margin", { precision: 5, scale: 2 }), // percentage (legacy field)
   status: text("status").notNull().default("active"), // active, inactive, out_of_stock
   listedOnEbay: boolean("listed_on_ebay").default(false),
   listedOnAmazon: boolean("listed_on_amazon").default(false),

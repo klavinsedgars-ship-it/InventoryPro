@@ -22,6 +22,15 @@ import fs from 'fs';
 import path from 'path';
 import { findValidEbayCategory, getCategoryNameById } from "./ebay-category-finder";
 import { findBestCategoryForProduct, explainCategoryChoice, categorizeBatch } from "./product-category-matcher";
+import { 
+  calculateDynamicPrice, 
+  calculateBulkPricing, 
+  getPricingTiers, 
+  getPricingTierInfo,
+  generatePricingSummary,
+  validatePricingConfig,
+  formatPrice
+} from "./dynamic-pricing";
 
 // Type for authenticated requests
 interface AuthenticatedRequest extends Request {
@@ -95,6 +104,151 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(metrics);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch dashboard metrics" });
+    }
+  });
+
+  // Dynamic Pricing API routes
+  app.post("/api/pricing/calculate", requireAuth, async (req, res) => {
+    try {
+      const { supplierPrice } = req.body;
+      
+      if (!supplierPrice) {
+        return res.status(400).json({ message: "Supplier price is required" });
+      }
+
+      const result = calculateDynamicPrice(supplierPrice);
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to calculate pricing" });
+    }
+  });
+
+  app.post("/api/pricing/bulk-calculate", requireAuth, async (req, res) => {
+    try {
+      const { productIds } = req.body;
+      
+      if (!Array.isArray(productIds)) {
+        return res.status(400).json({ message: "Product IDs array is required" });
+      }
+
+      // Get products with their supplier prices
+      const products = await Promise.all(
+        productIds.map(async (id: number) => {
+          const product = await storage.getProduct(id);
+          return product ? { id: product.id, supplierPrice: parseFloat(product.supplierPrice) } : null;
+        })
+      );
+
+      const validProducts = products.filter(p => p !== null);
+      const results = calculateBulkPricing(validProducts);
+      
+      res.json({ results, processedCount: validProducts.length });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to calculate bulk pricing" });
+    }
+  });
+
+  app.post("/api/pricing/bulk-update", requireAuth, async (req, res) => {
+    try {
+      const { productIds, applyCalculated = true } = req.body;
+      
+      if (!Array.isArray(productIds)) {
+        return res.status(400).json({ message: "Product IDs array is required" });
+      }
+
+      let updatedCount = 0;
+      let errors: string[] = [];
+
+      for (const productId of productIds) {
+        try {
+          const product = await storage.getProduct(productId);
+          if (!product) {
+            errors.push(`Product ${productId} not found`);
+            continue;
+          }
+
+          const pricingResult = calculateDynamicPrice(parseFloat(product.supplierPrice));
+          
+          if (!pricingResult.isValid) {
+            errors.push(`Product ${productId}: ${pricingResult.errors.join(', ')}`);
+            continue;
+          }
+
+          // Update product with calculated pricing
+          const updateData: any = {
+            calculatedPrice: pricingResult.finalPrice.toString(),
+            marginTier: pricingResult.marginTier,
+            marginPercentage: pricingResult.marginPercentage.toString(),
+            priceUpdatedAt: new Date(),
+            useCalculatedPrice: applyCalculated
+          };
+
+          // If applying calculated price, update salePrice as well
+          if (applyCalculated) {
+            updateData.salePrice = pricingResult.finalPrice.toString();
+          }
+
+          await storage.updateProduct(productId, updateData);
+          updatedCount++;
+        } catch (error) {
+          errors.push(`Product ${productId}: ${(error as Error).message}`);
+        }
+      }
+
+      res.json({
+        success: true,
+        updatedCount,
+        totalProducts: productIds.length,
+        errors
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update pricing" });
+    }
+  });
+
+  app.get("/api/pricing/tiers", requireAuth, async (req, res) => {
+    try {
+      const tiers = getPricingTiers();
+      const config = validatePricingConfig();
+      
+      res.json({
+        tiers,
+        config,
+        isValid: config.isValid
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch pricing tiers" });
+    }
+  });
+
+  app.get("/api/pricing/preview/:productId", requireAuth, async (req, res) => {
+    try {
+      const productId = parseInt(req.params.productId);
+      const product = await storage.getProduct(productId);
+      
+      if (!product) {
+        return res.status(404).json({ message: "Product not found" });
+      }
+
+      const currentSupplierPrice = parseFloat(product.supplierPrice);
+      const pricingResult = calculateDynamicPrice(currentSupplierPrice);
+      const summary = generatePricingSummary(currentSupplierPrice);
+      const tierInfo = getPricingTierInfo(currentSupplierPrice);
+      
+      res.json({
+        product: {
+          id: product.id,
+          name: product.name,
+          currentSupplierPrice,
+          currentSalePrice: parseFloat(product.salePrice),
+          useCalculatedPrice: product.useCalculatedPrice || false
+        },
+        pricing: pricingResult,
+        summary,
+        tierInfo
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to generate pricing preview" });
     }
   });
 

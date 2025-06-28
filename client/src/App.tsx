@@ -11,6 +11,7 @@ import { Marketplaces } from "@/pages/marketplaces";
 import { TMESync } from "@/pages/sync";
 import { Settings } from "@/pages/settings";
 import { Reports } from "@/pages/reports";
+import { Pricing } from "@/pages/pricing";
 import { Login } from "@/pages/login";
 import NotFound from "@/pages/not-found";
 
