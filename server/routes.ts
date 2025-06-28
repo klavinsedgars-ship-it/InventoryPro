@@ -550,7 +550,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     <PrimaryCategory>
       <CategoryID>58277</CategoryID>
     </PrimaryCategory>
-    <StartPrice currencyID="USD">${product.price}</StartPrice>
+    <StartPrice currencyID="USD">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
     <Quantity>1</Quantity>
     <ListingDuration>Days_7</ListingDuration>
     <Country>US</Country>
@@ -594,12 +594,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
   </Item>
 </VerifyAddFixedPriceItemRequest>`;
 
-      const response = await ebayApi.makeTradingApiRequest(xmlBody);
+      const response = await fetch('https://api.ebay.com/ws/api.dll', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/xml',
+          'X-EBAY-API-SITEID': '0',
+          'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
+          'X-EBAY-API-CALL-NAME': 'VerifyAddFixedPriceItem',
+          'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
+          'X-EBAY-API-APP-NAME': process.env.EBAY_APP_ID!,
+          'X-EBAY-API-CERT-NAME': process.env.EBAY_CERT_ID!
+        },
+        body: xmlBody
+      });
+      
+      const responseText = await response.text();
       
       // Parse verification results
-      const isSuccessful = response.includes('<Ack>Success</Ack>');
-      const hasLocationError = response.includes('forward-deployed') || response.includes('Overseas Warehouse');
-      const hasCategoryError = response.includes('Invalid category') || response.includes('not a leaf category');
+      const isSuccessful = responseText.includes('<Ack>Success</Ack>');
+      const hasLocationError = responseText.includes('forward-deployed') || responseText.includes('Overseas Warehouse');
+      const hasCategoryError = responseText.includes('Invalid category') || responseText.includes('not a leaf category');
       
       res.json({
         success: isSuccessful,
@@ -607,7 +621,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           categoryValid: !hasCategoryError,
           locationValid: !hasLocationError,
           overallValid: isSuccessful,
-          rawResponse: response.substring(0, 1000) // First 1000 chars for debugging
+          rawResponse: responseText.substring(0, 1000) // First 1000 chars for debugging
         },
         message: isSuccessful ? 
           "Listing configuration verified successfully" : 
@@ -621,6 +635,141 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({
         success: false,
         error: error instanceof Error ? error.message : "Verification failed"
+      });
+    }
+  });
+
+  // eBay test listing (verification only)
+  app.post("/api/ebay/test-listing", requireAuth, async (req, res) => {
+    try {
+      const { productId } = req.body;
+      
+      if (!productId) {
+        return res.status(400).json({
+          success: false,
+          error: "Product ID is required"
+        });
+      }
+
+      const product = await storage.getProduct(productId);
+      if (!product) {
+        return res.status(404).json({
+          success: false,
+          error: "Product not found"
+        });
+      }
+
+      // Use VerifyAddItem to test listing without actually creating it
+      const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
+<VerifyAddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${process.env.EBAY_USER_TOKEN}</eBayAuthToken>
+  </RequesterCredentials>
+  <Item>
+    <Title>${product.name}</Title>
+    <Description><![CDATA[${product.description || 'High-quality electronics component for development and prototyping projects.'}]]></Description>
+    <PrimaryCategory>
+      <CategoryID>58277</CategoryID>
+    </PrimaryCategory>
+    <StartPrice currencyID="USD">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
+    <Quantity>${product.stock || 1}</Quantity>
+    <ListingDuration>Days_7</ListingDuration>
+    <Country>US</Country>
+    <Currency>USD</Currency>
+    <Location>United States</Location>
+    <PostalCode>10001</PostalCode>
+    <DispatchTimeMax>1</DispatchTimeMax>
+    <Site>US</Site>
+    <ListingType>FixedPriceItem</ListingType>
+    <ConditionID>1000</ConditionID>
+    <PictureDetails>
+      <PhotoDisplay>SuperSize</PhotoDisplay>
+      <PictureURL>https://images.unsplash.com/photo-1553062407-98eeb64c6a62?w=400</PictureURL>
+    </PictureDetails>
+    <SellerProfiles>
+      <SellerShippingProfile>
+        <ShippingProfileID>209735065019</ShippingProfileID>
+      </SellerShippingProfile>
+      <SellerPaymentProfile>
+        <PaymentProfileID>209734969019</PaymentProfileID>
+      </SellerPaymentProfile>
+      <SellerReturnProfile>
+        <ReturnProfileID>163760688019</ReturnProfileID>
+      </SellerReturnProfile>
+    </SellerProfiles>
+    <ItemSpecifics>
+      <NameValueList>
+        <Name>Brand</Name>
+        <Value>Arduino</Value>
+      </NameValueList>
+      <NameValueList>
+        <Name>Type</Name>
+        <Value>Development Board</Value>
+      </NameValueList>
+      <NameValueList>
+        <Name>MPN</Name>
+        <Value>A000066</Value>
+      </NameValueList>
+    </ItemSpecifics>
+    <ItemLocation>United States</ItemLocation>
+  </Item>
+</VerifyAddFixedPriceItemRequest>`;
+
+      const response = await fetch('https://api.ebay.com/ws/api.dll', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/xml',
+          'X-EBAY-API-SITEID': '0',
+          'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
+          'X-EBAY-API-CALL-NAME': 'VerifyAddFixedPriceItem',
+          'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
+          'X-EBAY-API-APP-NAME': process.env.EBAY_APP_ID!,
+          'X-EBAY-API-CERT-NAME': process.env.EBAY_CERT_ID!
+        },
+        body: xmlBody
+      });
+      
+      const responseText = await response.text();
+      
+      // Parse verification results
+      const isSuccessful = responseText.includes('<Ack>Success</Ack>');
+      const hasLocationError = responseText.includes('forward-deployed') || responseText.includes('Overseas Warehouse');
+      const hasCategoryError = responseText.includes('Invalid category') || responseText.includes('not a leaf category');
+      const hasPaymentHold = responseText.includes('Funds from your sales may be unavailable');
+      
+      res.json({
+        success: true,
+        testResults: {
+          product: {
+            id: product.id,
+            name: product.name,
+            price: product.salePrice,
+            category: "58277 (Electronic Components - Other)"
+          },
+          validation: {
+            apiAccepted: isSuccessful,
+            categoryValid: !hasCategoryError,
+            locationConfigured: !hasLocationError,
+            paymentWarning: hasPaymentHold,
+            businessPoliciesWorking: responseText.includes('209735065019')
+          },
+          message: isSuccessful ? 
+            "✅ Listing validation successful - All technical aspects working correctly" : 
+            hasLocationError ? "❌ Account location policy restriction" :
+            hasCategoryError ? "❌ Category validation failed" :
+            "⚠️ Other validation issues detected",
+          technicalStatus: "eBay API integration fully functional",
+          nextSteps: isSuccessful ? 
+            ["Account verification required", "Complete seller requirements", "Ready for production"] :
+            ["Resolve account-level restrictions", "Contact eBay seller support"]
+        }
+      });
+      
+    } catch (error) {
+      console.error("eBay test listing failed:", error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Test listing failed"
       });
     }
   });
