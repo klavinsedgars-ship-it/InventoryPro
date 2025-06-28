@@ -72,6 +72,10 @@ export class EbayOAuthService {
     // Force reload from environment to get fresh token
     this.reloadTokenFromEnvironment();
     
+    // Debug: Log what token we're actually returning
+    console.log("OAuth getValidAccessToken - Token prefix:", this.currentToken?.access_token.substring(0, 50));
+    console.log("OAuth getValidAccessToken - Token length:", this.currentToken?.access_token.length);
+    
     if (this.currentToken && this.isTokenValid()) {
       return this.currentToken.access_token;
     }

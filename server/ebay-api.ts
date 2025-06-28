@@ -331,10 +331,12 @@ export class EbayApiService {
       throw new Error("eBay User Token is required for listing products");
     }
     
+    console.log("createVerifyItemXML - Using fresh token:", userToken.startsWith("v^1.1#i^1#f^0"));
+    
     return `<?xml version="1.0" encoding="utf-8"?>
 <VerifyAddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
-    <eBayAuthToken>${userToken}</eBayAuthToken>
+    <eBayAuthToken>${process.env.EBAY_USER_TOKEN}</eBayAuthToken>
   </RequesterCredentials>
   <Item>
     <Title>${this.escapeXml(listingData.title)}</Title>
@@ -370,6 +372,7 @@ export class EbayApiService {
   }
 
   private createAddItemXML(listingData: any): string {
+    // Force direct read from environment to bypass all caching
     const userToken = process.env.EBAY_USER_TOKEN;
     if (!userToken) {
       throw new Error("eBay User Token is required for listing products");
@@ -378,12 +381,12 @@ export class EbayApiService {
     // Debug: Log token details for troubleshooting
     console.log("createAddItemXML - Token prefix:", userToken.substring(0, 50));
     console.log("createAddItemXML - Token length:", userToken.length);
-    console.log("createAddItemXML - DIRECT token from ENV:", userToken === process.env.EBAY_USER_TOKEN);
+    console.log("createAddItemXML - Fresh token check:", userToken.startsWith("v^1.1#i^1#f^0"));
     
     return `<?xml version="1.0" encoding="utf-8"?>
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
-    <eBayAuthToken>${userToken}</eBayAuthToken>
+    <eBayAuthToken>${process.env.EBAY_USER_TOKEN}</eBayAuthToken>
   </RequesterCredentials>
   <Item>
     <Title>${this.escapeXml(listingData.title)}</Title>
