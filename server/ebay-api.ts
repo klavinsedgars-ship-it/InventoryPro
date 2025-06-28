@@ -456,9 +456,7 @@ export class EbayApiService {
       .replace(/'/g, '&#39;');
   }
 
-  private createEndItemXML(itemId: string): string {
-    const authToken = process.env.EBAY_USER_TOKEN;
-    
+  private createEndItemXML(itemId: string, authToken: string): string {
     return `<?xml version="1.0" encoding="utf-8"?>
 <EndItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
@@ -793,8 +791,13 @@ export class EbayApiService {
 
       console.log(`Unlisting product ${product.name} (Item ID: ${product.ebayItemId}) from eBay...`);
 
-      // Create EndItem XML request
-      const endItemXml = this.createEndItemXML(product.ebayItemId);
+      // Use the same fresh Auth n Auth token as listing operations
+      const authToken = "v^1.1#i^1#f^0#p^3#I^3#r^1#t^Ul4xMF83OjFCN0M0NTkxQkNFNTUyRUE0MjE4REMyMjcyODdDOTg5XzFfMSNFXjI2MA==";
+      console.log(`Using fresh Auth n Auth token for unlisting prefix: ${authToken.substring(0, 50)}...`);
+      console.log(`Unlisting token length: ${authToken.length}`);
+
+      // Create EndItem XML request with fresh token
+      const endItemXml = this.createEndItemXML(product.ebayItemId, authToken!);
       
       // Make EndItem API call
       const responseText = await this.makeTradingApiRequest(endItemXml, 'EndItem');
