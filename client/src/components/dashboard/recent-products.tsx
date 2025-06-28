@@ -9,13 +9,17 @@ interface RecentProductsProps {
   onEditProduct: (product: Product) => void;
   onDeleteProduct: (productId: number) => void;
   onViewAll: () => void;
+  onEditBeforeListingEbay?: (product: Product) => void;
+  onEditBeforeListingAmazon?: (product: Product) => void;
 }
 
 export function RecentProducts({ 
   products, 
   onEditProduct, 
   onDeleteProduct, 
-  onViewAll 
+  onViewAll,
+  onEditBeforeListingEbay,
+  onEditBeforeListingAmazon
 }: RecentProductsProps) {
   const recentProducts = products.slice(0, 5);
 
@@ -85,22 +89,48 @@ export function RecentProducts({
                          product.status.charAt(0).toUpperCase() + product.status.slice(1)}
                       </Badge>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-3">
-                      <Button 
-                        variant="ghost" 
-                        size="sm"
-                        onClick={() => onEditProduct(product)}
-                      >
-                        Edit
-                      </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="sm"
-                        onClick={() => onDeleteProduct(product.id)}
-                        className="text-red-600 hover:text-red-900"
-                      >
-                        Delete
-                      </Button>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                      <div className="flex flex-col space-y-1">
+                        <div className="flex space-x-2">
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => onEditProduct(product)}
+                          >
+                            Edit
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => onDeleteProduct(product.id)}
+                            className="text-red-600 hover:text-red-900"
+                          >
+                            Delete
+                          </Button>
+                        </div>
+                        {onEditBeforeListingEbay && (
+                          <div className="flex space-x-2">
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => onEditBeforeListingEbay(product)}
+                              className="text-blue-600 hover:text-blue-900"
+                            >
+                              📦 List to eBay
+                            </Button>
+                            {onEditBeforeListingAmazon && (
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => onEditBeforeListingAmazon(product)}
+                                className="text-orange-600 hover:text-orange-900"
+                              >
+                                📦 List to Amazon
+                              </Button>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

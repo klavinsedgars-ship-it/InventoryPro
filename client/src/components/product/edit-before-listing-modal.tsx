@@ -78,8 +78,9 @@ export function EditBeforeListingModal({
       if (!product) throw new Error("No product selected");
       
       // First update the product with edited data
-      await apiRequest(`/api/products/${product.id}`, {
+      await fetch(`/api/products/${product.id}`, {
         method: "PATCH",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: data.name,
           description: data.description,
@@ -90,8 +91,9 @@ export function EditBeforeListingModal({
 
       // Then list to marketplace
       const endpoint = marketplace === "ebay" ? "/api/ebay/list-us" : "/api/amazon/list";
-      return apiRequest(endpoint, {
+      const response = await fetch(endpoint, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           productId: product.id,
           title: data.name,
@@ -101,6 +103,8 @@ export function EditBeforeListingModal({
           categoryId: data.categoryId,
         }),
       });
+
+      return response.json();
     },
     onSuccess: (response: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });

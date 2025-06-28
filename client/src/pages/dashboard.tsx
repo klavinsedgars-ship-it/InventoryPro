@@ -6,6 +6,7 @@ import { MetricsCards } from "@/components/dashboard/metrics-cards";
 import { QuickActions } from "@/components/dashboard/quick-actions";
 import { RecentProducts } from "@/components/dashboard/recent-products";
 import { ProductModal } from "@/components/product/product-modal";
+import { EditBeforeListingModal } from "@/components/product/edit-before-listing-modal";
 import { useLocation } from "wouter";
 import type { Product } from "@shared/schema";
 
@@ -17,6 +18,9 @@ export function Dashboard({ user }: DashboardProps) {
   const [, setLocation] = useLocation();
   const [productModalOpen, setProductModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [editBeforeListingModalOpen, setEditBeforeListingModalOpen] = useState(false);
+  const [listingProduct, setListingProduct] = useState<Product | null>(null);
+  const [listingMarketplace, setListingMarketplace] = useState<"ebay" | "amazon">("ebay");
 
   const { data: metrics } = useQuery({
     queryKey: ["/api/dashboard/metrics"],
@@ -49,6 +53,18 @@ export function Dashboard({ user }: DashboardProps) {
 
   const handleBulkList = () => {
     setLocation("/marketplaces");
+  };
+
+  const handleEditBeforeListingEbay = (product: Product) => {
+    setListingProduct(product);
+    setListingMarketplace("ebay");
+    setEditBeforeListingModalOpen(true);
+  };
+
+  const handleEditBeforeListingAmazon = (product: Product) => {
+    setListingProduct(product);
+    setListingMarketplace("amazon");
+    setEditBeforeListingModalOpen(true);
   };
 
   const handleViewReports = () => {
@@ -107,6 +123,8 @@ export function Dashboard({ user }: DashboardProps) {
                 onEditProduct={handleEditProduct}
                 onDeleteProduct={handleDeleteProduct}
                 onViewAll={handleViewAll}
+                onEditBeforeListingEbay={handleEditBeforeListingEbay}
+                onEditBeforeListingAmazon={handleEditBeforeListingAmazon}
               />
             </div>
           </div>
