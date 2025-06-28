@@ -145,6 +145,31 @@ export function Products({ user }: ProductsProps) {
     },
   });
 
+  const uploadImageMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/ebay/upload-image"),
+    onSuccess: (data: any) => {
+      if (data.success) {
+        toast({
+          title: "Image Uploaded!",
+          description: `Image uploaded to eBay successfully`,
+        });
+      } else {
+        toast({
+          title: "Upload Failed",
+          description: data.error || "Failed to upload image to eBay",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to upload image",
+        variant: "destructive",
+      });
+    },
+  });
+
   const bulkListToAmazonMutation = useMutation({
     mutationFn: async (productIds: number[]) => {
       const promises = productIds.map(id => 
@@ -422,6 +447,15 @@ export function Products({ user }: ProductsProps) {
                             onClick={() => handleEditProduct(product)}
                           >
                             Edit
+                          </Button>
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => uploadImageMutation.mutate()}
+                            disabled={uploadImageMutation.isPending}
+                            className="text-green-600 hover:text-green-900"
+                          >
+                            {uploadImageMutation.isPending ? "Uploading..." : "Upload Image"}
                           </Button>
                           <Button 
                             variant="outline" 
