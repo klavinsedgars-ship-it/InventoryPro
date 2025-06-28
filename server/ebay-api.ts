@@ -375,6 +375,10 @@ export class EbayApiService {
       throw new Error("eBay User Token is required for listing products");
     }
     
+    // Debug: Log token details for troubleshooting
+    console.log("createAddItemXML - Token prefix:", userToken.substring(0, 50));
+    console.log("createAddItemXML - Token length:", userToken.length);
+    
     return `<?xml version="1.0" encoding="utf-8"?>
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
