@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent } from "@/components/ui/card";
-import { Plus, Search, Filter, Edit2, Trash2, Upload, Download, MoreHorizontal, Eye } from "lucide-react";
+import { Plus, Search, Filter, Edit2, Trash2, Upload, Download, MoreHorizontal, Eye, X } from "lucide-react";
 import { getStatusColor, formatCurrency } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -128,6 +128,35 @@ export function Products({ user }: ProductsProps) {
       toast({
         title: "Error",
         description: error.message || "Failed to connect to eBay API.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const unlistFromEbayMutation = useMutation({
+    mutationFn: async (productId: number) => {
+      return apiRequest("POST", "/api/ebay/unlist", { productId });
+    },
+    onSuccess: (data: any) => {
+      if (data.success) {
+        toast({
+          title: "Product Unlisted",
+          description: "Product successfully removed from eBay marketplace.",
+        });
+      } else {
+        toast({
+          title: "Unlisting Failed", 
+          description: data.message || "Failed to unlist product from eBay.",
+          variant: "destructive",
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to unlist product from eBay.",
         variant: "destructive",
       });
     },
@@ -470,13 +499,32 @@ export function Products({ user }: ProductsProps) {
                                   size="sm"
                                   className="h-5 w-5 p-0"
                                   onClick={() => {
-                                    const searchQuery = encodeURIComponent(`${product.name} ${product.sku}`);
-                                    const ebayUrl = `https://www.ebay.com/sch/i.html?_nkw=${searchQuery}`;
-                                    window.open(ebayUrl, '_blank');
+                                    if (product.ebayItemId) {
+                                      const ebayUrl = `https://www.ebay.co.uk/itm/${product.ebayItemId}`;
+                                      window.open(ebayUrl, '_blank');
+                                    } else {
+                                      const searchQuery = encodeURIComponent(`${product.name} ${product.sku}`);
+                                      const ebayUrl = `https://www.ebay.co.uk/sch/i.html?_nkw=${searchQuery}`;
+                                      window.open(ebayUrl, '_blank');
+                                    }
                                   }}
                                   title="View on eBay"
                                 >
                                   <Eye className="h-3 w-3" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-5 w-5 p-0 text-red-600 hover:text-red-900"
+                                  onClick={() => {
+                                    if (confirm(`Are you sure you want to unlist "${product.name}" from eBay?`)) {
+                                      unlistFromEbayMutation.mutate(product.id);
+                                    }
+                                  }}
+                                  disabled={unlistFromEbayMutation.isPending}
+                                  title="Unlist from eBay"
+                                >
+                                  <X className="h-3 w-3" />
                                 </Button>
                               </div>
                             )}

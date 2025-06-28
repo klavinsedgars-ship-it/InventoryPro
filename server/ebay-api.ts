@@ -456,6 +456,19 @@ export class EbayApiService {
       .replace(/'/g, '&#39;');
   }
 
+  private createEndItemXML(itemId: string): string {
+    const authToken = process.env.EBAY_USER_TOKEN;
+    
+    return `<?xml version="1.0" encoding="utf-8"?>
+<EndItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${authToken}</eBayAuthToken>
+  </RequesterCredentials>
+  <ItemID>${itemId}</ItemID>
+  <EndingReason>NotAvailable</EndingReason>
+</EndItemRequest>`;
+  }
+
   private async makeTradingApiRequest(xmlBody: string, callName: string = 'AddFixedPriceItem'): Promise<string> {
     const tradingUrl = this.isProduction ? this.tradingApiUrl : this.sandboxTradingApiUrl;
     console.log("Using eBay environment:", this.isProduction ? "PRODUCTION" : "SANDBOX");
@@ -778,9 +791,28 @@ export class EbayApiService {
         throw new Error("Product not found or not listed on eBay");
       }
 
-      // In a real implementation, you would call eBay's EndItem API
-      // For demo purposes, we'll simulate unlisting
+      console.log(`Unlisting product ${product.name} (Item ID: ${product.ebayItemId}) from eBay...`);
+
+      // Create EndItem XML request
+      const endItemXml = this.createEndItemXML(product.ebayItemId);
       
+      // Make EndItem API call
+      const responseText = await this.makeTradingApiRequest(endItemXml, 'EndItem');
+      
+      // Check if the API call was successful
+      const isSuccess = responseText.includes('<Ack>Success</Ack>') || 
+                       responseText.includes('<Ack>Warning</Ack>');
+      
+      if (!isSuccess) {
+        const errorMatch = responseText.match(/<ShortMessage>(.*?)<\/ShortMessage>/) ||
+                          responseText.match(/<LongMessage>(.*?)<\/LongMessage>/);
+        const errorMessage = errorMatch ? errorMatch[1] : 'Unknown error occurred';
+        throw new Error(`eBay EndItem failed: ${errorMessage}`);
+      }
+
+      console.log("eBay unlisting successful:", { itemId: product.ebayItemId, productId });
+
+      // Update product in database
       await storage.updateProduct(productId, {
         listedOnEbay: false,
         ebayItemId: null
@@ -790,10 +822,11 @@ export class EbayApiService {
         source: "ebay",
         operation: "product_unlisting",
         status: "success",
-        message: `Successfully unlisted product "${product.name}" from eBay`,
+        message: `Successfully unlisted product "${product.name}" from eBay (Item ID: ${product.ebayItemId})`,
         details: JSON.stringify({
           productId,
-          itemId: product.ebayItemId
+          itemId: product.ebayItemId,
+          ebayResponse: responseText
         })
       });
 
