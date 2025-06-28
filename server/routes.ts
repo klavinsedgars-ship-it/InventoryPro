@@ -830,8 +830,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Upload image to eBay
   app.post("/api/ebay/upload-image", requireAuth, async (req, res) => {
     try {
-      // Read the Arduino image file
-      const imagePath = path.join(process.cwd(), 'attached_assets', 'Arduino_Uno_-_R3_1751105386641.jpg');
+      // Read the test image file (minimal JPEG for testing)
+      const imagePath = path.join(process.cwd(), 'attached_assets', 'test_minimal.jpg');
       const imageBuffer = fs.readFileSync(imagePath);
       const base64Image = imageBuffer.toString('base64');
 
