@@ -80,29 +80,12 @@ export class EbayApiService {
   }
 
   private async getAccessToken(): Promise<string> {
-    if (this.authToken && this.isTokenValid()) {
-      return this.authToken.access_token;
-    }
-
+    // Import the OAuth service
+    const { ebayOAuth } = await import('./ebay-oauth');
+    
     try {
-      const credentials = Buffer.from(`${this.credentials.appId}:${this.credentials.certId}`).toString('base64');
-      
-      const response = await fetch(`${this.getApiUrl()}/identity/v1/oauth2/token`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Authorization': `Basic ${credentials}`,
-        },
-        body: 'grant_type=client_credentials&scope=https://api.ebay.com/oauth/api_scope'
-      });
-
-      if (!response.ok) {
-        throw new Error(`eBay authentication failed: ${response.status} ${response.statusText}`);
-      }
-
-      this.authToken = await response.json();
-      return this.authToken!.access_token;
-
+      // Use the OAuth service to get a valid access token
+      return await ebayOAuth.getValidAccessToken();
     } catch (error) {
       console.error("eBay authentication failed:", error);
       throw new Error(`Failed to authenticate with eBay API: ${(error as Error).message}`);
