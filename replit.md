@@ -109,6 +109,10 @@ This is a minimalistic web-based CRM application for inventory and marketplace m
 ```
 Changelog:
 - June 28, 2025. Initial setup
+- June 28, 2025. Added comprehensive sample product data (8 electronics products)
+- June 28, 2025. Created full Categories management page with CRUD operations
+- June 28, 2025. Created full Marketplace management page with bulk listing capabilities
+- June 28, 2025. Fixed header component imports and improved navigation functionality
 ```
 
 ## User Preferences

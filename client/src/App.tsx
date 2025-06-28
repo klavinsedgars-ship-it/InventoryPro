@@ -6,6 +6,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Dashboard } from "@/pages/dashboard";
 import { Products } from "@/pages/products";
+import { Categories } from "@/pages/categories";
+import { Marketplaces } from "@/pages/marketplaces";
 import { Login } from "@/pages/login";
 import NotFound from "@/pages/not-found";
 
@@ -70,9 +72,9 @@ function AppContent() {
     <Switch>
       <Route path="/" component={() => <Dashboard user={user} />} />
       <Route path="/products" component={() => <Products user={user} />} />
-      <Route path="/marketplaces" component={() => <div className="min-h-screen bg-gray-50 flex items-center justify-center"><p>Marketplaces page coming soon...</p></div>} />
+      <Route path="/marketplaces" component={() => <Marketplaces user={user} />} />
       <Route path="/sync" component={() => <div className="min-h-screen bg-gray-50 flex items-center justify-center"><p>TME Sync page coming soon...</p></div>} />
-      <Route path="/categories" component={() => <div className="min-h-screen bg-gray-50 flex items-center justify-center"><p>Categories page coming soon...</p></div>} />
+      <Route path="/categories" component={() => <Categories user={user} />} />
       <Route path="/settings" component={() => <div className="min-h-screen bg-gray-50 flex items-center justify-center"><p>Settings page coming soon...</p></div>} />
       <Route component={NotFound} />
     </Switch>

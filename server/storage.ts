@@ -88,6 +88,146 @@ export class MemStorage implements IStorage {
     this.createCategory({ name: "Accessories", ebayMapping: "Accessories", amazonMapping: "Accessories" });
     this.createCategory({ name: "Gaming", ebayMapping: "Gaming", amazonMapping: "Gaming" });
     this.createCategory({ name: "Home & Garden", ebayMapping: "Home & Garden", amazonMapping: "Home & Garden" });
+    
+    // Create sample products
+    this.initializeSampleProducts();
+  }
+
+  private initializeSampleProducts() {
+    const sampleProducts = [
+      {
+        name: "Arduino Uno R3 Microcontroller Board",
+        sku: "ARD-UNO-R3",
+        ean: "7501234567890",
+        category: "Electronics",
+        description: "Official Arduino Uno R3 with USB cable. Perfect for beginners and prototyping.",
+        supplierPrice: "15.50",
+        salePrice: "24.99",
+        stock: 150,
+        weight: 25,
+        status: "active",
+        listedOnEbay: true,
+        listedOnAmazon: true,
+        excludeFromListing: false,
+        tmeProductId: "TME001"
+      },
+      {
+        name: "Raspberry Pi 4 Model B 8GB RAM",
+        sku: "RPI4-8GB",
+        ean: "7501234567891", 
+        category: "Electronics",
+        description: "Latest Raspberry Pi 4 with 8GB RAM, dual 4K display support, Gigabit Ethernet.",
+        supplierPrice: "68.00",
+        salePrice: "89.99",
+        stock: 75,
+        weight: 46,
+        status: "active",
+        listedOnEbay: true,
+        listedOnAmazon: false,
+        excludeFromListing: false,
+        tmeProductId: "TME002"
+      },
+      {
+        name: "ESP32 Development Board WiFi Bluetooth",
+        sku: "ESP32-DEV",
+        ean: "7501234567892",
+        category: "Electronics",
+        description: "ESP32 dual-core microcontroller with WiFi and Bluetooth capabilities.",
+        supplierPrice: "8.20",
+        salePrice: "14.99",
+        stock: 0,
+        weight: 10,
+        status: "out_of_stock",
+        listedOnEbay: false,
+        listedOnAmazon: false,
+        excludeFromListing: false,
+        tmeProductId: "TME003"
+      },
+      {
+        name: "Breadboard 830 Point Solderless",
+        sku: "BB-830",
+        ean: "7501234567893",
+        category: "Accessories",
+        description: "High-quality solderless breadboard with 830 tie points for prototyping.",
+        supplierPrice: "3.50",
+        salePrice: "7.99",
+        stock: 200,
+        weight: 15,
+        status: "active",
+        listedOnEbay: true,
+        listedOnAmazon: true,
+        excludeFromListing: false,
+        tmeProductId: "TME004"
+      },
+      {
+        name: "LED Strip 5050 RGB 5m Waterproof",
+        sku: "LED-5050-5M",
+        ean: "7501234567894",
+        category: "Electronics",
+        description: "Waterproof RGB LED strip with remote control and power adapter included.",
+        supplierPrice: "12.80",
+        salePrice: "19.99",
+        stock: 45,
+        weight: 120,
+        status: "active",
+        listedOnEbay: false,
+        listedOnAmazon: true,
+        excludeFromListing: false,
+        tmeProductId: "TME005"
+      },
+      {
+        name: "Servo Motor SG90 9g Micro",
+        sku: "SERVO-SG90",
+        ean: "7501234567895",
+        category: "Electronics",
+        description: "Lightweight micro servo motor for RC applications and robotics projects.",
+        supplierPrice: "2.30",
+        salePrice: "4.99",
+        stock: 300,
+        weight: 9,
+        status: "active",
+        listedOnEbay: true,
+        listedOnAmazon: false,
+        excludeFromListing: false,
+        tmeProductId: "TME006"
+      },
+      {
+        name: "LCD Display 16x2 Character Blue Backlight",
+        sku: "LCD-16X2-BLUE",
+        ean: "7501234567896",
+        category: "Electronics",
+        description: "16x2 character LCD display with blue backlight and I2C interface module.",
+        supplierPrice: "6.40",
+        salePrice: "11.99",
+        stock: 80,
+        weight: 35,
+        status: "active",
+        listedOnEbay: true,
+        listedOnAmazon: true,
+        excludeFromListing: false,
+        tmeProductId: "TME007"
+      },
+      {
+        name: "Ultrasonic Sensor HC-SR04",
+        sku: "US-HCSR04",
+        ean: "7501234567897",
+        category: "Electronics",
+        description: "Ultrasonic distance sensor with 2cm-400cm range for Arduino projects.",
+        supplierPrice: "1.80",
+        salePrice: "3.99",
+        stock: 120,
+        weight: 8,
+        status: "active",
+        listedOnEbay: false,
+        listedOnAmazon: false,
+        excludeFromListing: false,
+        tmeProductId: "TME008"
+      }
+    ];
+
+    sampleProducts.forEach(product => {
+      this.createProduct(product);
+    });
   }
 
   // Users
