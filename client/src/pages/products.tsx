@@ -7,7 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Search, Filter } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Card, CardContent } from "@/components/ui/card";
+import { Plus, Search, Filter, Edit2, Trash2, Upload, Download, MoreHorizontal } from "lucide-react";
 import { getStatusColor, formatCurrency } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -25,6 +27,8 @@ export function Products({ user }: ProductsProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("");
   const [selectedStatus, setSelectedStatus] = useState<string>("");
+  const [selectedProducts, setSelectedProducts] = useState<Set<number>>(new Set());
+  const [showFilters, setShowFilters] = useState(false);
 
   const { data: products = [], isLoading } = useQuery<Product[]>({
     queryKey: ["/api/products", { 
@@ -71,6 +75,73 @@ export function Products({ user }: ProductsProps) {
       deleteMutation.mutate(productId);
     }
   };
+
+  // Bulk operations
+  const handleSelectAll = () => {
+    if (selectedProducts.size === filteredProducts.length) {
+      setSelectedProducts(new Set());
+    } else {
+      setSelectedProducts(new Set(filteredProducts.map(p => p.id)));
+    }
+  };
+
+  const handleSelectProduct = (productId: number) => {
+    const newSelected = new Set(selectedProducts);
+    if (newSelected.has(productId)) {
+      newSelected.delete(productId);
+    } else {
+      newSelected.add(productId);
+    }
+    setSelectedProducts(newSelected);
+  };
+
+  const bulkListToEbayMutation = useMutation({
+    mutationFn: async (productIds: number[]) => {
+      const promises = productIds.map(id => 
+        apiRequest("PATCH", `/api/products/${id}`, { listedOnEbay: true })
+      );
+      return Promise.all(promises);
+    },
+    onSuccess: () => {
+      toast({
+        title: "Bulk Operation Completed",
+        description: `${selectedProducts.size} products listed on eBay.`,
+      });
+      setSelectedProducts(new Set());
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to list products on eBay.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const bulkListToAmazonMutation = useMutation({
+    mutationFn: async (productIds: number[]) => {
+      const promises = productIds.map(id => 
+        apiRequest("PATCH", `/api/products/${id}`, { listedOnAmazon: true })
+      );
+      return Promise.all(promises);
+    },
+    onSuccess: () => {
+      toast({
+        title: "Bulk Operation Completed",
+        description: `${selectedProducts.size} products listed on Amazon.`,
+      });
+      setSelectedProducts(new Set());
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to list products on Amazon.",
+        variant: "destructive",
+      });
+    },
+  });
 
   // Filter products based on search term
   const filteredProducts = products.filter(product =>
@@ -134,6 +205,46 @@ export function Products({ user }: ProductsProps) {
                 Add Product
               </Button>
             </div>
+
+            {/* Bulk Operations Toolbar */}
+            {selectedProducts.size > 0 && (
+              <Card className="mb-4">
+                <CardContent className="py-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-600">
+                      {selectedProducts.size} product{selectedProducts.size !== 1 ? 's' : ''} selected
+                    </span>
+                    <div className="flex items-center space-x-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => bulkListToEbayMutation.mutate(Array.from(selectedProducts))}
+                        disabled={bulkListToEbayMutation.isPending}
+                      >
+                        <Upload className="w-4 h-4 mr-1" />
+                        List on eBay
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => bulkListToAmazonMutation.mutate(Array.from(selectedProducts))}
+                        disabled={bulkListToAmazonMutation.isPending}
+                      >
+                        <Upload className="w-4 h-4 mr-1" />
+                        List on Amazon
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSelectedProducts(new Set())}
+                      >
+                        Clear Selection
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           {/* Products Table */}
