@@ -341,7 +341,7 @@ export class EbayApiService {
     <Title>${this.escapeXml(listingData.title)}</Title>
     <Description><![CDATA[${listingData.description}]]></Description>
     <PrimaryCategory>
-      <CategoryID>293</CategoryID>
+      <CategoryID>11176</CategoryID>
     </PrimaryCategory>
     <StartPrice currencyID="USD">${listingData.startPrice}</StartPrice>
     <Quantity>${listingData.quantity}</Quantity>
