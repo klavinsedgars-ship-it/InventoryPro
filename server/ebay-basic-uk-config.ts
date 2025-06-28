@@ -20,23 +20,17 @@ export function createBasicUKListingXML(product: any, authToken: string): string
     <DispatchTimeMax>3</DispatchTimeMax>
     <ItemLocation>London, UK</ItemLocation>
     <PostalCode>SW1A 1AA</PostalCode>
-    <ShippingDetails>
-      <ShippingType>Calculated</ShippingType>
-      <ShippingServiceOptions>
-        <ShippingServicePriority>1</ShippingServicePriority>
-        <ShippingService>Other</ShippingService>
-        <ShippingServiceCost currencyID="GBP">0.00</ShippingServiceCost>
-        <FreeShipping>true</FreeShipping>
-      </ShippingServiceOptions>
-    </ShippingDetails>
-    <PaymentMethods>PayPal</PaymentMethods>
-    <PayPalEmailAddress>test@example.com</PayPalEmailAddress>
-    <ReturnPolicy>
-      <ReturnsAcceptedOption>ReturnsAccepted</ReturnsAcceptedOption>
-      <RefundOption>MoneyBack</RefundOption>
-      <ReturnsWithinOption>Days_30</ReturnsWithinOption>
-      <ShippingCostPaidByOption>Buyer</ShippingCostPaidByOption>
-    </ReturnPolicy>
+    <SellerProfiles>
+      <SellerShippingProfile>
+        <ShippingProfileID>142140832019</ShippingProfileID>
+      </SellerShippingProfile>
+      <SellerPaymentProfile>
+        <PaymentProfileID>209734844019</PaymentProfileID>
+      </SellerPaymentProfile>
+      <SellerReturnProfile>
+        <ReturnProfileID>161272624019</ReturnProfileID>
+      </SellerReturnProfile>
+    </SellerProfiles>
     <PictureDetails>
       <PictureURL>https://images.unsplash.com/photo-1553062407-98eeb64c6a62</PictureURL>
     </PictureDetails>
