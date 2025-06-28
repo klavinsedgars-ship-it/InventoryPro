@@ -1,4 +1,8 @@
 export function createMinimalUKListingXML(product: any, authToken: string): string {
+  // Debug: Check what token is actually received
+  console.log("createMinimalUKListingXML - Received token prefix:", authToken.substring(0, 50));
+  console.log("createMinimalUKListingXML - Received token length:", authToken.length);
+  
   return `<?xml version="1.0" encoding="utf-8"?>
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>

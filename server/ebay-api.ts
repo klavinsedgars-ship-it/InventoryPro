@@ -378,6 +378,7 @@ export class EbayApiService {
     // Debug: Log token details for troubleshooting
     console.log("createAddItemXML - Token prefix:", userToken.substring(0, 50));
     console.log("createAddItemXML - Token length:", userToken.length);
+    console.log("createAddItemXML - DIRECT token from ENV:", userToken === process.env.EBAY_USER_TOKEN);
     
     return `<?xml version="1.0" encoding="utf-8"?>
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
