@@ -18,8 +18,7 @@ export function createMinimalUKListingXML(product: any, authToken: string): stri
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
     <DispatchTimeMax>3</DispatchTimeMax>
-    <ItemLocation>London, UK</ItemLocation>
-    <PostalCode>SW1A 1AA</PostalCode>
+    <ItemLocation>Riga, Latvia</ItemLocation>
     <SellerProfiles>
       <SellerShippingProfile>
         <ShippingProfileID>142140832019</ShippingProfileID>
