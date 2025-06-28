@@ -1,6 +1,6 @@
 export function createMinimalUSListingXML(product: any, authToken: string): string {
   return `<?xml version="1.0" encoding="utf-8"?>
-<VerifyAddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+<AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
     <eBayAuthToken>${authToken}</eBayAuthToken>
   </RequesterCredentials>
@@ -19,22 +19,20 @@ export function createMinimalUSListingXML(product: any, authToken: string): stri
     <ConditionID>1000</ConditionID>
     <DispatchTimeMax>3</DispatchTimeMax>
     <Location>New York, NY</Location>
-    <ShippingDetails>
-      <ShippingType>Flat</ShippingType>
-      <ShippingServiceOptions>
-        <ShippingServicePriority>1</ShippingServicePriority>
-        <ShippingService>USPSMedia</ShippingService>
-        <ShippingServiceCost>5.99</ShippingServiceCost>
-      </ShippingServiceOptions>
-    </ShippingDetails>
-    <ReturnPolicy>
-      <ReturnsAcceptedOption>ReturnsAccepted</ReturnsAcceptedOption>
-      <ReturnsWithinOption>Days_30</ReturnsWithinOption>
-      <ShippingCostPaidByOption>Buyer</ShippingCostPaidByOption>
-    </ReturnPolicy>
+    <SellerProfiles>
+      <SellerShippingProfile>
+        <ShippingProfileID>234560863019</ShippingProfileID>
+      </SellerShippingProfile>
+      <SellerPaymentProfile>
+        <PaymentProfileID>216006444019</PaymentProfileID>
+      </SellerPaymentProfile>
+      <SellerReturnProfile>
+        <ReturnProfileID>209734982019</ReturnProfileID>
+      </SellerReturnProfile>
+    </SellerProfiles>
     <PictureDetails>
       <PictureURL>https://images.unsplash.com/photo-1553062407-98eeb64c6a62</PictureURL>
     </PictureDetails>
   </Item>
-</VerifyAddFixedPriceItemRequest>`;
+</AddFixedPriceItemRequest>`;
 }

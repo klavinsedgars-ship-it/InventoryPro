@@ -1131,8 +1131,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { ebayOAuth } = await import('./ebay-oauth');
       const authToken = await ebayOAuth.getValidAccessToken();
 
-      // Create US listing XML using simplified configuration with image
-      const xmlBody = createSimpleUSListingXML(product, authToken, imageUrl);
+      // Create US listing XML using minimal working configuration
+      const { createMinimalUSListingXML } = await import('./ebay-minimal-config');
+      const xmlBody = createMinimalUSListingXML(product, authToken);
       const response = await fetch('https://api.ebay.com/ws/api.dll', {
         method: 'POST',
         headers: {
