@@ -1,4 +1,5 @@
 import { storage } from "./storage";
+import { ebayOAuth } from "./ebay-oauth";
 
 interface EbayCredentials {
   appId: string;
@@ -180,7 +181,7 @@ export class EbayApiService {
       try {
         // Create XML request for eBay Trading API
         // First verify the item structure with VerifyAddItem
-        const verifyXmlRequest = this.createVerifyItemXML(listingData);
+        const verifyXmlRequest = await this.createVerifyItemXML(listingData);
         console.log("Verifying item with eBay API first...");
         
         let response: string;
@@ -189,7 +190,7 @@ export class EbayApiService {
           console.log("VerifyAddItem response:", verifyResponse);
           
           // If verification succeeds, proceed with actual listing
-          const xmlRequest = this.createAddItemXML(listingData);
+          const xmlRequest = await this.createAddItemXML(listingData);
           console.log("Generated XML:", xmlRequest);
           console.log("Making eBay Trading API call with XML request");
           
@@ -324,8 +325,8 @@ export class EbayApiService {
 
 
 
-  private createVerifyItemXML(listingData: any): string {
-    const userToken = process.env.EBAY_USER_TOKEN;
+  private async createVerifyItemXML(listingData: any): Promise<string> {
+    const userToken = await ebayOAuth.getValidAccessToken();
     if (!userToken) {
       throw new Error("eBay User Token is required for listing products");
     }
@@ -368,8 +369,8 @@ export class EbayApiService {
 </VerifyAddFixedPriceItemRequest>`;
   }
 
-  private createAddItemXML(listingData: any): string {
-    const userToken = process.env.EBAY_USER_TOKEN;
+  private async createAddItemXML(listingData: any): Promise<string> {
+    const userToken = await ebayOAuth.getValidAccessToken();
     if (!userToken) {
       throw new Error("eBay User Token is required for listing products");
     }
