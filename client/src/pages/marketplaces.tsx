@@ -115,7 +115,10 @@ export function Marketplaces({ user }: MarketplacesProps) {
   });
 
   const unlistEbayMutation = useMutation({
-    mutationFn: (productId: number) => apiRequest("POST", "/api/ebay/unlist", { productId }),
+    mutationFn: async (productId: number) => {
+      const response = await apiRequest("POST", "/api/ebay/unlist", { productId });
+      return response.json();
+    },
     onSuccess: (response: any, productId: number) => {
       const product = products.find(p => p.id === productId);
       

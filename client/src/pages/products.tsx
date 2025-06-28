@@ -135,7 +135,8 @@ export function Products({ user }: ProductsProps) {
 
   const unlistFromEbayMutation = useMutation({
     mutationFn: async (productId: number) => {
-      return apiRequest("POST", "/api/ebay/unlist", { productId });
+      const response = await apiRequest("POST", "/api/ebay/unlist", { productId });
+      return response.json();
     },
     onSuccess: (data: any) => {
       if (data.success) {
