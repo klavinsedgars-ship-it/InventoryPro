@@ -1064,7 +1064,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Image upload can be done manually using the "Upload Image" button
       let imageUrl = null;
 
-      // Get OAuth token from the OAuth service
+      // Use Trading API compatible token - get it from OAuth service
       const { ebayOAuth } = await import('./ebay-oauth');
       const authToken = await ebayOAuth.getValidAccessToken();
 
