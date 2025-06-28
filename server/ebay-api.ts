@@ -68,6 +68,10 @@ export class EbayApiService {
     if (!this.credentials.appId || !this.credentials.devId || !this.credentials.certId) {
       throw new Error("eBay API credentials not properly configured");
     }
+
+    if (!process.env.EBAY_USER_TOKEN) {
+      console.warn("eBay User Token not configured - listings will fail");
+    }
   }
 
   private getApiUrl(): string {
@@ -202,6 +206,7 @@ export class EbayApiService {
         // Create XML request for eBay Trading API
         const xmlRequest = this.createAddItemXML(listingData);
         console.log("Making eBay Trading API call with XML request");
+        console.log("XML Request (first 200 chars):", xmlRequest.substring(0, 200));
         
         const response = await this.makeTradingApiRequest(xmlRequest);
         
@@ -210,9 +215,12 @@ export class EbayApiService {
         const itemId = itemIdMatch ? itemIdMatch[1] : null;
         
         if (!itemId) {
-          // Check for errors in response
-          const errorMatch = response.match(/<ShortMessage>(.*?)<\/ShortMessage>/);
+          // Check for errors in response - try multiple error patterns
+          const errorMatch = response.match(/<ShortMessage>(.*?)<\/ShortMessage>/) ||
+                           response.match(/<LongMessage>(.*?)<\/LongMessage>/) ||
+                           response.match(/<ErrorCode>(\d+)<\/ErrorCode>/);
           const errorMessage = errorMatch ? errorMatch[1] : 'Unknown eBay API error';
+          console.log("eBay API Error - Full response:", response);
           throw new Error(`eBay listing failed: ${errorMessage}`);
         }
         
@@ -290,10 +298,15 @@ export class EbayApiService {
   }
 
   private createAddItemXML(listingData: any): string {
+    const userToken = process.env.EBAY_USER_TOKEN;
+    if (!userToken) {
+      throw new Error("eBay User Token is required for listing products");
+    }
+    
     return `<?xml version="1.0" encoding="utf-8"?>
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
-    <eBayAuthToken>${this.credentials.appId}</eBayAuthToken>
+    <eBayAuthToken>${userToken}</eBayAuthToken>
   </RequesterCredentials>
   <Item>
     <Title>${this.escapeXml(listingData.title)}</Title>
@@ -339,10 +352,18 @@ export class EbayApiService {
   private async makeTradingApiRequest(xmlBody: string): Promise<string> {
     const tradingUrl = this.isProduction ? this.tradingApiUrl : this.sandboxTradingApiUrl;
     
+    console.log("Making eBay API request to:", tradingUrl);
+    console.log("Request headers:", {
+      'X-EBAY-API-DEV-NAME': this.credentials.devId ? 'SET' : 'MISSING',
+      'X-EBAY-API-APP-NAME': this.credentials.appId ? 'SET' : 'MISSING',
+      'X-EBAY-API-CERT-NAME': this.credentials.certId ? 'SET' : 'MISSING',
+      'EBAY_USER_TOKEN': process.env.EBAY_USER_TOKEN ? 'SET' : 'MISSING'
+    });
+    
     const response = await fetch(tradingUrl, {
       method: 'POST',
       headers: {
-        'Content-Type': 'text/xml',
+        'Content-Type': 'text/xml; charset=utf-8',
         'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
         'X-EBAY-API-DEV-NAME': this.credentials.devId,
         'X-EBAY-API-APP-NAME': this.credentials.appId,
@@ -353,11 +374,16 @@ export class EbayApiService {
       body: xmlBody
     });
 
+    console.log("eBay API response status:", response.status, response.statusText);
+    
+    const responseText = await response.text();
+    console.log("eBay API response body:", responseText.substring(0, 500) + "...");
+
     if (!response.ok) {
       throw new Error(`eBay Trading API request failed: ${response.status} ${response.statusText}`);
     }
 
-    return await response.text();
+    return responseText;
   }
 
   async bulkListProducts(productIds: number[], categoryId?: string): Promise<{
