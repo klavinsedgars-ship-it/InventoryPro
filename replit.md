@@ -132,6 +132,9 @@ Changelog:
 - June 28, 2025. Successfully integrated eBay API with real credentials and authentication
 - June 28, 2025. Implemented eBay product listing and bulk listing functionality
 - June 28, 2025. Added eBay marketplace management features to CRM interface
+- June 28, 2025. Fixed Select component runtime errors in both marketplace and products pages
+- June 28, 2025. Added eye icons with marketplace links for listed products
+- June 28, 2025. Reset product database with single test product for eBay listing validation
 ```
 
 ## User Preferences
