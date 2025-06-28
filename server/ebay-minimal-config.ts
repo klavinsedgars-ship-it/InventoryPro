@@ -18,6 +18,23 @@ export function createMinimalUSListingXML(product: any, authToken: string): stri
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
     <DispatchTimeMax>3</DispatchTimeMax>
+    <Location>New York, NY</Location>
+    <ShippingDetails>
+      <ShippingType>Flat</ShippingType>
+      <ShippingServiceOptions>
+        <ShippingServicePriority>1</ShippingServicePriority>
+        <ShippingService>USPSMedia</ShippingService>
+        <ShippingServiceCost>5.99</ShippingServiceCost>
+      </ShippingServiceOptions>
+    </ShippingDetails>
+    <ReturnPolicy>
+      <ReturnsAcceptedOption>ReturnsAccepted</ReturnsAcceptedOption>
+      <ReturnsWithinOption>Days_30</ReturnsWithinOption>
+      <ShippingCostPaidByOption>Buyer</ShippingCostPaidByOption>
+    </ReturnPolicy>
+    <PictureDetails>
+      <PictureURL>https://images.unsplash.com/photo-1553062407-98eeb64c6a62</PictureURL>
+    </PictureDetails>
   </Item>
 </VerifyAddFixedPriceItemRequest>`;
 }
