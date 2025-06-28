@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent } from "@/components/ui/card";
-import { Plus, Search, Filter, Edit2, Trash2, Upload, Download, MoreHorizontal } from "lucide-react";
+import { Plus, Search, Filter, Edit2, Trash2, Upload, Download, MoreHorizontal, Eye } from "lucide-react";
 import { getStatusColor, formatCurrency } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -25,15 +25,15 @@ export function Products({ user }: ProductsProps) {
   const [productModalOpen, setProductModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState<string>("");
-  const [selectedStatus, setSelectedStatus] = useState<string>("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [selectedStatus, setSelectedStatus] = useState<string>("all");
   const [selectedProducts, setSelectedProducts] = useState<Set<number>>(new Set());
   const [showFilters, setShowFilters] = useState(false);
 
   const { data: products = [], isLoading } = useQuery<Product[]>({
     queryKey: ["/api/products", { 
-      category: selectedCategory || undefined,
-      status: selectedStatus || undefined 
+      category: selectedCategory && selectedCategory !== "all" ? selectedCategory : undefined,
+      status: selectedStatus && selectedStatus !== "all" ? selectedStatus : undefined 
     }],
   });
 
@@ -345,12 +345,44 @@ export function Products({ user }: ProductsProps) {
                           </Badge>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          <div className="flex space-x-1">
+                          <div className="flex items-center space-x-2">
                             {product.listedOnEbay && (
-                              <Badge variant="outline" className="text-xs">eBay</Badge>
+                              <div className="flex items-center space-x-1">
+                                <Badge variant="outline" className="text-xs">eBay</Badge>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 w-6 p-0"
+                                  onClick={() => {
+                                    // Generate eBay search URL based on product name and SKU
+                                    const searchQuery = encodeURIComponent(`${product.name} ${product.sku}`);
+                                    const ebayUrl = `https://www.ebay.com/sch/i.html?_nkw=${searchQuery}`;
+                                    window.open(ebayUrl, '_blank');
+                                  }}
+                                  title="View on eBay"
+                                >
+                                  <Eye className="h-3 w-3" />
+                                </Button>
+                              </div>
                             )}
                             {product.listedOnAmazon && (
-                              <Badge variant="outline" className="text-xs">Amazon</Badge>
+                              <div className="flex items-center space-x-1">
+                                <Badge variant="outline" className="text-xs">Amazon</Badge>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 w-6 p-0"
+                                  onClick={() => {
+                                    // Generate Amazon search URL based on product name and SKU
+                                    const searchQuery = encodeURIComponent(`${product.name} ${product.sku}`);
+                                    const amazonUrl = `https://www.amazon.com/s?k=${searchQuery}`;
+                                    window.open(amazonUrl, '_blank');
+                                  }}
+                                  title="View on Amazon"
+                                >
+                                  <Eye className="h-3 w-3" />
+                                </Button>
+                              </div>
                             )}
                             {!product.listedOnEbay && !product.listedOnAmazon && (
                               <span className="text-gray-400">None</span>
