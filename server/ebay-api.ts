@@ -332,19 +332,23 @@ export class EbayApiService {
     <ListingDuration>GTC</ListingDuration>
     <Country>GB</Country>
     <Currency>GBP</Currency>
-    <Location>Riga</Location>
-    <PostalCode>LV-1010</PostalCode>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
     <DispatchTimeMax>3</DispatchTimeMax>
     <ItemLocation>Riga, Latvia</ItemLocation>
+    <PostalCode>LV-1010</PostalCode>
     <PictureDetails>
       <PictureURL>https://images.unsplash.com/photo-1553062407-98eeb64c6a62</PictureURL>
     </PictureDetails>
+    <ShippingDetails>
+      <ShippingType>NotSpecified</ShippingType>
+      <SellerProfiles>
+        <SellerShippingProfile>
+          <ShippingProfileID>142140832019</ShippingProfileID>
+        </SellerShippingProfile>
+      </SellerProfiles>
+    </ShippingDetails>
     <SellerProfiles>
-      <SellerShippingProfile>
-        <ShippingProfileID>142140832019</ShippingProfileID>
-      </SellerShippingProfile>
       <SellerPaymentProfile>
         <PaymentProfileID>209734844019</PaymentProfileID>
       </SellerPaymentProfile>
