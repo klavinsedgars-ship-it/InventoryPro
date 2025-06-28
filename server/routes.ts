@@ -437,7 +437,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   </Item>
 </VerifyAddItemRequest>`;
 
-          const response = await fetch('https://api.ebay.com/ws/api.dll', {
+          const response = await fetch('https://api.ebay.de/ws/api.dll', {
             method: 'POST',
             headers: {
               'Content-Type': 'text/xml; charset=utf-8',
@@ -600,7 +600,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   </Item>
 </VerifyAddFixedPriceItemRequest>`;
 
-      const response = await fetch('https://api.ebay.com/ws/api.dll', {
+      const response = await fetch('https://api.ebay.de/ws/api.dll', {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
@@ -680,7 +680,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   </RequesterCredentials>
 </GetSellerProfilesRequest>`;
 
-      const response = await fetch('https://api.ebay.com/ws/api.dll', {
+      const response = await fetch('https://api.ebay.de/ws/api.dll', {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
@@ -710,7 +710,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // eBay Germany listing simplified (no business policies)
+  // eBay US listing simplified (no business policies)
   app.post("/api/ebay/list-simple", requireAuth, async (req, res) => {
     try {
       const { productId } = req.body;
@@ -742,7 +742,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     <PrimaryCategory>
       <CategoryID>58277</CategoryID>
     </PrimaryCategory>
-    <StartPrice currencyID="EUR">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
+    <StartPrice currencyID="USD">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
     <Quantity>${product.stock || 1}</Quantity>
     <ListingDuration>GTC</ListingDuration>
     <Country>DE</Country>
@@ -759,7 +759,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       <ShippingServiceOptions>
         <ShippingServicePriority>1</ShippingServicePriority>
         <ShippingService>Other</ShippingService>
-        <ShippingServiceCost currencyID="EUR">0.00</ShippingServiceCost>
+        <ShippingServiceCost currencyID="USD">0.00</ShippingServiceCost>
         <FreeShipping>true</FreeShipping>
       </ShippingServiceOptions>
     </ShippingDetails>
@@ -770,7 +770,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   </Item>
 </AddFixedPriceItemRequest>`;
 
-      const response = await fetch('https://api.ebay.com/ws/api.dll', {
+      const response = await fetch('https://api.ebay.de/ws/api.dll', {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
@@ -804,12 +804,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           listingResult: {
             itemId: itemId,
             ebayUrl: `https://www.ebay.de/itm/${itemId}`,
-            message: "Product successfully listed on eBay Germany!",
+            message: "Product successfully listed on eBay US!",
             product: {
               id: product.id,
               name: product.name,
               price: product.salePrice,
-              currency: "EUR"
+              currency: "USD"
             }
           }
         });
@@ -859,7 +859,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   </PictureData>
 </UploadSiteHostedPicturesRequest>`;
 
-      const response = await fetch('https://api.ebay.com/ws/api.dll', {
+      const response = await fetch('https://api.ebay.de/ws/api.dll', {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml; charset=utf-8',
@@ -943,7 +943,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const externalImageUrl = `${req.protocol}://${req.get('host')}/api/images/arduino.jpg`;
       
       const xmlBody = createListingWithExternalImageXML(product, externalImageUrl, accessToken);
-      const response = await fetch('https://api.ebay.com/ws/api.dll', {
+      const response = await fetch('https://api.ebay.de/ws/api.dll', {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml; charset=utf-8',
@@ -1001,7 +1001,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Use VerifyAddFixedPriceItem to test business policies without actually listing
       const xmlBody = createTestListingXML(product);
-      const response = await fetch('https://api.ebay.com/ws/api.dll', {
+      const response = await fetch('https://api.ebay.de/ws/api.dll', {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
@@ -1093,11 +1093,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Create US listing XML using simplified configuration with image
       const xmlBody = createSimpleUSListingXML(product, authToken, imageUrl);
-      const response = await fetch('https://api.ebay.com/ws/api.dll', {
+      const response = await fetch('https://api.ebay.de/ws/api.dll', {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
-          'X-EBAY-API-SITEID': '0',
+          'X-EBAY-API-SITEID': '77',
           'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
           'X-EBAY-API-CALL-NAME': 'AddFixedPriceItem',
           'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
@@ -1127,12 +1127,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           listingResult: {
             itemId: itemId,
             ebayUrl: `https://www.ebay.de/itm/${itemId}`,
-            message: "Product successfully listed on eBay Germany!",
+            message: "Product successfully listed on eBay US!",
             product: {
               id: product.id,
               name: product.name,
               price: product.salePrice,
-              currency: "EUR"
+              currency: "USD"
             }
           }
         });
@@ -1146,7 +1146,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
     } catch (error) {
-      console.error("eBay Germany listing failed:", error);
+      console.error("eBay US listing failed:", error);
       res.status(500).json({
         success: false,
         error: error instanceof Error ? error.message : "Germany listing failed"
@@ -1186,7 +1186,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     <PrimaryCategory>
       <CategoryID>58277</CategoryID>
     </PrimaryCategory>
-    <StartPrice currencyID="EUR">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
+    <StartPrice currencyID="USD">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
     <Quantity>${product.stock || 1}</Quantity>
     <ListingDuration>Days_7</ListingDuration>
     <Country>DE</Country>
@@ -1230,7 +1230,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   </Item>
 </VerifyAddFixedPriceItemRequest>`;
 
-      const response = await fetch('https://api.ebay.com/ws/api.dll', {
+      const response = await fetch('https://api.ebay.de/ws/api.dll', {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
