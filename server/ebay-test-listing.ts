@@ -12,13 +12,13 @@ export function createTestListingXML(product: any): string {
     <PrimaryCategory>
       <CategoryID>58277</CategoryID>
     </PrimaryCategory>
-    <StartPrice currencyID="USD">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
+    <StartPrice currencyID="GBP">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
     <Quantity>${product.stock || 1}</Quantity>
     <ListingDuration>GTC</ListingDuration>
-    <Country>US</Country>
-    <Currency>USD</Currency>
-    <Location>New York, NY</Location>
-    <PostalCode>10001</PostalCode>
+    <Country>GB</Country>
+    <Currency>GBP</Currency>
+    <Location>London, UK</Location>
+    <PostalCode>SW1A 1AA</PostalCode>
     <DispatchTimeMax>2</DispatchTimeMax>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
@@ -47,7 +47,7 @@ export function createTestListingXML(product: any): string {
         <Value>Uno R3</Value>
       </NameValueList>
     </ItemSpecifics>
-    <ItemLocation>New York, NY</ItemLocation>
+    <ItemLocation>London, UK</ItemLocation>
   </Item>
 </VerifyAddFixedPriceItemRequest>`;
 }

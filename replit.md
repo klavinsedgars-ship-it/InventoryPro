@@ -162,6 +162,10 @@ Changelog:
 - June 28, 2025. System technically functional - all XML generation, authentication, and API integration working correctly
 - June 28, 2025. Location mismatch between account registration (Latvia) and US marketplace triggers policy enforcement
 - June 28, 2025. Manual listing success suggests account has special permissions or different configuration
+- June 28, 2025. **MAJOR CHANGE: Complete system migration from eBay US to eBay UK marketplace**
+- June 28, 2025. Updated all site IDs from US (0) to UK (3), changed currency from USD to GBP, locations to London, UK
+- June 28, 2025. Modified all XML configurations, API calls, and frontend currency formatting for UK marketplace
+- June 28, 2025. Created UK-specific listing configurations and updated business logic throughout the system
 ```
 
 ## User Preferences

@@ -50,7 +50,7 @@ export function createListingWithExternalImageXML(product: any, externalImageUrl
         <Value>Uno R3</Value>
       </NameValueList>
     </ItemSpecifics>
-    <ItemLocation>New York, NY</ItemLocation>
+    <ItemLocation>London, UK</ItemLocation>
   </Item>
 </AddFixedPriceItemRequest>`;
 }

@@ -7,14 +7,14 @@ export function cn(...inputs: ClassValue[]) {
 
 export function formatCurrency(amount: number | string): string {
   const num = typeof amount === 'string' ? parseFloat(amount) : amount;
-  return new Intl.NumberFormat('en-US', {
+  return new Intl.NumberFormat('en-GB', {
     style: 'currency',
-    currency: 'USD',
+    currency: 'GBP',
   }).format(num);
 }
 
 export function formatNumber(amount: number): string {
-  return new Intl.NumberFormat('en-US').format(amount);
+  return new Intl.NumberFormat('en-GB').format(amount);
 }
 
 export function getStatusColor(status: string): string {
