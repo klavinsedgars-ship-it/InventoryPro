@@ -1134,6 +1134,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Create US listing XML using minimal working configuration
       const { createMinimalUSListingXML } = await import('./ebay-minimal-config');
       const xmlBody = createMinimalUSListingXML(product, authToken);
+      
+      // Debug: Log the actual XML being sent
+      console.log("Generated XML:", xmlBody);
+      
       const response = await fetch('https://api.ebay.com/ws/api.dll', {
         method: 'POST',
         headers: {
