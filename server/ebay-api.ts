@@ -807,6 +807,36 @@ export class EbayApiService {
         const errorMatch = responseText.match(/<ShortMessage>(.*?)<\/ShortMessage>/) ||
                           responseText.match(/<LongMessage>(.*?)<\/LongMessage>/);
         const errorMessage = errorMatch ? errorMatch[1] : 'Unknown error occurred';
+        
+        // For token expiration, still update the local database to keep it in sync
+        if (errorMessage.includes('token is hard expired') || errorMessage.includes('expired')) {
+          console.log(`Token expired for unlisting, updating local database only for product ${product.name}`);
+          
+          await storage.updateProduct(productId, {
+            listedOnEbay: false,
+            ebayItemId: null
+          });
+
+          await storage.createSyncLog({
+            source: "ebay",
+            operation: "product_unlisting",
+            status: "warning",
+            message: `Product "${product.name}" marked as unlisted locally due to expired token. Manual eBay unlisting may be required.`,
+            details: JSON.stringify({
+              productId,
+              itemId: product.ebayItemId,
+              error: errorMessage,
+              note: "Token expired - local database updated only"
+            })
+          });
+
+          return {
+            success: true,
+            message: `Product "${product.name}" marked as unlisted locally. Note: eBay token expired - manual verification recommended.`,
+            itemId: product.ebayItemId
+          };
+        }
+        
         throw new Error(`eBay EndItem failed: ${errorMessage}`);
       }
 

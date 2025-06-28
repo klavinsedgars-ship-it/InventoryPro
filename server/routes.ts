@@ -328,10 +328,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(result);
     } catch (error) {
       console.error("eBay unlisting failed:", error);
-      res.status(500).json({ 
+      res.json({ 
         success: false, 
-        message: (error as Error).message || "eBay unlisting failed",
-        error: (error as Error).message
+        message: `Failed to unlist product: ${(error as Error).message}`,
+        errors: [(error as Error).message]
       });
     }
   });
