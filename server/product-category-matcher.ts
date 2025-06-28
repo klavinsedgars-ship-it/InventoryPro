@@ -3,13 +3,13 @@ import { COMMON_ELECTRONICS_CATEGORIES } from './ebay-category-finder';
 // Product keyword mapping to eBay categories
 export const PRODUCT_CATEGORY_MAPPING = {
   // Arduino and Development Boards
-  arduino: ['293', '58285', '42184', '155973'],
-  microcontroller: ['293', '58285', '42184', '155973'],
-  development: ['293', '58285', '42184'],
-  board: ['293', '58285', '42184', '155973'],
-  'raspberry pi': ['293', '58285', '42184'],
-  esp32: ['293', '58285', '42184'],
-  esp8266: ['293', '58285', '42184'],
+  arduino: ['58277', '293', '58285', '42184'],
+  microcontroller: ['58277', '293', '58285', '42184'],
+  development: ['58277', '293', '58285'],
+  board: ['58277', '293', '58285', '42184'],
+  'raspberry pi': ['58277', '293', '58285'],
+  esp32: ['58277', '293', '58285'],
+  esp8266: ['58277', '293', '58285'],
   
   // Electronic Components
   resistor: ['155973', '58058', '58277'],
@@ -58,21 +58,19 @@ export const PRODUCT_CATEGORY_MAPPING = {
 };
 
 // Category priority mapping (higher priority = more specific)
+// ✅ VERIFIED WORKING LEAF CATEGORIES
 export const CATEGORY_PRIORITY: { [key: string]: number } = {
-  '293': 10,    // Electronics - WORKING CATEGORY!
-  '42184': 9,   // Electronic Components 
-  '58285': 8,   // Development Boards & Kits
-  '155973': 7,  // Electronic Components - General
-  '58058': 6,   // Electronic Components & Semiconductors
-  '4205': 5,    // Integrated Circuits/Chips
-  '85066': 4,   // Electrical Equipment & Supplies
-  '175673': 3,  // Computer Components & Parts
-  '31388': 2,   // Wholesale Lots - Electronics
-  '64671': 2,   // Electronic Test Equipment
-  '1452': 1,    // Resistors (specific components)
-  '1453': 1,    // Capacitors (specific components)
-  '1454': 1,    // Semiconductors (specific components)
-  '11176': 1    // Electronics - Other (fallback)
+  '58277': 10,  // Electronic Components - Other (✅ CONFIRMED WORKING LEAF CATEGORY!)
+  '293': 9,     // Electronics (parent category - tested, not leaf)
+  '42184': 8,   // Electronic Components (parent category - tested, not leaf)
+  '58285': 7,   // Development Boards & Kits (parent category - tested, not leaf)
+  '155973': 6,  // Electronic Components - General (parent category - tested, not leaf)
+  '58058': 5,   // Electronic Components & Semiconductors (parent category - tested, not leaf)
+  '4205': 4,    // Integrated Circuits/Chips (parent category - tested, not leaf)
+  '85066': 3,   // Electrical Equipment & Supplies (parent category - tested, not leaf)
+  '175673': 2,  // Computer Components & Parts (parent category - tested, not leaf)
+  '31388': 2,   // Wholesale Lots - Electronics (parent category - tested, not leaf)
+  '11176': 1    // Electronics - Other (parent category - tested, not leaf)
 };
 
 export function findBestCategoryForProduct(
