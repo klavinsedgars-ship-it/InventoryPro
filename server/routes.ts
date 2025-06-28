@@ -15,6 +15,7 @@ import { tmeApi } from "./tme-api";
 import { ebayApi } from "./ebay-api";
 import { createSimpleUSListingXML } from "./ebay-us-config";
 import { createTestListingXML } from "./ebay-test-listing";
+import { createListingWithExternalImageXML } from "./ebay-external-image";
 import fs from 'fs';
 import path from 'path';
 import { findValidEbayCategory, getCategoryNameById } from "./ebay-category-finder";
@@ -831,10 +832,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Upload image to eBay
   app.post("/api/ebay/upload-image", requireAuth, async (req, res) => {
     try {
-      // Read the test image file (minimal JPEG for testing)
-      const imagePath = path.join(process.cwd(), 'attached_assets', 'test_minimal.jpg');
+      // Read the original Arduino image file (valid JPEG)
+      const imagePath = path.join(process.cwd(), 'attached_assets', 'Arduino_Uno_-_R3_1751105386641.jpg');
+      
+      // Check if file exists
+      if (!fs.existsSync(imagePath)) {
+        throw new Error('Image file not found');
+      }
+      
       const imageBuffer = fs.readFileSync(imagePath);
       const base64Image = imageBuffer.toString('base64');
+      
+      console.log(`Image size: ${imageBuffer.length} bytes`);
+      console.log(`Base64 length: ${base64Image.length} characters`);
 
       const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
 <UploadSiteHostedPicturesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -842,7 +852,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     <eBayAuthToken>${process.env.EBAY_USER_TOKEN}</eBayAuthToken>
   </RequesterCredentials>
   <PictureData>
-    <PictureSet>Supersize</PictureSet>
+    <PictureName>Arduino_Uno_R3.jpg</PictureName>
+    <PictureSet>Standard</PictureSet>
     <Data>${base64Image}</Data>
   </PictureData>
 </UploadSiteHostedPicturesRequest>`;
@@ -850,9 +861,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const response = await fetch('https://api.ebay.com/ws/api.dll', {
         method: 'POST',
         headers: {
-          'Content-Type': 'text/xml',
+          'Content-Type': 'text/xml; charset=utf-8',
           'X-EBAY-API-SITEID': '0',
-          'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
+          'X-EBAY-API-COMPATIBILITY-LEVEL': '1419',
           'X-EBAY-API-CALL-NAME': 'UploadSiteHostedPictures',
           'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
           'X-EBAY-API-APP-NAME': process.env.EBAY_APP_ID!,
@@ -877,6 +888,86 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({
         success: false,
         error: error instanceof Error ? error.message : "Image upload failed"
+      });
+    }
+  });
+
+  // Serve Arduino image for external URL approach
+  app.get("/api/images/arduino.jpg", (req, res) => {
+    try {
+      const imagePath = path.join(process.cwd(), 'attached_assets', 'Arduino_Uno_-_R3_1751105386641.jpg');
+      
+      if (!fs.existsSync(imagePath)) {
+        return res.status(404).json({ error: "Image not found" });
+      }
+      
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+      
+      const imageStream = fs.createReadStream(imagePath);
+      imageStream.pipe(res);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to serve image" });
+    }
+  });
+
+  // Test external image listing endpoint
+  app.post("/api/ebay/list-external-image", requireAuth, async (req, res) => {
+    try {
+      const { productId } = req.body;
+      
+      const product = await storage.getProduct(productId);
+      if (!product) {
+        return res.status(404).json({
+          success: false,
+          error: "Product not found"
+        });
+      }
+
+      // Use external image URL pointing to our own server
+      const externalImageUrl = `${req.protocol}://${req.get('host')}/api/images/arduino.jpg`;
+      
+      const xmlBody = createListingWithExternalImageXML(product, externalImageUrl);
+      const response = await fetch('https://api.ebay.com/ws/api.dll', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/xml; charset=utf-8',
+          'X-EBAY-API-SITEID': '0',
+          'X-EBAY-API-COMPATIBILITY-LEVEL': '1419',
+          'X-EBAY-API-CALL-NAME': 'AddFixedPriceItem',
+          'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
+          'X-EBAY-API-APP-NAME': process.env.EBAY_APP_ID!,
+          'X-EBAY-API-CERT-NAME': process.env.EBAY_CERT_ID!
+        },
+        body: xmlBody
+      });
+      
+      const responseText = await response.text();
+      const isSuccessful = responseText.includes('<Ack>Success</Ack>');
+      
+      if (isSuccessful) {
+        const itemIdMatch = responseText.match(/<ItemID>(.*?)<\/ItemID>/);
+        res.json({
+          success: true,
+          message: "Listed successfully with external image",
+          listingResult: {
+            itemId: itemIdMatch ? itemIdMatch[1] : null,
+            imageUrl: externalImageUrl
+          },
+          response: responseText
+        });
+      } else {
+        res.json({
+          success: false,
+          error: "Listing failed",
+          details: responseText
+        });
+      }
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: "External image listing failed",
+        message: error.message
       });
     }
   });

@@ -144,6 +144,32 @@ export function Products({ user }: ProductsProps) {
     },
   });
 
+  const externalImageMutation = useMutation({
+    mutationFn: (productId: number) => apiRequest("POST", "/api/ebay/list-external-image", { productId }),
+    onSuccess: (data: any) => {
+      if (data.success) {
+        toast({
+          title: "Success with External Image!",
+          description: `Product listed on eBay US! Item ID: ${data.listingResult.itemId}`,
+        });
+        queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      } else {
+        toast({
+          title: "External Image Listing Failed",
+          description: data.error || "Failed to list with external image",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to connect to eBay US",
+        variant: "destructive",
+      });
+    },
+  });
+
   const usListingMutation = useMutation({
     mutationFn: (productId: number) => apiRequest("POST", "/api/ebay/list-us", { productId }),
     onSuccess: (data: any) => {
