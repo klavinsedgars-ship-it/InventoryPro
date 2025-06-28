@@ -39,6 +39,9 @@ interface TMEStock {
 interface TMEApiResponse<T> {
   Status: string;
   Message?: string;
+  ErrorMessage?: string;
+  ErrorCode?: number;
+  Error?: any[];
   Data: {
     ProductList?: T[];
     PriceList?: T[];
@@ -183,18 +186,20 @@ export class TMEApiService {
           source: "tme",
           operation: "api_error",
           status: "error",
-          message: "TME API authentication failed. Please verify credentials.",
+          message: "TME API access issues detected. API key may require activation or additional permissions.",
           details: JSON.stringify({ 
             error: (apiError as Error).message,
-            suggestion: "Verify TME API token, customer number, and contact number in environment variables"
+            suggestion: "Contact TME support to verify API key permissions and account status",
+            errorType: "authentication_or_permissions"
           })
         });
 
         return {
           success: false,
-          message: "TME API authentication failed. Please verify your TME credentials are correctly configured.",
-          suggestion: "Check that TME_API_TOKEN, TME_CUSTOMER_NUMBER, and TME_CONTACT_NUMBER environment variables are set correctly.",
-          productsProcessed: 0
+          message: "TME API access denied. Your API credentials may require activation or additional permissions.",
+          suggestion: "Contact TME support to verify your API key has the necessary permissions for product search and data access.",
+          productsProcessed: 0,
+          needsManualVerification: true
         };
       }
       console.log(`Found ${products.length} products from TME`);
