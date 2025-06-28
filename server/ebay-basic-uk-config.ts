@@ -13,7 +13,7 @@ export function createBasicUKListingXML(product: any, authToken: string): string
     <StartPrice currencyID="GBP">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
     <Quantity>${product.stock || 1}</Quantity>
     <ListingDuration>GTC</ListingDuration>
-    <Country>GB</Country>
+    <Country>LV</Country>
     <Currency>GBP</Currency>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>

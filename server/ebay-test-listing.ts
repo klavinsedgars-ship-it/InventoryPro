@@ -15,7 +15,7 @@ export function createTestListingXML(product: any): string {
     <StartPrice currencyID="GBP">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
     <Quantity>${product.stock || 1}</Quantity>
     <ListingDuration>GTC</ListingDuration>
-    <Country>GB</Country>
+    <Country>LV</Country>
     <Currency>GBP</Currency>
     <Location>London, UK</Location>
     <PostalCode>SW1A 1AA</PostalCode>

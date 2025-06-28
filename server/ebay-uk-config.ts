@@ -13,7 +13,7 @@ export function createSimpleUKListingXML(product: any, authToken: string, imageU
     <StartPrice currencyID="GBP">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
     <Quantity>${product.stock || 1}</Quantity>
     <ListingDuration>GTC</ListingDuration>
-    <Country>GB</Country>
+    <Country>LV</Country>
     <Currency>GBP</Currency>
     <DispatchTimeMax>3</DispatchTimeMax>
     <ListingType>FixedPriceItem</ListingType>
