@@ -119,6 +119,31 @@ export function Products({ user }: ProductsProps) {
     },
   });
 
+  const policyTestMutation = useMutation({
+    mutationFn: (productId: number) => apiRequest("POST", "/api/ebay/test-policies", { productId }),
+    onSuccess: (data: any) => {
+      if (data.success) {
+        toast({
+          title: "Policy Test Success!",
+          description: "Your business policies are working correctly with eBay US",
+        });
+      } else {
+        toast({
+          title: "Policy Test Failed",
+          description: data.error || "Business policies need attention",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Test Error",
+        description: error.message || "Failed to test policies",
+        variant: "destructive",
+      });
+    },
+  });
+
   const usListingMutation = useMutation({
     mutationFn: (productId: number) => apiRequest("POST", "/api/ebay/list-us", { productId }),
     onSuccess: (data: any) => {
@@ -455,6 +480,15 @@ export function Products({ user }: ProductsProps) {
                             className="text-green-600 hover:text-green-900"
                           >
                             {uploadImageMutation.isPending ? "Uploading..." : "Upload Image"}
+                          </Button>
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => policyTestMutation.mutate(product.id)}
+                            disabled={policyTestMutation.isPending}
+                            className="text-purple-600 hover:text-purple-900"
+                          >
+                            {policyTestMutation.isPending ? "Testing..." : "Test Policies"}
                           </Button>
                           <Button 
                             variant="outline" 
