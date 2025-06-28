@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>REPLACE_TOKEN_HERE</eBayAuthToken>
+  </RequesterCredentials>
+  <Item>
+    <Title>Test Fresh Token Component</Title>
+    <Description><![CDATA[Test listing with fresh environment token]]></Description>
+    <PrimaryCategory>
+      <CategoryID>58277</CategoryID>
+    </PrimaryCategory>
+    <StartPrice currencyID="GBP">1.00</StartPrice>
+    <Quantity>1</Quantity>
+    <ListingDuration>GTC</ListingDuration>
+    <Country>LV</Country>
+    <Currency>GBP</Currency>
+    <Location>Riga, Latvia</Location>
+    <ListingType>FixedPriceItem</ListingType>
+    <ConditionID>1000</ConditionID>
+    <DispatchTimeMax>3</DispatchTimeMax>
+  </Item>
+</AddFixedPriceItemRequest>
