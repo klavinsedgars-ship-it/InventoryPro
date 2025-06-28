@@ -91,6 +91,9 @@ export class MemStorage implements IStorage {
     
     // Create sample products
     this.initializeSampleProducts();
+    
+    // Create initial sync logs
+    this.initializeSampleSyncLogs();
   }
 
   private initializeSampleProducts() {
@@ -227,6 +230,55 @@ export class MemStorage implements IStorage {
 
     sampleProducts.forEach(product => {
       this.createProduct(product);
+    });
+  }
+
+  private initializeSampleSyncLogs() {
+    const now = new Date();
+    const sampleLogs = [
+      {
+        source: "tme",
+        status: "success",
+        message: "Successfully synchronized 8 products from TME catalog",
+      },
+      {
+        source: "tme", 
+        status: "success",
+        message: "Product prices updated for 6 items",
+      },
+      {
+        source: "ebay",
+        status: "success", 
+        message: "Uploaded 5 products to eBay marketplace",
+      },
+      {
+        source: "amazon",
+        status: "error",
+        message: "API rate limit exceeded. Retry scheduled for next hour",
+      },
+      {
+        source: "tme",
+        status: "success",
+        message: "Stock levels updated for all active products",
+      }
+    ];
+
+    // Create logs with different timestamps (going back in time)
+    sampleLogs.forEach((log, index) => {
+      const logDate = new Date(now.getTime() - (index * 2 * 60 * 60 * 1000)); // 2 hours apart
+      const syncLog = {
+        ...log,
+        syncedAt: logDate
+      };
+      
+      // Manually create the log with custom timestamp
+      const id = this.currentSyncLogId++;
+      const fullLog = { 
+        ...syncLog, 
+        id, 
+        syncedAt: logDate 
+      };
+      this.syncLogs.set(id, fullLog as any);
     });
   }
 

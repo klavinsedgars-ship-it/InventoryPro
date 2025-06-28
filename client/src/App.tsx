@@ -8,6 +8,8 @@ import { Dashboard } from "@/pages/dashboard";
 import { Products } from "@/pages/products";
 import { Categories } from "@/pages/categories";
 import { Marketplaces } from "@/pages/marketplaces";
+import { TMESync } from "@/pages/sync";
+import { Settings } from "@/pages/settings";
 import { Login } from "@/pages/login";
 import NotFound from "@/pages/not-found";
 
@@ -73,9 +75,9 @@ function AppContent() {
       <Route path="/" component={() => <Dashboard user={user} />} />
       <Route path="/products" component={() => <Products user={user} />} />
       <Route path="/marketplaces" component={() => <Marketplaces user={user} />} />
-      <Route path="/sync" component={() => <div className="min-h-screen bg-gray-50 flex items-center justify-center"><p>TME Sync page coming soon...</p></div>} />
+      <Route path="/sync" component={() => <TMESync user={user} />} />
       <Route path="/categories" component={() => <Categories user={user} />} />
-      <Route path="/settings" component={() => <div className="min-h-screen bg-gray-50 flex items-center justify-center"><p>Settings page coming soon...</p></div>} />
+      <Route path="/settings" component={() => <Settings user={user} />} />
       <Route component={NotFound} />
     </Switch>
   );
