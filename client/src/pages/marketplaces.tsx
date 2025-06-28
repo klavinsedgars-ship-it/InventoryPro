@@ -64,16 +64,24 @@ export function Marketplaces({ user }: MarketplacesProps) {
       apiRequest("POST", "/api/ebay/bulk-list", data),
     onSuccess: (response: any) => {
       console.log("Marketplaces eBay listing response:", response);
-      if (response.success && response.listedCount > 0) {
+      console.log("Success check:", response.success, "Listed count:", response.listedCount);
+      
+      if (response.success === true && (response.listedCount || 0) > 0) {
         toast({
           title: "eBay Listing Completed",
           description: `Successfully listed ${response.listedCount} of ${response.totalProducts} products on eBay.`,
         });
-      } else {
+      } else if (response.success === false || (response.failedCount || 0) > 0) {
         toast({
           title: "eBay Listing Issues",
-          description: `${response.failedCount || response.totalProducts || 0} products failed to list. Check individual results.`,
+          description: `${response.failedCount || 0} products failed to list. Check individual results.`,
           variant: "destructive",
+        });
+      } else {
+        // Fallback for unexpected response structure
+        toast({
+          title: "eBay Listing Status",
+          description: `Listing completed. Check product status for details.`,
         });
       }
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });

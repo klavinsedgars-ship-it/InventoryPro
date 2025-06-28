@@ -101,16 +101,23 @@ export function Products({ user }: ProductsProps) {
     },
     onSuccess: (data: any) => {
       console.log("Bulk listing response:", data);
-      if (data.success && data.listedCount > 0) {
+      console.log("Success check:", data.success, "Listed count:", data.listedCount);
+      
+      if (data.success === true && (data.listedCount || 0) > 0) {
         toast({
           title: "Bulk eBay Listing Completed",
           description: `${data.listedCount} of ${data.totalProducts} products successfully listed on eBay.`,
         });
-      } else {
+      } else if (data.success === false || (data.failedCount || 0) > 0) {
         toast({
           title: "Bulk Listing Issues",
-          description: `${data.failedCount || data.totalProducts} products failed to list. Check individual results.`,
+          description: `${data.failedCount || 0} products failed to list. Check individual results.`,
           variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "eBay Listing Status",
+          description: `Listing completed. Check product status for details.`,
         });
       }
       setSelectedProducts(new Set());
