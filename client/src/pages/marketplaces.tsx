@@ -127,9 +127,13 @@ export function Marketplaces({ user }: MarketplacesProps) {
     },
     onError: (error: any, productId: number) => {
       const product = products.find(p => p.id === productId);
+      const isTokenExpired = error?.message?.includes('token is hard expired') || error?.message?.includes('expired');
+      
       toast({
-        title: "Unlist Failed",
-        description: error?.message || `Failed to unlist "${product?.name}" from eBay.`,
+        title: isTokenExpired ? "eBay Token Expired" : "Unlist Failed",
+        description: isTokenExpired 
+          ? `Cannot unlist "${product?.name}" - eBay token expired. Product remains listed on eBay. Please refresh your eBay token in Settings.`
+          : (error?.message || `Failed to unlist "${product?.name}" from eBay.`),
         variant: "destructive",
       });
     },
