@@ -79,7 +79,7 @@ export class EbayOAuthService {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: authorizationCode,
-        redirect_uri: process.env.EBAY_REDIRECT_URI || 'https://your-app.com/oauth/callback'
+        redirect_uri: process.env.EBAY_REDIRECT_URI || 'https://developer.ebay.com/DevZone/account/'
       })
     });
 
@@ -165,7 +165,7 @@ export class EbayOAuthService {
   generateAuthUrl(state?: string): string {
     const baseUrl = this.getApiUrl();
     const clientId = process.env.EBAY_APP_ID;
-    const redirectUri = process.env.EBAY_REDIRECT_URI || 'https://your-app.com/oauth/callback';
+    const redirectUri = process.env.EBAY_REDIRECT_URI || 'https://developer.ebay.com/DevZone/account/';
     
     const scopes = [
       'https://api.ebay.com/oauth/api_scope/sell.marketing.readonly',
