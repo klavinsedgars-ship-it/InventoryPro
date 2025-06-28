@@ -23,13 +23,13 @@ export function Marketplaces({ user }: MarketplacesProps) {
   const queryClient = useQueryClient();
   const [selectedProducts, setSelectedProducts] = useState<number[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState<string>("");
-  const [selectedStatus, setSelectedStatus] = useState<string>("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [selectedStatus, setSelectedStatus] = useState<string>("all");
 
   const { data: products = [], isLoading } = useQuery<Product[]>({
     queryKey: ["/api/products", { 
-      category: selectedCategory || undefined,
-      status: selectedStatus || undefined 
+      category: selectedCategory && selectedCategory !== "all" ? selectedCategory : undefined,
+      status: selectedStatus && selectedStatus !== "all" ? selectedStatus : undefined 
     }],
   });
 
@@ -274,7 +274,7 @@ export function Marketplaces({ user }: MarketplacesProps) {
                   <SelectValue placeholder="All Categories" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All Categories</SelectItem>
+                  <SelectItem value="all">All Categories</SelectItem>
                   {categories.map((category) => (
                     <SelectItem key={category.id} value={category.name}>
                       {category.name}
@@ -288,7 +288,7 @@ export function Marketplaces({ user }: MarketplacesProps) {
                   <SelectValue placeholder="All Status" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All Status</SelectItem>
+                  <SelectItem value="all">All Status</SelectItem>
                   <SelectItem value="active">Active</SelectItem>
                   <SelectItem value="inactive">Inactive</SelectItem>
                   <SelectItem value="out_of_stock">Out of Stock</SelectItem>
