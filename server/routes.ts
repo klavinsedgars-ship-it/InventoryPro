@@ -10,6 +10,7 @@ import {
   type User 
 } from "@shared/schema";
 import { ZodError } from "zod";
+import bcrypt from "bcryptjs";
 
 // Type for authenticated requests
 interface AuthenticatedRequest extends Request {
@@ -32,7 +33,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { username, password } = loginSchema.parse(req.body);
       
       const user = await storage.getUserByUsername(username);
-      if (!user || user.password !== password) {
+      if (!user) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+
+      const isPasswordValid = await bcrypt.compare(password, user.password);
+      if (!isPasswordValid) {
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
