@@ -32,10 +32,14 @@ export const EBAY_GERMANY_CONFIG = {
   }
 };
 
-export function getGermanXMLConfig(product: any, businessPolicyIds?: {
-  shipping?: string;
-  payment?: string;
-  return?: string;
+export function getGermanXMLConfig(product: any, businessPolicyIds: {
+  shipping: string;
+  payment: string;
+  return: string;
+} = {
+  shipping: "DE_216006551019",
+  payment: "DE_216006440019", 
+  return: "DE_216006441019"
 }) {
   const config = EBAY_GERMANY_CONFIG;
   

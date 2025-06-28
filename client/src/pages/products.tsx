@@ -119,6 +119,32 @@ export function Products({ user }: ProductsProps) {
     },
   });
 
+  const germanListingMutation = useMutation({
+    mutationFn: (productId: number) => apiRequest("POST", "/api/ebay/list-germany", { productId }),
+    onSuccess: (data: any) => {
+      if (data.success) {
+        toast({
+          title: "Success!",
+          description: `Product listed on eBay Germany! Item ID: ${data.listingResult.itemId}`,
+        });
+        queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      } else {
+        toast({
+          title: "Listing Failed",
+          description: data.error || "Failed to list on eBay Germany",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to connect to eBay Germany",
+        variant: "destructive",
+      });
+    },
+  });
+
   const bulkListToAmazonMutation = useMutation({
     mutationFn: async (productIds: number[]) => {
       const promises = productIds.map(id => 
@@ -389,13 +415,22 @@ export function Products({ user }: ProductsProps) {
                             )}
                           </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-3">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
                           <Button 
                             variant="ghost" 
                             size="sm"
                             onClick={() => handleEditProduct(product)}
                           >
                             Edit
+                          </Button>
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => germanListingMutation.mutate(product.id)}
+                            disabled={germanListingMutation.isPending}
+                            className="text-blue-600 hover:text-blue-900"
+                          >
+                            {germanListingMutation.isPending ? "Testing..." : "Test Germany"}
                           </Button>
                           <Button 
                             variant="ghost" 
