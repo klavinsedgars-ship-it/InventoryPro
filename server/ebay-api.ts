@@ -325,18 +325,18 @@ export class EbayApiService {
 
 
 
-  private createVerifyItemXML(listingData: any): string {
-    const userToken = process.env.EBAY_USER_TOKEN;
+  private async createVerifyItemXML(listingData: any): Promise<string> {
+    const userToken = await ebayOAuth.getValidAccessToken();
     if (!userToken) {
-      throw new Error("eBay User Token is required for listing products");
+      throw new Error("eBay OAuth token is required for listing products");
     }
     
-    console.log("createVerifyItemXML - Using fresh token:", userToken.startsWith("v^1.1#i^1#f^0"));
+    console.log("createVerifyItemXML - Using OAuth token:", userToken.startsWith("v^1.1#i^1#f^0"));
     
     return `<?xml version="1.0" encoding="utf-8"?>
 <VerifyAddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
-    <eBayAuthToken>${process.env.EBAY_USER_TOKEN}</eBayAuthToken>
+    <eBayAuthToken>${userToken}</eBayAuthToken>
   </RequesterCredentials>
   <Item>
     <Title>${this.escapeXml(listingData.title)}</Title>
@@ -371,22 +371,22 @@ export class EbayApiService {
 </VerifyAddFixedPriceItemRequest>`;
   }
 
-  private createAddItemXML(listingData: any): string {
-    // Force direct read from environment to bypass all caching
-    const userToken = process.env.EBAY_USER_TOKEN;
+  private async createAddItemXML(listingData: any): Promise<string> {
+    // Use OAuth access token instead of legacy user token
+    const userToken = await ebayOAuth.getValidAccessToken();
     if (!userToken) {
-      throw new Error("eBay User Token is required for listing products");
+      throw new Error("eBay OAuth token is required for listing products");
     }
     
     // Debug: Log token details for troubleshooting
-    console.log("createAddItemXML - Token prefix:", userToken.substring(0, 50));
+    console.log("createAddItemXML - OAuth token prefix:", userToken.substring(0, 50));
     console.log("createAddItemXML - Token length:", userToken.length);
-    console.log("createAddItemXML - Fresh token check:", userToken.startsWith("v^1.1#i^1#f^0"));
+    console.log("createAddItemXML - Fresh OAuth token check:", userToken.startsWith("v^1.1#i^1#f^0"));
     
     return `<?xml version="1.0" encoding="utf-8"?>
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
-    <eBayAuthToken>${process.env.EBAY_USER_TOKEN}</eBayAuthToken>
+    <eBayAuthToken>${userToken}</eBayAuthToken>
   </RequesterCredentials>
   <Item>
     <Title>${this.escapeXml(listingData.title)}</Title>
