@@ -1,10 +1,10 @@
 // Alternative eBay listing with external image URL instead of hosted upload
 
-export function createListingWithExternalImageXML(product: any, externalImageUrl: string): string {
+export function createListingWithExternalImageXML(product: any, externalImageUrl: string, accessToken: string): string {
   return `<?xml version="1.0" encoding="utf-8"?>
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
-    <eBayAuthToken>${process.env.EBAY_USER_TOKEN}</eBayAuthToken>
+    <eBayAuthToken>${accessToken}</eBayAuthToken>
   </RequesterCredentials>
   <Item>
     <Title>${product.name} - Arduino Microcontroller Board</Title>

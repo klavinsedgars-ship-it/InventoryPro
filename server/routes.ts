@@ -16,6 +16,7 @@ import { ebayApi } from "./ebay-api";
 import { createSimpleUSListingXML } from "./ebay-us-config";
 import { createTestListingXML } from "./ebay-test-listing";
 import { createListingWithExternalImageXML } from "./ebay-external-image";
+import { ebayOAuth } from "./ebay-oauth";
 import fs from 'fs';
 import path from 'path';
 import { findValidEbayCategory, getCategoryNameById } from "./ebay-category-finder";
@@ -924,10 +925,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // Get valid OAuth access token
+      let accessToken: string;
+      
+      try {
+        accessToken = await ebayOAuth.getValidAccessToken();
+      } catch (oauthError) {
+        return res.status(401).json({
+          success: false,
+          error: "eBay authentication failed",
+          details: "Please re-authorize the application using OAuth 2.0",
+          authUrl: ebayOAuth.generateAuthUrl()
+        });
+      }
+
       // Use external image URL pointing to our own server
       const externalImageUrl = `${req.protocol}://${req.get('host')}/api/images/arduino.jpg`;
       
-      const xmlBody = createListingWithExternalImageXML(product, externalImageUrl);
+      const xmlBody = createListingWithExternalImageXML(product, externalImageUrl, accessToken);
       const response = await fetch('https://api.ebay.com/ws/api.dll', {
         method: 'POST',
         headers: {
@@ -1370,6 +1385,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(salesData);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch sales analytics" });
+    }
+  });
+
+  // eBay OAuth status and management endpoints
+  app.get("/api/ebay/oauth/status", requireAuth, async (req, res) => {
+    try {
+      const tokenInfo = ebayOAuth.getTokenInfo();
+      res.json({
+        success: true,
+        tokenInfo,
+        authUrl: ebayOAuth.generateAuthUrl()
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: "Failed to get OAuth status"
+      });
+    }
+  });
+
+  app.post("/api/ebay/oauth/exchange", requireAuth, async (req, res) => {
+    try {
+      const { code } = req.body;
+      
+      if (!code) {
+        return res.status(400).json({
+          success: false,
+          error: "Authorization code is required"
+        });
+      }
+
+      const tokens = await ebayOAuth.exchangeCodeForTokens(code);
+      res.json({
+        success: true,
+        message: "OAuth tokens obtained successfully",
+        tokenInfo: ebayOAuth.getTokenInfo()
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: "Failed to exchange authorization code",
+        details: error instanceof Error ? error.message : String(error)
+      });
     }
   });
 
