@@ -136,6 +136,13 @@ export function Dashboard({ user }: DashboardProps) {
         onClose={() => setProductModalOpen(false)}
         product={selectedProduct}
       />
+
+      <EditBeforeListingModal
+        product={listingProduct}
+        open={editBeforeListingModalOpen}
+        onOpenChange={setEditBeforeListingModalOpen}
+        marketplace={listingMarketplace}
+      />
     </div>
   );
 }

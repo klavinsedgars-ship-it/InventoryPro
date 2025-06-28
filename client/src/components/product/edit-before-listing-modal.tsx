@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -61,7 +61,7 @@ export function EditBeforeListingModal({
   });
 
   // Reset form when product changes
-  useState(() => {
+  useEffect(() => {
     if (product) {
       form.reset({
         name: product.name,
@@ -71,7 +71,7 @@ export function EditBeforeListingModal({
         categoryId: "58277",
       });
     }
-  });
+  }, [product, form]);
 
   const listProductMutation = useMutation({
     mutationFn: async (data: z.infer<typeof editListingSchema>) => {
