@@ -15,6 +15,9 @@ import {
   type SyncLog,
   type InsertSyncLog
 } from "@shared/schema";
+import { db } from "./db";
+import { eq, and, gte, lte, desc } from "drizzle-orm";
+import bcrypt from "bcryptjs";
 
 export interface IStorage {
   // Users
@@ -62,38 +65,36 @@ export interface IStorage {
   }>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<number, User> = new Map();
-  private products: Map<number, Product> = new Map();
-  private categories: Map<number, Category> = new Map();
-  private marketplaceSettings: Map<number, MarketplaceSettings> = new Map();
-  private syncLogs: Map<number, SyncLog> = new Map();
-  private currentUserId = 1;
-  private currentProductId = 1;
-  private currentCategoryId = 1;
-  private currentMarketplaceSettingsId = 1;
-  private currentSyncLogId = 1;
-
+export class DatabaseStorage implements IStorage {
   constructor() {
-    // Create default admin user
-    this.createUser({
-      username: "admin",
-      password: "admin123", // In real app, this would be hashed
-      email: "admin@inventorysync.com",
-      role: "admin"
-    });
+    this.initializeDatabase();
+  }
 
-    // Create default categories
-    this.createCategory({ name: "Electronics", ebayMapping: "Electronics", amazonMapping: "Electronics" });
-    this.createCategory({ name: "Accessories", ebayMapping: "Accessories", amazonMapping: "Accessories" });
-    this.createCategory({ name: "Gaming", ebayMapping: "Gaming", amazonMapping: "Gaming" });
-    this.createCategory({ name: "Home & Garden", ebayMapping: "Home & Garden", amazonMapping: "Home & Garden" });
-    
-    // Create sample products
-    this.initializeSampleProducts();
-    
-    // Create initial sync logs
-    this.initializeSampleSyncLogs();
+  private async initializeDatabase() {
+    try {
+      // Create default admin user if it doesn't exist
+      const existingAdmin = await this.getUserByUsername("admin");
+      if (!existingAdmin) {
+        const hashedPassword = await bcrypt.hash("admin123", 10);
+        await this.createUser({
+          username: "admin",
+          password: hashedPassword,
+          email: "admin@inventorysync.com",
+          role: "admin"
+        });
+      }
+
+      // Create default categories if they don't exist
+      const existingCategories = await this.getCategories();
+      if (existingCategories.length === 0) {
+        await this.createCategory({ name: "Electronics", ebayMapping: "Electronics", amazonMapping: "Electronics" });
+        await this.createCategory({ name: "Accessories", ebayMapping: "Accessories", amazonMapping: "Accessories" });
+        await this.createCategory({ name: "Gaming", ebayMapping: "Gaming", amazonMapping: "Gaming" });
+        await this.createCategory({ name: "Home & Garden", ebayMapping: "Home & Garden", amazonMapping: "Home & Garden" });
+      }
+    } catch (error) {
+      console.error("Error initializing database:", error);
+    }
   }
 
   private initializeSampleProducts() {
@@ -476,4 +477,4 @@ export class MemStorage implements IStorage {
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
