@@ -477,13 +477,15 @@ export class EbayApiService {
         throw new Error("eBay User Token is required");
       }
 
-      // Get business policies using GetSellerProfiles call
+      // Get seller information to understand business policies setup
       const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
-<GetSellerProfilesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+<GetUserRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
     <eBayAuthToken>${userToken}</eBayAuthToken>
   </RequesterCredentials>
-</GetSellerProfilesRequest>`;
+  <UserID></UserID>
+  <IncludeSelector>BusinessSellerDetails</IncludeSelector>
+</GetUserRequest>`;
 
       console.log("Fetching eBay business policies...");
       const response = await this.makeTradingApiRequestForPolicies(xmlRequest);
@@ -523,7 +525,7 @@ export class EbayApiService {
         'X-EBAY-API-DEV-NAME': this.credentials.devId,
         'X-EBAY-API-APP-NAME': this.credentials.appId,
         'X-EBAY-API-CERT-NAME': this.credentials.certId,
-        'X-EBAY-API-CALL-NAME': 'GetSellerProfiles',
+        'X-EBAY-API-CALL-NAME': 'GetUser',
         'X-EBAY-API-SITEID': '0'
       },
       body: xmlBody
