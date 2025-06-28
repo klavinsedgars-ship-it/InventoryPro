@@ -63,38 +63,45 @@ export class TMEApiService {
   }
 
   private async makeRequest<T>(endpoint: string, params: Record<string, any> = {}): Promise<TMEApiResponse<T>> {
-    const url = new URL(`${this.baseUrl}${endpoint}`);
+    // TME API requires specific POST method with form data for most endpoints
+    const formData = new URLSearchParams();
     
     // Add authentication parameters
-    url.searchParams.set("Token", this.credentials.token);
-    url.searchParams.set("Country", "US");
-    url.searchParams.set("Language", "EN");
-    url.searchParams.set("Currency", "USD");
+    formData.append("Token", this.credentials.token);
+    formData.append("Country", "US");
+    formData.append("Language", "EN");
+    formData.append("Currency", "USD");
 
     // Add other parameters
     Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined && value !== null) {
-        url.searchParams.set(key, String(value));
+        formData.append(key, String(value));
       }
     });
 
     try {
-      const response = await fetch(url.toString(), {
-        method: "GET",
+      const response = await fetch(`${this.baseUrl}${endpoint}`, {
+        method: "POST",
         headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
           "Accept": "application/json",
           "User-Agent": "CRM-TME-Integration/1.0",
         },
+        body: formData.toString(),
       });
+
+      const data = await response.json() as TMEApiResponse<T>;
+      
+      if (response.status === 403 && data.Status === "E_ACTION_FORBIDDEN") {
+        throw new Error(`TME API access forbidden: ${data.ErrorMessage || "API key may not have required permissions"} (Error: ${data.ErrorCode})`);
+      }
 
       if (!response.ok) {
         throw new Error(`TME API request failed: ${response.status} ${response.statusText}`);
       }
-
-      const data = await response.json() as TMEApiResponse<T>;
       
       if (data.Status !== "OK") {
-        throw new Error(`TME API error: ${data.Message || "Unknown error"}`);
+        throw new Error(`TME API error: ${data.ErrorMessage || data.Message || "Unknown error"} (Status: ${data.Status})`);
       }
 
       return data;

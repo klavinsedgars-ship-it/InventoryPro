@@ -225,8 +225,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("TME price sync failed:", error);
       res.status(500).json({ 
         success: false, 
-        message: error.message || "TME price sync failed",
-        error: error.message
+        message: (error as Error).message || "TME price sync failed",
+        error: (error as Error).message
+      });
+    }
+  });
+
+  // TME API Debug endpoint
+  app.get("/api/debug/tme", requireAuth, async (req, res) => {
+    try {
+      const { debugTMEAuthentication, testTMESearch } = await import("./tme-debug");
+      
+      console.log("Starting TME API debug investigation...");
+      
+      // Test authentication methods
+      const authResult = await debugTMEAuthentication();
+      
+      // Test specific search
+      const searchResult = await testTMESearch("resistor");
+      
+      res.json({
+        authentication: authResult,
+        search: searchResult,
+        credentials: {
+          tokenConfigured: !!(process.env.TME_API_TOKEN),
+          customerConfigured: !!(process.env.TME_CUSTOMER_NUMBER),
+          contactConfigured: !!(process.env.TME_CONTACT_NUMBER),
+        }
+      });
+    } catch (error) {
+      console.error("TME debug failed:", error);
+      res.status(500).json({ 
+        success: false, 
+        message: (error as Error).message || "TME debug failed",
+        error: (error as Error).message
       });
     }
   });
