@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Search, Upload, Download, ShoppingCart, Store } from "lucide-react";
+import { Search, Upload, Download, ShoppingCart, Store, Eye, X } from "lucide-react";
 import { getStatusColor, formatCurrency } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -113,6 +113,34 @@ export function Marketplaces({ user }: MarketplacesProps) {
       });
     },
   });
+
+  const unlistEbayMutation = useMutation({
+    mutationFn: (productId: number) => apiRequest("POST", "/api/ebay/unlist", { productId }),
+    onSuccess: (response: any, productId: number) => {
+      const product = products.find(p => p.id === productId);
+      toast({
+        title: "Product Unlisted",
+        description: response.message || `Successfully unlisted "${product?.name}" from eBay.`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
+    },
+    onError: (error: any, productId: number) => {
+      const product = products.find(p => p.id === productId);
+      toast({
+        title: "Unlist Failed",
+        description: error?.message || `Failed to unlist "${product?.name}" from eBay.`,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleUnlistFromEbay = (productId: number) => {
+    const product = products.find(p => p.id === productId);
+    if (product && window.confirm(`Are you sure you want to unlist "${product.name}" from eBay?`)) {
+      unlistEbayMutation.mutate(productId);
+    }
+  };
 
   // Filter products based on search term
   const filteredProducts = products.filter(product =>
@@ -406,25 +434,54 @@ export function Marketplaces({ user }: MarketplacesProps) {
                           </Badge>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          <div className="flex space-x-1">
-                            {product.listedOnEbay ? (
-                              <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
-                                eBay ✓
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="text-xs text-gray-400">
-                                eBay
-                              </Badge>
-                            )}
-                            {product.listedOnAmazon ? (
-                              <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 border-orange-200">
-                                Amazon ✓
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="text-xs text-gray-400">
-                                Amazon
-                              </Badge>
-                            )}
+                          <div className="flex items-center space-x-2">
+                            <div className="flex items-center space-x-1">
+                              {product.listedOnEbay ? (
+                                <div className="flex items-center space-x-1">
+                                  <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                                    eBay ✓
+                                  </Badge>
+                                  {product.ebayItemId && (
+                                    <div className="flex items-center space-x-1">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 w-6 p-0 text-blue-600 hover:text-blue-800"
+                                        onClick={() => window.open(`https://www.ebay.co.uk/itm/${product.ebayItemId}`, '_blank')}
+                                        title={`View on eBay: ${product.ebayItemId}`}
+                                      >
+                                        <Eye className="h-3 w-3" />
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 w-6 p-0 text-red-600 hover:text-red-800"
+                                        onClick={() => handleUnlistFromEbay(product.id)}
+                                        disabled={unlistEbayMutation.isPending}
+                                        title="Unlist from eBay"
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </Button>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <Badge variant="outline" className="text-xs text-gray-400">
+                                  eBay
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="flex items-center space-x-1">
+                              {product.listedOnAmazon ? (
+                                <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 border-orange-200">
+                                  Amazon ✓
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-xs text-gray-400">
+                                  Amazon
+                                </Badge>
+                              )}
+                            </div>
                             {product.excludeFromListing && (
                               <Badge variant="outline" className="text-xs bg-red-50 text-red-700 border-red-200">
                                 Excluded
