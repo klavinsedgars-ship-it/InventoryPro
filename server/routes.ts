@@ -903,25 +903,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // For now, we'll list without images to test the business policy integration
       let imageUrl = null;
 
-      // Create German listing XML without business policies
+      // Create US listing XML without business policies
       const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
     <eBayAuthToken>${process.env.EBAY_USER_TOKEN}</eBayAuthToken>
   </RequesterCredentials>
   <Item>
-    <Title>${product.name} - Arduino Mikrocontroller Board</Title>
-    <Description><![CDATA[Hochwertige Elektronikkomponente für Entwicklungs- und Prototyping-Projekte. Arduino kompatibel. Original verpackt.]]></Description>
+    <Title>${product.name} - Arduino Microcontroller Board</Title>
+    <Description><![CDATA[High-quality electronic component for development and prototyping projects. Arduino compatible. Original packaging.]]></Description>
     <PrimaryCategory>
       <CategoryID>58277</CategoryID>
     </PrimaryCategory>
-    <StartPrice currencyID="EUR">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
+    <StartPrice currencyID="USD">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
     <Quantity>${product.stock || 1}</Quantity>
     <ListingDuration>GTC</ListingDuration>
-    <Country>DE</Country>
-    <Currency>EUR</Currency>
-    <Location>Germany</Location>
-    <PostalCode>10115</PostalCode>
+    <Country>US</Country>
+    <Currency>USD</Currency>
+    <Location>New York, NY</Location>
+    <PostalCode>10001</PostalCode>
     <DispatchTimeMax>2</DispatchTimeMax>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>

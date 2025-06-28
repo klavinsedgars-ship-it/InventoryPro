@@ -460,11 +460,11 @@ export function Products({ user }: ProductsProps) {
                           <Button 
                             variant="outline" 
                             size="sm"
-                            onClick={() => germanListingMutation.mutate(product.id)}
-                            disabled={germanListingMutation.isPending}
+                            onClick={() => usListingMutation.mutate(product.id)}
+                            disabled={usListingMutation.isPending}
                             className="text-blue-600 hover:text-blue-900"
                           >
-                            {germanListingMutation.isPending ? "Testing..." : "Test Germany"}
+                            {usListingMutation.isPending ? "Testing..." : "Test US"}
                           </Button>
                           <Button 
                             variant="ghost" 
