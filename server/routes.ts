@@ -13,6 +13,8 @@ import { ZodError } from "zod";
 import bcrypt from "bcryptjs";
 import { tmeApi } from "./tme-api";
 import { ebayApi } from "./ebay-api";
+import fs from 'fs';
+import path from 'path';
 import { findValidEbayCategory, getCategoryNameById } from "./ebay-category-finder";
 import { findBestCategoryForProduct, explainCategoryChoice, categorizeBatch } from "./product-category-matcher";
 
@@ -827,12 +829,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Upload image to eBay
   app.post("/api/ebay/upload-image", requireAuth, async (req, res) => {
     try {
-      const fs = await import('fs');
-      const path = await import('path');
-      
       // Read the Arduino image file
-      const imagePath = path.default.join(process.cwd(), 'attached_assets', 'Arduino_Uno_-_R3_1751105386641.jpg');
-      const imageBuffer = fs.default.readFileSync(imagePath);
+      const imagePath = path.join(process.cwd(), 'attached_assets', 'Arduino_Uno_-_R3_1751105386641.jpg');
+      const imageBuffer = fs.readFileSync(imagePath);
       const base64Image = imageBuffer.toString('base64');
 
       const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
