@@ -10,14 +10,11 @@ export function createSimpleUSListingXML(product: any, authToken: string, imageU
     <PrimaryCategory>
       <CategoryID>58277</CategoryID>
     </PrimaryCategory>
-    <StartPrice currencyID="EUR">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
+    <StartPrice currencyID="USD">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
     <Quantity>${product.stock || 1}</Quantity>
     <ListingDuration>GTC</ListingDuration>
-    <Country>DE</Country>
-    <Currency>EUR</Currency>
-    <Location>Germany</Location>
-    <PostalCode>10115</PostalCode>
-    <DispatchTimeMax>2</DispatchTimeMax>
+    <Currency>USD</Currency>
+    <DispatchTimeMax>3</DispatchTimeMax>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
     <SellerProfiles>

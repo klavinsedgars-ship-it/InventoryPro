@@ -437,7 +437,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   </Item>
 </VerifyAddItemRequest>`;
 
-          const response = await fetch('https://api.ebay.de/ws/api.dll', {
+          const response = await fetch('https://api.ebay.com/ws/api.dll', {
             method: 'POST',
             headers: {
               'Content-Type': 'text/xml; charset=utf-8',
@@ -600,7 +600,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   </Item>
 </VerifyAddFixedPriceItemRequest>`;
 
-      const response = await fetch('https://api.ebay.de/ws/api.dll', {
+      const response = await fetch('https://api.ebay.com/ws/api.dll', {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
@@ -680,7 +680,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   </RequesterCredentials>
 </GetSellerProfilesRequest>`;
 
-      const response = await fetch('https://api.ebay.de/ws/api.dll', {
+      const response = await fetch('https://api.ebay.com/ws/api.dll', {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
@@ -770,7 +770,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   </Item>
 </AddFixedPriceItemRequest>`;
 
-      const response = await fetch('https://api.ebay.de/ws/api.dll', {
+      const response = await fetch('https://api.ebay.com/ws/api.dll', {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
@@ -859,7 +859,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   </PictureData>
 </UploadSiteHostedPicturesRequest>`;
 
-      const response = await fetch('https://api.ebay.de/ws/api.dll', {
+      const response = await fetch('https://api.ebay.com/ws/api.dll', {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml; charset=utf-8',
@@ -943,7 +943,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const externalImageUrl = `${req.protocol}://${req.get('host')}/api/images/arduino.jpg`;
       
       const xmlBody = createListingWithExternalImageXML(product, externalImageUrl, accessToken);
-      const response = await fetch('https://api.ebay.de/ws/api.dll', {
+      const response = await fetch('https://api.ebay.com/ws/api.dll', {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml; charset=utf-8',
@@ -1001,7 +1001,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Use VerifyAddFixedPriceItem to test business policies without actually listing
       const xmlBody = createTestListingXML(product);
-      const response = await fetch('https://api.ebay.de/ws/api.dll', {
+      const response = await fetch('https://api.ebay.com/ws/api.dll', {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
@@ -1093,11 +1093,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Create US listing XML using simplified configuration with image
       const xmlBody = createSimpleUSListingXML(product, authToken, imageUrl);
-      const response = await fetch('https://api.ebay.de/ws/api.dll', {
+      const response = await fetch('https://api.ebay.com/ws/api.dll', {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
-          'X-EBAY-API-SITEID': '77',
+          'X-EBAY-API-SITEID': '0',
           'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
           'X-EBAY-API-CALL-NAME': 'AddFixedPriceItem',
           'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
@@ -1230,7 +1230,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   </Item>
 </VerifyAddFixedPriceItemRequest>`;
 
-      const response = await fetch('https://api.ebay.de/ws/api.dll', {
+      const response = await fetch('https://api.ebay.com/ws/api.dll', {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
