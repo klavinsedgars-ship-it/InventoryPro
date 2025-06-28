@@ -333,6 +333,27 @@ export class EbayApiService {
     }
   }
 
+  async getEbayCategories(): Promise<any[]> {
+    try {
+      const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
+<GetCategoriesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${process.env.EBAY_USER_TOKEN}</eBayAuthToken>
+  </RequesterCredentials>
+  <CategorySiteID>0</CategorySiteID>
+  <DetailLevel>ReturnAll</DetailLevel>
+  <LevelLimit>3</LevelLimit>
+</GetCategoriesRequest>`;
+
+      const response = await this.makeTradingApiRequest(xmlBody);
+      console.log('Categories response:', response.substring(0, 1000));
+      return [];
+    } catch (error) {
+      console.error('Error fetching eBay categories:', error);
+      return [];
+    }
+  }
+
   private createAddItemXML(listingData: any): string {
     const userToken = process.env.EBAY_USER_TOKEN;
     if (!userToken) {
@@ -348,7 +369,7 @@ export class EbayApiService {
     <Title>${this.escapeXml(listingData.title)}</Title>
     <Description><![CDATA[${listingData.description}]]></Description>
     <PrimaryCategory>
-      <CategoryID>58058</CategoryID>
+      <CategoryID>183067</CategoryID>
     </PrimaryCategory>
     <StartPrice currencyID="USD">${listingData.startPrice}</StartPrice>
     <Quantity>${listingData.quantity}</Quantity>
@@ -359,10 +380,22 @@ export class EbayApiService {
     <PostalCode>10001</PostalCode>
     <DispatchTimeMax>1</DispatchTimeMax>
     <ListingType>FixedPriceItem</ListingType>
+    <ConditionID>1000</ConditionID>
     <PictureDetails>
       <PhotoDisplay>SuperSize</PhotoDisplay>
       <PictureURL>https://images.unsplash.com/photo-1553062407-98eeb64c6a62?w=400</PictureURL>
     </PictureDetails>
+    <SellerProfiles>
+      <SellerShippingProfile>
+        <ShippingProfileID>209735065019</ShippingProfileID>
+      </SellerShippingProfile>
+      <SellerPaymentProfile>
+        <PaymentProfileID>209734969019</PaymentProfileID>
+      </SellerPaymentProfile>
+      <SellerReturnProfile>
+        <ReturnProfileID>163760688019</ReturnProfileID>
+      </SellerReturnProfile>
+    </SellerProfiles>
   </Item>
 </AddFixedPriceItemRequest>`;
   }
