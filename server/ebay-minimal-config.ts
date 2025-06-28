@@ -18,24 +18,19 @@ export function createMinimalUSListingXML(product: any, authToken: string): stri
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
     <DispatchTimeMax>3</DispatchTimeMax>
-    <ItemLocation>Riga, Latvia</ItemLocation>
-    <PostalCode>1001</PostalCode>
-    <ShippingDetails>
-      <ShippingType>Flat</ShippingType>
-      <ShippingServiceOptions>
-        <ShippingServicePriority>1</ShippingServicePriority>
-        <ShippingService>Other</ShippingService>
-        <ShippingServiceCost>5.99</ShippingServiceCost>
-      </ShippingServiceOptions>
-    </ShippingDetails>
-    <PaymentMethods>PayPal</PaymentMethods>
-    <PayPalEmailAddress>paypal@example.com</PayPalEmailAddress>
-    <ReturnPolicy>
-      <ReturnsAcceptedOption>ReturnsAccepted</ReturnsAcceptedOption>
-      <RefundOption>MoneyBack</RefundOption>
-      <ReturnsWithinOption>Days_30</ReturnsWithinOption>
-      <ShippingCostPaidByOption>Buyer</ShippingCostPaidByOption>
-    </ReturnPolicy>
+    <ItemLocation>New York, NY</ItemLocation>
+    <PostalCode>10001</PostalCode>
+    <SellerProfiles>
+      <SellerShippingProfile>
+        <ShippingProfileID>234560863019</ShippingProfileID>
+      </SellerShippingProfile>
+      <SellerPaymentProfile>
+        <PaymentProfileID>216006444019</PaymentProfileID>
+      </SellerPaymentProfile>
+      <SellerReturnProfile>
+        <ReturnProfileID>209734982019</ReturnProfileID>
+      </SellerReturnProfile>
+    </SellerProfiles>
     <PictureDetails>
       <PictureURL>https://images.unsplash.com/photo-1553062407-98eeb64c6a62</PictureURL>
     </PictureDetails>
