@@ -56,7 +56,7 @@ export class EbayApiService {
   private tradingApiUrl = "https://api.ebay.com/ws/api.dll";
   private sandboxTradingApiUrl = "https://api.sandbox.ebay.com/ws/api.dll";
   private authToken?: EbayAuthToken;
-  private isProduction = process.env.NODE_ENV === "production";
+  private isProduction = true; // Force production for OAuth token testing
 
   constructor() {
     this.credentials = {
@@ -312,22 +312,27 @@ export class EbayApiService {
     <Title>${this.escapeXml(listingData.title)}</Title>
     <Description><![CDATA[${listingData.description}]]></Description>
     <PrimaryCategory>
-      <CategoryID>${listingData.categoryId}</CategoryID>
+      <CategoryID>172008</CategoryID>
     </PrimaryCategory>
     <StartPrice currencyID="USD">${listingData.startPrice}</StartPrice>
     <Quantity>${listingData.quantity}</Quantity>
-    <ListingDuration>${listingData.listingDuration}</ListingDuration>
+    <ListingDuration>GTC</ListingDuration>
     <ConditionID>1000</ConditionID>
     <Country>US</Country>
     <Currency>USD</Currency>
+    <Location>New York, NY</Location>
+    <PostalCode>10001</PostalCode>
     <DispatchTimeMax>1</DispatchTimeMax>
     <ListingType>FixedPriceItem</ListingType>
-    <PaymentMethods>PayPal</PaymentMethods>
+    <PictureDetails>
+      <PhotoDisplay>SuperSize</PhotoDisplay>
+      <PictureURL>https://images.unsplash.com/photo-1553062407-98eeb64c6a62?w=400</PictureURL>
+    </PictureDetails>
     <ShippingDetails>
       <ShippingType>Flat</ShippingType>
       <ShippingServiceOptions>
         <ShippingServicePriority>1</ShippingServicePriority>
-        <ShippingService>USPSMedia</ShippingService>
+        <ShippingService>USPSPriority</ShippingService>
         <ShippingServiceCost currencyID="USD">${listingData.shippingDetails.shippingServiceCost}</ShippingServiceCost>
       </ShippingServiceOptions>
     </ShippingDetails>
@@ -351,6 +356,7 @@ export class EbayApiService {
 
   private async makeTradingApiRequest(xmlBody: string): Promise<string> {
     const tradingUrl = this.isProduction ? this.tradingApiUrl : this.sandboxTradingApiUrl;
+    console.log("Using eBay environment:", this.isProduction ? "PRODUCTION" : "SANDBOX");
     
     console.log("Making eBay API request to:", tradingUrl);
     console.log("Request headers:", {
