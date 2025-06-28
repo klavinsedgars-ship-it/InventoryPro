@@ -119,19 +119,19 @@ export function Products({ user }: ProductsProps) {
     },
   });
 
-  const germanListingMutation = useMutation({
-    mutationFn: (productId: number) => apiRequest("POST", "/api/ebay/list-germany", { productId }),
+  const usListingMutation = useMutation({
+    mutationFn: (productId: number) => apiRequest("POST", "/api/ebay/list-us", { productId }),
     onSuccess: (data: any) => {
       if (data.success) {
         toast({
           title: "Success!",
-          description: `Product listed on eBay Germany! Item ID: ${data.listingResult.itemId}`,
+          description: `Product listed on eBay US! Item ID: ${data.listingResult.itemId}`,
         });
         queryClient.invalidateQueries({ queryKey: ["/api/products"] });
       } else {
         toast({
           title: "Listing Failed",
-          description: data.error || "Failed to list on eBay Germany",
+          description: data.error || "Failed to list on eBay US",
           variant: "destructive",
         });
       }
@@ -139,7 +139,7 @@ export function Products({ user }: ProductsProps) {
     onError: (error: any) => {
       toast({
         title: "Error",
-        description: error.message || "Failed to connect to eBay Germany",
+        description: error.message || "Failed to connect to eBay US",
         variant: "destructive",
       });
     },

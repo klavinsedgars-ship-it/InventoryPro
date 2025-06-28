@@ -680,7 +680,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
-          'X-EBAY-API-SITEID': '77',
+          'X-EBAY-API-SITEID': '0',
           'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
           'X-EBAY-API-CALL-NAME': 'GetSellerProfiles',
           'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
@@ -770,7 +770,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
-          'X-EBAY-API-SITEID': '77',
+          'X-EBAY-API-SITEID': '0',
           'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
           'X-EBAY-API-CALL-NAME': 'AddFixedPriceItem',
           'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
@@ -849,7 +849,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
-          'X-EBAY-API-SITEID': '77',
+          'X-EBAY-API-SITEID': '0',
           'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
           'X-EBAY-API-CALL-NAME': 'UploadSiteHostedPictures',
           'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
@@ -879,8 +879,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // eBay Germany listing with business policies and uploaded image
-  app.post("/api/ebay/list-germany", requireAuth, async (req, res) => {
+  // eBay US listing with business policies and uploaded image
+  app.post("/api/ebay/list-us", requireAuth, async (req, res) => {
     try {
       const { productId } = req.body;
       
@@ -961,7 +961,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         method: 'POST',
         headers: {
           'Content-Type': 'text/xml',
-          'X-EBAY-API-SITEID': '77',
+          'X-EBAY-API-SITEID': '0',
           'X-EBAY-API-COMPATIBILITY-LEVEL': '967',
           'X-EBAY-API-CALL-NAME': 'AddFixedPriceItem',
           'X-EBAY-API-DEV-NAME': process.env.EBAY_DEV_ID!,
