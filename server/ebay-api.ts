@@ -55,6 +55,7 @@ export class EbayApiService {
   private sandboxUrl = "https://api.sandbox.ebay.com";
   private tradingApiUrl = "https://api.ebay.com/ws/api.dll";
   private sandboxTradingApiUrl = "https://api.sandbox.ebay.com/ws/api.dll";
+  private siteId = "77"; // eBay Germany site ID
   private authToken?: EbayAuthToken;
   private isProduction = true; // Force production for OAuth token testing
 
@@ -343,15 +344,15 @@ export class EbayApiService {
     <PrimaryCategory>
       <CategoryID>58277</CategoryID>
     </PrimaryCategory>
-    <StartPrice currencyID="USD">${listingData.startPrice}</StartPrice>
+    <StartPrice currencyID="EUR">${listingData.startPrice}</StartPrice>
     <Quantity>${listingData.quantity}</Quantity>
     <ListingDuration>GTC</ListingDuration>
-    <Country>US</Country>
-    <Currency>USD</Currency>
-    <Location>United States</Location>
-    <PostalCode>10001</PostalCode>
+    <Country>DE</Country>
+    <Currency>EUR</Currency>
+    <Location>Germany</Location>
+    <PostalCode>10115</PostalCode>
     <DispatchTimeMax>1</DispatchTimeMax>
-    <Site>US</Site>
+    <Site>Germany</Site>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
     <PictureDetails>
@@ -362,17 +363,18 @@ export class EbayApiService {
       <ShippingType>Flat</ShippingType>
       <ShippingServiceOptions>
         <ShippingServicePriority>1</ShippingServicePriority>
-        <ShippingService>USPSMedia</ShippingService>
-        <ShippingServiceCost currencyID="USD">4.99</ShippingServiceCost>
-        <ShippingServiceAdditionalCost currencyID="USD">2.50</ShippingServiceAdditionalCost>
-        <ShipToLocation>US</ShipToLocation>
+        <ShippingService>DE_DHLPaket</ShippingService>
+        <ShippingServiceCost currencyID="EUR">4.99</ShippingServiceCost>
+        <ShippingServiceAdditionalCost currencyID="EUR">2.50</ShippingServiceAdditionalCost>
+        <ShipToLocation>DE</ShipToLocation>
+        <ShipToLocation>Europe</ShipToLocation>
         <ShipToLocation>Worldwide</ShipToLocation>
       </ShippingServiceOptions>
       <InternationalShippingServiceOption>
         <ShippingServicePriority>1</ShippingServicePriority>
-        <ShippingService>USPSFirstClassMailInternational</ShippingService>
-        <ShippingServiceCost currencyID="USD">12.99</ShippingServiceCost>
-        <ShippingServiceAdditionalCost currencyID="USD">5.99</ShippingServiceAdditionalCost>
+        <ShippingService>DE_DHLPaketInternational</ShippingService>
+        <ShippingServiceCost currencyID="EUR">12.99</ShippingServiceCost>
+        <ShippingServiceAdditionalCost currencyID="EUR">5.99</ShippingServiceAdditionalCost>
         <ShipToLocation>Worldwide</ShipToLocation>
       </InternationalShippingServiceOption>
     </ShippingDetails>
@@ -436,7 +438,7 @@ export class EbayApiService {
         'X-EBAY-API-APP-NAME': this.credentials.appId,
         'X-EBAY-API-CERT-NAME': this.credentials.certId,
         'X-EBAY-API-CALL-NAME': 'AddFixedPriceItem',
-        'X-EBAY-API-SITEID': '0'
+        'X-EBAY-API-SITEID': this.siteId
       },
       body: xmlBody
     });

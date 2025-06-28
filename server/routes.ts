@@ -671,15 +671,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     <PrimaryCategory>
       <CategoryID>58277</CategoryID>
     </PrimaryCategory>
-    <StartPrice currencyID="USD">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
+    <StartPrice currencyID="EUR">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
     <Quantity>${product.stock || 1}</Quantity>
     <ListingDuration>Days_7</ListingDuration>
-    <Country>US</Country>
-    <Currency>USD</Currency>
-    <Location>United States</Location>
-    <PostalCode>10001</PostalCode>
+    <Country>DE</Country>
+    <Currency>EUR</Currency>
+    <Location>Germany</Location>
+    <PostalCode>10115</PostalCode>
     <DispatchTimeMax>1</DispatchTimeMax>
-    <Site>US</Site>
+    <Site>Germany</Site>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
     <PictureDetails>
