@@ -341,7 +341,7 @@ export class EbayApiService {
     <Title>${this.escapeXml(listingData.title)}</Title>
     <Description><![CDATA[${listingData.description}]]></Description>
     <PrimaryCategory>
-      <CategoryID>42184</CategoryID>
+      <CategoryID>293</CategoryID>
     </PrimaryCategory>
     <StartPrice currencyID="USD">${listingData.startPrice}</StartPrice>
     <Quantity>${listingData.quantity}</Quantity>
@@ -368,6 +368,20 @@ export class EbayApiService {
         <ReturnProfileID>163760688019</ReturnProfileID>
       </SellerReturnProfile>
     </SellerProfiles>
+    <ItemSpecifics>
+      <NameValueList>
+        <Name>Brand</Name>
+        <Value>Arduino</Value>
+      </NameValueList>
+      <NameValueList>
+        <Name>Type</Name>
+        <Value>Development Board</Value>
+      </NameValueList>
+      <NameValueList>
+        <Name>MPN</Name>
+        <Value>A000066</Value>
+      </NameValueList>
+    </ItemSpecifics>
   </Item>
 </AddFixedPriceItemRequest>`;
   }
