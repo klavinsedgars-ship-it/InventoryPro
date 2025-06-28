@@ -13,6 +13,7 @@ import { ZodError } from "zod";
 import bcrypt from "bcryptjs";
 import { tmeApi } from "./tme-api";
 import { ebayApi } from "./ebay-api";
+import { createSimpleUSListingXML } from "./ebay-us-config";
 import fs from 'fs';
 import path from 'path';
 import { findValidEbayCategory, getCategoryNameById } from "./ebay-category-finder";
@@ -903,63 +904,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // For now, we'll list without images to test the business policy integration
       let imageUrl = null;
 
-      // Create US listing XML without business policies
-      const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
-<AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${process.env.EBAY_USER_TOKEN}</eBayAuthToken>
-  </RequesterCredentials>
-  <Item>
-    <Title>${product.name} - Arduino Microcontroller Board</Title>
-    <Description><![CDATA[High-quality electronic component for development and prototyping projects. Arduino compatible. Original packaging.]]></Description>
-    <PrimaryCategory>
-      <CategoryID>58277</CategoryID>
-    </PrimaryCategory>
-    <StartPrice currencyID="USD">${parseFloat(product.salePrice.toString()).toFixed(2)}</StartPrice>
-    <Quantity>${product.stock || 1}</Quantity>
-    <ListingDuration>GTC</ListingDuration>
-    <Country>US</Country>
-    <Currency>USD</Currency>
-    <Location>New York, NY</Location>
-    <PostalCode>10001</PostalCode>
-    <DispatchTimeMax>2</DispatchTimeMax>
-    <ListingType>FixedPriceItem</ListingType>
-    <ConditionID>1000</ConditionID>
-    <ShippingDetails>
-      <ShippingType>Flat</ShippingType>
-      <ShippingServiceOptions>
-        <ShippingServicePriority>1</ShippingServicePriority>
-        <ShippingService>USPSGround</ShippingService>
-        <ShippingServiceCost>4.99</ShippingServiceCost>
-      </ShippingServiceOptions>
-    </ShippingDetails>
-    <PaymentMethods>PayPal</PaymentMethods>
-    <ReturnPolicy>
-      <ReturnsAcceptedOption>ReturnsAccepted</ReturnsAcceptedOption>
-      <ReturnsWithinOption>Days_30</ReturnsWithinOption>
-      <ShippingCostPaidByOption>Buyer</ShippingCostPaidByOption>
-    </ReturnPolicy>
-    ${imageUrl ? `<PictureDetails>
-      <PictureURL>${imageUrl}</PictureURL>
-    </PictureDetails>` : ''}
-    <ItemSpecifics>
-      <NameValueList>
-        <Name>Marke</Name>
-        <Value>Arduino</Value>
-      </NameValueList>
-      <NameValueList>
-        <Name>Typ</Name>
-        <Value>Development Board</Value>
-      </NameValueList>
-      <NameValueList>
-        <Name>Modell</Name>
-        <Value>Uno R3</Value>
-      </NameValueList>
-    </ItemSpecifics>
-    <ItemLocation>New York, NY</ItemLocation>
-  </Item>
-</AddFixedPriceItemRequest>`;
-
+      // Create US listing XML using simplified configuration  
+      const xmlBody = createSimpleUSListingXML(product);
       const response = await fetch('https://api.ebay.com/ws/api.dll', {
         method: 'POST',
         headers: {
