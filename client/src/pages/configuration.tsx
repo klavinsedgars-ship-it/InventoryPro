@@ -43,22 +43,22 @@ export default function Configuration({ user }: ConfigurationProps) {
   const { toast } = useToast();
 
   // Fetch shipping policies
-  const { data: policiesData } = useQuery({
+  const { data: policiesData, isLoading: policiesLoading } = useQuery({
     queryKey: ["/api/shipping/policies"],
   });
 
   // Fetch policy assignments
-  const { data: assignmentsData } = useQuery({
+  const { data: assignmentsData, isLoading: assignmentsLoading } = useQuery({
     queryKey: ["/api/shipping/assignments"],
   });
 
   // Fetch categories
-  const { data: categoriesData } = useQuery({
+  const { data: categoriesData, isLoading: categoriesLoading } = useQuery({
     queryKey: ["/api/categories"],
   });
 
   // Fetch pricing tiers
-  const { data: pricingData } = useQuery({
+  const { data: pricingData, isLoading: pricingLoading } = useQuery({
     queryKey: ["/api/pricing/tiers"],
   });
 
@@ -118,8 +118,23 @@ export default function Configuration({ user }: ConfigurationProps) {
   const policies = policiesData?.policies || [];
   const assignments = assignmentsData?.assignments || [];
   const validation = policiesData?.validation;
-  const categories = categoriesData || [];
+  const categories = Array.isArray(categoriesData) ? categoriesData : [];
   const pricingTiers = pricingData?.tiers || [];
+
+  const isLoading = policiesLoading || assignmentsLoading || categoriesLoading || pricingLoading;
+
+  if (isLoading) {
+    return (
+      <div className="flex h-screen bg-gray-50">
+        <Sidebar />
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 flex items-center justify-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -138,7 +153,7 @@ export default function Configuration({ user }: ConfigurationProps) {
 
             {/* Tabs */}
             <Tabs defaultValue="categories" className="w-full">
-              <TabsList className="grid w-full grid-cols-3">
+              <TabsList className="grid w-full grid-cols-3 mb-6">
                 <TabsTrigger value="categories" className="flex items-center space-x-2">
                   <FolderTree className="h-4 w-4" />
                   <span>Categories</span>
