@@ -315,7 +315,7 @@ export class DatabaseStorage implements IStorage {
     failed: number;
     byPriority: Record<string, number>;
   }> {
-    const [statusCounts] = await Promise.all([
+    const [statusCounts, priorityCounts] = await Promise.all([
       db
         .select({ 
           status: syncQueue.status, 
@@ -341,11 +341,11 @@ export class DatabaseStorage implements IStorage {
       byPriority: {} as Record<string, number>
     };
 
-    statusCounts[0]?.forEach(row => {
+    statusCounts.forEach(row => {
       stats[row.status as keyof typeof stats] = row.count;
     });
 
-    statusCounts[1]?.forEach(row => {
+    priorityCounts.forEach(row => {
       stats.byPriority[`Priority ${row.priority}`] = row.count;
     });
 
