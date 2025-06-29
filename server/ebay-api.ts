@@ -169,7 +169,7 @@ export class EbayApiService {
       // Prepare listing data for eBay Trading API
       const listingData = {
         title: listingDetails.title || templateData?.title || product.name,
-        description: listingDetails.description || templateData?.description || product.description || `${product.name} - High quality electronics component`,
+        description: listingDetails.description || templateData?.htmlDescription || templateData?.description || product.description || `${product.name} - High quality electronics component`,
         categoryId: listingDetails.categoryId || "175673", // Default electronics category
         startPrice: listingDetails.startPrice || parseFloat(product.salePrice) || 0,
         quantity: listingDetails.quantity || product.stock || 1,
@@ -181,6 +181,10 @@ export class EbayApiService {
           shippingServiceCost: 5.99
         }
       };
+
+      console.log("Template data available:", !!templateData);
+      console.log("Using HTML description:", !!templateData?.htmlDescription);
+      console.log("Description length:", listingData.description.length);
 
       // Make actual eBay API call to list the product
       console.log("Attempting to list product on eBay:", {

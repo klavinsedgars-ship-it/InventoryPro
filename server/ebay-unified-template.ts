@@ -126,33 +126,109 @@ function generateUnifiedDescription(product: Product, specs: any, category: stri
  * Generate HTML version with consistent styling
  */
 function generateUnifiedHtmlDescription(product: Product, specs: any, category: string): string {
-  const plainDescription = generateUnifiedDescription(product, specs, category);
+  const applications = getCategoryApplications(category);
   
-  // Convert to HTML with consistent styling
-  let html = plainDescription
-    .replace(/🔧 PROFESSIONAL (.*)/g, '<h2 style="color: #0066cc; font-size: 18px; margin: 15px 0 10px 0;">🔧 $1</h2>')
-    .replace(/📝 PRODUCT DESCRIPTION:/g, '<h3 style="color: #333; font-size: 16px; margin: 15px 0 5px 0;">📝 PRODUCT DESCRIPTION:</h3>')
-    .replace(/📋 TECHNICAL SPECIFICATIONS:/g, '<h3 style="color: #333; font-size: 16px; margin: 15px 0 5px 0;">📋 TECHNICAL SPECIFICATIONS:</h3>')
-    .replace(/📦 PACKAGE INCLUDES:/g, '<h3 style="color: #333; font-size: 16px; margin: 15px 0 5px 0;">📦 PACKAGE INCLUDES:</h3>')
-    .replace(/💡 TYPICAL APPLICATIONS:/g, '<h3 style="color: #333; font-size: 16px; margin: 15px 0 5px 0;">💡 TYPICAL APPLICATIONS:</h3>')
-    .replace(/🛡️ QUALITY ASSURANCE:/g, '<h3 style="color: #333; font-size: 16px; margin: 15px 0 5px 0;">🛡️ QUALITY ASSURANCE:</h3>')
-    .replace(/🚚 SHIPPING INFORMATION:/g, '<h3 style="color: #333; font-size: 16px; margin: 15px 0 5px 0;">🚚 SHIPPING INFORMATION:</h3>')
-    .replace(/🏢 ABOUT US:/g, '<h3 style="color: #333; font-size: 16px; margin: 15px 0 5px 0;">🏢 ABOUT US:</h3>')
-    .replace(/✅ (.*)/g, '<div style="color: #009900; margin: 3px 0;">✅ $1</div>')
-    .replace(/• (.*)/g, '<li style="margin: 2px 0;">$1</li>')
-    .replace(/\n\n/g, '</ul><br><ul>')
-    .replace(/\n/g, '');
+  // Build eBay-compatible HTML with simpler styling (no CSS grid, gradients, etc.)
+  const html = `
+<div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto; color: #333;">
   
-  // Wrap in professional container
-  return `
-    <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; line-height: 1.6;">
-      <ul>${html}</ul>
-      <div style="background: #f0f8ff; padding: 15px; border-radius: 5px; text-align: center; margin-top: 20px;">
-        <strong style="color: #0066cc;">📞 NEED HELP? Contact our technical support team for assistance.</strong><br>
-        <strong style="color: #0066cc;">🔒 SECURE PAYMENT: All major payment methods accepted.</strong>
-      </div>
+  <!-- Header -->
+  <div style="background-color: #0066cc; color: white; padding: 15px; text-align: center; margin-bottom: 15px;">
+    <h2 style="font-size: 20px; margin: 0;">🔧 PROFESSIONAL ${(product.name || 'ELECTRONIC COMPONENT').toUpperCase()}</h2>
+  </div>
+  
+  <!-- Quality Features -->
+  <div style="background-color: #f0f8ff; border: 2px solid #0066cc; padding: 15px; margin-bottom: 15px;">
+    <div style="font-weight: bold; color: #006600;">
+      ✅ HIGH QUALITY ELECTRONIC COMPONENT<br>
+      ✅ GENUINE MANUFACTURER SPECIFICATIONS<br>
+      ✅ TECHNICAL DOCUMENTATION INCLUDED<br>
+      ✅ SAME DAY DISPATCH FROM UK WAREHOUSE<br>
+      ✅ PROFESSIONAL TECHNICAL SUPPORT<br>
+      ✅ 30-DAY RETURN GUARANTEE
     </div>
-  `;
+  </div>
+  
+  ${product.description ? `
+  <!-- Product Description -->
+  <div style="background-color: #ffffff; border: 1px solid #cccccc; padding: 15px; margin-bottom: 15px;">
+    <h3 style="color: #0066cc; font-size: 16px; margin: 0 0 10px 0; border-bottom: 1px solid #0066cc;">📝 PRODUCT DESCRIPTION</h3>
+    <p style="margin: 0; line-height: 1.4;">${product.description}</p>
+  </div>
+  ` : ''}
+  
+  <!-- Technical Specifications -->
+  <div style="background-color: #ffffff; border: 1px solid #cccccc; padding: 15px; margin-bottom: 15px;">
+    <h3 style="color: #0066cc; font-size: 16px; margin: 0 0 10px 0; border-bottom: 1px solid #0066cc;">📋 TECHNICAL SPECIFICATIONS</h3>
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+      ${product.sku ? `<tr><td style="padding: 3px 5px; font-weight: bold; width: 40%;">SKU:</td><td style="padding: 3px 5px;">${product.sku}</td></tr>` : ''}
+      ${product.ean ? `<tr><td style="padding: 3px 5px; font-weight: bold; width: 40%;">EAN:</td><td style="padding: 3px 5px;">${product.ean}</td></tr>` : ''}
+      ${specs.voltage ? `<tr><td style="padding: 3px 5px; font-weight: bold; width: 40%;">Voltage:</td><td style="padding: 3px 5px;">${specs.voltage}V</td></tr>` : ''}
+      ${specs.current ? `<tr><td style="padding: 3px 5px; font-weight: bold; width: 40%;">Current:</td><td style="padding: 3px 5px;">${specs.current}A</td></tr>` : ''}
+      ${specs.power ? `<tr><td style="padding: 3px 5px; font-weight: bold; width: 40%;">Power:</td><td style="padding: 3px 5px;">${specs.power}W</td></tr>` : ''}
+      ${specs.frequency ? `<tr><td style="padding: 3px 5px; font-weight: bold; width: 40%;">Frequency:</td><td style="padding: 3px 5px;">${specs.frequency}MHz</td></tr>` : ''}
+      ${specs.temperature ? `<tr><td style="padding: 3px 5px; font-weight: bold; width: 40%;">Operating Temperature:</td><td style="padding: 3px 5px;">${specs.temperature}°C</td></tr>` : ''}
+      ${product.category ? `<tr><td style="padding: 3px 5px; font-weight: bold; width: 40%;">Category:</td><td style="padding: 3px 5px;">${product.category}</td></tr>` : ''}
+    </table>
+  </div>
+  
+  <!-- Package Contents -->
+  <div style="background-color: #ffffff; border: 1px solid #cccccc; padding: 15px; margin-bottom: 15px;">
+    <h3 style="color: #0066cc; font-size: 16px; margin: 0 0 10px 0; border-bottom: 1px solid #0066cc;">📦 PACKAGE INCLUDES</h3>
+    <ul style="margin: 5px 0; padding-left: 20px;">
+      <li>1x ${product.name || 'Electronic Component'}</li>
+      <li>Technical Documentation</li>
+      <li>Quality Certificate</li>
+    </ul>
+  </div>
+  
+  ${applications.length > 0 ? `
+  <!-- Applications -->
+  <div style="background-color: #ffffff; border: 1px solid #cccccc; padding: 15px; margin-bottom: 15px;">
+    <h3 style="color: #0066cc; font-size: 16px; margin: 0 0 10px 0; border-bottom: 1px solid #0066cc;">💡 TYPICAL APPLICATIONS</h3>
+    <ul style="margin: 5px 0; padding-left: 20px;">
+      ${applications.map(app => `<li>${app}</li>`).join('')}
+    </ul>
+  </div>
+  ` : ''}
+  
+  <!-- Quality Assurance -->
+  <div style="background-color: #ffffff; border: 1px solid #cccccc; padding: 15px; margin-bottom: 15px;">
+    <h3 style="color: #0066cc; font-size: 16px; margin: 0 0 10px 0; border-bottom: 1px solid #0066cc;">🛡️ QUALITY ASSURANCE</h3>
+    <ul style="margin: 5px 0; padding-left: 20px; font-size: 14px;">
+      <li>All products tested before dispatch</li>
+      <li>Genuine components from authorized suppliers</li>
+      <li>30-day return guarantee</li>
+      <li>12-month manufacturer warranty</li>
+    </ul>
+  </div>
+  
+  <!-- Shipping Information -->
+  <div style="background-color: #ffffff; border: 1px solid #cccccc; padding: 15px; margin-bottom: 15px;">
+    <h3 style="color: #0066cc; font-size: 16px; margin: 0 0 10px 0; border-bottom: 1px solid #0066cc;">🚚 SHIPPING INFORMATION</h3>
+    <ul style="margin: 5px 0; padding-left: 20px; font-size: 14px;">
+      <li>Same day dispatch (orders before 2PM)</li>
+      <li>Free UK shipping on orders over £20</li>
+      <li>Tracked delivery available</li>
+      <li>International shipping available</li>
+    </ul>
+  </div>
+  
+  <!-- About Us -->
+  <div style="background-color: #f8f9fa; border: 1px solid #cccccc; padding: 15px; margin-bottom: 15px;">
+    <h3 style="color: #0066cc; font-size: 16px; margin: 0 0 10px 0;">🏢 ABOUT US</h3>
+    <p style="margin: 0; font-size: 14px; line-height: 1.4;">Professional electronics supplier serving makers, engineers, and hobbyists. Specializing in high-quality electronic components with expert support.</p>
+  </div>
+  
+  <!-- Contact Footer -->
+  <div style="background-color: #0066cc; color: white; padding: 15px; text-align: center;">
+    <div style="font-size: 16px; font-weight: bold; margin-bottom: 5px;">📞 NEED HELP? Contact our technical support team for assistance.</div>
+    <div style="font-size: 16px; font-weight: bold;">🔒 SECURE PAYMENT: All major payment methods accepted.</div>
+  </div>
+  
+</div>`;
+  
+  return html;
 }
 
 /**
