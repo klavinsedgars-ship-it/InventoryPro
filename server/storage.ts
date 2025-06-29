@@ -6,6 +6,7 @@ import {
   syncLogs,
   syncQueue,
   pricingTiers,
+  shippingPolicies,
   type User, 
   type InsertUser, 
   type Product, 
@@ -18,6 +19,8 @@ import {
   type InsertSyncLog,
   type SyncQueue,
   type InsertSyncQueue,
+  type ShippingPolicy,
+  type InsertShippingPolicy,
   type PricingTier,
   type InsertPricingTier
 } from "@shared/schema";

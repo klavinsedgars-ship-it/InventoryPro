@@ -94,6 +94,17 @@ export const pricingTiers = pgTable("pricing_tiers", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const shippingPolicies = pgTable("shipping_policies", {
+  id: text("id").primaryKey(), // e.g., "policy_light", "policy_heavy"
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  minWeight: integer("min_weight").notNull(), // in grams
+  maxWeight: integer("max_weight").notNull(), // in grams
+  type: text("type").default("standard"), // standard, express, overnight
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
@@ -131,6 +142,11 @@ export const insertPricingTierSchema = createInsertSchema(pricingTiers).omit({
   updatedAt: true,
 });
 
+export const insertShippingPolicySchema = createInsertSchema(shippingPolicies).omit({
+  createdAt: true,
+  updatedAt: true,
+});
+
 // Login schema
 export const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -152,4 +168,6 @@ export type SyncQueue = typeof syncQueue.$inferSelect;
 export type InsertSyncQueue = z.infer<typeof insertSyncQueueSchema>;
 export type PricingTier = typeof pricingTiers.$inferSelect;
 export type InsertPricingTier = z.infer<typeof insertPricingTierSchema>;
+export type ShippingPolicy = typeof shippingPolicies.$inferSelect;
+export type InsertShippingPolicy = z.infer<typeof insertShippingPolicySchema>;
 export type LoginData = z.infer<typeof loginSchema>;
