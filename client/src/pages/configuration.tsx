@@ -155,21 +155,34 @@ export default function Configuration({ user }: ConfigurationProps) {
   // Pricing tier mutations
   const createPricingTierMutation = useMutation({
     mutationFn: async (data: any) => {
+      console.log("Creating pricing tier with data:", data);
       const response = await fetch("/api/pricing/tiers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
+      console.log("Pricing tier response status:", response.status);
       if (!response.ok) throw new Error("Failed to create pricing tier");
-      return response.json();
+      const result = await response.json();
+      console.log("Pricing tier response data:", result);
+      return result;
     },
     onSuccess: (data) => {
+      console.log("Pricing tier created successfully, closing dialog...");
       queryClient.invalidateQueries({ queryKey: ["/api/pricing/tiers"] });
       setIsPricingDialogOpen(false);
       setNewPricingTier({ min: "", max: "", multiplier: "", label: "", marginPercentage: "" });
       toast({ 
         title: "Pricing tier created successfully",
-        description: `${data.productsUpdated} products updated with new pricing`
+        description: `${data?.productsUpdated || 0} products updated with new pricing`
+      });
+    },
+    onError: (error) => {
+      console.error("Pricing tier creation error:", error);
+      toast({ 
+        title: "Error creating pricing tier",
+        description: error.message,
+        variant: "destructive"
       });
     },
   });
@@ -211,20 +224,33 @@ export default function Configuration({ user }: ConfigurationProps) {
   // Shipping policy mutations
   const createShippingPolicyMutation = useMutation({
     mutationFn: async (data: any) => {
+      console.log("Creating shipping policy with data:", data);
       const response = await fetch("/api/shipping/policies", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
+      console.log("Shipping policy response status:", response.status);
       if (!response.ok) throw new Error("Failed to create shipping policy");
-      return response.json();
+      const result = await response.json();
+      console.log("Shipping policy response data:", result);
+      return result;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      console.log("Shipping policy created successfully, closing dialog...");
       queryClient.invalidateQueries({ queryKey: ["/api/shipping/policies"] });
       queryClient.invalidateQueries({ queryKey: ["/api/shipping/assignments"] });
       setIsShippingDialogOpen(false);
       setNewShippingPolicy({ name: "", description: "", weightRange: { min: "", max: "" }, id: "" });
       toast({ title: "Shipping policy created successfully" });
+    },
+    onError: (error) => {
+      console.error("Shipping policy creation error:", error);
+      toast({ 
+        title: "Error creating shipping policy",
+        description: error.message,
+        variant: "destructive"
+      });
     },
   });
 
@@ -265,10 +291,26 @@ export default function Configuration({ user }: ConfigurationProps) {
   });
 
   const handleCreatePricingTier = () => {
+    if (!newPricingTier.label || !newPricingTier.min || !newPricingTier.max || !newPricingTier.multiplier || !newPricingTier.marginPercentage) {
+      toast({ 
+        title: "Validation Error", 
+        description: "Please fill in all required fields",
+        variant: "destructive"
+      });
+      return;
+    }
     createPricingTierMutation.mutate(newPricingTier);
   };
 
   const handleCreateShippingPolicy = () => {
+    if (!newShippingPolicy.name || !newShippingPolicy.description || !newShippingPolicy.weightRange.min || !newShippingPolicy.weightRange.max) {
+      toast({ 
+        title: "Validation Error", 
+        description: "Please fill in all required fields",
+        variant: "destructive"
+      });
+      return;
+    }
     createShippingPolicyMutation.mutate(newShippingPolicy);
   };
 
@@ -501,9 +543,14 @@ export default function Configuration({ user }: ConfigurationProps) {
                         <DialogFooter>
                           <Button
                             onClick={handleCreatePricingTier}
-                            disabled={createPricingTierMutation.isPending || !newPricingTier.label}
+                            disabled={createPricingTierMutation.isPending || 
+                              !newPricingTier.label || 
+                              !newPricingTier.min || 
+                              !newPricingTier.max || 
+                              !newPricingTier.multiplier || 
+                              !newPricingTier.marginPercentage}
                           >
-                            Create Tier
+                            {createPricingTierMutation.isPending ? "Creating..." : "Create Tier"}
                           </Button>
                         </DialogFooter>
                       </DialogContent>
@@ -646,9 +693,13 @@ export default function Configuration({ user }: ConfigurationProps) {
                         <DialogFooter>
                           <Button
                             onClick={handleCreateShippingPolicy}
-                            disabled={createShippingPolicyMutation.isPending || !newShippingPolicy.name}
+                            disabled={createShippingPolicyMutation.isPending || 
+                              !newShippingPolicy.name || 
+                              !newShippingPolicy.description || 
+                              !newShippingPolicy.weightRange.min || 
+                              !newShippingPolicy.weightRange.max}
                           >
-                            Create Policy
+                            {createShippingPolicyMutation.isPending ? "Creating..." : "Create Policy"}
                           </Button>
                         </DialogFooter>
                       </DialogContent>
