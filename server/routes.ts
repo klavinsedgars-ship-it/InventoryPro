@@ -2016,6 +2016,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Shipping policy endpoints
+  app.get("/api/shipping/policies", async (req: Request, res: Response) => {
+    try {
+      const { getAllShippingPolicies, generatePolicySummary, validateShippingPolicies } = await import("./shipping-policies");
+      
+      const policies = getAllShippingPolicies();
+      const summary = generatePolicySummary();
+      const validation = validateShippingPolicies();
+      
+      res.json({
+        success: true,
+        policies,
+        summary,
+        validation
+      });
+    } catch (error) {
+      console.error("Shipping policies error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to get shipping policies"
+      });
+    }
+  });
+
+  // Get shipping policy assignments for products
+  app.get("/api/shipping/assignments", async (req: Request, res: Response) => {
+    try {
+      const products = await storage.getProducts({});
+      const { assignShippingPolicies } = await import("./shipping-policies");
+      
+      const assignments = assignShippingPolicies(
+        products.map(p => ({ id: p.id, weight: p.weight }))
+      );
+      
+      res.json({
+        success: true,
+        assignments
+      });
+    } catch (error) {
+      console.error("Shipping assignments error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to get shipping policy assignments"
+      });
+    }
+  });
+
+  // Test shipping policy for specific weight
+  app.post("/api/shipping/test", async (req: Request, res: Response) => {
+    try {
+      const { weight } = req.body;
+      const { getShippingPolicyId, getShippingPolicyName, getShippingPolicyById } = await import("./shipping-policies");
+      
+      const policyId = getShippingPolicyId(weight);
+      const policyName = getShippingPolicyName(weight);
+      const policy = getShippingPolicyById(policyId);
+      
+      res.json({
+        success: true,
+        weight,
+        policyId,
+        policyName,
+        policy
+      });
+    } catch (error) {
+      console.error("Shipping test error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to test shipping policy"
+      });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
