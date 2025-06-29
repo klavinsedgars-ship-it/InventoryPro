@@ -211,8 +211,8 @@ export default function Configuration({ user }: ConfigurationProps) {
   });
 
   const updatePricingTierMutation = useMutation({
-    mutationFn: async ({ index, ...data }: any) => {
-      const response = await fetch(`/api/pricing/tiers/${index}`, {
+    mutationFn: async ({ id, ...data }: any) => {
+      const response = await fetch(`/api/pricing/tiers/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -231,8 +231,8 @@ export default function Configuration({ user }: ConfigurationProps) {
   });
 
   const deletePricingTierMutation = useMutation({
-    mutationFn: async (index: number) => {
-      const response = await fetch(`/api/pricing/tiers/${index}`, {
+    mutationFn: async (id: number) => {
+      const response = await fetch(`/api/pricing/tiers/${id}`, {
         method: "DELETE",
       });
       if (!response.ok) throw new Error("Failed to delete pricing tier");
@@ -694,7 +694,7 @@ export default function Configuration({ user }: ConfigurationProps) {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => deletePricingTierMutation.mutate(index)}
+                            onClick={() => deletePricingTierMutation.mutate(tier.id)}
                             disabled={deletePricingTierMutation.isPending}
                           >
                             <Trash2 className="h-4 w-4 mr-1" />

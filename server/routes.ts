@@ -302,26 +302,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update pricing tier
-  app.put("/api/pricing/tiers/:index", requireAuth, async (req, res) => {
+  app.put("/api/pricing/tiers/:id", requireAuth, async (req, res) => {
     try {
+      const { id } = req.params;
       const { min, max, multiplier, label, marginPercentage } = req.body;
       
-      const updatedTier = {
-        min: parseFloat(min),
-        max: parseFloat(max),
-        multiplier: parseFloat(multiplier),
+      // Update the tier in the database
+      const updatedTier = await storage.updatePricingTier(parseInt(id), {
+        min: min.toString(),
+        max: max.toString(),
+        multiplier: multiplier.toString(),
         label,
-        marginPercentage: parseFloat(marginPercentage)
-      };
+        marginPercentage: marginPercentage.toString()
+      });
+
+      if (!updatedTier) {
+        return res.status(404).json({ 
+          success: false, 
+          error: "Pricing tier not found" 
+        });
+      }
 
       // Trigger recalculation for all products in this tier range
-      const products = await storage.getProducts({});
+      const products = await storage.getProducts();
       let updatedCount = 0;
       
       for (const product of products) {
         if (product.supplierPrice) {
           const supplierPrice = parseFloat(product.supplierPrice);
-          if (supplierPrice >= updatedTier.min && supplierPrice <= updatedTier.max) {
+          const tierMin = parseFloat(updatedTier.min);
+          const tierMax = parseFloat(updatedTier.max);
+          
+          if (supplierPrice >= tierMin && supplierPrice <= tierMax) {
             const result = calculateDynamicPrice(supplierPrice);
             await storage.updateProduct(product.id, {
               calculatedPrice: result.finalPrice,
@@ -349,17 +361,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Delete pricing tier
-  app.delete("/api/pricing/tiers/:index", requireAuth, async (req, res) => {
+  app.delete("/api/pricing/tiers/:id", requireAuth, async (req, res) => {
     try {
-      const { index } = req.params;
+      const { id } = req.params;
       
-      // Note: This would normally modify the pricing configuration
-      // For now, we simulate success and suggest recalculation
+      const deleted = await storage.deletePricingTier(parseInt(id));
+      
+      if (!deleted) {
+        return res.status(404).json({ 
+          success: false, 
+          error: "Pricing tier not found" 
+        });
+      }
       
       res.json({ 
         success: true, 
-        message: "Pricing tier deleted successfully",
-        note: "Products in this tier range will use default pricing rules"
+        message: "Pricing tier deleted successfully"
       });
     } catch (error) {
       console.error("Error deleting pricing tier:", error);
