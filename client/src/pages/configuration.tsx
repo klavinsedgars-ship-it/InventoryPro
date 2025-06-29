@@ -132,10 +132,10 @@ export default function Configuration({ user }: ConfigurationProps) {
 
   if (isLoading) {
     return (
-      <div className="flex h-screen bg-gray-50">
+      <div className="bg-gray-50 min-h-screen">
         <Sidebar />
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 flex items-center justify-center">
+        <div className="ml-64 p-6">
+          <div className="flex items-center justify-center h-96">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
           </div>
         </div>
@@ -144,229 +144,227 @@ export default function Configuration({ user }: ConfigurationProps) {
   }
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="bg-gray-50 min-h-screen">
       <Sidebar />
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="flex-1 overflow-auto p-6">
-          <div className="w-full space-y-6">
-            {/* Header */}
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <div className="flex items-center space-x-3">
-                <Package className="h-8 w-8 text-blue-600" />
-                <div>
-                  <h1 className="text-2xl font-bold text-gray-900">Configuration</h1>
-                  <p className="text-gray-600">Manage categories, pricing, and shipping policies</p>
-                </div>
+      <div className="ml-64 p-6">
+        <div className="w-full space-y-6">
+          {/* Header */}
+          <div className="bg-white rounded-lg shadow-sm p-6">
+            <div className="flex items-center space-x-3">
+              <Package className="h-8 w-8 text-blue-600" />
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">Configuration</h1>
+                <p className="text-gray-600">Manage categories, pricing, and shipping policies</p>
               </div>
             </div>
+          </div>
 
-            {/* Tabs */}
-            <div className="w-full">
-              <Tabs defaultValue="categories" className="w-full">
-                <TabsList className="grid w-full grid-cols-3 mb-6">
-                  <TabsTrigger value="categories" className="flex items-center justify-center space-x-2 px-4 py-2">
-                    <FolderTree className="h-4 w-4" />
-                    <span>Categories</span>
-                  </TabsTrigger>
-                  <TabsTrigger value="pricing" className="flex items-center justify-center space-x-2 px-4 py-2">
-                    <Calculator className="h-4 w-4" />
-                    <span>Pricing Tiers</span>
-                  </TabsTrigger>
-                  <TabsTrigger value="shipping" className="flex items-center justify-center space-x-2 px-4 py-2">
-                    <Truck className="h-4 w-4" />
-                    <span>Shipping Policies</span>
-                  </TabsTrigger>
-                </TabsList>
+          {/* Tabs */}
+          <div className="w-full">
+            <Tabs defaultValue="categories" className="w-full">
+              <TabsList className="grid w-full grid-cols-3 mb-6">
+                <TabsTrigger value="categories" className="flex items-center justify-center space-x-2 px-4 py-2">
+                  <FolderTree className="h-4 w-4" />
+                  <span>Categories</span>
+                </TabsTrigger>
+                <TabsTrigger value="pricing" className="flex items-center justify-center space-x-2 px-4 py-2">
+                  <Calculator className="h-4 w-4" />
+                  <span>Pricing Tiers</span>
+                </TabsTrigger>
+                <TabsTrigger value="shipping" className="flex items-center justify-center space-x-2 px-4 py-2">
+                  <Truck className="h-4 w-4" />
+                  <span>Shipping Policies</span>
+                </TabsTrigger>
+              </TabsList>
 
-                {/* Categories Tab */}
-                <TabsContent value="categories" className="space-y-6">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-xl font-semibold">Product Categories</h2>
-                    <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-                      <DialogTrigger asChild>
-                        <Button>
-                          <Plus className="h-4 w-4 mr-2" />
-                          Add Category
+              {/* Categories Tab */}
+              <TabsContent value="categories" className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xl font-semibold">Product Categories</h2>
+                  <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button>
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add Category
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Create New Category</DialogTitle>
+                        <DialogDescription>
+                          Add a new product category for organizing your inventory.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4">
+                        <div>
+                          <Label htmlFor="name">Category Name</Label>
+                          <Input
+                            id="name"
+                            value={newCategoryName}
+                            onChange={(e) => setNewCategoryName(e.target.value)}
+                            placeholder="Electronics, Components, etc."
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="description">Description</Label>
+                          <Textarea
+                            id="description"
+                            value={newCategoryDescription}
+                            onChange={(e) => setNewCategoryDescription(e.target.value)}
+                            placeholder="Category description..."
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="ebayMapping">eBay Category ID</Label>
+                          <Input
+                            id="ebayMapping"
+                            value={newCategoryEbayMapping}
+                            onChange={(e) => setNewCategoryEbayMapping(e.target.value)}
+                            placeholder="e.g., 58277"
+                          />
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button
+                          onClick={handleCreateCategory}
+                          disabled={createCategoryMutation.isPending || !newCategoryName}
+                        >
+                          Create Category
                         </Button>
-                      </DialogTrigger>
-                      <DialogContent>
-                        <DialogHeader>
-                          <DialogTitle>Create New Category</DialogTitle>
-                          <DialogDescription>
-                            Add a new product category for organizing your inventory.
-                          </DialogDescription>
-                        </DialogHeader>
-                        <div className="space-y-4">
-                          <div>
-                            <Label htmlFor="name">Category Name</Label>
-                            <Input
-                              id="name"
-                              value={newCategoryName}
-                              onChange={(e) => setNewCategoryName(e.target.value)}
-                              placeholder="Electronics, Components, etc."
-                            />
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {categories.map((category: any) => (
+                    <Card key={category.id}>
+                      <CardHeader>
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-lg">{category.name}</CardTitle>
+                          <Badge variant="secondary">ID: {category.id}</Badge>
+                        </div>
+                        <CardDescription>{category.description || "No description"}</CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="font-medium">eBay Category:</span>
+                            <span>{category.ebayMapping || "Not mapped"}</span>
                           </div>
-                          <div>
-                            <Label htmlFor="description">Description</Label>
-                            <Textarea
-                              id="description"
-                              value={newCategoryDescription}
-                              onChange={(e) => setNewCategoryDescription(e.target.value)}
-                              placeholder="Category description..."
-                            />
-                          </div>
-                          <div>
-                            <Label htmlFor="ebayMapping">eBay Category ID</Label>
-                            <Input
-                              id="ebayMapping"
-                              value={newCategoryEbayMapping}
-                              onChange={(e) => setNewCategoryEbayMapping(e.target.value)}
-                              placeholder="e.g., 58277"
-                            />
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="font-medium">Products:</span>
+                            <span>0</span>
                           </div>
                         </div>
-                        <DialogFooter>
-                          <Button
-                            onClick={handleCreateCategory}
-                            disabled={createCategoryMutation.isPending || !newCategoryName}
-                          >
-                            Create Category
+                        <div className="flex space-x-2 mt-4">
+                          <Button variant="outline" size="sm">
+                            <Edit className="h-4 w-4 mr-1" />
+                            Edit
                           </Button>
-                        </DialogFooter>
-                      </DialogContent>
-                    </Dialog>
-                  </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => deleteCategoryMutation.mutate(category.id)}
+                            disabled={deleteCategoryMutation.isPending}
+                          >
+                            <Trash2 className="h-4 w-4 mr-1" />
+                            Delete
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </TabsContent>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {categories.map((category: any) => (
-                      <Card key={category.id}>
-                        <CardHeader>
+              {/* Pricing Tab */}
+              <TabsContent value="pricing" className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xl font-semibold">Pricing Tiers</h2>
+                  <Badge variant="secondary">7 Active Tiers</Badge>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {pricingTiers.map((tier: any, index: number) => (
+                    <Card key={index}>
+                      <CardHeader>
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-lg">{tier.label}</CardTitle>
+                          <Badge variant="default">{tier.marginPercentage}%</Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-3">
                           <div className="flex items-center justify-between">
-                            <CardTitle className="text-lg">{category.name}</CardTitle>
-                            <Badge variant="secondary">ID: {category.id}</Badge>
+                            <span className="text-sm font-medium">Price Range:</span>
+                            <span className="text-sm">€{tier.min} - €{tier.max}</span>
                           </div>
-                          <CardDescription>{category.description || "No description"}</CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="font-medium">eBay Category:</span>
-                              <span>{category.ebayMapping || "Not mapped"}</span>
-                            </div>
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="font-medium">Products:</span>
-                              <span>0</span>
-                            </div>
-                          </div>
-                          <div className="flex space-x-2 mt-4">
-                            <Button variant="outline" size="sm">
-                              <Edit className="h-4 w-4 mr-1" />
-                              Edit
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => deleteCategoryMutation.mutate(category.id)}
-                              disabled={deleteCategoryMutation.isPending}
-                            >
-                              <Trash2 className="h-4 w-4 mr-1" />
-                              Delete
-                            </Button>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                </TabsContent>
-
-                {/* Pricing Tab */}
-                <TabsContent value="pricing" className="space-y-6">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-xl font-semibold">Pricing Tiers</h2>
-                    <Badge variant="secondary">7 Active Tiers</Badge>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {pricingTiers.map((tier: any, index: number) => (
-                      <Card key={index}>
-                        <CardHeader>
                           <div className="flex items-center justify-between">
-                            <CardTitle className="text-lg">{tier.label}</CardTitle>
-                            <Badge variant="default">{tier.marginPercentage}%</Badge>
+                            <span className="text-sm font-medium">Multiplier:</span>
+                            <span className="text-sm">{tier.multiplier}x</span>
                           </div>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="space-y-3">
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm font-medium">Price Range:</span>
-                              <span className="text-sm">€{tier.min} - €{tier.max}</span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm font-medium">Multiplier:</span>
-                              <span className="text-sm">{tier.multiplier}x</span>
-                            </div>
-                            <div className="text-sm text-gray-600">
-                              Automatic pricing based on supplier cost
-                            </div>
+                          <div className="text-sm text-gray-600">
+                            Automatic pricing based on supplier cost
                           </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                </TabsContent>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </TabsContent>
 
-                {/* Shipping Tab */}
-                <TabsContent value="shipping" className="space-y-6">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-xl font-semibold">Shipping Policies</h2>
-                    <div className="flex items-center space-x-2">
-                      {validation?.isValid ? (
-                        <Badge variant="default" className="bg-green-500">
-                          <CheckCircle className="h-4 w-4 mr-1" />
-                          All Policies Valid
-                        </Badge>
-                      ) : (
-                        <Badge variant="destructive">
-                          <AlertCircle className="h-4 w-4 mr-1" />
-                          Configuration Issues
-                        </Badge>
-                      )}
-                    </div>
+              {/* Shipping Tab */}
+              <TabsContent value="shipping" className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xl font-semibold">Shipping Policies</h2>
+                  <div className="flex items-center space-x-2">
+                    {validation?.isValid ? (
+                      <Badge variant="default" className="bg-green-500">
+                        <CheckCircle className="h-4 w-4 mr-1" />
+                        All Policies Valid
+                      </Badge>
+                    ) : (
+                      <Badge variant="destructive">
+                        <AlertCircle className="h-4 w-4 mr-1" />
+                        Configuration Issues
+                      </Badge>
+                    )}
                   </div>
+                </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {policies.map((policy: any) => (
-                      <Card key={policy.id}>
-                        <CardHeader>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {policies.map((policy: any) => (
+                    <Card key={policy.id}>
+                      <CardHeader>
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-lg flex items-center space-x-2">
+                            <Weight className="h-5 w-5" />
+                            <span>{policy.name}</span>
+                          </CardTitle>
+                          <Badge variant="outline">{policy.type}</Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-3">
                           <div className="flex items-center justify-between">
-                            <CardTitle className="text-lg flex items-center space-x-2">
-                              <Weight className="h-5 w-5" />
-                              <span>{policy.name}</span>
-                            </CardTitle>
-                            <Badge variant="outline">{policy.type}</Badge>
+                            <span className="text-sm font-medium">Policy ID:</span>
+                            <Badge variant="secondary">{policy.id}</Badge>
                           </div>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="space-y-3">
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm font-medium">Policy ID:</span>
-                              <Badge variant="secondary">{policy.id}</Badge>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm font-medium">Weight Range:</span>
-                              <span className="text-sm">{policy.weightRange.min}-{policy.weightRange.max}g</span>
-                            </div>
-                            <div className="text-sm text-gray-600">
-                              Products: {assignments.filter((a: any) => a.policyId === policy.id).length}
-                            </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium">Weight Range:</span>
+                            <span className="text-sm">{policy.weightRange.min}-{policy.weightRange.max}g</span>
                           </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                </TabsContent>
-              </Tabs>
-            </div>
+                          <div className="text-sm text-gray-600">
+                            Products: {assignments.filter((a: any) => a.policyId === policy.id).length}
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </TabsContent>
+            </Tabs>
           </div>
         </div>
       </div>
