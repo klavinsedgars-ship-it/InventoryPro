@@ -147,17 +147,28 @@ export class EbayApiService {
 
 
 
-  async listProduct(productId: number, listingDetails: Partial<EbayListingRequest>): Promise<EbayApiResponse> {
+  async listProduct(productId: number, listingDetails: Partial<EbayListingRequest>, useTemplate: boolean = true): Promise<EbayApiResponse> {
     try {
       const product = await storage.getProduct(productId);
       if (!product) {
         throw new Error("Product not found");
       }
 
+      // Generate professional listing template if enabled
+      let templateData = null;
+      if (useTemplate) {
+        try {
+          const { generateEbayListing } = await import("./ebay-listing-template");
+          templateData = generateEbayListing(product);
+        } catch (error) {
+          console.warn("Template generation failed, using basic listing:", error);
+        }
+      }
+
       // Prepare listing data for eBay Trading API
       const listingData = {
-        title: listingDetails.title || product.name,
-        description: listingDetails.description || product.description || `${product.name} - High quality electronics component`,
+        title: listingDetails.title || templateData?.title || product.name,
+        description: listingDetails.description || templateData?.description || product.description || `${product.name} - High quality electronics component`,
         categoryId: listingDetails.categoryId || "175673", // Default electronics category
         startPrice: listingDetails.startPrice || parseFloat(product.salePrice) || 0,
         quantity: listingDetails.quantity || product.stock || 1,

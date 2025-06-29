@@ -10,7 +10,8 @@ import {
   Box,
   BarChart3,
   Calculator,
-  Database
+  Database,
+  FileText
 } from "lucide-react";
 
 const navigation = [
@@ -21,6 +22,7 @@ const navigation = [
   { name: 'Categories', href: '/categories', icon: FolderTree },
   { name: 'Pricing', href: '/pricing', icon: Calculator },
   { name: 'Queue Manager', href: '/queue', icon: Database },
+  { name: 'Templates', href: '/templates', icon: FileText },
   { name: 'Reports', href: '/reports', icon: BarChart3 },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];

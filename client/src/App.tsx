@@ -13,6 +13,7 @@ import { Settings } from "@/pages/settings";
 import { Reports } from "@/pages/reports";
 import { Pricing } from "@/pages/pricing";
 import { QueueManagement } from "@/pages/queue-management";
+import { TemplatePreview } from "@/pages/template-preview";
 import { Login } from "@/pages/login";
 import NotFound from "@/pages/not-found";
 
@@ -89,6 +90,7 @@ function AppContent() {
       <Route path="/categories" component={() => <Categories user={user} />} />
       <Route path="/pricing" component={() => <Pricing user={user} />} />
       <Route path="/queue" component={() => <QueueManagement user={user} />} />
+      <Route path="/templates" component={() => <TemplatePreview user={user} />} />
       <Route path="/reports" component={() => <Reports user={user} />} />
       <Route path="/settings" component={() => <Settings user={user} />} />
       <Route component={NotFound} />
