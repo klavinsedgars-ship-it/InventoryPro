@@ -565,6 +565,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Apply templates to all products
+  app.post("/api/products/apply-templates", requireAuth, async (req, res) => {
+    try {
+      const products = await storage.getProducts();
+      const { generateEbayListing } = await import("./ebay-listing-template");
+      
+      let updatedCount = 0;
+      const results = [];
+      
+      for (const product of products) {
+        try {
+          const template = generateEbayListing(product);
+          
+          // Update product with template-generated description
+          await storage.updateProduct(product.id, {
+            description: template.description,
+            name: template.title.length <= 80 ? template.title : product.name
+          });
+          
+          updatedCount++;
+          results.push({
+            id: product.id,
+            name: product.name,
+            success: true,
+            titleLength: template.title.length,
+            keywordCount: template.keywords.length
+          });
+        } catch (error) {
+          results.push({
+            id: product.id,
+            name: product.name,
+            success: false,
+            error: (error as Error).message
+          });
+        }
+      }
+      
+      res.json({
+        success: true,
+        message: `Applied templates to ${updatedCount} products`,
+        updatedCount,
+        totalProducts: products.length,
+        results
+      });
+    } catch (error) {
+      console.error("Template application failed:", error);
+      res.status(500).json({
+        success: false,
+        message: (error as Error).message
+      });
+    }
+  });
+
   // eBay API routes
   app.post("/api/ebay/list", requireAuth, async (req, res) => {
     try {
