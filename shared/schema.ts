@@ -68,6 +68,21 @@ export const syncLogs = pgTable("sync_logs", {
   syncedAt: timestamp("synced_at").defaultNow(),
 });
 
+export const syncQueue = pgTable("sync_queue", {
+  id: serial("id").primaryKey(),
+  productId: integer("product_id").references(() => products.id).notNull(),
+  operation: text("operation").notNull(), // 'list', 'update_price', 'update_stock', 'unlist'
+  priority: integer("priority").notNull().default(3), // 1=critical, 2=high, 3=medium, 4=low
+  status: text("status").notNull().default("pending"), // 'pending', 'processing', 'completed', 'failed'
+  retryCount: integer("retry_count").notNull().default(0),
+  maxRetries: integer("max_retries").notNull().default(3),
+  marketplace: text("marketplace").notNull().default("ebay"), // ebay, amazon
+  scheduledFor: timestamp("scheduled_for").defaultNow(),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow(),
+  processedAt: timestamp("processed_at"),
+});
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
@@ -93,6 +108,12 @@ export const insertSyncLogSchema = createInsertSchema(syncLogs).omit({
   syncedAt: true,
 });
 
+export const insertSyncQueueSchema = createInsertSchema(syncQueue).omit({
+  id: true,
+  createdAt: true,
+  processedAt: true,
+});
+
 // Login schema
 export const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -110,4 +131,6 @@ export type MarketplaceSettings = typeof marketplaceSettings.$inferSelect;
 export type InsertMarketplaceSettings = z.infer<typeof insertMarketplaceSettingsSchema>;
 export type SyncLog = typeof syncLogs.$inferSelect;
 export type InsertSyncLog = z.infer<typeof insertSyncLogSchema>;
+export type SyncQueue = typeof syncQueue.$inferSelect;
+export type InsertSyncQueue = z.infer<typeof insertSyncQueueSchema>;
 export type LoginData = z.infer<typeof loginSchema>;

@@ -142,16 +142,135 @@ class EbayRateLimiter {
 Total daily eBay calls: 50-200 (well under 5,000 limit)
 ```
 
-## Next Steps Required
+## ENTERPRISE SCALE: 150K Products Strategy
 
-1. **Implement eBay Rate Limiter**: Add 1-second delays between eBay API calls
-2. **Auto-Sync Backend**: Create scheduled job for TME → eBay price/stock sync
-3. **Queue System**: Buffer eBay updates for rate-limited processing
-4. **Monitoring**: Track API usage and sync success rates
+### **Critical Math for 150K Products:**
 
-## Answer to Your Questions:
+#### eBay API Constraints:
+- **5,000 calls/day limit = MAJOR BOTTLENECK**
+- **150,000 products ÷ 5,000 calls = 30 DAYS** to list all products
+- **Daily processing capacity: 5,000 products max**
+- **Realistic daily capacity: 4,500 products** (safety buffer)
 
-1. **Images**: ✅ Implemented with TME auto-import and emoji fallbacks
-2. **Auto-sync**: ✅ TME sync implemented, eBay auto-sync needs rate limiter
-3. **Timeframe**: Hourly TME sync + hourly eBay updates (60 products/hour max)
-4. **eBay Limits**: 5,000 calls/day, 1 listing/second - current usage well under limits
+#### Required Architecture Changes:
+
+### **Phase 1: Queue-Based Processing System**
+```javascript
+// Implement job queue with priority levels:
+1. CRITICAL: Stock = 0 (unlist immediately)
+2. HIGH: Stock changes (update within 1 hour)  
+3. MEDIUM: Price changes (update within 4 hours)
+4. LOW: New listings (process over 30 days)
+```
+
+### **Phase 2: Multi-App Strategy**
+```
+eBay allows multiple applications per developer account:
+- App 1: New listings (5,000 calls/day)
+- App 2: Price updates (5,000 calls/day) 
+- App 3: Stock updates (5,000 calls/day)
+- App 4: Product management (5,000 calls/day)
+
+Total capacity: 20,000 API calls/day
+```
+
+### **Phase 3: eBay Inventory API Migration**
+```
+Trading API → Inventory API benefits:
+- Bulk operations (1 call = 25 products)
+- Higher rate limits for enterprise accounts
+- Better for large catalogs
+- Required for 150K+ scale
+```
+
+## **Immediate Implementation Requirements:**
+
+### **1. Database Optimization:**
+```sql
+-- Add indices for queue processing:
+CREATE INDEX idx_products_sync_priority ON products(status, listedOnEbay, updatedAt);
+CREATE INDEX idx_products_stock_changes ON products(stock, listedOnEbay);
+CREATE INDEX idx_sync_queue_priority ON sync_queue(priority, status, createdAt);
+```
+
+### **2. Sync Queue Table:**
+```sql
+CREATE TABLE sync_queue (
+  id SERIAL PRIMARY KEY,
+  product_id INTEGER REFERENCES products(id),
+  operation VARCHAR(50), -- 'list', 'update_price', 'update_stock', 'unlist'
+  priority INTEGER, -- 1=critical, 2=high, 3=medium, 4=low
+  status VARCHAR(20), -- 'pending', 'processing', 'completed', 'failed'
+  retry_count INTEGER DEFAULT 0,
+  max_retries INTEGER DEFAULT 3,
+  scheduled_for TIMESTAMP,
+  created_at TIMESTAMP DEFAULT NOW(),
+  processed_at TIMESTAMP
+);
+```
+
+### **3. Rate-Limited Worker System:**
+```javascript
+class EbayQueueProcessor {
+  private callsToday = 0;
+  private dailyLimit = 4500;
+  private lastCall = 0;
+  private minInterval = 1000; // 1 second between calls
+  
+  async processQueue() {
+    // Process up to daily limit with 1-second intervals
+    // Priority-based processing
+    // Automatic retry with exponential backoff
+  }
+}
+```
+
+## **150K Product Sync Timeline:**
+
+### **Optimistic Scenario (Multi-App Setup):**
+- **Week 1**: Critical infrastructure (queue system, rate limiting)
+- **Week 2**: Initial listing batch (35,000 products)
+- **Week 3-4**: Continue listing (70,000 more products) 
+- **Week 5-6**: Complete initial listing (45,000 remaining)
+- **Ongoing**: Real-time sync maintenance
+
+### **Realistic Timeline:**
+- **Month 1**: Core infrastructure + first 30,000 products
+- **Month 2**: Scale to 60,000 products with optimizations
+- **Month 3**: Complete 150K with mature queue system
+- **Month 4+**: Maintenance mode with real-time sync
+
+## **Cost & Infrastructure Considerations:**
+
+### **eBay API Applications Needed:**
+- **Primary App**: Listings (current)
+- **Secondary Apps**: 2-3 additional apps for parallel processing
+- **Enterprise Account**: Consider eBay Partner Network for higher limits
+
+### **Infrastructure Scaling:**
+- **Database**: PostgreSQL with proper indexing
+- **Queue Processing**: Background job workers
+- **Monitoring**: API usage tracking, success rates
+- **Error Handling**: Dead letter queues, manual intervention tools
+
+## **Action Plan for 150K Scale:**
+
+### **Immediate (Week 1):**
+1. Implement sync queue table and priority system
+2. Build rate-limited eBay processor with 1-second intervals
+3. Create monitoring dashboard for API usage
+4. Test with current 11 products to validate queue system
+
+### **Short-term (Month 1):**
+1. Apply for additional eBay developer applications
+2. Implement bulk TME sync (500+ products per batch)
+3. Deploy automated queue worker with retry logic
+4. Begin systematic listing of first 30,000 products
+
+### **Medium-term (Month 2-3):**
+1. Migrate to eBay Inventory API for true bulk operations
+2. Implement smart sync (only changed products)
+3. Add predictive stock management
+4. Scale to full 150K product catalog
+
+**The 150K target is achievable, but requires significant architecture changes and 2-3 months of systematic processing.**

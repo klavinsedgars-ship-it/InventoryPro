@@ -63,6 +63,20 @@ export interface IStorage {
     totalRevenue: number;
     outOfStock: number;
   }>;
+
+  // Sync Queue Operations
+  createSyncQueueItem(item: InsertSyncQueue): Promise<SyncQueue>;
+  createBulkSyncQueueItems(items: InsertSyncQueue[]): Promise<void>;
+  getPendingSyncQueueItems(limit?: number): Promise<SyncQueue[]>;
+  updateSyncQueueItem(id: number, updates: Partial<InsertSyncQueue>): Promise<void>;
+  getSyncQueueCount(status?: string): Promise<number>;
+  getSyncQueueStats(): Promise<{
+    pending: number;
+    processing: number;
+    completed: number;
+    failed: number;
+    byPriority: Record<string, number>;
+  }>;
 }
 
 export class DatabaseStorage implements IStorage {
