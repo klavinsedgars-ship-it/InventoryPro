@@ -547,7 +547,11 @@ export default function Configuration({ user }: ConfigurationProps) {
                           </div>
                         </div>
                         <div className="flex space-x-2 mt-4">
-                          <Button variant="outline" size="sm">
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => setEditingCategory(category)}
+                          >
                             <Edit className="h-4 w-4 mr-1" />
                             Edit
                           </Button>
@@ -565,6 +569,69 @@ export default function Configuration({ user }: ConfigurationProps) {
                     </Card>
                   ))}
                 </div>
+
+                {/* Edit Category Dialog */}
+                {editingCategory && (
+                  <Dialog open={!!editingCategory} onOpenChange={() => setEditingCategory(null)}>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Edit Category</DialogTitle>
+                        <DialogDescription>
+                          Update the category information.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4">
+                        <div>
+                          <Label htmlFor="editCategoryName">Category Name</Label>
+                          <Input
+                            id="editCategoryName"
+                            value={editingCategory.name}
+                            onChange={(e) => setEditingCategory({
+                              ...editingCategory, 
+                              name: e.target.value
+                            })}
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="editCategoryDescription">Description</Label>
+                          <Textarea
+                            id="editCategoryDescription"
+                            value={editingCategory.description || ''}
+                            onChange={(e) => setEditingCategory({
+                              ...editingCategory, 
+                              description: e.target.value
+                            })}
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="editCategoryEbayMapping">eBay Category ID</Label>
+                          <Input
+                            id="editCategoryEbayMapping"
+                            value={editingCategory.ebayMapping || ''}
+                            onChange={(e) => setEditingCategory({
+                              ...editingCategory, 
+                              ebayMapping: e.target.value
+                            })}
+                            placeholder="e.g., 58277"
+                          />
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button variant="outline" onClick={() => setEditingCategory(null)}>
+                          Cancel
+                        </Button>
+                        <Button
+                          onClick={() => {
+                            updateCategoryMutation.mutate(editingCategory);
+                          }}
+                          disabled={updateCategoryMutation.isPending}
+                        >
+                          {updateCategoryMutation.isPending ? "Updating..." : "Update Category"}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                )}
               </TabsContent>
 
               {/* Pricing Tab */}
