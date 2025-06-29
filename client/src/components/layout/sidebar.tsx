@@ -11,7 +11,8 @@ import {
   BarChart3,
   Calculator,
   Database,
-  FileText
+  FileText,
+  Truck
 } from "lucide-react";
 
 const navigation = [
@@ -23,6 +24,7 @@ const navigation = [
   { name: 'Pricing', href: '/pricing', icon: Calculator },
   { name: 'Queue Manager', href: '/queue', icon: Database },
   { name: 'Templates', href: '/templates', icon: FileText },
+  { name: 'Shipping Policies', href: '/shipping', icon: Truck },
   { name: 'Reports', href: '/reports', icon: BarChart3 },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
