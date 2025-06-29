@@ -1067,13 +1067,10 @@ export default function Configuration({ user }: ConfigurationProps) {
                             <Input
                               id="editMinWeight"
                               type="number"
-                              value={editingShippingPolicy.weightRange?.min || ''}
+                              value={editingShippingPolicy.minWeight || ''}
                               onChange={(e) => setEditingShippingPolicy({
                                 ...editingShippingPolicy, 
-                                weightRange: {
-                                  ...editingShippingPolicy.weightRange,
-                                  min: e.target.value
-                                }
+                                minWeight: parseInt(e.target.value) || 0
                               })}
                             />
                           </div>
@@ -1082,13 +1079,10 @@ export default function Configuration({ user }: ConfigurationProps) {
                             <Input
                               id="editMaxWeight"
                               type="number"
-                              value={editingShippingPolicy.weightRange?.max || ''}
+                              value={editingShippingPolicy.maxWeight || ''}
                               onChange={(e) => setEditingShippingPolicy({
                                 ...editingShippingPolicy, 
-                                weightRange: {
-                                  ...editingShippingPolicy.weightRange,
-                                  max: e.target.value
-                                }
+                                maxWeight: parseInt(e.target.value) || 0
                               })}
                             />
                           </div>
@@ -1111,7 +1105,16 @@ export default function Configuration({ user }: ConfigurationProps) {
                         </Button>
                         <Button
                           onClick={() => {
-                            updateShippingPolicyMutation.mutate(editingShippingPolicy);
+                            const updateData = {
+                              id: editingShippingPolicy.id,
+                              name: editingShippingPolicy.name,
+                              description: editingShippingPolicy.description,
+                              weightRange: {
+                                min: editingShippingPolicy.minWeight,
+                                max: editingShippingPolicy.maxWeight
+                              }
+                            };
+                            updateShippingPolicyMutation.mutate(updateData);
                           }}
                           disabled={updateShippingPolicyMutation.isPending}
                         >
