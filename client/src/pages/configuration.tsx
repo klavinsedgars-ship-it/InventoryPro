@@ -39,6 +39,28 @@ export default function Configuration({ user }: ConfigurationProps) {
   const [newCategoryEbayMapping, setNewCategoryEbayMapping] = useState("");
   const [editingCategory, setEditingCategory] = useState<any>(null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  
+  // Pricing tier states
+  const [isPricingDialogOpen, setIsPricingDialogOpen] = useState(false);
+  const [editingPricingTier, setEditingPricingTier] = useState<any>(null);
+  const [newPricingTier, setNewPricingTier] = useState({
+    min: "",
+    max: "",
+    multiplier: "",
+    label: "",
+    marginPercentage: ""
+  });
+
+  // Shipping policy states
+  const [isShippingDialogOpen, setIsShippingDialogOpen] = useState(false);
+  const [editingShippingPolicy, setEditingShippingPolicy] = useState<any>(null);
+  const [newShippingPolicy, setNewShippingPolicy] = useState({
+    name: "",
+    description: "",
+    weightRange: { min: "", max: "" },
+    id: ""
+  });
+
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -128,6 +150,126 @@ export default function Configuration({ user }: ConfigurationProps) {
       description: newCategoryDescription,
       ebayMapping: newCategoryEbayMapping,
     });
+  };
+
+  // Pricing tier mutations
+  const createPricingTierMutation = useMutation({
+    mutationFn: async (data: any) => {
+      const response = await fetch("/api/pricing/tiers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) throw new Error("Failed to create pricing tier");
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/pricing/tiers"] });
+      setIsPricingDialogOpen(false);
+      setNewPricingTier({ min: "", max: "", multiplier: "", label: "", marginPercentage: "" });
+      toast({ 
+        title: "Pricing tier created successfully",
+        description: `${data.productsUpdated} products updated with new pricing`
+      });
+    },
+  });
+
+  const updatePricingTierMutation = useMutation({
+    mutationFn: async ({ index, ...data }: any) => {
+      const response = await fetch(`/api/pricing/tiers/${index}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) throw new Error("Failed to update pricing tier");
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/pricing/tiers"] });
+      setEditingPricingTier(null);
+      toast({ 
+        title: "Pricing tier updated successfully",
+        description: `${data.productsUpdated} products recalculated`
+      });
+    },
+  });
+
+  const deletePricingTierMutation = useMutation({
+    mutationFn: async (index: number) => {
+      const response = await fetch(`/api/pricing/tiers/${index}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) throw new Error("Failed to delete pricing tier");
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/pricing/tiers"] });
+      toast({ title: "Pricing tier deleted successfully" });
+    },
+  });
+
+  // Shipping policy mutations
+  const createShippingPolicyMutation = useMutation({
+    mutationFn: async (data: any) => {
+      const response = await fetch("/api/shipping/policies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) throw new Error("Failed to create shipping policy");
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/shipping/policies"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/shipping/assignments"] });
+      setIsShippingDialogOpen(false);
+      setNewShippingPolicy({ name: "", description: "", weightRange: { min: "", max: "" }, id: "" });
+      toast({ title: "Shipping policy created successfully" });
+    },
+  });
+
+  const updateShippingPolicyMutation = useMutation({
+    mutationFn: async ({ id, ...data }: any) => {
+      const response = await fetch(`/api/shipping/policies/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) throw new Error("Failed to update shipping policy");
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/shipping/policies"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/shipping/assignments"] });
+      setEditingShippingPolicy(null);
+      toast({ 
+        title: "Shipping policy updated successfully",
+        description: `${data.productsReassigned} products reassigned`
+      });
+    },
+  });
+
+  const deleteShippingPolicyMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const response = await fetch(`/api/shipping/policies/${id}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) throw new Error("Failed to delete shipping policy");
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/shipping/policies"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/shipping/assignments"] });
+      toast({ title: "Shipping policy deleted successfully" });
+    },
+  });
+
+  const handleCreatePricingTier = () => {
+    createPricingTierMutation.mutate(newPricingTier);
+  };
+
+  const handleCreateShippingPolicy = () => {
+    createShippingPolicyMutation.mutate(newShippingPolicy);
   };
 
   if (isLoading) {
@@ -282,7 +424,91 @@ export default function Configuration({ user }: ConfigurationProps) {
               <TabsContent value="pricing" className="space-y-6">
                 <div className="flex items-center justify-between">
                   <h2 className="text-xl font-semibold">Pricing Tiers</h2>
-                  <Badge variant="secondary">7 Active Tiers</Badge>
+                  <div className="flex items-center space-x-3">
+                    <Badge variant="secondary">{pricingTiers.length} Active Tiers</Badge>
+                    <Dialog open={isPricingDialogOpen} onOpenChange={setIsPricingDialogOpen}>
+                      <DialogTrigger asChild>
+                        <Button>
+                          <Plus className="h-4 w-4 mr-2" />
+                          Add Pricing Tier
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Create New Pricing Tier</DialogTitle>
+                          <DialogDescription>
+                            Add a new pricing tier for automatic margin calculation.
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <Label htmlFor="min">Min Price (€)</Label>
+                              <Input
+                                id="min"
+                                type="number"
+                                step="0.01"
+                                value={newPricingTier.min}
+                                onChange={(e) => setNewPricingTier({...newPricingTier, min: e.target.value})}
+                                placeholder="1.00"
+                              />
+                            </div>
+                            <div>
+                              <Label htmlFor="max">Max Price (€)</Label>
+                              <Input
+                                id="max"
+                                type="number"
+                                step="0.01"
+                                value={newPricingTier.max}
+                                onChange={(e) => setNewPricingTier({...newPricingTier, max: e.target.value})}
+                                placeholder="5.00"
+                              />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <Label htmlFor="multiplier">Multiplier</Label>
+                              <Input
+                                id="multiplier"
+                                type="number"
+                                step="0.1"
+                                value={newPricingTier.multiplier}
+                                onChange={(e) => setNewPricingTier({...newPricingTier, multiplier: e.target.value})}
+                                placeholder="6.0"
+                              />
+                            </div>
+                            <div>
+                              <Label htmlFor="marginPercentage">Margin %</Label>
+                              <Input
+                                id="marginPercentage"
+                                type="number"
+                                value={newPricingTier.marginPercentage}
+                                onChange={(e) => setNewPricingTier({...newPricingTier, marginPercentage: e.target.value})}
+                                placeholder="500"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <Label htmlFor="label">Tier Label</Label>
+                            <Input
+                              id="label"
+                              value={newPricingTier.label}
+                              onChange={(e) => setNewPricingTier({...newPricingTier, label: e.target.value})}
+                              placeholder="Ultra Low Price"
+                            />
+                          </div>
+                        </div>
+                        <DialogFooter>
+                          <Button
+                            onClick={handleCreatePricingTier}
+                            disabled={createPricingTierMutation.isPending || !newPricingTier.label}
+                          >
+                            Create Tier
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -307,6 +533,21 @@ export default function Configuration({ user }: ConfigurationProps) {
                           <div className="text-sm text-gray-600">
                             Automatic pricing based on supplier cost
                           </div>
+                        </div>
+                        <div className="flex space-x-2 mt-4">
+                          <Button variant="outline" size="sm">
+                            <Edit className="h-4 w-4 mr-1" />
+                            Edit
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => deletePricingTierMutation.mutate(index)}
+                            disabled={deletePricingTierMutation.isPending}
+                          >
+                            <Trash2 className="h-4 w-4 mr-1" />
+                            Delete
+                          </Button>
                         </div>
                       </CardContent>
                     </Card>
