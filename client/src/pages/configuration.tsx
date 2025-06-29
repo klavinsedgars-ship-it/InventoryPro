@@ -317,23 +317,47 @@ export default function Configuration({ user }: ConfigurationProps) {
       return;
     }
     
-    console.log("Handling pricing tier creation - about to call mutate");
+    console.log("SIMPLE APPROACH: Creating pricing tier directly");
     
     try {
-      // Call the mutation and wait for it to complete
-      await createPricingTierMutation.mutateAsync(newPricingTier);
+      const response = await fetch("/api/pricing/tiers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newPricingTier),
+        credentials: 'include',
+      });
       
-      // Force dialog closure if mutation didn't trigger onSuccess properly
-      console.log("Mutation completed, forcing dialog closure");
+      console.log("Response status:", response.status);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const result = await response.json();
+      console.log("API Success, result:", result);
+      
+      // Immediately close dialog and clear form
+      console.log("Closing dialog NOW");
       setIsPricingDialogOpen(false);
+      
+      console.log("Clearing form NOW");
       setNewPricingTier({ min: "", max: "", multiplier: "", label: "", marginPercentage: "" });
-      queryClient.invalidateQueries({ queryKey: ["/api/pricing/tiers"] });
+      
+      console.log("Showing toast NOW");
+      toast({ 
+        title: "Success!",
+        description: "Pricing tier created successfully"
+      });
+      
+      console.log("Refreshing data NOW");
+      // Force refresh
+      window.location.reload();
       
     } catch (error) {
-      console.error("Mutation failed:", error);
+      console.error("Direct API call failed:", error);
       toast({ 
-        title: "Error creating pricing tier",
-        description: error instanceof Error ? error.message : "Unknown error",
+        title: "Error",
+        description: "Failed to create pricing tier",
         variant: "destructive"
       });
     }
@@ -349,24 +373,47 @@ export default function Configuration({ user }: ConfigurationProps) {
       return;
     }
     
-    console.log("Handling shipping policy creation - about to call mutate");
+    console.log("SIMPLE APPROACH: Creating shipping policy directly");
     
     try {
-      // Call the mutation and wait for it to complete
-      await createShippingPolicyMutation.mutateAsync(newShippingPolicy);
+      const response = await fetch("/api/shipping/policies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newShippingPolicy),
+        credentials: 'include',
+      });
       
-      // Force dialog closure if mutation didn't trigger onSuccess properly
-      console.log("Shipping mutation completed, forcing dialog closure");
+      console.log("Shipping response status:", response.status);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const result = await response.json();
+      console.log("Shipping API Success, result:", result);
+      
+      // Immediately close dialog and clear form
+      console.log("Closing shipping dialog NOW");
       setIsShippingDialogOpen(false);
+      
+      console.log("Clearing shipping form NOW");
       setNewShippingPolicy({ name: "", description: "", id: "", weightRange: { min: 0, max: 0 } });
-      queryClient.invalidateQueries({ queryKey: ["/api/shipping/policies"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/shipping/assignments"] });
+      
+      console.log("Showing shipping toast NOW");
+      toast({ 
+        title: "Success!",
+        description: "Shipping policy created successfully"
+      });
+      
+      console.log("Refreshing shipping data NOW");
+      // Force refresh
+      window.location.reload();
       
     } catch (error) {
-      console.error("Shipping mutation failed:", error);
+      console.error("Direct shipping API call failed:", error);
       toast({ 
-        title: "Error creating shipping policy",
-        description: error instanceof Error ? error.message : "Unknown error",
+        title: "Error",
+        description: "Failed to create shipping policy",
         variant: "destructive"
       });
     }
