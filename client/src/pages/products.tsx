@@ -383,6 +383,46 @@ export function Products({ user }: ProductsProps) {
                 </CardContent>
               </Card>
             )}
+
+            {/* Advanced Filters Panel */}
+            {showFilters && (
+              <Card className="mb-4">
+                <CardContent className="py-4">
+                  <div className="space-y-4">
+                    <div>
+                      <Label className="text-sm font-medium">Price Range (€{priceRange[0]} - €{priceRange[1]})</Label>
+                      <div className="mt-2">
+                        <Slider
+                          value={priceRange}
+                          onValueChange={(value) => setPriceRange(value as [number, number])}
+                          max={1000}
+                          min={0}
+                          step={10}
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setSearchTerm("");
+                          setSelectedCategory("all");
+                          setSelectedStatus("all");
+                          setStockFilter("all");
+                          setMarketplaceFilter("all");
+                          setPriceRange([0, 1000]);
+                        }}
+                      >
+                        <RefreshCw className="w-4 h-4 mr-1" />
+                        Reset Filters
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           {/* Products Table */}
@@ -452,7 +492,17 @@ export function Products({ user }: ProductsProps) {
                         </td>
                         <td className="px-3 py-3 whitespace-nowrap">
                           <div className="flex items-center">
-                            <div className="h-8 w-8 bg-gray-200 rounded mr-2 flex-shrink-0"></div>
+                            <div className="h-10 w-10 bg-gray-100 rounded-lg mr-3 flex-shrink-0 flex items-center justify-center border">
+                              {product.imageUrl ? (
+                                <img 
+                                  src={product.imageUrl} 
+                                  alt={product.name}
+                                  className="h-8 w-8 object-cover rounded"
+                                />
+                              ) : (
+                                <span className="text-lg">{getProductThumbnail(product)}</span>
+                              )}
+                            </div>
                             <div className="min-w-0">
                               <div className="text-sm font-medium text-gray-900 truncate max-w-48">
                                 {product.name}
@@ -482,122 +532,105 @@ export function Products({ user }: ProductsProps) {
                              product.status.charAt(0).toUpperCase() + product.status.slice(1)}
                           </Badge>
                         </td>
-                        <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-500">
-                          <div className="flex items-center space-x-1">
-                            {product.listedOnEbay && (
-                              <div className="flex items-center space-x-1">
-                                <Badge variant="outline" className="text-xs px-1">eB</Badge>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-5 w-5 p-0"
-                                  onClick={() => {
-                                    if (product.ebayItemId) {
-                                      const ebayUrl = `https://www.ebay.co.uk/itm/${product.ebayItemId}`;
-                                      window.open(ebayUrl, '_blank');
-                                    } else {
+                        <td className="px-2 py-3 whitespace-nowrap">
+                          <div className="space-y-1">
+                            {/* eBay Status */}
+                            <div className="flex items-center space-x-2">
+                              {product.listedOnEbay ? (
+                                <div className="flex items-center space-x-2">
+                                  <div className="flex items-center space-x-1">
+                                    <CheckCircle className="h-3 w-3 text-green-500" />
+                                    <span className="text-xs text-green-700 font-medium">eBay</span>
+                                  </div>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-4 w-4 p-0"
+                                    onClick={() => {
+                                      if (product.ebayItemId) {
+                                        const ebayUrl = `https://www.ebay.co.uk/itm/${product.ebayItemId}`;
+                                        window.open(ebayUrl, '_blank');
+                                      }
+                                    }}
+                                    title="View on eBay"
+                                  >
+                                    <ExternalLink className="h-3 w-3 text-blue-500" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-4 w-4 p-0"
+                                    onClick={() => {
+                                      if (confirm(`Unlist "${product.name}" from eBay?`)) {
+                                        unlistFromEbayMutation.mutate(product.id);
+                                      }
+                                    }}
+                                    disabled={unlistFromEbayMutation.isPending}
+                                    title="Unlist from eBay"
+                                  >
+                                    <X className="h-3 w-3 text-red-500" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center space-x-1">
+                                  <XCircle className="h-3 w-3 text-gray-400" />
+                                  <span className="text-xs text-gray-500">eBay</span>
+                                </div>
+                              )}
+                            </div>
+                            
+                            {/* Amazon Status */}
+                            <div className="flex items-center space-x-2">
+                              {product.listedOnAmazon ? (
+                                <div className="flex items-center space-x-2">
+                                  <div className="flex items-center space-x-1">
+                                    <CheckCircle className="h-3 w-3 text-green-500" />
+                                    <span className="text-xs text-green-700 font-medium">Amazon</span>
+                                  </div>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-4 w-4 p-0"
+                                    onClick={() => {
                                       const searchQuery = encodeURIComponent(`${product.name} ${product.sku}`);
-                                      const ebayUrl = `https://www.ebay.co.uk/sch/i.html?_nkw=${searchQuery}`;
-                                      window.open(ebayUrl, '_blank');
-                                    }
-                                  }}
-                                  title="View on eBay"
-                                >
-                                  <Eye className="h-3 w-3" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-5 w-5 p-0 text-red-600 hover:text-red-900"
-                                  onClick={() => {
-                                    if (confirm(`Are you sure you want to unlist "${product.name}" from eBay?`)) {
-                                      unlistFromEbayMutation.mutate(product.id);
-                                    }
-                                  }}
-                                  disabled={unlistFromEbayMutation.isPending}
-                                  title="Unlist from eBay"
-                                >
-                                  <X className="h-3 w-3" />
-                                </Button>
-                              </div>
-                            )}
-                            {product.listedOnAmazon && (
-                              <div className="flex items-center space-x-1">
-                                <Badge variant="outline" className="text-xs px-1">Am</Badge>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-5 w-5 p-0"
-                                  onClick={() => {
-                                    const searchQuery = encodeURIComponent(`${product.name} ${product.sku}`);
-                                    const amazonUrl = `https://www.amazon.com/s?k=${searchQuery}`;
-                                    window.open(amazonUrl, '_blank');
-                                  }}
-                                  title="View on Amazon"
-                                >
-                                  <Eye className="h-3 w-3" />
-                                </Button>
-                              </div>
-                            )}
-                            {!product.listedOnEbay && !product.listedOnAmazon && (
-                              <span className="text-gray-400 text-xs">-</span>
-                            )}
+                                      const amazonUrl = `https://www.amazon.com/s?k=${searchQuery}`;
+                                      window.open(amazonUrl, '_blank');
+                                    }}
+                                    title="View on Amazon"
+                                  >
+                                    <ExternalLink className="h-3 w-3 text-blue-500" />
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center space-x-1">
+                                  <XCircle className="h-3 w-3 text-gray-400" />
+                                  <span className="text-xs text-gray-500">Amazon</span>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </td>
                         <td className="px-3 py-3 whitespace-nowrap text-sm font-medium">
-                          <div className="flex flex-wrap gap-1">
-                          <Button 
-                            variant="ghost" 
-                            size="sm"
-                            onClick={() => handleEditProduct(product)}
-                          >
-                            Edit
-                          </Button>
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => uploadImageMutation.mutate()}
-                            disabled={uploadImageMutation.isPending}
-                            className="text-green-600 hover:text-green-900"
-                          >
-                            {uploadImageMutation.isPending ? "Uploading..." : "Upload Image"}
-                          </Button>
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => policyTestMutation.mutate(product.id)}
-                            disabled={policyTestMutation.isPending}
-                            className="text-purple-600 hover:text-purple-900"
-                          >
-                            {policyTestMutation.isPending ? "Testing..." : "Test Policies"}
-                          </Button>
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => externalImageMutation.mutate(product.id)}
-                            disabled={externalImageMutation.isPending}
-                            className="text-orange-600 hover:text-orange-900"
-                          >
-                            {externalImageMutation.isPending ? "Testing..." : "Test Ext Image"}
-                          </Button>
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => usListingMutation.mutate(product.id)}
-                            disabled={usListingMutation.isPending}
-                            className="text-blue-600 hover:text-blue-900"
-                          >
-                            {usListingMutation.isPending ? "Testing..." : "Test US"}
-                          </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="sm"
-                            onClick={() => handleDeleteProduct(product.id)}
-                            className="text-red-600 hover:text-red-900"
-                            disabled={deleteMutation.isPending}
-                          >
-                            Delete
-                          </Button>
+                          <div className="flex items-center space-x-2">
+                            <Button 
+                              variant="ghost" 
+                              size="sm"
+                              onClick={() => handleEditProduct(product)}
+                              className="h-8 w-8 p-0 hover:bg-blue-50"
+                              title="Edit product"
+                            >
+                              <Edit2 className="h-4 w-4 text-blue-600" />
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="sm"
+                              onClick={() => handleDeleteProduct(product.id)}
+                              className="h-8 w-8 p-0 hover:bg-red-50"
+                              disabled={deleteMutation.isPending}
+                              title="Delete product"
+                            >
+                              <Trash2 className="h-4 w-4 text-red-600" />
+                            </Button>
                           </div>
                         </td>
                       </tr>
