@@ -504,6 +504,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // eBay Listing Template Routes
+  app.get("/api/ebay/template/:productId", requireAuth, async (req, res) => {
+    try {
+      const productId = parseInt(req.params.productId);
+      const product = await storage.getProduct(productId);
+      
+      if (!product) {
+        return res.status(404).json({ 
+          success: false, 
+          error: "Product not found" 
+        });
+      }
+
+      const { generateEbayListing } = await import("./ebay-listing-template");
+      const template = generateEbayListing(product);
+      
+      res.json({ 
+        success: true, 
+        template,
+        product: {
+          id: product.id,
+          name: product.name,
+          sku: product.sku
+        }
+      });
+    } catch (error) {
+      console.error("Template generation failed:", error);
+      res.status(500).json({ 
+        success: false, 
+        message: (error as Error).message 
+      });
+    }
+  });
+
+  app.post("/api/ebay/preview-template", requireAuth, async (req, res) => {
+    try {
+      const { productData } = req.body;
+      
+      if (!productData) {
+        return res.status(400).json({
+          success: false,
+          error: "Product data is required"
+        });
+      }
+
+      const { generateEbayListing } = await import("./ebay-listing-template");
+      const template = generateEbayListing(productData);
+      
+      res.json({ 
+        success: true, 
+        template 
+      });
+    } catch (error) {
+      console.error("Template preview failed:", error);
+      res.status(500).json({ 
+        success: false, 
+        message: (error as Error).message 
+      });
+    }
+  });
+
   // eBay API routes
   app.post("/api/ebay/list", requireAuth, async (req, res) => {
     try {
