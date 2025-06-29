@@ -80,12 +80,7 @@ function generateUnifiedDescription(product: Product, specs: any, category: stri
   if (product.category) sections.push(`• Category: ${product.category}`);
   sections.push('');
   
-  // Package contents
-  sections.push('📦 PACKAGE INCLUDES:');
-  sections.push(`• 1x ${product.name || 'Electronic Component'}`);
-  sections.push('• Technical Documentation');
-  sections.push('• Quality Certificate');
-  sections.push('');
+
   
   // Applications (category-specific but consistent format)
   const applications = getCategoryApplications(category);
@@ -172,15 +167,6 @@ function generateUnifiedHtmlDescription(product: Product, specs: any, category: 
     </table>
   </div>
   
-  <!-- Package Contents -->
-  <div style="background-color: #ffffff; border: 1px solid #cccccc; padding: 15px; margin-bottom: 15px;">
-    <h3 style="color: #0066cc; font-size: 16px; margin: 0 0 10px 0; border-bottom: 1px solid #0066cc;">📦 PACKAGE INCLUDES</h3>
-    <ul style="margin: 5px 0; padding-left: 20px;">
-      <li>1x ${product.name || 'Electronic Component'}</li>
-      <li>Technical Documentation</li>
-      <li>Quality Certificate</li>
-    </ul>
-  </div>
   
   ${applications.length > 0 ? `
   <!-- Applications -->

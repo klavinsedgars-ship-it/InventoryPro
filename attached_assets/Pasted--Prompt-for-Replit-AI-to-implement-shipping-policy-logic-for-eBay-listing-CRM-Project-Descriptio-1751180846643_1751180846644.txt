@@ -1,0 +1,66 @@
+# Prompt for Replit AI to implement shipping policy logic for eBay listing CRM
+
+# Project Description:
+# The CRM is a web-based tool built on Replit, which syncs inventory from a supplier's API and lists items to eBay. 
+# You want to automate the shipping policy selection based on product weight.
+# You already have 10–15 predefined shipping policies on eBay. Each policy corresponds to a certain weight range.
+
+# Implement the following logic:
+
+"""
+1. When syncing inventory from supplier API, ensure the weight (in grams) is fetched and stored with each product.
+
+2. Map weight ranges (in grams) to existing eBay shipping policy IDs. Example mapping (adjust with your actual policy IDs):
+   SHIPPING_POLICY_MAP = {
+       (0, 99): "policy_id_light",
+       (100, 499): "policy_id_medium",
+       (500, 999): "policy_id_heavy",
+       (1000, 4999): "policy_id_very_heavy",
+       ...
+   }
+
+3. When listing a product to eBay:
+   - Read the stored product weight in grams.
+   - Match the weight to the correct shipping policy ID based on defined ranges.
+   - Include the selected shipping policy ID in the API request to list the product.
+
+4. Optional: Add a section in the admin dashboard to view/edit the weight-to-policy mapping table.
+
+5. Ensure robust error handling:
+   - If weight is missing or invalid, assign a default policy.
+   - Log any mismatches or failures for review.
+
+6. Add unit tests for the function that selects the shipping policy based on weight.
+
+"""
+
+# Example Python Function to Map Weight to Shipping Policy
+
+def get_shipping_policy_id(weight_grams: int, shipping_policy_map: dict) -> str:
+    for weight_range, policy_id in shipping_policy_map.items():
+        min_weight, max_weight = weight_range
+        if min_weight <= weight_grams <= max_weight:
+            return policy_id
+    return "default_policy_id"  # Fallback if no match
+
+# Example Usage
+SHIPPING_POLICY_MAP = {
+    (0, 99): "policy_light",
+    (100, 499): "policy_medium",
+    (500, 999): "policy_heavy",
+    (1000, 4999): "policy_very_heavy",
+    (5000, 9999): "policy_oversized",
+}
+
+product_weight = 450  # in grams
+policy_id = get_shipping_policy_id(product_weight, SHIPPING_POLICY_MAP)
+print(f"Use shipping policy: {policy_id}")
+
+# Now use this `policy_id` in the eBay listing API payload when submitting the product.
+
+# Integrate this function within your listing logic on Replit, making sure to:
+# - Fetch the correct product weight in grams
+# - Call get_shipping_policy_id()
+# - Inject the result into the eBay API call
+
+# Final step: Test the feature with a variety of weights and verify the correct shipping policy is applied in eBay UI.
