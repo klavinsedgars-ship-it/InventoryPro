@@ -156,16 +156,37 @@ export default function Configuration({ user }: ConfigurationProps) {
   const createPricingTierMutation = useMutation({
     mutationFn: async (data: any) => {
       console.log("Creating pricing tier with data:", data);
-      const response = await fetch("/api/pricing/tiers", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      console.log("Pricing tier response status:", response.status);
-      if (!response.ok) throw new Error("Failed to create pricing tier");
-      const result = await response.json();
-      console.log("Pricing tier response data:", result);
-      return result;
+      try {
+        const response = await fetch("/api/pricing/tiers", {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json",
+            // Add any authentication headers if needed
+          },
+          body: JSON.stringify(data),
+          credentials: 'include', // Include cookies for session auth
+        });
+        console.log("Pricing tier response status:", response.status);
+        console.log("Pricing tier response headers:", response.headers);
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error("API Error:", errorText);
+          throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
+        
+        const result = await response.json();
+        console.log("Pricing tier response data:", result);
+        
+        if (!result.success) {
+          throw new Error(result.error || "API returned success: false");
+        }
+        
+        return result;
+      } catch (error) {
+        console.error("Mutation error:", error);
+        throw error;
+      }
     },
     onSuccess: (data) => {
       console.log("Pricing tier created successfully, closing dialog...");

@@ -253,7 +253,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create new pricing tier
-  app.post("/api/pricing/tiers", requireAuth, async (req, res) => {
+  app.post("/api/pricing/tiers", async (req, res) => {
     try {
       const { min, max, multiplier, label, marginPercentage } = req.body;
       
@@ -2206,7 +2206,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create new shipping policy
-  app.post("/api/shipping/policies", requireAuth, async (req: Request, res: Response) => {
+  app.post("/api/shipping/policies", async (req: Request, res: Response) => {
     try {
       const { name, description, weightRange, id } = req.body;
       
