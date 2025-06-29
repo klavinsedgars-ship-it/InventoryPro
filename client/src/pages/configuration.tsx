@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -156,47 +157,48 @@ export default function Configuration({ user }: ConfigurationProps) {
   const createPricingTierMutation = useMutation({
     mutationFn: async (data: any) => {
       console.log("Creating pricing tier with data:", data);
-      try {
-        const response = await fetch("/api/pricing/tiers", {
-          method: "POST",
-          headers: { 
-            "Content-Type": "application/json",
-            // Add any authentication headers if needed
-          },
-          body: JSON.stringify(data),
-          credentials: 'include', // Include cookies for session auth
-        });
-        console.log("Pricing tier response status:", response.status);
-        console.log("Pricing tier response headers:", response.headers);
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error("API Error:", errorText);
-          throw new Error(`HTTP ${response.status}: ${errorText}`);
-        }
-        
-        const result = await response.json();
-        console.log("Pricing tier response data:", result);
-        
-        if (!result.success) {
-          throw new Error(result.error || "API returned success: false");
-        }
-        
-        return result;
-      } catch (error) {
-        console.error("Mutation error:", error);
-        throw error;
+      const response = await fetch("/api/pricing/tiers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+        credentials: 'include',
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
       }
+      
+      const result = await response.json();
+      console.log("Pricing tier response data:", result);
+      
+      if (!result.success) {
+        throw new Error(result.error || "Operation failed");
+      }
+      
+      return result;
     },
     onSuccess: (data) => {
-      console.log("Pricing tier created successfully, closing dialog...");
-      queryClient.invalidateQueries({ queryKey: ["/api/pricing/tiers"] });
+      console.log("Success callback triggered, data:", data);
+      console.log("About to close dialog and invalidate queries");
+      
+      // Immediately close dialog
       setIsPricingDialogOpen(false);
+      console.log("Dialog state set to false");
+      
+      // Clear form
       setNewPricingTier({ min: "", max: "", multiplier: "", label: "", marginPercentage: "" });
+      console.log("Form cleared");
+      
+      // Show success message
       toast({ 
         title: "Pricing tier created successfully",
         description: `${data?.productsUpdated || 0} products updated with new pricing`
       });
+      console.log("Toast shown");
+      
+      // Refresh data
+      queryClient.invalidateQueries({ queryKey: ["/api/pricing/tiers"] });
+      console.log("Queries invalidated");
     },
     onError: (error) => {
       console.error("Pricing tier creation error:", error);
@@ -246,13 +248,7 @@ export default function Configuration({ user }: ConfigurationProps) {
   const createShippingPolicyMutation = useMutation({
     mutationFn: async (data: any) => {
       console.log("Creating shipping policy with data:", data);
-      const response = await fetch("/api/shipping/policies", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      console.log("Shipping policy response status:", response.status);
-      if (!response.ok) throw new Error("Failed to create shipping policy");
+      const response = await apiRequest("POST", "/api/shipping/policies", data);
       const result = await response.json();
       console.log("Shipping policy response data:", result);
       return result;
