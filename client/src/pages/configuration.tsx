@@ -665,7 +665,7 @@ export default function Configuration({ user }: ConfigurationProps) {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {pricingTiers.map((tier: any, index: number) => (
-                    <Card key={index}>
+                    <Card key={tier.id}>
                       <CardHeader>
                         <div className="flex items-center justify-between">
                           <CardTitle className="text-lg">{tier.label}</CardTitle>
@@ -687,7 +687,11 @@ export default function Configuration({ user }: ConfigurationProps) {
                           </div>
                         </div>
                         <div className="flex space-x-2 mt-4">
-                          <Button variant="outline" size="sm">
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => setEditingPricingTier(tier)}
+                          >
                             <Edit className="h-4 w-4 mr-1" />
                             Edit
                           </Button>
@@ -705,6 +709,101 @@ export default function Configuration({ user }: ConfigurationProps) {
                     </Card>
                   ))}
                 </div>
+
+                {/* Edit Pricing Tier Dialog */}
+                {editingPricingTier && (
+                  <Dialog open={!!editingPricingTier} onOpenChange={() => setEditingPricingTier(null)}>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Edit Pricing Tier</DialogTitle>
+                        <DialogDescription>
+                          Update the pricing tier configuration.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <Label htmlFor="editMin">Min Price (€)</Label>
+                            <Input
+                              id="editMin"
+                              type="number"
+                              step="0.01"
+                              value={editingPricingTier.min}
+                              onChange={(e) => setEditingPricingTier({
+                                ...editingPricingTier, 
+                                min: e.target.value
+                              })}
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="editMax">Max Price (€)</Label>
+                            <Input
+                              id="editMax"
+                              type="number"
+                              step="0.01"
+                              value={editingPricingTier.max}
+                              onChange={(e) => setEditingPricingTier({
+                                ...editingPricingTier, 
+                                max: e.target.value
+                              })}
+                            />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <Label htmlFor="editMultiplier">Multiplier</Label>
+                            <Input
+                              id="editMultiplier"
+                              type="number"
+                              step="0.1"
+                              value={editingPricingTier.multiplier}
+                              onChange={(e) => setEditingPricingTier({
+                                ...editingPricingTier, 
+                                multiplier: e.target.value
+                              })}
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="editMarginPercentage">Margin %</Label>
+                            <Input
+                              id="editMarginPercentage"
+                              type="number"
+                              value={editingPricingTier.marginPercentage}
+                              onChange={(e) => setEditingPricingTier({
+                                ...editingPricingTier, 
+                                marginPercentage: e.target.value
+                              })}
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <Label htmlFor="editLabel">Tier Label</Label>
+                          <Input
+                            id="editLabel"
+                            value={editingPricingTier.label}
+                            onChange={(e) => setEditingPricingTier({
+                              ...editingPricingTier, 
+                              label: e.target.value
+                            })}
+                          />
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button variant="outline" onClick={() => setEditingPricingTier(null)}>
+                          Cancel
+                        </Button>
+                        <Button
+                          onClick={() => {
+                            updatePricingTierMutation.mutate(editingPricingTier);
+                          }}
+                          disabled={updatePricingTierMutation.isPending}
+                        >
+                          {updatePricingTierMutation.isPending ? "Updating..." : "Update Tier"}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                )}
               </TabsContent>
 
               {/* Shipping Tab */}
@@ -839,7 +938,11 @@ export default function Configuration({ user }: ConfigurationProps) {
                           </div>
                         </div>
                         <div className="flex space-x-2 mt-4">
-                          <Button variant="outline" size="sm">
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => setEditingShippingPolicy(policy)}
+                          >
                             <Edit className="h-4 w-4 mr-1" />
                             Edit
                           </Button>
@@ -857,6 +960,100 @@ export default function Configuration({ user }: ConfigurationProps) {
                     </Card>
                   ))}
                 </div>
+
+                {/* Edit Shipping Policy Dialog */}
+                {editingShippingPolicy && (
+                  <Dialog open={!!editingShippingPolicy} onOpenChange={() => setEditingShippingPolicy(null)}>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Edit Shipping Policy</DialogTitle>
+                        <DialogDescription>
+                          Update the shipping policy configuration.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4">
+                        <div>
+                          <Label htmlFor="editShippingName">Policy Name</Label>
+                          <Input
+                            id="editShippingName"
+                            value={editingShippingPolicy.name}
+                            onChange={(e) => setEditingShippingPolicy({
+                              ...editingShippingPolicy, 
+                              name: e.target.value
+                            })}
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="editShippingDescription">Description</Label>
+                          <Input
+                            id="editShippingDescription"
+                            value={editingShippingPolicy.description}
+                            onChange={(e) => setEditingShippingPolicy({
+                              ...editingShippingPolicy, 
+                              description: e.target.value
+                            })}
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <Label htmlFor="editMinWeight">Min Weight (g)</Label>
+                            <Input
+                              id="editMinWeight"
+                              type="number"
+                              value={editingShippingPolicy.weightRange?.min || ''}
+                              onChange={(e) => setEditingShippingPolicy({
+                                ...editingShippingPolicy, 
+                                weightRange: {
+                                  ...editingShippingPolicy.weightRange,
+                                  min: e.target.value
+                                }
+                              })}
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="editMaxWeight">Max Weight (g)</Label>
+                            <Input
+                              id="editMaxWeight"
+                              type="number"
+                              value={editingShippingPolicy.weightRange?.max || ''}
+                              onChange={(e) => setEditingShippingPolicy({
+                                ...editingShippingPolicy, 
+                                weightRange: {
+                                  ...editingShippingPolicy.weightRange,
+                                  max: e.target.value
+                                }
+                              })}
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <Label htmlFor="editShippingId">Policy ID</Label>
+                          <Input
+                            id="editShippingId"
+                            value={editingShippingPolicy.id}
+                            onChange={(e) => setEditingShippingPolicy({
+                              ...editingShippingPolicy, 
+                              id: e.target.value
+                            })}
+                          />
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button variant="outline" onClick={() => setEditingShippingPolicy(null)}>
+                          Cancel
+                        </Button>
+                        <Button
+                          onClick={() => {
+                            updateShippingPolicyMutation.mutate(editingShippingPolicy);
+                          }}
+                          disabled={updateShippingPolicyMutation.isPending}
+                        >
+                          {updateShippingPolicyMutation.isPending ? "Updating..." : "Update Policy"}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                )}
               </TabsContent>
             </Tabs>
           </div>
