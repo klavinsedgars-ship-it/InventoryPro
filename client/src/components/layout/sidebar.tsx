@@ -5,14 +5,12 @@ import {
   LayoutDashboard, 
   ShoppingCart, 
   RefreshCw, 
-  FolderTree, 
   Settings,
   Box,
   BarChart3,
-  Calculator,
   Database,
   FileText,
-  Truck
+  Cog
 } from "lucide-react";
 
 const navigation = [
@@ -20,13 +18,10 @@ const navigation = [
   { name: 'Products', href: '/products', icon: Package },
   { name: 'Marketplaces', href: '/marketplaces', icon: ShoppingCart },
   { name: 'TME Sync', href: '/sync', icon: RefreshCw },
-  { name: 'Categories', href: '/categories', icon: FolderTree },
-  { name: 'Pricing', href: '/pricing', icon: Calculator },
+  { name: 'Configuration', href: '/configuration', icon: Cog },
   { name: 'Queue Manager', href: '/queue', icon: Database },
   { name: 'Templates', href: '/templates', icon: FileText },
-  { name: 'Shipping Policies', href: '/shipping', icon: Truck },
   { name: 'Reports', href: '/reports', icon: BarChart3 },
-  { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
 interface SidebarProps {
@@ -79,16 +74,23 @@ export function Sidebar({ user }: SidebarProps) {
         {/* User Profile */}
         {user && (
           <div className="p-4 border-t border-gray-200">
-            <div className="flex items-center">
-              <div className="h-8 w-8 rounded-full bg-primary flex items-center justify-center">
-                <span className="text-sm font-medium text-primary-foreground">
-                  {user.username.charAt(0).toUpperCase()}
-                </span>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <div className="h-8 w-8 rounded-full bg-primary flex items-center justify-center">
+                  <span className="text-sm font-medium text-primary-foreground">
+                    {user.username.charAt(0).toUpperCase()}
+                  </span>
+                </div>
+                <div className="ml-3">
+                  <p className="text-sm font-medium text-gray-700">{user.username}</p>
+                  <p className="text-xs text-gray-500 capitalize">{user.role}</p>
+                </div>
               </div>
-              <div className="ml-3">
-                <p className="text-sm font-medium text-gray-700">{user.username}</p>
-                <p className="text-xs text-gray-500 capitalize">{user.role}</p>
-              </div>
+              <Link href="/settings">
+                <a className="p-2 rounded-lg hover:bg-gray-100 transition-colors">
+                  <Settings className="h-4 w-4 text-gray-500 hover:text-gray-700" />
+                </a>
+              </Link>
             </div>
           </div>
         )}

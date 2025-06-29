@@ -11,10 +11,9 @@ import { Marketplaces } from "@/pages/marketplaces";
 import { TMESync } from "@/pages/sync";
 import { Settings } from "@/pages/settings";
 import { Reports } from "@/pages/reports";
-import { Pricing } from "@/pages/pricing";
 import { QueueManagement } from "@/pages/queue-management";
 import { TemplatePreview } from "@/pages/template-preview";
-import ShippingPolicies from "@/pages/shipping-policies";
+import Configuration from "@/pages/configuration";
 import { Login } from "@/pages/login";
 import NotFound from "@/pages/not-found";
 
@@ -88,11 +87,9 @@ function AppContent() {
       <Route path="/products" component={() => <Products user={user} />} />
       <Route path="/marketplaces" component={() => <Marketplaces user={user} />} />
       <Route path="/sync" component={() => <TMESync user={user} />} />
-      <Route path="/categories" component={() => <Categories user={user} />} />
-      <Route path="/pricing" component={() => <Pricing user={user} />} />
+      <Route path="/configuration" component={() => <Configuration user={user} />} />
       <Route path="/queue" component={() => <QueueManagement user={user} />} />
       <Route path="/templates" component={() => <TemplatePreview user={user} />} />
-      <Route path="/shipping" component={() => <ShippingPolicies user={user} />} />
       <Route path="/reports" component={() => <Reports user={user} />} />
       <Route path="/settings" component={() => <Settings user={user} />} />
       <Route component={NotFound} />
