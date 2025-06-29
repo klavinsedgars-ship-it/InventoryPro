@@ -9,7 +9,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent } from "@/components/ui/card";
-import { Plus, Search, Filter, Edit2, Trash2, Upload, Download, MoreHorizontal, Eye, X } from "lucide-react";
+import { Slider } from "@/components/ui/slider";
+import { Label } from "@/components/ui/label";
+import { 
+  Plus, Search, Filter, Edit2, Trash2, Upload, Download, MoreHorizontal, 
+  Eye, X, Package, ShoppingCart, AlertTriangle, CheckCircle, XCircle,
+  ExternalLink, Settings, RefreshCw
+} from "lucide-react";
 import { getStatusColor, formatCurrency } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -29,6 +35,9 @@ export function Products({ user }: ProductsProps) {
   const [selectedStatus, setSelectedStatus] = useState<string>("all");
   const [selectedProducts, setSelectedProducts] = useState<Set<number>>(new Set());
   const [showFilters, setShowFilters] = useState(false);
+  const [priceRange, setPriceRange] = useState<[number, number]>([0, 1000]);
+  const [stockFilter, setStockFilter] = useState<string>("all");
+  const [marketplaceFilter, setMarketplaceFilter] = useState<string>("all");
 
   const { data: products = [], isLoading } = useQuery<Product[]>({
     queryKey: ["/api/products", { 
@@ -171,107 +180,21 @@ export function Products({ user }: ProductsProps) {
     },
   });
 
-  const policyTestMutation = useMutation({
-    mutationFn: (productId: number) => apiRequest("POST", "/api/ebay/test-policies", { productId }),
-    onSuccess: (data: any) => {
-      if (data.success) {
-        toast({
-          title: "Policy Test Success!",
-          description: "Your business policies are working correctly with eBay US",
-        });
-      } else {
-        toast({
-          title: "Policy Test Failed",
-          description: data.error || "Business policies need attention",
-          variant: "destructive",
-        });
-      }
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Test Error",
-        description: error.message || "Failed to test policies",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const externalImageMutation = useMutation({
-    mutationFn: (productId: number) => apiRequest("POST", "/api/ebay/list-external-image", { productId }),
-    onSuccess: (data: any) => {
-      if (data.success) {
-        toast({
-          title: "Success with External Image!",
-          description: `Product listed on eBay US! Item ID: ${data.listingResult.itemId}`,
-        });
-        queryClient.invalidateQueries({ queryKey: ["/api/products"] });
-      } else {
-        toast({
-          title: "External Image Listing Failed",
-          description: data.error || "Failed to list with external image",
-          variant: "destructive",
-        });
-      }
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to connect to eBay US",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const usListingMutation = useMutation({
-    mutationFn: (productId: number) => apiRequest("POST", "/api/ebay/list-us", { productId }),
-    onSuccess: (data: any) => {
-      if (data.success) {
-        toast({
-          title: "Success!",
-          description: `Product listed on eBay US! Item ID: ${data.listingResult.itemId}`,
-        });
-        queryClient.invalidateQueries({ queryKey: ["/api/products"] });
-      } else {
-        toast({
-          title: "Listing Failed",
-          description: data.error || "Failed to list on eBay US",
-          variant: "destructive",
-        });
-      }
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to connect to eBay US",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const uploadImageMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/ebay/upload-image"),
-    onSuccess: (data: any) => {
-      if (data.success) {
-        toast({
-          title: "Image Uploaded!",
-          description: `Image uploaded to eBay successfully`,
-        });
-      } else {
-        toast({
-          title: "Upload Failed",
-          description: data.error || "Failed to upload image to eBay",
-          variant: "destructive",
-        });
-      }
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to upload image",
-        variant: "destructive",
-      });
-    },
-  });
+  // Helper function to get product thumbnail
+  const getProductThumbnail = (product: Product) => {
+    if (product.imageUrl) {
+      return product.imageUrl;
+    }
+    // Default thumbnail based on category
+    const categoryDefaults: { [key: string]: string } = {
+      'Electronics': '📱',
+      'Accessories': '🔧',
+      'Components': '⚡',
+      'Sensors': '🔍',
+      'Development': '💻'
+    };
+    return categoryDefaults[product.category] || '📦';
+  };
 
   const bulkListToAmazonMutation = useMutation({
     mutationFn: async (productIds: number[]) => {
@@ -297,11 +220,39 @@ export function Products({ user }: ProductsProps) {
     },
   });
 
-  // Filter products based on search term
-  const filteredProducts = products.filter(product =>
-    product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    product.sku.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Enhanced filtering logic
+  const filteredProducts = products.filter(product => {
+    // Text search
+    const matchesSearch = !searchTerm || 
+      product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      product.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (product.ean && product.ean.toLowerCase().includes(searchTerm.toLowerCase()));
+
+    // Category filter
+    const matchesCategory = selectedCategory === "all" || product.category === selectedCategory;
+
+    // Status filter
+    const matchesStatus = selectedStatus === "all" || product.status === selectedStatus;
+
+    // Price range filter
+    const productPrice = parseFloat(product.salePrice);
+    const matchesPrice = productPrice >= priceRange[0] && productPrice <= priceRange[1];
+
+    // Stock filter
+    const matchesStock = stockFilter === "all" || 
+      (stockFilter === "low" && product.stock < 5) ||
+      (stockFilter === "out" && product.stock === 0) ||
+      (stockFilter === "available" && product.stock > 0);
+
+    // Marketplace filter
+    const matchesMarketplace = marketplaceFilter === "all" ||
+      (marketplaceFilter === "ebay" && product.listedOnEbay) ||
+      (marketplaceFilter === "amazon" && product.listedOnAmazon) ||
+      (marketplaceFilter === "unlisted" && !product.listedOnEbay && !product.listedOnAmazon);
+
+    return matchesSearch && matchesCategory && matchesStatus && 
+           matchesPrice && matchesStock && matchesMarketplace;
+  });
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -320,10 +271,10 @@ export function Products({ user }: ProductsProps) {
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                   <Input
-                    placeholder="Search products..."
+                    placeholder="Search products, SKU, or EAN..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10 w-64"
+                    className="pl-10 w-72"
                   />
                 </div>
 
@@ -342,8 +293,8 @@ export function Products({ user }: ProductsProps) {
                 </Select>
 
                 <Select value={selectedStatus} onValueChange={setSelectedStatus}>
-                  <SelectTrigger className="w-40">
-                    <SelectValue placeholder="All Status" />
+                  <SelectTrigger className="w-32">
+                    <SelectValue placeholder="Status" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Status</SelectItem>
@@ -352,6 +303,39 @@ export function Products({ user }: ProductsProps) {
                     <SelectItem value="out_of_stock">Out of Stock</SelectItem>
                   </SelectContent>
                 </Select>
+
+                <Select value={stockFilter} onValueChange={setStockFilter}>
+                  <SelectTrigger className="w-32">
+                    <SelectValue placeholder="Stock" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Stock</SelectItem>
+                    <SelectItem value="available">Available</SelectItem>
+                    <SelectItem value="low">Low (&lt;5)</SelectItem>
+                    <SelectItem value="out">Out</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Select value={marketplaceFilter} onValueChange={setMarketplaceFilter}>
+                  <SelectTrigger className="w-32">
+                    <SelectValue placeholder="Market" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All</SelectItem>
+                    <SelectItem value="ebay">eBay</SelectItem>
+                    <SelectItem value="amazon">Amazon</SelectItem>
+                    <SelectItem value="unlisted">Unlisted</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Button
+                  variant="outline"
+                  onClick={() => setShowFilters(!showFilters)}
+                  className="flex items-center space-x-2"
+                >
+                  <Filter className="w-4 h-4" />
+                  <span>Price Range</span>
+                </Button>
               </div>
 
               <Button onClick={handleAddProduct}>
