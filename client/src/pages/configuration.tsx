@@ -307,7 +307,7 @@ export default function Configuration({ user }: ConfigurationProps) {
     },
   });
 
-  const handleCreatePricingTier = () => {
+  const handleCreatePricingTier = async () => {
     if (!newPricingTier.label || !newPricingTier.min || !newPricingTier.max || !newPricingTier.multiplier || !newPricingTier.marginPercentage) {
       toast({ 
         title: "Validation Error", 
@@ -316,10 +316,30 @@ export default function Configuration({ user }: ConfigurationProps) {
       });
       return;
     }
-    createPricingTierMutation.mutate(newPricingTier);
+    
+    console.log("Handling pricing tier creation - about to call mutate");
+    
+    try {
+      // Call the mutation and wait for it to complete
+      await createPricingTierMutation.mutateAsync(newPricingTier);
+      
+      // Force dialog closure if mutation didn't trigger onSuccess properly
+      console.log("Mutation completed, forcing dialog closure");
+      setIsPricingDialogOpen(false);
+      setNewPricingTier({ min: "", max: "", multiplier: "", label: "", marginPercentage: "" });
+      queryClient.invalidateQueries({ queryKey: ["/api/pricing/tiers"] });
+      
+    } catch (error) {
+      console.error("Mutation failed:", error);
+      toast({ 
+        title: "Error creating pricing tier",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive"
+      });
+    }
   };
 
-  const handleCreateShippingPolicy = () => {
+  const handleCreateShippingPolicy = async () => {
     if (!newShippingPolicy.name || !newShippingPolicy.description || !newShippingPolicy.weightRange.min || !newShippingPolicy.weightRange.max) {
       toast({ 
         title: "Validation Error", 
@@ -328,7 +348,28 @@ export default function Configuration({ user }: ConfigurationProps) {
       });
       return;
     }
-    createShippingPolicyMutation.mutate(newShippingPolicy);
+    
+    console.log("Handling shipping policy creation - about to call mutate");
+    
+    try {
+      // Call the mutation and wait for it to complete
+      await createShippingPolicyMutation.mutateAsync(newShippingPolicy);
+      
+      // Force dialog closure if mutation didn't trigger onSuccess properly
+      console.log("Shipping mutation completed, forcing dialog closure");
+      setIsShippingDialogOpen(false);
+      setNewShippingPolicy({ name: "", description: "", id: "", weightRange: { min: 0, max: 0 } });
+      queryClient.invalidateQueries({ queryKey: ["/api/shipping/policies"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/shipping/assignments"] });
+      
+    } catch (error) {
+      console.error("Shipping mutation failed:", error);
+      toast({ 
+        title: "Error creating shipping policy",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive"
+      });
+    }
   };
 
   if (isLoading) {
