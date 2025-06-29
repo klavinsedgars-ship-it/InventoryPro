@@ -166,6 +166,13 @@ export class EbayApiService {
         }
       }
 
+      // Determine shipping policy based on product weight
+      const { getShippingPolicyId, getShippingPolicyName } = await import("./shipping-policies");
+      const shippingPolicyId = getShippingPolicyId(product.weight);
+      const shippingPolicyName = getShippingPolicyName(product.weight);
+      
+      console.log(`Product weight: ${product.weight}g, assigned shipping policy: ${shippingPolicyId} (${shippingPolicyName})`);
+
       // Prepare listing data for eBay Trading API
       const listingData = {
         title: listingDetails.title || templateData?.title || product.name,
@@ -176,6 +183,8 @@ export class EbayApiService {
         listingDuration: listingDetails.listingDuration || "Days_7",
         condition: listingDetails.condition || "New",
         pictureURLs: listingDetails.pictureURLs || (product.imageUrl ? [product.imageUrl] : []),
+        shippingPolicyId: shippingPolicyId,
+        weight: product.weight,
         shippingDetails: listingDetails.shippingDetails || {
           shippingType: "Flat",
           shippingServiceCost: 5.99
@@ -185,6 +194,7 @@ export class EbayApiService {
       console.log("Template data available:", !!templateData);
       console.log("Using HTML description:", !!templateData?.htmlDescription);
       console.log("Description length:", listingData.description.length);
+      console.log("Shipping policy assigned:", shippingPolicyId);
 
       // Make actual eBay API call to list the product
       console.log("Attempting to list product on eBay:", {
