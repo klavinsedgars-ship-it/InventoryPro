@@ -84,11 +84,11 @@ export default function Configuration({ user }: ConfigurationProps) {
     queryKey: ["/api/pricing/tiers"],
   });
 
-  const policies = policiesData?.policies || [];
-  const assignments = assignmentsData?.assignments || [];
-  const validation = policiesData?.validation;
+  const policies = (policiesData as any)?.policies || [];
+  const assignments = (assignmentsData as any)?.assignments || [];
+  const validation = (policiesData as any)?.validation;
   const categories = Array.isArray(categoriesData) ? categoriesData : [];
-  const pricingTiers = pricingData?.tiers || [];
+  const pricingTiers = (pricingData as any)?.tiers || [];
 
   const isLoading = policiesLoading || assignmentsLoading || categoriesLoading || pricingLoading;
 
@@ -559,7 +559,8 @@ export default function Configuration({ user }: ConfigurationProps) {
               <TabsContent value="shipping" className="space-y-6">
                 <div className="flex items-center justify-between">
                   <h2 className="text-xl font-semibold">Shipping Policies</h2>
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-center space-x-3">
+                    <Badge variant="secondary">{policies.length} Policies</Badge>
                     {validation?.isValid ? (
                       <Badge variant="default" className="bg-green-500">
                         <CheckCircle className="h-4 w-4 mr-1" />
@@ -571,6 +572,87 @@ export default function Configuration({ user }: ConfigurationProps) {
                         Configuration Issues
                       </Badge>
                     )}
+                    <Dialog open={isShippingDialogOpen} onOpenChange={setIsShippingDialogOpen}>
+                      <DialogTrigger asChild>
+                        <Button>
+                          <Plus className="h-4 w-4 mr-2" />
+                          Add Shipping Policy
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Create New Shipping Policy</DialogTitle>
+                          <DialogDescription>
+                            Add a new weight-based shipping policy for automatic assignment.
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4">
+                          <div>
+                            <Label htmlFor="policyName">Policy Name</Label>
+                            <Input
+                              id="policyName"
+                              value={newShippingPolicy.name}
+                              onChange={(e) => setNewShippingPolicy({...newShippingPolicy, name: e.target.value})}
+                              placeholder="Medium Items"
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="policyDescription">Description</Label>
+                            <Input
+                              id="policyDescription"
+                              value={newShippingPolicy.description}
+                              onChange={(e) => setNewShippingPolicy({...newShippingPolicy, description: e.target.value})}
+                              placeholder="Standard shipping for medium weight items"
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <Label htmlFor="minWeight">Min Weight (g)</Label>
+                              <Input
+                                id="minWeight"
+                                type="number"
+                                value={newShippingPolicy.weightRange.min}
+                                onChange={(e) => setNewShippingPolicy({
+                                  ...newShippingPolicy, 
+                                  weightRange: {...newShippingPolicy.weightRange, min: e.target.value}
+                                })}
+                                placeholder="100"
+                              />
+                            </div>
+                            <div>
+                              <Label htmlFor="maxWeight">Max Weight (g)</Label>
+                              <Input
+                                id="maxWeight"
+                                type="number"
+                                value={newShippingPolicy.weightRange.max}
+                                onChange={(e) => setNewShippingPolicy({
+                                  ...newShippingPolicy, 
+                                  weightRange: {...newShippingPolicy.weightRange, max: e.target.value}
+                                })}
+                                placeholder="500"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <Label htmlFor="policyId">Policy ID (optional)</Label>
+                            <Input
+                              id="policyId"
+                              value={newShippingPolicy.id}
+                              onChange={(e) => setNewShippingPolicy({...newShippingPolicy, id: e.target.value})}
+                              placeholder="Auto-generated from name"
+                            />
+                          </div>
+                        </div>
+                        <DialogFooter>
+                          <Button
+                            onClick={handleCreateShippingPolicy}
+                            disabled={createShippingPolicyMutation.isPending || !newShippingPolicy.name}
+                          >
+                            Create Policy
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
                   </div>
                 </div>
 
@@ -599,6 +681,21 @@ export default function Configuration({ user }: ConfigurationProps) {
                           <div className="text-sm text-gray-600">
                             Products: {assignments.filter((a: any) => a.policyId === policy.id).length}
                           </div>
+                        </div>
+                        <div className="flex space-x-2 mt-4">
+                          <Button variant="outline" size="sm">
+                            <Edit className="h-4 w-4 mr-1" />
+                            Edit
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => deleteShippingPolicyMutation.mutate(policy.id)}
+                            disabled={deleteShippingPolicyMutation.isPending}
+                          >
+                            <Trash2 className="h-4 w-4 mr-1" />
+                            Delete
+                          </Button>
                         </div>
                       </CardContent>
                     </Card>
