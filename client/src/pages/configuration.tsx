@@ -998,7 +998,7 @@ export default function Configuration({ user }: ConfigurationProps) {
                           </div>
                           <div className="flex items-center justify-between">
                             <span className="text-sm font-medium">Weight Range:</span>
-                            <span className="text-sm">{policy.weightRange.min}-{policy.weightRange.max}g</span>
+                            <span className="text-sm">{policy.minWeight}-{policy.maxWeight}g</span>
                           </div>
                           <div className="text-sm text-gray-600">
                             Products: {assignments.filter((a: any) => a.policyId === policy.id).length}
