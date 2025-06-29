@@ -517,8 +517,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      const { generateEbayListing } = await import("./ebay-listing-template");
-      const template = generateEbayListing(product);
+      const { generateUnifiedEbayTemplate } = await import("./ebay-unified-template");
+      const template = generateUnifiedEbayTemplate(product);
       
       res.json({ 
         success: true, 
@@ -549,8 +549,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      const { generateEbayListing } = await import("./ebay-listing-template");
-      const template = generateEbayListing(productData);
+      const { generateUnifiedEbayTemplate } = await import("./ebay-unified-template");
+      const template = generateUnifiedEbayTemplate(productData);
       
       res.json({ 
         success: true, 

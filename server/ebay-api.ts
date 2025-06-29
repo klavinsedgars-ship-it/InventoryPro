@@ -154,12 +154,13 @@ export class EbayApiService {
         throw new Error("Product not found");
       }
 
-      // Generate professional listing template if enabled
+      // Generate unified professional template if enabled
       let templateData = null;
       if (useTemplate) {
         try {
-          const { generateEbayListing } = await import("./ebay-listing-template");
-          templateData = generateEbayListing(product);
+          const { generateUnifiedEbayTemplate } = await import("./ebay-unified-template");
+          templateData = generateUnifiedEbayTemplate(product);
+          console.log("Unified template generated for product:", product.name);
         } catch (error) {
           console.warn("Template generation failed, using basic listing:", error);
         }
