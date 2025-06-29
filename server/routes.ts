@@ -2154,17 +2154,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Shipping policy endpoints
   app.get("/api/shipping/policies", async (req: Request, res: Response) => {
     try {
-      const { getAllShippingPolicies, generatePolicySummary, validateShippingPolicies } = await import("./shipping-policies");
-      
-      const policies = getAllShippingPolicies();
-      const summary = generatePolicySummary();
-      const validation = validateShippingPolicies();
+      const policies = await storage.getShippingPolicies();
       
       res.json({
         success: true,
         policies,
-        summary,
-        validation
+        count: policies.length
       });
     } catch (error) {
       console.error("Shipping policies error:", error);
@@ -2233,19 +2228,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         id: id || `policy_${name.toLowerCase().replace(/\s+/g, '_')}`,
         name,
         description,
-        weightRange: {
-          min: parseInt(weightRange.min),
-          max: parseInt(weightRange.max)
-        }
+        minWeight: parseInt(weightRange.min),
+        maxWeight: parseInt(weightRange.max),
+        type: "standard"
       };
 
-      // Note: In production, this would update the shipping policies configuration
-      // For now, we simulate success
+      const createdPolicy = await storage.createShippingPolicy(newPolicy);
       
       res.json({
         success: true,
         message: "Shipping policy created successfully",
-        policy: newPolicy
+        policy: createdPolicy
       });
     } catch (error) {
       console.error("Error creating shipping policy:", error);
@@ -2262,33 +2255,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { id } = req.params;
       const { name, description, weightRange } = req.body;
       
-      const updatedPolicy = {
-        id,
+      const updatedPolicyData = {
         name,
         description,
-        weightRange: {
-          min: parseInt(weightRange.min),
-          max: parseInt(weightRange.max)
-        }
+        minWeight: parseInt(weightRange.min),
+        maxWeight: parseInt(weightRange.max)
       };
 
-      // Reassign products that fall into this weight range
-      const products = await storage.getProducts({});
-      let reassignedCount = 0;
+      const updatedPolicy = await storage.updateShippingPolicy(id, updatedPolicyData);
       
-      for (const product of products) {
-        if (product.weight >= updatedPolicy.weightRange.min && 
-            product.weight <= updatedPolicy.weightRange.max) {
-          // Update product's shipping policy assignment
-          reassignedCount++;
-        }
+      if (!updatedPolicy) {
+        return res.status(404).json({
+          success: false,
+          error: "Shipping policy not found"
+        });
       }
 
       res.json({
         success: true,
         message: "Shipping policy updated successfully",
-        policy: updatedPolicy,
-        productsReassigned: reassignedCount
+        policy: updatedPolicy
       });
     } catch (error) {
       console.error("Error updating shipping policy:", error);
@@ -2304,13 +2290,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { id } = req.params;
       
-      // Note: In production, this would remove the policy and reassign affected products
-      // to the default policy
+      const deleted = await storage.deleteShippingPolicy(id);
+      
+      if (!deleted) {
+        return res.status(404).json({
+          success: false,
+          error: "Shipping policy not found"
+        });
+      }
       
       res.json({
         success: true,
-        message: "Shipping policy deleted successfully",
-        note: "Affected products will use the default shipping policy"
+        message: "Shipping policy deleted successfully"
       });
     } catch (error) {
       console.error("Error deleting shipping policy:", error);

@@ -92,6 +92,12 @@ export interface IStorage {
   createPricingTier(tier: InsertPricingTier): Promise<PricingTier>;
   updatePricingTier(id: number, tier: Partial<InsertPricingTier>): Promise<PricingTier | undefined>;
   deletePricingTier(id: number): Promise<boolean>;
+
+  // Shipping Policies
+  getShippingPolicies(): Promise<ShippingPolicy[]>;
+  createShippingPolicy(policy: InsertShippingPolicy): Promise<ShippingPolicy>;
+  updateShippingPolicy(id: string, policy: Partial<InsertShippingPolicy>): Promise<ShippingPolicy | undefined>;
+  deleteShippingPolicy(id: string): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -398,6 +404,30 @@ export class DatabaseStorage implements IStorage {
   async deletePricingTier(id: number): Promise<boolean> {
     const result = await db.delete(pricingTiers).where(eq(pricingTiers.id, id));
     return result.rowCount > 0;
+  }
+
+  // Shipping Policy methods
+  async getShippingPolicies(): Promise<ShippingPolicy[]> {
+    const result = await db.select().from(shippingPolicies).orderBy(asc(shippingPolicies.minWeight));
+    return result;
+  }
+
+  async createShippingPolicy(policy: InsertShippingPolicy): Promise<ShippingPolicy> {
+    const result = await db.insert(shippingPolicies).values(policy).returning();
+    return result[0];
+  }
+
+  async updateShippingPolicy(id: string, policy: Partial<InsertShippingPolicy>): Promise<ShippingPolicy | undefined> {
+    const result = await db.update(shippingPolicies)
+      .set({ ...policy, updatedAt: new Date() })
+      .where(eq(shippingPolicies.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deleteShippingPolicy(id: string): Promise<boolean> {
+    const result = await db.delete(shippingPolicies).where(eq(shippingPolicies.id, id));
+    return result.rowCount! > 0;
   }
 }
 
