@@ -208,13 +208,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/pricing/tiers", requireAuth, async (req, res) => {
     try {
-      const tiers = getPricingTiers();
-      const config = validatePricingConfig();
+      const tiers = await storage.getPricingTiers();
       
       res.json({
         tiers,
-        config,
-        isValid: config.isValid
+        isValid: true
       });
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch pricing tiers" });
@@ -257,22 +255,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { min, max, multiplier, label, marginPercentage } = req.body;
       
-      const newTier = {
-        min: parseFloat(min),
-        max: parseFloat(max),
-        multiplier: parseFloat(multiplier),
+      // Create the tier in the database
+      const createdTier = await storage.createPricingTier({
+        min: min.toString(),
+        max: max.toString(),
+        multiplier: multiplier.toString(),
         label,
-        marginPercentage: parseFloat(marginPercentage)
-      };
+        marginPercentage: marginPercentage.toString()
+      });
 
       // Trigger recalculation for all affected products
-      const products = await storage.getProducts({});
+      const products = await storage.getProducts();
       let updatedCount = 0;
       
       for (const product of products) {
         if (product.supplierPrice) {
           const supplierPrice = parseFloat(product.supplierPrice);
-          if (supplierPrice >= newTier.min && supplierPrice <= newTier.max) {
+          const tierMin = parseFloat(createdTier.min);
+          const tierMax = parseFloat(createdTier.max);
+          
+          if (supplierPrice >= tierMin && supplierPrice <= tierMax) {
             const result = calculateDynamicPrice(supplierPrice);
             await storage.updateProduct(product.id, {
               calculatedPrice: result.finalPrice,
@@ -287,7 +289,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ 
         success: true, 
         message: "Pricing tier created successfully",
-        tier: newTier,
+        tier: createdTier,
         productsUpdated: updatedCount
       });
     } catch (error) {

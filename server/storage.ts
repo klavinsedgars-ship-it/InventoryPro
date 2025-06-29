@@ -5,6 +5,7 @@ import {
   marketplaceSettings, 
   syncLogs,
   syncQueue,
+  pricingTiers,
   type User, 
   type InsertUser, 
   type Product, 
@@ -16,7 +17,9 @@ import {
   type SyncLog,
   type InsertSyncLog,
   type SyncQueue,
-  type InsertSyncQueue
+  type InsertSyncQueue,
+  type PricingTier,
+  type InsertPricingTier
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, gte, lte, desc, asc, count } from "drizzle-orm";
@@ -80,6 +83,12 @@ export interface IStorage {
     failed: number;
     byPriority: Record<string, number>;
   }>;
+
+  // Pricing Tiers
+  getPricingTiers(): Promise<PricingTier[]>;
+  createPricingTier(tier: InsertPricingTier): Promise<PricingTier>;
+  updatePricingTier(id: number, tier: Partial<InsertPricingTier>): Promise<PricingTier | undefined>;
+  deletePricingTier(id: number): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -108,6 +117,18 @@ export class DatabaseStorage implements IStorage {
         await this.createCategory({ name: "Accessories", ebayMapping: "Accessories", amazonMapping: "Accessories" });
         await this.createCategory({ name: "Gaming", ebayMapping: "Gaming", amazonMapping: "Gaming" });
         await this.createCategory({ name: "Home & Garden", ebayMapping: "Home & Garden", amazonMapping: "Home & Garden" });
+      }
+
+      // Create default pricing tiers if they don't exist
+      const existingTiers = await this.getPricingTiers();
+      if (existingTiers.length === 0) {
+        await this.createPricingTier({ min: "1.00", max: "5.00", multiplier: "6.00", label: "Ultra High", marginPercentage: "500" });
+        await this.createPricingTier({ min: "5.01", max: "9.99", multiplier: "4.00", label: "Very High", marginPercentage: "300" });
+        await this.createPricingTier({ min: "10.00", max: "15.00", multiplier: "3.00", label: "High", marginPercentage: "200" });
+        await this.createPricingTier({ min: "15.01", max: "25.00", multiplier: "2.50", label: "Medium-High", marginPercentage: "150" });
+        await this.createPricingTier({ min: "25.01", max: "50.00", multiplier: "2.00", label: "Medium", marginPercentage: "100" });
+        await this.createPricingTier({ min: "50.01", max: "100.00", multiplier: "1.75", label: "Low-Medium", marginPercentage: "75" });
+        await this.createPricingTier({ min: "100.01", max: "999999", multiplier: "1.50", label: "Low", marginPercentage: "50" });
       }
     } catch (error) {
       console.error("Error initializing database:", error);
@@ -350,6 +371,30 @@ export class DatabaseStorage implements IStorage {
     });
 
     return stats;
+  }
+
+  // Pricing Tier methods
+  async getPricingTiers(): Promise<PricingTier[]> {
+    const result = await db.select().from(pricingTiers).orderBy(asc(pricingTiers.min));
+    return result;
+  }
+
+  async createPricingTier(tier: InsertPricingTier): Promise<PricingTier> {
+    const result = await db.insert(pricingTiers).values(tier).returning();
+    return result[0];
+  }
+
+  async updatePricingTier(id: number, tier: Partial<InsertPricingTier>): Promise<PricingTier | undefined> {
+    const result = await db.update(pricingTiers)
+      .set({ ...tier, updatedAt: new Date() })
+      .where(eq(pricingTiers.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deletePricingTier(id: number): Promise<boolean> {
+    const result = await db.delete(pricingTiers).where(eq(pricingTiers.id, id));
+    return result.rowCount > 0;
   }
 }
 
