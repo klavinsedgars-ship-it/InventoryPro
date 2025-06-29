@@ -4,6 +4,7 @@ import {
   categories, 
   marketplaceSettings, 
   syncLogs,
+  syncQueue,
   type User, 
   type InsertUser, 
   type Product, 
@@ -13,10 +14,12 @@ import {
   type MarketplaceSettings,
   type InsertMarketplaceSettings,
   type SyncLog,
-  type InsertSyncLog
+  type InsertSyncLog,
+  type SyncQueue,
+  type InsertSyncQueue
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, gte, lte, desc } from "drizzle-orm";
+import { eq, and, gte, lte, desc, asc, count } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 
 export interface IStorage {
@@ -267,6 +270,86 @@ export class DatabaseStorage implements IStorage {
       totalRevenue: Math.round(totalRevenue),
       outOfStock
     };
+  }
+
+  // Sync Queue Operations
+  async createSyncQueueItem(item: InsertSyncQueue): Promise<SyncQueue> {
+    const [result] = await db.insert(syncQueue).values(item).returning();
+    return result;
+  }
+
+  async createBulkSyncQueueItems(items: InsertSyncQueue[]): Promise<void> {
+    if (items.length === 0) return;
+    await db.insert(syncQueue).values(items);
+  }
+
+  async getPendingSyncQueueItems(limit: number = 100): Promise<SyncQueue[]> {
+    return await db
+      .select()
+      .from(syncQueue)
+      .where(eq(syncQueue.status, 'pending'))
+      .orderBy(asc(syncQueue.priority), asc(syncQueue.createdAt))
+      .limit(limit);
+  }
+
+  async updateSyncQueueItem(id: number, updates: Partial<InsertSyncQueue>): Promise<void> {
+    await db
+      .update(syncQueue)
+      .set(updates)
+      .where(eq(syncQueue.id, id));
+  }
+
+  async getSyncQueueCount(status?: string): Promise<number> {
+    const conditions = status ? [eq(syncQueue.status, status)] : [];
+    const [result] = await db
+      .select({ count: count() })
+      .from(syncQueue)
+      .where(and(...conditions));
+    return result.count;
+  }
+
+  async getSyncQueueStats(): Promise<{
+    pending: number;
+    processing: number;
+    completed: number;
+    failed: number;
+    byPriority: Record<string, number>;
+  }> {
+    const [statusCounts] = await Promise.all([
+      db
+        .select({ 
+          status: syncQueue.status, 
+          count: count() 
+        })
+        .from(syncQueue)
+        .groupBy(syncQueue.status),
+      db
+        .select({ 
+          priority: syncQueue.priority, 
+          count: count() 
+        })
+        .from(syncQueue)
+        .where(eq(syncQueue.status, 'pending'))
+        .groupBy(syncQueue.priority)
+    ]);
+
+    const stats = {
+      pending: 0,
+      processing: 0,
+      completed: 0,
+      failed: 0,
+      byPriority: {} as Record<string, number>
+    };
+
+    statusCounts[0]?.forEach(row => {
+      stats[row.status as keyof typeof stats] = row.count;
+    });
+
+    statusCounts[1]?.forEach(row => {
+      stats.byPriority[`Priority ${row.priority}`] = row.count;
+    });
+
+    return stats;
   }
 }
 

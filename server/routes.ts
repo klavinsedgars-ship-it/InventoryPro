@@ -430,6 +430,80 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // eBay Queue Management Routes (Enterprise Scale)
+  app.post("/api/queue/process", requireAuth, async (req, res) => {
+    try {
+      const { ebayQueueProcessor } = await import("./ebay-queue-processor");
+      const stats = await ebayQueueProcessor.processQueue();
+      res.json({ success: true, stats });
+    } catch (error) {
+      console.error("Queue processing failed:", error);
+      res.status(500).json({ 
+        success: false, 
+        message: (error as Error).message,
+        error: (error as Error).message
+      });
+    }
+  });
+
+  app.get("/api/queue/status", requireAuth, async (req, res) => {
+    try {
+      const { ebayQueueProcessor } = await import("./ebay-queue-processor");
+      const [status, stats] = await Promise.all([
+        ebayQueueProcessor.getStatus(),
+        ebayQueueProcessor.getQueueStats()
+      ]);
+      res.json({ success: true, status, stats });
+    } catch (error) {
+      console.error("Queue status check failed:", error);
+      res.status(500).json({ 
+        success: false, 
+        message: (error as Error).message 
+      });
+    }
+  });
+
+  app.post("/api/queue/bulk-add", requireAuth, async (req, res) => {
+    try {
+      const { productIds, operation = "list", priority = 3 } = req.body;
+      
+      if (!productIds || !Array.isArray(productIds)) {
+        return res.status(400).json({
+          success: false,
+          error: "productIds array is required"
+        });
+      }
+
+      const { ebayQueueProcessor } = await import("./ebay-queue-processor");
+      await ebayQueueProcessor.queueBulkOperation(productIds, operation, priority);
+      
+      res.json({ 
+        success: true, 
+        message: `Added ${productIds.length} products to ${operation} queue`,
+        count: productIds.length
+      });
+    } catch (error) {
+      console.error("Bulk queue add failed:", error);
+      res.status(500).json({ 
+        success: false, 
+        message: (error as Error).message 
+      });
+    }
+  });
+
+  app.post("/api/queue/stop", requireAuth, async (req, res) => {
+    try {
+      const { ebayQueueProcessor } = await import("./ebay-queue-processor");
+      ebayQueueProcessor.stop();
+      res.json({ success: true, message: "Queue processing stopped" });
+    } catch (error) {
+      res.status(500).json({ 
+        success: false, 
+        message: (error as Error).message 
+      });
+    }
+  });
+
   // eBay API routes
   app.post("/api/ebay/list", requireAuth, async (req, res) => {
     try {

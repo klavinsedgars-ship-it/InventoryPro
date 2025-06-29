@@ -9,7 +9,8 @@ import {
   Settings,
   Box,
   BarChart3,
-  Calculator
+  Calculator,
+  Database
 } from "lucide-react";
 
 const navigation = [
@@ -19,6 +20,7 @@ const navigation = [
   { name: 'TME Sync', href: '/sync', icon: RefreshCw },
   { name: 'Categories', href: '/categories', icon: FolderTree },
   { name: 'Pricing', href: '/pricing', icon: Calculator },
+  { name: 'Queue Manager', href: '/queue', icon: Database },
   { name: 'Reports', href: '/reports', icon: BarChart3 },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
