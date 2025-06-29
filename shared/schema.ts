@@ -83,6 +83,17 @@ export const syncQueue = pgTable("sync_queue", {
   processedAt: timestamp("processed_at"),
 });
 
+export const pricingTiers = pgTable("pricing_tiers", {
+  id: serial("id").primaryKey(),
+  min: decimal("min", { precision: 10, scale: 2 }).notNull(),
+  max: decimal("max", { precision: 10, scale: 2 }).notNull(),
+  multiplier: decimal("multiplier", { precision: 5, scale: 2 }).notNull(),
+  label: text("label").notNull(),
+  marginPercentage: decimal("margin_percentage", { precision: 5, scale: 2 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
@@ -114,6 +125,12 @@ export const insertSyncQueueSchema = createInsertSchema(syncQueue).omit({
   processedAt: true,
 });
 
+export const insertPricingTierSchema = createInsertSchema(pricingTiers).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 // Login schema
 export const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -133,4 +150,6 @@ export type SyncLog = typeof syncLogs.$inferSelect;
 export type InsertSyncLog = z.infer<typeof insertSyncLogSchema>;
 export type SyncQueue = typeof syncQueue.$inferSelect;
 export type InsertSyncQueue = z.infer<typeof insertSyncQueueSchema>;
+export type PricingTier = typeof pricingTiers.$inferSelect;
+export type InsertPricingTier = z.infer<typeof insertPricingTierSchema>;
 export type LoginData = z.infer<typeof loginSchema>;
