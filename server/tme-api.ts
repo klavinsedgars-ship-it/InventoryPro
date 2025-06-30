@@ -143,7 +143,18 @@ export class TMEApiService {
         body: formData.toString(),
       });
 
-      const data = await response.json() as TMEApiResponse<T>;
+      console.log('TME API Response Status:', response.status, response.statusText);
+      
+      const responseText = await response.text();
+      console.log('TME API Raw Response:', responseText.substring(0, 500));
+
+      let data: TMEApiResponse<T>;
+      try {
+        data = JSON.parse(responseText) as TMEApiResponse<T>;
+      } catch (parseError) {
+        console.error('Failed to parse TME API response as JSON');
+        throw new Error(`TME API returned invalid JSON: ${response.status} ${response.statusText}`);
+      }
       
       if (response.status === 403 && data.Status === "E_ACTION_FORBIDDEN") {
         throw new Error(`TME API access forbidden: ${data.ErrorMessage || "API key may not have required permissions"} (Error: ${data.ErrorCode})`);
@@ -154,7 +165,8 @@ export class TMEApiService {
       }
 
       if (!response.ok) {
-        throw new Error(`TME API request failed: ${response.status} ${response.statusText}`);
+        console.log('TME API Error Response Data:', JSON.stringify(data, null, 2));
+        throw new Error(`TME API request failed: ${response.status} ${response.statusText} - ${data.ErrorMessage || data.Message || 'Unknown error'}`);
       }
       
       if (data.Status !== "OK") {
