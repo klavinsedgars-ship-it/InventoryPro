@@ -158,10 +158,11 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
       if (!response.ok) throw new Error("Sync failed");
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      const { results } = data;
       toast({
-        title: "Sync completed successfully",
-        description: `${selectedProducts.size} products have been synced to your CRM.`
+        title: "Sync completed",
+        description: `${results.syncedCount} new products added, ${results.updatedCount} updated, ${results.failedCount} failed`
       });
       setSelectedProducts(new Set());
       setShowSyncDialog(false);
@@ -175,6 +176,16 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
       });
     }
   });
+
+  const handleBulkSync = () => {
+    if (selectedProducts.size === 0) return;
+    
+    const productSymbols = Array.from(selectedProducts);
+    syncMutation.mutate({
+      productSymbols,
+      settings: syncSettings
+    });
+  };
 
   const toggleProductSelection = (symbol: string) => {
     const newSelected = new Set(selectedProducts);
@@ -356,12 +367,12 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                           <div className="flex items-center space-x-4">
                             <div className="flex items-center space-x-2">
                               <Checkbox
-                                checked={currentPageProducts.length > 0 && currentPageProducts.every(p => selectedProducts.has(p.Symbol))}
+                                checked={currentPageProducts.length > 0 && currentPageProducts.every((p: any) => selectedProducts.has(p.Symbol))}
                                 onCheckedChange={(checked) => {
                                   if (checked) {
-                                    currentPageProducts.forEach(p => selectedProducts.add(p.Symbol));
+                                    currentPageProducts.forEach((p: any) => selectedProducts.add(p.Symbol));
                                   } else {
-                                    currentPageProducts.forEach(p => selectedProducts.delete(p.Symbol));
+                                    currentPageProducts.forEach((p: any) => selectedProducts.delete(p.Symbol));
                                   }
                                   setSelectedProducts(new Set(selectedProducts));
                                 }}
@@ -387,11 +398,12 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                               <Button
                                 variant="default"
                                 size="sm"
-                                onClick={() => setShowSyncDialog(true)}
+                                onClick={handleBulkSync}
+                                disabled={syncMutation.isPending}
                                 className="bg-blue-600 hover:bg-blue-700"
                               >
                                 <Download className="h-3 w-3 mr-1" />
-                                Sync {selectedProducts.size} Products
+                                {syncMutation.isPending ? "Syncing..." : `Sync ${selectedProducts.size} Products`}
                               </Button>
                             </div>
                           )}
