@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
+import { useToast } from "@/hooks/use-toast";
 import { 
   RefreshCw, 
   CheckCircle2, 
@@ -17,11 +18,11 @@ import {
   Zap, 
   Eye, 
   Package,
-  ArrowRight, 
+  ArrowRight,
+  Download, 
   AlertTriangle 
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
-import { useToast } from "@/hooks/use-toast";
 
 interface TMEProduct {
   Symbol: string;
@@ -138,6 +139,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   const startIndex = (currentPage - 1) * displayLimit;
   const endIndex = startIndex + displayLimit;
   const products = allProducts.slice(startIndex, endIndex);
+  const currentPageProducts = products;
   const totalPages = Math.ceil(totalProducts / displayLimit);
   
   // Reset to page 1 when category changes
@@ -348,21 +350,70 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      {totalPages > 1 && (
-                        <div className="flex items-center justify-between border-b pb-4">
-                          <div className="text-sm text-gray-500">
-                            Showing {startIndex + 1}-{Math.min(endIndex, totalProducts)} of {totalProducts} products (Page {currentPage} of {totalPages})
+                      <div className="border-b pb-4 space-y-3">
+                        {/* Bulk Selection Controls */}
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-4">
+                            <div className="flex items-center space-x-2">
+                              <Checkbox
+                                checked={currentPageProducts.length > 0 && currentPageProducts.every(p => selectedProducts.has(p.Symbol))}
+                                onCheckedChange={(checked) => {
+                                  if (checked) {
+                                    currentPageProducts.forEach(p => selectedProducts.add(p.Symbol));
+                                  } else {
+                                    currentPageProducts.forEach(p => selectedProducts.delete(p.Symbol));
+                                  }
+                                  setSelectedProducts(new Set(selectedProducts));
+                                }}
+                              />
+                              <span className="text-sm font-medium">Select All on Page</span>
+                            </div>
+                            {selectedProducts.size > 0 && (
+                              <Badge variant="secondary">
+                                {selectedProducts.size} selected
+                              </Badge>
+                            )}
                           </div>
-                          <div className="flex items-center space-x-2">
-                            <Button variant="outline" size="sm" onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1}>
-                              Previous
-                            </Button>
-                            <Button variant="outline" size="sm" onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages}>
-                              Next
-                            </Button>
-                          </div>
+                          
+                          {selectedProducts.size > 0 && (
+                            <div className="flex items-center space-x-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setSelectedProducts(new Set())}
+                              >
+                                Clear All
+                              </Button>
+                              <Button
+                                variant="default"
+                                size="sm"
+                                onClick={() => setShowSyncDialog(true)}
+                                className="bg-blue-600 hover:bg-blue-700"
+                              >
+                                <Download className="h-3 w-3 mr-1" />
+                                Sync {selectedProducts.size} Products
+                              </Button>
+                            </div>
+                          )}
                         </div>
-                      )}
+                        
+                        {/* Pagination Controls */}
+                        {totalPages > 1 && (
+                          <div className="flex items-center justify-between">
+                            <div className="text-sm text-gray-500">
+                              Showing {startIndex + 1}-{Math.min(endIndex, totalProducts)} of {totalProducts} products (Page {currentPage} of {totalPages})
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <Button variant="outline" size="sm" onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1}>
+                                Previous
+                              </Button>
+                              <Button variant="outline" size="sm" onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages}>
+                                Next
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                       
                       <div className="space-y-2">
                         {products.map((product: TMEProduct) => (
