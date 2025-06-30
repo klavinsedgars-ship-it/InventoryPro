@@ -174,7 +174,7 @@ export class EbayApiService {
 
       // Determine shipping policy based on product weight
       const { getShippingPolicyId, getShippingPolicyName } = await import("./shipping-policies");
-      const productWeight = product.weight ? parseFloat(product.weight) : null;
+      const productWeight = product.weight ? parseFloat(product.weight) : undefined;
       const shippingPolicyId = getShippingPolicyId(productWeight);
       const shippingPolicyName = getShippingPolicyName(productWeight);
       

@@ -1,4 +1,4 @@
-import type { Express, Request } from "express";
+import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { 
@@ -2818,7 +2818,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { assignShippingPolicies } = await import("./shipping-policies");
       
       const assignments = assignShippingPolicies(
-        products.map(p => ({ id: p.id, weight: p.weight }))
+        products.map(p => ({ id: p.id, weight: p.weight ? parseFloat(p.weight) : null }))
       );
       
       res.json({
