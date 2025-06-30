@@ -348,6 +348,22 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                     </div>
                   ) : (
                     <div className="space-y-4">
+                      {totalPages > 1 && (
+                        <div className="flex items-center justify-between border-b pb-4">
+                          <div className="text-sm text-gray-500">
+                            Showing {startIndex + 1}-{Math.min(endIndex, totalProducts)} of {totalProducts} products (Page {currentPage} of {totalPages})
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Button variant="outline" size="sm" onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1}>
+                              Previous
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages}>
+                              Next
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                      
                       <div className="space-y-2">
                         {products.map((product: TMEProduct) => (
                           <div
