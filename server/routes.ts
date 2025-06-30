@@ -543,6 +543,119 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // Get exact TME API response details
+  app.get("/api/debug/tme-response", requireAuth, async (req, res) => {
+    const credentials = {
+      token: "4c7c4c076d049b050b7db3a648c6ef61c4bd1daad6c5ab09df",
+      customerNumber: "40026843",
+      contactNumber: "642966"
+    };
+
+    console.log("Testing TME API with exact response capture...");
+    
+    // Test multiple endpoints with detailed response capture
+    const tests = [];
+    
+    // Test 1: Products/Search.json with POST form data
+    try {
+      const formData = new URLSearchParams();
+      formData.append("Token", credentials.token);
+      formData.append("Country", "US");
+      formData.append("Language", "EN");
+      formData.append("Currency", "USD");
+      formData.append("SearchPlain", "arduino");
+      formData.append("SearchWithStock", "1");
+      formData.append("SearchPhoto", "1");
+
+      const response1 = await fetch("https://api.tme.eu/Products/Search.json", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Accept": "application/json",
+          "User-Agent": "TME-CRM-Integration/1.0",
+        },
+        body: formData.toString(),
+      });
+
+      const responseText1 = await response1.text();
+      let responseData1;
+      try {
+        responseData1 = JSON.parse(responseText1);
+      } catch {
+        responseData1 = responseText1;
+      }
+
+      tests.push({
+        endpoint: "POST /Products/Search.json",
+        status: response1.status,
+        statusText: response1.statusText,
+        headers: Object.fromEntries(response1.headers.entries()),
+        responseText: responseText1.substring(0, 1000),
+        responseData: responseData1,
+        requestBody: formData.toString()
+      });
+    } catch (error) {
+      tests.push({
+        endpoint: "POST /Products/Search.json",
+        error: (error as Error).message
+      });
+    }
+
+    // Test 2: GET method with URL params
+    try {
+      const url = new URL("https://api.tme.eu/Products/Search.json");
+      url.searchParams.set("Token", credentials.token);
+      url.searchParams.set("Country", "US");
+      url.searchParams.set("Language", "EN");
+      url.searchParams.set("Currency", "USD");
+      url.searchParams.set("SearchPlain", "arduino");
+
+      const response2 = await fetch(url.toString(), {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+          "User-Agent": "TME-CRM-Integration/1.0",
+        },
+      });
+
+      const responseText2 = await response2.text();
+      let responseData2;
+      try {
+        responseData2 = JSON.parse(responseText2);
+      } catch {
+        responseData2 = responseText2;
+      }
+
+      tests.push({
+        endpoint: "GET /Products/Search.json",
+        status: response2.status,
+        statusText: response2.statusText,
+        headers: Object.fromEntries(response2.headers.entries()),
+        responseText: responseText2.substring(0, 1000),
+        responseData: responseData2,
+        requestUrl: url.toString().replace(credentials.token, "***TOKEN***")
+      });
+    } catch (error) {
+      tests.push({
+        endpoint: "GET /Products/Search.json",
+        error: (error as Error).message
+      });
+    }
+
+    console.log("TME API Response Details:", JSON.stringify(tests, null, 2));
+    
+    res.json({
+      success: true,
+      credentials: {
+        tokenLength: credentials.token.length,
+        customerNumber: credentials.customerNumber,
+        contactNumber: credentials.contactNumber
+      },
+      tests,
+      timestamp: new Date().toISOString()
+    });
+  });
+
   // Test new TME credentials directly
   app.get("/api/debug/tme-new", requireAuth, async (req, res) => {
     const newCredentials = {
