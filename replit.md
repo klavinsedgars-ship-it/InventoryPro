@@ -285,6 +285,11 @@ Changelog:
 - June 30, 2025. **EBAY TEMPLATE REFRESH ENHANCED**: Implemented advanced template refresh mechanism with unique timestamps and hidden elements to force eBay description updates
 - June 30, 2025. Added comprehensive debugging system to track template generation, marker application, and eBay API response handling
 - June 30, 2025. **KNOWN LIMITATION**: eBay ReviseFixedPriceItem API may not immediately refresh description templates - this is an eBay platform limitation, not a system issue
+- June 30, 2025. **EBAY STOCK LIMITATION SYSTEM IMPLEMENTED**: Built comprehensive stock management system to preserve eBay account listing limits
+- June 30, 2025. Added ebayStockLimit and useStockLimit database fields with default 3-unit maximum per product
+- June 30, 2025. Created stock manager utility to calculate minimum of TME stock vs eBay limit for marketplace listings
+- June 30, 2025. Updated products table with separate TME Stock and eBay Stock columns for clear inventory visibility
+- June 30, 2025. Successfully tested eBay listings with stock limitations - system correctly limits quantities to 3 units regardless of higher TME stock levels
 ```
 
 ## User Preferences

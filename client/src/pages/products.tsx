@@ -573,16 +573,9 @@ export function Products({ user }: ProductsProps) {
                             const isLimited = productStockInfo.isLimited;
                             
                             return (
-                              <div className="flex items-center space-x-1">
-                                <span className={ebayStock === 0 ? "text-red-600" : "text-green-600"}>
-                                  {ebayStock}
-                                </span>
-                                {isLimited && (
-                                  <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 border-orange-200">
-                                    Limited
-                                  </Badge>
-                                )}
-                              </div>
+                              <span className={ebayStock === 0 ? "text-red-600" : "text-green-600"}>
+                                {ebayStock}
+                              </span>
                             );
                           })()}
                         </td>
