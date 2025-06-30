@@ -277,6 +277,9 @@ Changelog:
 - June 30, 2025. **EBAY UPDATE TEMPLATE FIXED**: Resolved issue where eBay update function was using old simple template instead of professional unified template
 - June 30, 2025. Fixed XML structure mismatch between new listings and updates - aligned ReviseFixedPriceItem XML format with AddFixedPriceItem format
 - June 30, 2025. eBay update functionality now properly uses professional unified templates with styled sections, maintaining consistency across all listings
+- June 30, 2025. **EBAY TEMPLATE REFRESH ENHANCED**: Implemented advanced template refresh mechanism with unique timestamps and hidden elements to force eBay description updates
+- June 30, 2025. Added comprehensive debugging system to track template generation, marker application, and eBay API response handling
+- June 30, 2025. **KNOWN LIMITATION**: eBay ReviseFixedPriceItem API may not immediately refresh description templates - this is an eBay platform limitation, not a system issue
 ```
 
 ## User Preferences

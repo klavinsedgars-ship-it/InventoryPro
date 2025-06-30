@@ -535,14 +535,6 @@ export class EbayApiService {
     <ConditionID>1000</ConditionID>
     <DispatchTimeMax>3</DispatchTimeMax>
     ${pictureXML}
-    <ShippingDetails>
-      <ShippingType>Flat</ShippingType>
-      <ShippingServiceOptions>
-        <ShippingServicePriority>1</ShippingServicePriority>
-        <ShippingService>UK_RoyalMailSecondClassStandard</ShippingService>
-        <ShippingServiceCost currencyID="GBP">3.50</ShippingServiceCost>
-      </ShippingServiceOptions>
-    </ShippingDetails>
     <SellerProfiles>
       <SellerPaymentProfile>
         <PaymentProfileID>209734844019</PaymentProfileID>
@@ -904,10 +896,19 @@ export class EbayApiService {
       console.log("Generated listing template description length:", listingTemplate.htmlDescription.length);
       console.log("Generated template description preview:", listingTemplate.htmlDescription.substring(0, 200));
       
-      // Add unique timestamp to force eBay to recognize description changes
+      // Force eBay to recognize description changes by adding unique content
       const timestamp = new Date().getTime();
-      const uniqueMarker = `<!-- Updated: ${timestamp} -->`;
-      const finalDescription = updateData?.description || (uniqueMarker + listingTemplate.htmlDescription);
+      const uniqueMarker = `<!-- Template Version: 2.0 | Updated: ${timestamp} -->`;
+      
+      // Temporarily modify template content to force refresh
+      let templateWithForceRefresh = listingTemplate.htmlDescription;
+      if (!updateData?.description) {
+        // Add a hidden timestamp div to ensure content changes
+        const hiddenTimestamp = `<div style="display:none;" data-update="${timestamp}">Last updated: ${new Date().toISOString()}</div>`;
+        templateWithForceRefresh = uniqueMarker + hiddenTimestamp + listingTemplate.htmlDescription;
+      }
+      
+      const finalDescription = updateData?.description || templateWithForceRefresh;
       
       const listingData = {
         itemId: product.ebayItemId,
