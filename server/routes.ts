@@ -2998,17 +2998,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             calculatedPrice: pricingResult.calculatedPrice.toString(),
             marginTier: pricingResult.marginTier,
             marginPercentage: pricingResult.marginPercentage.toString(),
-            multiplier: pricingResult.multiplier.toString(),
             stock: stockData?.Amount || 100,
             status: "active",
             weight: product.Weight || 10,
             imageUrl: product.Photo ? `https:${product.Photo}` : null,
-            tmeListing: "not_listed",
-            ebayListing: "not_listed",
-            amazonListing: "not_listed",
-            tmeProductUrl: product.ProductInformationPage ? `https://www.tme.eu${product.ProductInformationPage}` : null,
-            tmeDatasheet: product.DataSheet ? `https://www.tme.eu${product.DataSheet}` : null,
-            producer: product.Producer
+            dataSheetUrl: product.DataSheet ? `https://www.tme.eu${product.DataSheet}` : null,
+            productUrl: product.ProductInformationPage ? `https://www.tme.eu${product.ProductInformationPage}` : null,
+            supplier: "tme",
+            supplierProductId: product.Symbol
           };
 
           // Check if product already exists
