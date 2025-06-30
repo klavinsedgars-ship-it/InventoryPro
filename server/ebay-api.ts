@@ -381,7 +381,7 @@ export class EbayApiService {
     <ConditionID>1000</ConditionID>
     <DispatchTimeMax>3</DispatchTimeMax>
     <PictureDetails>
-      <PictureURL>https://images.unsplash.com/photo-1553062407-98eeb64c6a62</PictureURL>
+      <PictureURL>${listingData.pictureURLs && listingData.pictureURLs.length > 0 ? listingData.pictureURLs[0] : ""}</PictureURL>
     </PictureDetails>
     <ShippingDetails>
       <ShippingType>Flat</ShippingType>
@@ -399,6 +399,20 @@ export class EbayApiService {
         <ReturnProfileID>161272624019</ReturnProfileID>
       </SellerReturnProfile>
     </SellerProfiles>
+    ${listingData.pictureURLs && listingData.pictureURLs.length > 0 ? `<ItemSpecifics>
+      <NameValueList>
+        <Name>Brand</Name>
+        <Value>Arduino</Value>
+      </NameValueList>
+      <NameValueList>
+        <Name>Type</Name>
+        <Value>Development Board</Value>
+      </NameValueList>
+      <NameValueList>
+        <Name>MPN</Name>
+        <Value>${listingData.sku || 'Arduino'}</Value>
+      </NameValueList>
+    </ItemSpecifics>` : ''}
   </Item>
 </VerifyAddFixedPriceItemRequest>`;
   }
@@ -436,7 +450,7 @@ export class EbayApiService {
     <ConditionID>1000</ConditionID>
     <DispatchTimeMax>3</DispatchTimeMax>
     <PictureDetails>
-      <PictureURL>https://images.unsplash.com/photo-1553062407-98eeb64c6a62</PictureURL>
+      <PictureURL>${listingData.pictureURLs && listingData.pictureURLs.length > 0 ? listingData.pictureURLs[0] : ""}</PictureURL>
     </PictureDetails>
     <ShippingDetails>
       <ShippingType>Flat</ShippingType>
