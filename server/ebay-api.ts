@@ -175,13 +175,24 @@ export class EbayApiService {
       
       console.log(`Product weight: ${product.weight}g, assigned shipping policy: ${shippingPolicyId} (${shippingPolicyName})`);
 
+      // Calculate eBay-specific stock (limited to preserve account limits)
+      const stockInfo = calculateEbayStock(product);
+      const ebayQuantity = stockInfo.ebayStock;
+      
+      console.log(`Stock calculation for ${product.name}:`, {
+        tmeStock: stockInfo.tmeStock,
+        ebayStock: stockInfo.ebayStock,
+        isLimited: stockInfo.isLimited,
+        reason: stockInfo.limitReason
+      });
+
       // Prepare listing data for eBay Trading API
       const listingData = {
         title: listingDetails.title || templateData?.title || product.name,
         description: listingDetails.description || templateData?.htmlDescription || templateData?.description || product.description || `${product.name} - High quality electronics component`,
         categoryId: listingDetails.categoryId || "175673", // Default electronics category
         startPrice: listingDetails.startPrice || parseFloat(product.salePrice) || 0,
-        quantity: listingDetails.quantity || product.stock || 1,
+        quantity: listingDetails.quantity || ebayQuantity, // Use calculated eBay stock
         listingDuration: listingDetails.listingDuration || "Days_7",
         condition: listingDetails.condition || "New",
         pictureURLs: listingDetails.pictureURLs || (product.imageUrl ? [product.imageUrl] : []),

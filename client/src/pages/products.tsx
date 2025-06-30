@@ -50,6 +50,10 @@ export function Products({ user }: ProductsProps) {
     queryKey: ["/api/categories"],
   });
 
+  const { data: stockInfo = [] } = useQuery({
+    queryKey: ["/api/stock/info"],
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/products/${id}`),
     onSuccess: () => {
@@ -495,11 +499,11 @@ export function Products({ user }: ProductsProps) {
                       <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
                         Price
                       </th>
-                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
-                        Stock
+                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
+                        TME Stock
                       </th>
-                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
-                        Min Qty
+                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
+                        eBay Stock
                       </th>
                       <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
                         Status
@@ -557,15 +561,28 @@ export function Products({ user }: ProductsProps) {
                           </span>
                         </td>
                         <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-900">
-                          {product.isMultipack ? (
-                            <div className="flex items-center space-x-1">
-                              <Badge variant="outline" className="text-xs">
-                                {product.minOrderQuantity}x
-                              </Badge>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-gray-500">1</span>
-                          )}
+                          {(() => {
+                            const productStockInfo = stockInfo.find((info: any) => info.id === product.id);
+                            if (!productStockInfo) {
+                              return <span className="text-xs text-gray-500">Loading...</span>;
+                            }
+                            
+                            const ebayStock = productStockInfo.ebayStock;
+                            const isLimited = productStockInfo.isLimited;
+                            
+                            return (
+                              <div className="flex items-center space-x-1">
+                                <span className={ebayStock === 0 ? "text-red-600" : "text-green-600"}>
+                                  {ebayStock}
+                                </span>
+                                {isLimited && (
+                                  <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 border-orange-200">
+                                    Limited
+                                  </Badge>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="px-2 py-3 whitespace-nowrap">
                           <Badge 
