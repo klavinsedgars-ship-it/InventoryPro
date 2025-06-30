@@ -120,18 +120,46 @@ export function TMEBrowserNew({ user }: TMEBrowserProps) {
 
     setSyncLoading(true);
     try {
-      // Implementation for syncing selected products
+      // Get selected products data
+      const selectedProductsData = filteredProducts.filter(product => 
+        selectedProducts.has(product.Symbol)
+      );
+      
       toast({
         title: "Sync Started",
         description: `Syncing ${selectedProducts.size} products...`,
       });
+
+      // Call the backend sync endpoint
+      const response = await fetch('/api/tme/sync-selected', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          symbols: Array.from(selectedProducts)
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        toast({
+          title: "Sync Completed",
+          description: `Successfully synced ${result.productsAdded || selectedProducts.size} products to your inventory.`,
+        });
+        
+        // Reset selections after successful sync
+        setSelectedProducts(new Set());
+      } else {
+        throw new Error(result.message || 'Sync failed');
+      }
       
-      // Reset selections after sync
-      setSelectedProducts(new Set());
     } catch (error) {
+      console.error('Sync error:', error);
       toast({
         title: "Sync Failed",
-        description: "Failed to sync selected products.",
+        description: error instanceof Error ? error.message : "Failed to sync selected products.",
         variant: "destructive",
       });
     } finally {
