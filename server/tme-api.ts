@@ -10,9 +10,13 @@ interface TMECredentials {
 
 interface TMEProduct {
   Symbol: string;
+  CustomerSymbol: string;
+  OriginalSymbol: string;
+  EAN: string;
+  Producer: string;
   Description: string;
   CategoryId: number;
-  Producer: string;
+  Category: string;
   Photo: string;
   Thumbnail: string;
   DataSheet: string;
@@ -339,19 +343,32 @@ export class TMEApiService {
           // Check if product already exists by SKU
           const existingProduct = await storage.getProductBySku(tmeProduct.Symbol);
 
+          // Extract weight from product description or parameters (estimate in grams)
+          const weightEstimate = this.estimateProductWeight(tmeProduct);
+          
+          // Get the price for this specific product (TME returns prices per quantity tier)
+          const supplierPrice = price?.PriceValue || 0;
+          
+          // Create detailed product description from TME data
+          const detailedDescription = this.createDetailedDescription(tmeProduct);
+          
           const productData = {
             name: tmeProduct.Description,
             sku: tmeProduct.Symbol,
-            description: `${tmeProduct.Producer} - ${tmeProduct.Description}`,
-            category: "Electronics", // Default category, could be mapped from TME categories
-            supplierPrice: (price?.PriceValue || 0).toString(),
-            salePrice: ((price?.PriceValue || 0) * 1.2).toString(), // 20% markup
+            ean: (tmeProduct as any).EAN || null,
+            description: detailedDescription,
+            category: this.mapTMECategory(tmeProduct.CategoryId) || "Electronics",
+            supplierPrice: supplierPrice.toString(),
+            salePrice: (supplierPrice * 1.5).toString(), // 50% markup as default
             stock: stock?.Amount || 0,
-            imageUrl: tmeProduct.Photo || tmeProduct.Thumbnail || null,
+            weight: weightEstimate,
+            imageUrl: tmeProduct.Photo?.replace(/^\/\//, 'https://') || tmeProduct.Thumbnail?.replace(/^\/\//, 'https://') || null,
             supplier: "TME",
             supplierProductId: tmeProduct.Symbol,
+            tmeProductId: tmeProduct.Symbol,
             dataSheetUrl: tmeProduct.DataSheet || null,
             productUrl: tmeProduct.ProductInformationPage || null,
+            status: (stock?.Amount || 0) > 0 ? "active" : "out_of_stock",
           };
 
           if (existingProduct) {
@@ -498,6 +515,70 @@ export class TMEApiService {
 
       throw error;
     }
+  }
+
+  /**
+   * Estimate product weight based on description and category
+   */
+  private estimateProductWeight(product: TMEProduct): number {
+    const description = product.Description.toLowerCase();
+    
+    // Weight estimates in grams based on common electronic components
+    if (description.includes('arduino') && description.includes('nano')) return 7;
+    if (description.includes('arduino') && description.includes('uno')) return 25;
+    if (description.includes('raspberry pi')) return 45;
+    if (description.includes('esp32')) return 8;
+    if (description.includes('esp8266')) return 5;
+    if (description.includes('sensor') && description.includes('temperature')) return 3;
+    if (description.includes('resistor')) return 1;
+    if (description.includes('capacitor')) return 2;
+    if (description.includes('led strip')) return 50;
+    if (description.includes('display') && description.includes('oled')) return 15;
+    if (description.includes('module')) return 10;
+    if (description.includes('board')) return 20;
+    if (description.includes('cable') || description.includes('wire')) return 15;
+    if (description.includes('power') && description.includes('supply')) return 200;
+    
+    // Default fallback
+    return 10;
+  }
+
+  /**
+   * Create detailed product description from TME data
+   */
+  private createDetailedDescription(product: TMEProduct): string {
+    let description = `${product.Producer} - ${product.Description}\n\n`;
+    
+    // Add technical specifications if available
+    if (product.Parameters && product.Parameters.length > 0) {
+      description += "Technical Specifications:\n";
+      product.Parameters.forEach(param => {
+        if (param.ParameterValue && param.ParameterValue.trim()) {
+          const unit = param.ParameterUnit ? ` ${param.ParameterUnit}` : '';
+          description += `• ${param.ParameterName}: ${param.ParameterValue}${unit}\n`;
+        }
+      });
+      description += "\n";
+    }
+    
+    // Add TME symbol for reference
+    description += `TME Symbol: ${product.Symbol}\n`;
+    
+    return description.trim();
+  }
+
+  /**
+   * Map TME category to CRM category
+   */
+  private mapTMECategory(categoryId: number): string {
+    // TME uses numeric category IDs, map them to meaningful names
+    if (categoryId === 118087) return 'Arduino & Development Boards'; // Arduino Solutions
+    if (categoryId >= 118000 && categoryId < 119000) return 'Development Boards';
+    if (categoryId >= 100000 && categoryId < 110000) return 'Sensors & Modules';
+    if (categoryId >= 110000 && categoryId < 115000) return 'Displays & Indicators';
+    if (categoryId >= 115000 && categoryId < 120000) return 'Communication Modules';
+    
+    return 'Electronics';
   }
 }
 
