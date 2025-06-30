@@ -289,87 +289,166 @@ export class TMEApiService {
   }
 
   private async getComprehensiveProductSearch(categoryId: string, targetLimit: number): Promise<{products: TMEProduct[], total: number}> {
-    console.log(`🚀 Starting comprehensive search for category ${categoryId}, targeting ${targetLimit} products`);
+    console.log(`🚀 Starting ULTRA comprehensive search for category ${categoryId}, targeting ${targetLimit} products`);
     
-    // Massive search terms for maximum product coverage
+    // MASSIVE search terms for 5000+ products per category
     const categorySearchMap: Record<string, string[]> = {
       "1000": [
-        // Microcontrollers - comprehensive search
+        // Microcontrollers - ULTRA comprehensive search (50+ terms)
         "microcontroller", "atmega", "pic", "stm32", "arduino", "avr", "arm", "cortex", 
         "esp32", "esp8266", "raspberry", "teensy", "mcu", "controller", "processor",
-        "atmega328", "atmega32", "pic16", "pic18", "stm32f", "arm7", "arm9", "cortex-m"
+        "atmega328", "atmega32", "atmega16", "atmega8", "atmega2560", "atmega168", "atmega644",
+        "pic16f", "pic18f", "pic24", "pic32", "dspic", "pic12f", "pic16c", "pic17c",
+        "stm32f0", "stm32f1", "stm32f2", "stm32f3", "stm32f4", "stm32f7", "stm32h7", "stm32l0", "stm32l1", "stm32l4",
+        "arm7", "arm9", "arm11", "cortex-m0", "cortex-m3", "cortex-m4", "cortex-m7", "cortex-a",
+        "esp32-s2", "esp32-s3", "esp32-c3", "esp8285", "nodemcu", "wemos", "lolin",
+        "raspberry pi", "rpi", "nano", "uno", "mega", "leonardo", "micro", "pro mini",
+        "teensy 3", "teensy 4", "development board", "eval board", "breakout", "module",
+        "8051", "8052", "89c51", "at89s52", "msp430", "cc2540", "cc3200", "nrf52", "nrf51"
       ],
       "1001": [
-        // Semiconductors & Transistors
-        "transistor", "mosfet", "bjt", "fets", "igbt", "jfet", "semiconductor", 
-        "npn", "pnp", "n-channel", "p-channel", "power", "switching", "amplifier",
-        "2n2222", "2n3904", "bc547", "irf540", "irfz44", "tip", "but", "irf"
+        // Semiconductors (50+ terms)
+        "transistor", "mosfet", "bjt", "fet", "igbt", "jfet", "semiconductor", "diode",
+        "npn", "pnp", "n-channel", "p-channel", "power", "switching", "amplifier", "logic",
+        "2n2222", "2n3904", "2n3906", "bc547", "bc548", "bc549", "bc557", "bc558",
+        "irf540", "irfz44", "irf730", "irf840", "irf3205", "tip120", "tip122", "tip31",
+        "but11", "but56", "bd139", "bd140", "2sc945", "2sa733", "mpsa06", "mpsa56",
+        "schottky", "zener", "rectifier", "bridge", "tvs", "varistor", "1n4001", "1n4007",
+        "1n5408", "1n5819", "1n5822", "bat85", "bat54", "sr560", "uf4007", "mbr2045",
+        "thyristor", "triac", "scr", "diac", "optocoupler", "photo", "led driver"
       ],
       "1002": [
-        // Integrated Circuits  
-        "integrated circuit", "ic", "chip", "microprocessor", "logic", "analog",
-        "op-amp", "comparator", "timer", "counter", "decoder", "encoder", "multiplexer",
-        "555", "741", "4017", "4020", "74hc", "74ls", "cd40", "lm", "ne"
+        // Integrated Circuits (60+ terms)
+        "integrated circuit", "ic", "chip", "microprocessor", "logic", "analog", "digital",
+        "op-amp", "operational amplifier", "comparator", "timer", "counter", "decoder", "encoder", 
+        "multiplexer", "demux", "shift register", "latch", "flip-flop", "gate", "buffer",
+        "555", "556", "741", "358", "324", "4017", "4020", "4040", "4060", "4013", "4011",
+        "74hc00", "74hc04", "74hc08", "74hc32", "74hc74", "74hc138", "74hc139", "74hc164", "74hc595",
+        "74ls00", "74ls04", "74ls08", "74ls32", "74ls74", "74ls138", "74ls139", "74ls164",
+        "cd4000", "cd4001", "cd4011", "cd4017", "cd4020", "cd4040", "cd4060", "cd4013", "cd4012",
+        "lm358", "lm324", "lm339", "lm393", "lm741", "lm301", "tl071", "tl072", "tl074",
+        "ne555", "ne556", "lm555", "mc1455", "ca555", "ics555", "se555", "xa555",
+        "voltage regulator", "switching regulator", "reference", "pwm", "pll", "vco", "adc", "dac"
       ],
       "1003": [
-        // LEDs & Displays
-        "led", "display", "oled", "lcd", "segment", "matrix", "strip", "module",
-        "tft", "e-paper", "nixie", "vfd", "character", "graphic", "ssd1306", "nokia"
+        // LEDs & Displays (40+ terms)
+        "led", "display", "oled", "lcd", "segment", "matrix", "strip", "module", "screen",
+        "tft", "ips", "e-paper", "e-ink", "nixie", "vfd", "character", "graphic", "dot matrix",
+        "ssd1306", "sh1106", "st7735", "ili9341", "nokia 5110", "pcd8544", "max7219",
+        "16x2", "20x4", "128x64", "240x320", "480x320", "800x480", "1024x600",
+        "7-segment", "4-digit", "common anode", "common cathode", "alphanumeric",
+        "ws2812", "ws2811", "neopixel", "addressable", "rgb", "rgbw", "apa102", "sk6812",
+        "backlight", "frontlight", "touch", "capacitive", "resistive", "hd44780", "pcf8574"
       ],
       "1004": [
-        // Passive Components
-        "resistor", "capacitor", "inductor", "coil", "choke", "ferrite", "crystal",
-        "ceramic", "electrolytic", "tantalum", "film", "carbon", "metal", "smd", "through hole"
+        // Passive Components (70+ terms)
+        "resistor", "capacitor", "inductor", "coil", "choke", "ferrite", "crystal", "oscillator",
+        "ceramic", "electrolytic", "tantalum", "film", "carbon", "metal", "wire wound", "precision",
+        "smd", "smt", "through hole", "axial", "radial", "surface mount", "chip", "package",
+        "0402", "0603", "0805", "1206", "1210", "2010", "2512", "1/4w", "1/2w", "1w", "2w",
+        "10k", "1k", "100k", "1m", "10m", "100", "470", "220", "330", "1.2k", "4.7k", "22k",
+        "100pf", "1nf", "10nf", "100nf", "1uf", "10uf", "100uf", "470uf", "1000uf", "2200uf",
+        "variable", "trimmer", "potentiometer", "rheostat", "thermistor", "varistor", "photoresistor",
+        "32.768khz", "8mhz", "16mhz", "20mhz", "25mhz", "crystal resonator", "ceramic resonator"
       ],
       "1005": [
-        // Switches & Relays
-        "relay", "switch", "button", "toggle", "rotary", "slide", "dip", "micro",
-        "push", "momentary", "latching", "spdt", "dpdt", "spst", "contactor"
+        // Switches & Relays (40+ terms)  
+        "relay", "switch", "button", "toggle", "rotary", "slide", "dip", "micro", "limit",
+        "push", "momentary", "latching", "spdt", "dpdt", "spst", "dpst", "3pdt", "4pdt",
+        "contactor", "solid state", "reed", "magnetic", "proximity", "optical", "mechanical",
+        "tactile", "tact", "push button", "emergency stop", "selector", "key", "cam",
+        "5v", "12v", "24v", "coil", "contact", "nc", "no", "changeover", "pcb mount",
+        "panel mount", "din rail", "socket", "base", "omron", "finder", "phoenix", "te"
       ],
       "1006": [
-        // Power Components
-        "power supply", "transformer", "converter", "regulator", "inverter", "charger",
-        "switching", "linear", "dc-dc", "ac-dc", "voltage", "current", "lm7805", "lm317"
+        // Power Components (50+ terms)
+        "power supply", "transformer", "converter", "regulator", "inverter", "charger", "adapter",
+        "switching", "linear", "dc-dc", "ac-dc", "ac-ac", "voltage", "current", "smps", "psu",
+        "lm7805", "lm7812", "lm7815", "lm317", "lm337", "l7805", "l7812", "ams1117",
+        "buck", "boost", "buck-boost", "flyback", "forward", "isolated", "non-isolated",
+        "step up", "step down", "adjustable", "fixed", "low dropout", "ldo", "switching regulator",
+        "battery", "charger", "bms", "protection", "tp4056", "cn3791", "max1555", "mcp73831",
+        "toroidal", "ei", "ui", "ferrite core", "laminated", "encapsulated", "pcb mount"
       ],
       "1007": [
-        // Connectors
-        "connector", "terminal", "plug", "socket", "header", "jumper", "block",
-        "usb", "rj45", "audio", "video", "power", "screw", "spring", "phoenix"
+        // Connectors (60+ terms)
+        "connector", "terminal", "plug", "socket", "header", "jumper", "block", "strip",
+        "usb", "usb-a", "usb-b", "usb-c", "micro usb", "mini usb", "type-c", "lightning",
+        "rj45", "rj11", "rj12", "ethernet", "modular", "8p8c", "6p6c", "4p4c",
+        "audio", "3.5mm", "6.35mm", "xlr", "rca", "phono", "cinch", "banana", "bnc",
+        "video", "hdmi", "vga", "dvi", "displayport", "composite", "component", "s-video",
+        "power", "dc", "barrel", "coaxial", "iec", "nema", "schuko", "british", "australian",
+        "screw", "spring", "cage clamp", "phoenix", "wago", "molex", "jst", "dupont",
+        "pin header", "socket header", "male", "female", "straight", "right angle", "smd"
       ],
       "1008": [
-        // Cables & Wires
-        "cable", "wire", "harness", "ribbon", "coaxial", "twisted", "ethernet",
-        "usb", "audio", "video", "power", "jumper", "breadboard", "dupont"
+        // Cables & Wires (40+ terms)
+        "cable", "wire", "harness", "ribbon", "flat", "coaxial", "twisted", "pair", "shielded",
+        "ethernet", "cat5", "cat5e", "cat6", "cat6a", "cat7", "utp", "stp", "ftp",
+        "usb", "usb 2.0", "usb 3.0", "usb-c", "lightning", "micro", "mini", "extension",
+        "audio", "xlr", "trs", "ts", "rca", "stereo", "mono", "balanced", "unbalanced",
+        "video", "hdmi", "vga", "dvi", "displayport", "component", "composite", "svga",
+        "power", "mains", "iec", "extension lead", "power cord", "ac", "dc", "battery",
+        "jumper", "breadboard", "dupont", "prototype", "hookup", "solid", "stranded", "awg"
       ],
       "1009": [
-        // Tools & Equipment
-        "multimeter", "oscilloscope", "power supply", "function generator", "soldering",
-        "iron", "station", "meter", "tester", "analyzer", "probe", "tool"
+        // Tools & Equipment (50+ terms)
+        "multimeter", "dmm", "oscilloscope", "scope", "power supply", "function generator", "awg",
+        "soldering", "iron", "station", "hot air", "reflow", "desoldering", "flux", "solder",
+        "meter", "tester", "analyzer", "probe", "logic analyzer", "spectrum analyzer",
+        "bench", "handheld", "digital", "analog", "true rms", "auto ranging", "manual",
+        "temperature", "humidity", "ph", "conductivity", "light", "sound", "vibration",
+        "crimping", "stripping", "cutting", "pliers", "tweezers", "magnifier", "microscope",
+        "breadboard", "perfboard", "stripboard", "pcb", "prototype", "enclosure", "case", "box"
       ],
       "1010": [
-        // Sensors
-        "sensor", "temperature", "pressure", "humidity", "motion", "light", "proximity",
-        "accelerometer", "gyroscope", "magnetometer", "gas", "ph", "ultrasonic"
+        // Sensors (80+ terms for maximum coverage)
+        "sensor", "temperature", "humidity", "pressure", "accelerometer", "gyroscope", "magnetometer",
+        "proximity", "distance", "ultrasonic", "infrared", "pir", "motion", "gesture", "touch",
+        "light", "color", "uv", "ambient", "lux", "photodiode", "phototransistor", "cds",
+        "gas", "air quality", "co2", "co", "alcohol", "smoke", "methane", "lpg", "mq",
+        "sound", "microphone", "noise", "decibel", "audio", "voice", "speech", "acoustic",
+        "flow", "water", "liquid", "hall effect", "magnetic", "current", "voltage", "power",
+        "vibration", "shock", "tilt", "orientation", "compass", "gps", "location", "positioning",
+        "dht11", "dht22", "bmp180", "bmp280", "bme280", "ds18b20", "lm35", "tmp36", "hc-sr04",
+        "mpu6050", "mpu9250", "adxl345", "hmc5883l", "qmc5883l", "gy-521", "gy-80", "gy-85",
+        "mq-2", "mq-3", "mq-4", "mq-5", "mq-6", "mq-7", "mq-8", "mq-9", "mq-135", "ccs811"
       ]
     };
 
-    const searchTerms = categorySearchMap[categoryId] || [
-      "electronic", "component", "module", "board", "kit", "part", "device"
-    ];
+    // Fallback search terms for any category (generic electronics)
+    const fallbackSearchTerms = [
+      "electronic", "electronics", "component", "parts", "module", "board", "pcb", "circuit",
+      "digital", "analog", "smd", "through hole", "dip", "sop", "soic", "qfn", "bga",
+      "arduino", "raspberry", "esp32", "esp8266", "microcontroller", "sensor", "led", "display",
+      "resistor", "capacitor", "diode", "transistor", "ic", "chip", "processor", "controller",
+      "power", "supply", "battery", "charger", "converter", "regulator", "voltage", "current",
+      "connector", "cable", "wire", "header", "terminal", "socket", "plug", "jack",
+      "switch", "button", "relay", "motor", "servo", "stepper", "buzzer", "speaker",
+      "oscillator", "crystal", "clock", "timer", "counter", "logic", "gate", "buffer"
+    ]
+    };
 
+    // Get specific search terms for this category or use fallback
+    const searchTerms = categorySearchMap[categoryId] || fallbackSearchTerms;
+    
+    console.log(`🚀 ULTRA FAST search for category ${categoryId} with ${searchTerms.length} terms, targeting ${targetLimit} products`);
+    
     let allProducts: TMEProduct[] = [];
     let searchCount = 0;
-    const maxSearches = Math.min(searchTerms.length, 50); // Limit to prevent excessive API calls
-
-    console.log(`📊 Will search with ${maxSearches} terms for maximum coverage`);
-
-    // Search with all available terms
-    for (let i = 0; i < maxSearches && allProducts.length < targetLimit; i++) {
-      const term = searchTerms[i];
-      searchCount++;
-      
+    
+    // STRATEGY: Return first 100 products immediately, continue searching for more
+    const IMMEDIATE_RETURN_THRESHOLD = 100;
+    const MAX_SEARCHES = Math.min(searchTerms.length, 50); // Use up to 50 search terms
+    
+    // Phase 1: Fast first batch (first 5 high-value terms)
+    const priorityTerms = searchTerms.slice(0, 5);
+    console.log(`⚡ Phase 1: Fast batch with ${priorityTerms.length} priority terms`);
+    
+    for (const term of priorityTerms) {
       try {
-        console.log(`🔍 Search ${searchCount}/${maxSearches}: "${term}"`);
+        searchCount++;
+        console.log(`🔍 Priority search ${searchCount}: "${term}"`);
         
         // Get as many products as possible per search (TME usually limits to ~20-100)
         const products = await this.searchProducts(term, 100);
