@@ -985,11 +985,41 @@ export class TMEApiService {
 
       const searchTerm = categorySearchMap[categoryId] || "electronic component";
       
-      // Use existing search functionality to get real TME products with higher limit for pagination
-      const totalLimit = Math.max(limit * 3, 200); // Fetch more products to simulate pagination
-      const allProducts = await this.searchProducts(searchTerm, totalLimit);
+      // Use modified search approach to get more products for pagination
+      // Since TME API has limitations, we'll use multiple search variations to get more results
+      const searchVariations = [
+        searchTerm,
+        `${searchTerm} electronic`,
+        `${searchTerm} component`,
+        `${searchTerm} module`,
+        `${searchTerm} board`
+      ];
       
-      if (!allProducts || allProducts.length === 0) {
+      let allProducts: TMEProduct[] = [];
+      let searchIndex = 0;
+      
+      // Try different search variations to get more products
+      while (allProducts.length < limit * 2 && searchIndex < searchVariations.length) {
+        const currentSearch = searchVariations[searchIndex];
+        const batchProducts = await this.searchProducts(currentSearch, 20);
+        
+        if (batchProducts && batchProducts.length > 0) {
+          // Remove duplicates based on Symbol
+          const uniqueProducts = batchProducts.filter(
+            product => !allProducts.some(existing => existing.Symbol === product.Symbol)
+          );
+          allProducts.push(...uniqueProducts);
+        }
+        
+        searchIndex++;
+        
+        // Add small delay between API calls
+        if (searchIndex < searchVariations.length) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+      
+      if (allProducts.length === 0) {
         return {
           success: true,
           products: [],
@@ -999,20 +1029,20 @@ export class TMEApiService {
         };
       }
       
-      // Simulate pagination by slicing the results
+      // Apply pagination to the collected products
       const startIndex = offset;
       const endIndex = offset + limit;
       const paginatedProducts = allProducts.slice(startIndex, endIndex);
-      const hasMore = endIndex < allProducts.length;
+      const hasMore = endIndex < allProducts.length || allProducts.length >= limit * 2;
       
-      console.log(`Successfully fetched ${paginatedProducts.length} products for category ${categoryId} (page ${Math.floor(offset/limit) + 1})`);
+      console.log(`Successfully fetched ${paginatedProducts.length} products for category ${categoryId} (page ${Math.floor(offset/limit) + 1}) from ${allProducts.length} total found`);
       
       return {
         success: true,
         products: paginatedProducts,
-        totalProducts: allProducts.length,
+        totalProducts: allProducts.length + (hasMore ? limit : 0), // Estimate more available
         hasMore: hasMore,
-        message: `Found ${paginatedProducts.length} of ${allProducts.length} products in category ${categoryId}`
+        message: `Found ${paginatedProducts.length} of ${allProducts.length}+ products in category ${categoryId}`
       };
 
     } catch (error) {
