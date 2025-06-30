@@ -474,50 +474,22 @@ export class TMEApiService {
           const { calculateDynamicPrice } = await import("./dynamic-pricing");
           const pricingResult = calculateDynamicPrice(supplierPrice);
           
-          // Extract minimum order quantity data from TME
-          const minOrderQuantity = tmeProduct.MinAmount || 1;
-          const orderMultiples = tmeProduct.Multiples || 1;
-          const packagingUnit = tmeProduct.Unit || "pcs";
-          const isMultipack = minOrderQuantity > 1;
-          
-          // Calculate pack-based pricing for multipacks
-          let finalSupplierPrice = supplierPrice;
-          let finalSalePrice = pricingResult.finalPrice;
-          let finalCalculatedPrice = pricingResult.calculatedPrice;
-          let productName = tmeProduct.Description;
-          
-          if (isMultipack) {
-            // For multipacks, multiply prices by minimum order quantity
-            finalSupplierPrice = supplierPrice * minOrderQuantity;
-            finalSalePrice = pricingResult.finalPrice * minOrderQuantity;
-            finalCalculatedPrice = pricingResult.calculatedPrice * minOrderQuantity;
-            
-            // Add quantity prefix to product name
-            productName = `${minOrderQuantity}x ${tmeProduct.Description}`;
-            
-            console.log(`📦 Multipack detected: ${tmeProduct.Symbol} - MinQty: ${minOrderQuantity}, Pack Price: €${finalSalePrice.toFixed(2)}`);
-          }
-          
           // Create detailed product description from TME data
-          const detailedDescription = this.createDetailedDescription(tmeProduct, isMultipack, minOrderQuantity, packagingUnit);
+          const detailedDescription = this.createDetailedDescription(tmeProduct);
           
           const productData = {
-            name: productName,
+            name: tmeProduct.Description,
             sku: tmeProduct.Symbol,
             ean: (tmeProduct as any).EAN || null,
             description: detailedDescription,
             category: this.mapTMECategory(tmeProduct.CategoryId) || "Electronics",
-            supplierPrice: finalSupplierPrice.toString(),
-            salePrice: finalSalePrice.toString(),
-            calculatedPrice: finalCalculatedPrice.toString(),
+            supplierPrice: supplierPrice.toString(),
+            salePrice: pricingResult.finalPrice.toString(),
+            calculatedPrice: pricingResult.calculatedPrice.toString(),
             marginTier: pricingResult.marginTier,
             marginPercentage: pricingResult.marginPercentage.toString(),
             stock: realStock,
-            weight: weightEstimate,
-            minOrderQuantity: minOrderQuantity,
-            orderMultiples: orderMultiples,
-            packagingUnit: packagingUnit,
-            isMultipack: isMultipack,
+            weight: weightEstimate.toString(),
             imageUrl: tmeProduct.Photo?.replace(/^\/\//, 'https://') || tmeProduct.Thumbnail?.replace(/^\/\//, 'https://') || null,
             supplier: "TME",
             supplierProductId: tmeProduct.Symbol,
@@ -702,14 +674,8 @@ export class TMEApiService {
   /**
    * Create detailed product description from TME data
    */
-  private createDetailedDescription(product: TMEProduct, isMultipack: boolean = false, minOrderQuantity: number = 1, packagingUnit: string = "pcs"): string {
+  private createDetailedDescription(product: TMEProduct): string {
     let description = `${product.Producer} - ${product.Description}\n\n`;
-    
-    // Add multipack information if applicable
-    if (isMultipack) {
-      description += `**SOLD IN PACKS OF ${minOrderQuantity} PIECES**\n`;
-      description += `This item is sold as a complete pack containing ${minOrderQuantity} ${packagingUnit}. Price shown is for the entire pack.\n\n`;
-    }
     
     // Add technical specifications if available
     if (product.Parameters && product.Parameters.length > 0) {
@@ -721,14 +687,6 @@ export class TMEApiService {
         }
       });
       description += "\n";
-    }
-    
-    // Add packaging information
-    if (isMultipack) {
-      description += `Packaging Information:\n`;
-      description += `• Minimum Order Quantity: ${minOrderQuantity} ${packagingUnit}\n`;
-      description += `• Unit: ${packagingUnit}\n`;
-      description += `• Cannot be sold individually\n\n`;
     }
     
     // Add TME symbol for reference

@@ -883,15 +883,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           totalProcessed += result.productsProcessed || 0;
           
-          // Count multipacks from the recent results
+          // Count newly synced products from the recent results
           if (result.success) {
-            const products = await storage.getProducts();
-            const recentMultipacks = products.filter(p => 
-              p.isMultipack && 
-              p.minOrderQuantity && 
-              p.minOrderQuantity > 1
-            );
-            totalMultipacks = recentMultipacks.length;
+            totalMultipacks = 0; // Reset since MOQ functionality removed
           }
           
           // Delay between queries to respect API limits
@@ -1239,68 +1233,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // TME High MOQ Search endpoint
-  app.post("/api/tme/find-high-moq", async (req, res) => {
-    try {
-      console.log('Searching for products with high MOQ...');
-      const { tmeApi } = await import("./tme-api");
-      
-      // Search for components that typically have higher MOQs
-      const searchTerms = [
-        'resistor SMD 0603 10K',
-        'capacitor ceramic 0805 100nF', 
-        'resistor chip 0402 1K',
-        'LED SMD 0805 red',
-        'diode switching SOD123',
-        'resistor thick film 1206',
-        'capacitor tantalum 3216'
-      ];
-      
-      const highMOQProducts = [];
-      
-      for (const searchTerm of searchTerms) {
-        try {
-          const searchResult = await tmeApi.searchProducts(searchTerm, 3);
-          
-          if (searchResult && searchResult.length > 0) {
-            const symbols = searchResult.slice(0, 2).map(p => p.Symbol);
-            const pricing = await tmeApi.getProductPrices(symbols);
-            
-            for (let i = 0; i < Math.min(searchResult.length, pricing.length); i++) {
-              const product = searchResult[i];
-              const priceData = pricing[i];
-              
-              if (priceData?.PriceList?.[0]?.Amount > 1) {
-                highMOQProducts.push({
-                  ...product,
-                  MinOrderQuantity: priceData.PriceList[0].Amount,
-                  UnitPrice: priceData.PriceList[0].PriceValue,
-                  SearchTerm: searchTerm
-                });
-              }
-            }
-          }
-        } catch (error) {
-          console.error(`Error processing search term "${searchTerm}":`, error);
-        }
-        
-        if (highMOQProducts.length >= 3) break;
-      }
-      
-      res.json({
-        success: true,
-        products: highMOQProducts.slice(0, 3),
-        message: `Found ${highMOQProducts.length} products with MOQ > 1`
-      });
-      
-    } catch (error) {
-      console.error('High MOQ search error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to search for high MOQ products'
-      });
-    }
-  });
+
 
   // eBay Listing Template Routes
   app.get("/api/ebay/template/:productId", requireAuth, async (req, res) => {
@@ -3042,9 +2975,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const priceData = productPrices.find(p => p.Symbol === product.Symbol);
           const stockData = productStock.find(s => s.Symbol === product.Symbol);
 
-          // Calculate supplier price and MOQ
+          // Calculate supplier price
           const supplierPrice = priceData?.PriceList?.[0]?.PriceValue || 0;
-          const minOrderQuantity = priceData?.PriceList?.[0]?.Amount || 1;
           
           // Calculate dynamic pricing
           const { calculateDynamicPrice } = await import("./dynamic-pricing");
