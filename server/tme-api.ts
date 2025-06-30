@@ -308,16 +308,23 @@ export class TMEApiService {
         return { success: true, productsProcessed: 0, message: "No products found" };
       }
 
-      // Get prices and stock for the products
+      // Get prices and stock for all products (full operation restored)
       const symbols = products.map(p => p.Symbol);
-      const [prices, stocks] = await Promise.all([
-        this.getProductPrices(symbols),
-        this.getProductStock(symbols)
-      ]);
-
-      // Create price and stock lookup maps
-      const priceMap = new Map(prices.map(p => [p.Symbol, p]));
-      const stockMap = new Map(stocks.map(s => [s.Symbol, s]));
+      
+      let priceMap = new Map();
+      let stockMap = new Map();
+      
+      try {
+        const [prices, stocks] = await Promise.all([
+          this.getProductPrices(symbols),
+          this.getProductStock(symbols)
+        ]);
+        priceMap = new Map(prices.map(p => [p.Symbol, p]));
+        stockMap = new Map(stocks.map(s => [s.Symbol, s]));
+      } catch (priceStockError) {
+        console.log("Price/Stock API calls failed, continuing with product sync only:", (priceStockError as Error).message);
+        // Continue with empty maps - we still have product data
+      }
 
       let processedCount = 0;
       let updatedCount = 0;
