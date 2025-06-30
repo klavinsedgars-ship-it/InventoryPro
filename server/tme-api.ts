@@ -31,9 +31,15 @@ interface TMEProduct {
 
 interface TMEPrice {
   Symbol: string;
-  Amount: number;
-  PriceValue: number;
-  Currency: string;
+  PriceList: Array<{
+    Amount: number;
+    PriceValue: number;
+    PriceBase: number;
+    Special: boolean;
+  }>;
+  Unit: string;
+  VatRate: number;
+  VatType: string;
 }
 
 interface TMEStock {
@@ -252,8 +258,8 @@ export class TMEApiService {
           Currency: "EUR", // Use EUR to match TME native currency
         });
         
-        if (response.Data.PriceList) {
-          prices.push(...response.Data.PriceList);
+        if (response.Data.ProductList) {
+          prices.push(...response.Data.ProductList);
         }
       } catch (error) {
         console.log(`Failed to get price for ${symbol}:`, error);
@@ -366,7 +372,8 @@ export class TMEApiService {
           const weightEstimate = this.estimateProductWeight(tmeProduct);
           
           // Get the price for this specific product (TME returns prices per quantity tier)
-          const supplierPrice = price?.PriceValue || 0;
+          // TME API returns price structure: {"Symbol":"A000005","PriceList":[{"Amount":1,"PriceValue":21.5}]}
+          const supplierPrice = price?.PriceList?.[0]?.PriceValue || 0;
           
           // Create detailed product description from TME data
           const detailedDescription = this.createDetailedDescription(tmeProduct);
