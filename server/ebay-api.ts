@@ -918,6 +918,17 @@ export class EbayApiService {
       // Automatically determine the best eBay category for this TME product (for updates)
       const categoryMapping = findEbayCategoryForTMEProduct(product);
       
+      // Calculate eBay-specific stock (limited to preserve account limits)
+      const stockInfo = calculateEbayStock(product);
+      const ebayQuantity = stockInfo.ebayStock;
+      
+      console.log(`Stock calculation for update of ${product.name}:`, {
+        tmeStock: stockInfo.tmeStock,
+        ebayStock: stockInfo.ebayStock,
+        isLimited: stockInfo.isLimited,
+        reason: stockInfo.limitReason
+      });
+      
       const authToken = "v^1.1#i^1#f^0#p^3#I^3#r^1#t^Ul4xMF83OjFCN0M0NTkxQkNFNTUyRUE0MjE4REMyMjcyODdDOTg5XzFfMSNFXjI2MA==";
       
       console.log("Update function - Using fixed auth token prefix:", authToken.substring(0, 50));
@@ -944,7 +955,7 @@ export class EbayApiService {
         title: updateData?.title || listingTemplate.title,
         description: finalDescription,
         startPrice: updateData?.startPrice || Number(product.salePrice),
-        quantity: updateData?.quantity || product.stock,
+        quantity: updateData?.quantity || ebayQuantity,
         categoryId: updateData?.categoryId || categoryMapping.categoryId, // Use automatically mapped category
         condition: updateData?.condition || "New",
         pictureURLs: product.imageUrl ? [product.imageUrl] : undefined,
