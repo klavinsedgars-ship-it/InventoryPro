@@ -54,7 +54,7 @@ export function TMEBrowser({ user }: TMEBrowserProps) {
   });
 
   const { data: productsData, isLoading: productsLoading } = useQuery({
-    queryKey: ["/api/tme/categories", selectedCategory?.CategoryId, "products"],
+    queryKey: [`/api/tme/categories/${selectedCategory?.CategoryId}/products`],
     enabled: !!selectedCategory,
     staleTime: 60000, // 1 minute
   });
