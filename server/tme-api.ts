@@ -285,57 +285,80 @@ export class TMEApiService {
     if (symbols.length === 0) return [];
 
     const batchSize = 5;
-    const symbolsBatch = symbols.slice(0, batchSize);
+    const allStocks: TMEStock[] = [];
     
-    // Try method 1: Products/GetStocks endpoint (dedicated stock endpoint)
-    try {
-      console.log(`🔍 Trying TME GetStocks endpoint for symbols: ${symbolsBatch.join(", ")}`);
-      const response = await this.makeRequest<any>("/Products/GetStocks.json", {
-        SymbolList: symbolsBatch,
-        Currency: "EUR",
-        Language: "EN"
-      });
+    // Process ALL symbols in batches, not just the first 5
+    for (let i = 0; i < symbols.length; i += batchSize) {
+      const symbolsBatch = symbols.slice(i, i + batchSize);
+      
+      // Try method 1: Products/GetStocks endpoint (dedicated stock endpoint)
+      try {
+        console.log(`🔍 Trying TME GetStocks endpoint for symbols ${i+1}-${Math.min(i+batchSize, symbols.length)}: ${symbolsBatch.join(", ")}`);
+        const response = await this.makeRequest<any>("/Products/GetStocks.json", {
+          SymbolList: symbolsBatch,
+          Currency: "EUR",
+          Language: "EN"
+        });
 
-      if (response.Data?.ProductList) {
-        console.log(`✅ GetStocks success! Got ${response.Data.ProductList.length} stock records`);
-        return response.Data.ProductList.map((product: any) => ({
-          Symbol: product.Symbol,
-          Amount: product.Amount || 0,
-          Unit: product.Unit || "pcs"
+        if (response.Data?.ProductList) {
+          console.log(`✅ GetStocks success! Got ${response.Data.ProductList.length} stock records for batch ${i+1}-${Math.min(i+batchSize, symbols.length)}`);
+          const batchStocks = response.Data.ProductList.map((product: any) => ({
+            Symbol: product.Symbol,
+            Amount: product.Amount || 0,
+            Unit: product.Unit || "pcs"
+          }));
+          allStocks.push(...batchStocks);
+          
+          // Rate limiting: wait 1 second between batches to avoid 429 errors
+          if (i + batchSize < symbols.length) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+          continue;
+        }
+      } catch (error) {
+        console.log(`❌ GetStocks failed for batch ${i+1}-${Math.min(i+batchSize, symbols.length)}: ${(error as Error).message}`);
+        
+        // Try fallback method for this batch: Products/GetPricesAndStocks endpoint
+        try {
+          console.log(`🔍 Trying TME GetPricesAndStocks fallback for symbols ${i+1}-${Math.min(i+batchSize, symbols.length)}: ${symbolsBatch.join(", ")}`);
+          const response = await this.makeRequest<any>("/Products/GetPricesAndStocks.json", {
+            SymbolList: symbolsBatch,
+            Currency: "EUR",
+            Language: "EN"
+          });
+
+          if (response.Data?.ProductList) {
+            console.log(`✅ GetPricesAndStocks fallback success! Got ${response.Data.ProductList.length} stock+price records for batch ${i+1}-${Math.min(i+batchSize, symbols.length)}`);
+            const batchStocks = response.Data.ProductList.map((product: any) => ({
+              Symbol: product.Symbol,
+              Amount: product.Amount || 0,
+              Unit: product.Unit || "pcs"
+            }));
+            allStocks.push(...batchStocks);
+            
+            // Rate limiting: wait 1 second between batches
+            if (i + batchSize < symbols.length) {
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+            continue;
+          }
+        } catch (fallbackError) {
+          console.log(`❌ GetPricesAndStocks fallback failed for batch ${i+1}-${Math.min(i+batchSize, symbols.length)}: ${(fallbackError as Error).message}`);
+        }
+        
+        // If both methods fail for this batch, add 0 stock entries
+        console.log(`❌ All TME stock endpoints failed for batch ${i+1}-${Math.min(i+batchSize, symbols.length)}: ${symbolsBatch.join(", ")}`);
+        const failedBatchStocks = symbolsBatch.map(symbol => ({
+          Symbol: symbol,
+          Amount: 0, // Set to 0 to indicate unknown/unavailable
+          Unit: "pcs"
         }));
+        allStocks.push(...failedBatchStocks);
       }
-    } catch (error) {
-      console.log(`❌ GetStocks failed: ${(error as Error).message}`);
     }
-
-    // Try method 2: Products/GetPricesAndStocks endpoint (combined endpoint)
-    try {
-      console.log(`🔍 Trying TME GetPricesAndStocks endpoint for symbols: ${symbolsBatch.join(", ")}`);
-      const response = await this.makeRequest<any>("/Products/GetPricesAndStocks.json", {
-        SymbolList: symbolsBatch,
-        Currency: "EUR",
-        Language: "EN"
-      });
-
-      if (response.Data?.ProductList) {
-        console.log(`✅ GetPricesAndStocks success! Got ${response.Data.ProductList.length} stock+price records`);
-        return response.Data.ProductList.map((product: any) => ({
-          Symbol: product.Symbol,
-          Amount: product.Amount || 0,
-          Unit: product.Unit || "pcs"
-        }));
-      }
-    } catch (error) {
-      console.log(`❌ GetPricesAndStocks failed: ${(error as Error).message}`);
-    }
-
-    // Final fallback: Return 0 stock to indicate unknown data
-    console.log(`❌ All TME stock endpoints failed for symbols: ${symbolsBatch.join(", ")}`);
-    return symbolsBatch.map(symbol => ({
-      Symbol: symbol,
-      Amount: 0, // Set to 0 to indicate unknown/unavailable
-      Unit: "pcs"
-    }));
+    
+    console.log(`📊 Total stock records retrieved: ${allStocks.length} out of ${symbols.length} requested`);
+    return allStocks;
   }
 
   async syncProductsFromTME(searchQuery: string = "arduino", limit: number = 10) {
