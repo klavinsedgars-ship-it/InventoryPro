@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { RefreshCw, CheckCircle, XCircle, Clock, Download, Upload } from "lucide-react";
+import { RefreshCw, CheckCircle, XCircle, Clock, Download, Upload, Package } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { formatNumber } from "@/lib/utils";
@@ -67,6 +67,26 @@ export function TMESync({ user }: TMESyncProps) {
       toast({
         title: "Sync Failed",
         description: error.message || "Failed to sync with TME supplier.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const multipackSyncMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/sync/tme/multipacks"),
+    onSuccess: (data: any) => {
+      toast({
+        title: "Multipack Sync Completed",
+        description: `${data.message || "Successfully synced multipack components"}`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/sync/logs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Multipack Sync Failed",
+        description: error.message || "Failed to sync multipack components.",
         variant: "destructive",
       });
     },
@@ -190,6 +210,18 @@ export function TMESync({ user }: TMESyncProps) {
                   <RefreshCw className={`w-4 h-4 ${(syncMutation.isPending || isManualSync) && "animate-spin"}`} />
                   <span>
                     {syncMutation.isPending || isManualSync ? "Syncing..." : "Start Manual Sync"}
+                  </span>
+                </Button>
+                
+                <Button 
+                  variant="outline" 
+                  className="flex items-center space-x-2"
+                  onClick={() => multipackSyncMutation.mutate()}
+                  disabled={multipackSyncMutation.isPending}
+                >
+                  <Package className={`w-4 h-4 ${multipackSyncMutation.isPending && "animate-spin"}`} />
+                  <span>
+                    {multipackSyncMutation.isPending ? "Syncing Multipacks..." : "Sync Multipack Components"}
                   </span>
                 </Button>
                 
