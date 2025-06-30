@@ -73,7 +73,11 @@ interface SyncSettings {
   autoSelectCategory: boolean;
 }
 
-export default function TMEBrowser() {
+interface TMEBrowserProps {
+  user: any;
+}
+
+export default function TMEBrowser({ user }: TMEBrowserProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>("");
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
@@ -307,7 +311,12 @@ export default function TMEBrowser() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="flex h-screen bg-gray-50">
+      <Sidebar user={user} />
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <Header user={user} />
+        <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 p-6">
+          <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">TME Product Browser</h1>
@@ -746,6 +755,9 @@ export default function TMEBrowser() {
           )}
         </DialogContent>
       </Dialog>
+          </div>
+        </main>
+      </div>
     </div>
   );
 }
