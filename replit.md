@@ -244,6 +244,11 @@ Changelog:
 - June 30, 2025. New TME products will automatically include: authentic stock levels, dynamic pricing calculations, margin tiers, product images, datasheets
 - June 30, 2025. Integrated complete product lifecycle: TME API → Stock API → Dynamic Pricing → Database → Ready for eBay listing
 - June 30, 2025. **STATUS**: Future TME product imports guaranteed to include all necessary information (stock, pricing, specifications, images)
+- June 30, 2025. **MAJOR CLEANUP: Complete MOQ Functionality Removal** - Systematically removed all Minimum Order Quantity (MOQ) features per user requirements
+- June 30, 2025. Database schema updated: Dropped min_order_quantity, order_multiples, packaging_unit, and is_multipack columns from products table
+- June 30, 2025. Server code cleaned: Removed all MOQ calculations, multipack logic, and related endpoint functionality from TME sync operations
+- June 30, 2025. Templates updated: Simplified product descriptions to remove MOQ/multipack information and packaging details
+- June 30, 2025. **STATUS**: MOQ removal in progress - database and core sync functionality cleaned, fixing remaining compilation issues
 - June 30, 2025. **MAJOR SUCCESS: 21 Non-Arduino Products Synced** - Successfully imported resistors, capacitors, and electronic components with complete data
 - June 30, 2025. Enhanced pricing system with micro-component tiers: €0.001-€0.05 (1400% margin), €0.05-€0.25 (700% margin), €0.25-€1.00 (550% margin)
 - June 30, 2025. Applied authentic TME stock data: SMD0805-10K-1% (2,189,300 units), SMD0603-10K-1% (4,230,400 units), CF1/4W-1K (269,300 units)

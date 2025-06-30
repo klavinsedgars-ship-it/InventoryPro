@@ -864,7 +864,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ];
       
       let totalProcessed = 0;
-      let totalMultipacks = 0;
       const results = [];
       
       for (let i = 0; i < multipackQueries.length; i++) {
@@ -884,9 +883,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           totalProcessed += result.productsProcessed || 0;
           
           // Count newly synced products from the recent results
-          if (result.success) {
-            totalMultipacks = 0; // Reset since MOQ functionality removed
-          }
           
           // Delay between queries to respect API limits
           if (i < multipackQueries.length - 1) {
@@ -905,20 +901,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
-      console.log(`TME multipack sync completed: ${totalProcessed} total products, ${totalMultipacks} multipacks`);
+      console.log(`TME sync completed: ${totalProcessed} total products`);
       
       res.json({
         success: true,
-        message: `Successfully synced ${totalProcessed} products, found ${totalMultipacks} with minimum quantities`,
+        message: `Successfully synced ${totalProcessed} products`,
         totalProcessed,
-        totalMultipacks,
         progress: "5/5",
         results
       });
     } catch (error) {
-      console.error("TME multipack sync failed:", error);
+      console.error("TME sync failed:", error);
       res.status(500).json({ 
-        message: "TME multipack sync failed", 
+        message: "TME sync failed", 
         error: (error as Error).message 
       });
     }
@@ -3004,7 +2999,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             stock: stockData?.Amount || 100,
             status: "active",
             weight: Number(product.Weight) || 10,
-            minOrderQuantity: minOrderQuantity,
             imageUrl: product.Photo ? `https:${product.Photo}` : null,
             dataSheetUrl: product.DataSheet ? `https://www.tme.eu${product.DataSheet}` : null,
             productUrl: product.ProductInformationPage ? `https://www.tme.eu${product.ProductInformationPage}` : null,
