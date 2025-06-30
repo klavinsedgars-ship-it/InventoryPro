@@ -256,6 +256,83 @@ export class TMEApiService {
     return products.slice(0, limit);
   }
 
+  async getProductsByCategory(categoryId: string, page: number = 1, limit: number = 100): Promise<{products: TMEProduct[], total: number}> {
+    try {
+      // Try to get products from specific category using TME's category-based endpoint
+      const response = await this.makeRequest<TMEProduct>("/Products/GetParameters.json", {
+        CategoryId: categoryId,
+        SearchWithStock: "1"
+      });
+
+      // If that doesn't work, fall back to targeted search for known categories
+      if (!response.Data?.ProductList || response.Data.ProductList.length === 0) {
+        console.log(`No products found via category ${categoryId}, trying targeted search...`);
+        return await this.getProductsWithTargetedSearch(categoryId, limit);
+      }
+
+      const products = response.Data.ProductList || [];
+      const total = response.Data.Amount || products.length;
+      
+      // Apply pagination
+      const startIndex = (page - 1) * limit;
+      const paginatedProducts = products.slice(startIndex, startIndex + limit);
+      
+      return {
+        products: paginatedProducts,
+        total: total
+      };
+    } catch (error) {
+      console.log(`Category ${categoryId} endpoint failed, trying targeted search...`);
+      return await this.getProductsWithTargetedSearch(categoryId, limit);
+    }
+  }
+
+  private async getProductsWithTargetedSearch(categoryId: string, limit: number): Promise<{products: TMEProduct[], total: number}> {
+    // Define specific search terms for known electronic component categories
+    const categorySearchMap: Record<string, string[]> = {
+      // Try multiple search terms for better coverage
+      "1000": ["microcontroller", "atmega", "pic", "stm32", "arduino"],
+      "1001": ["transistor", "mosfet", "bjt", "semiconductor"],  
+      "1002": ["integrated circuit", "ic chip", "microprocessor"],
+      "1003": ["led", "display", "oled", "lcd"],
+      "1004": ["resistor", "capacitor", "inductor"],
+      "1005": ["relay", "switch", "button"],
+      "1006": ["power supply", "transformer", "converter"],
+      "1007": ["connector", "terminal", "plug"],
+      "1008": ["cable", "wire", "harness"],
+      "1009": ["multimeter", "oscilloscope", "tool"],
+      "1010": ["sensor", "temperature", "pressure"]
+    };
+
+    const searchTerms = categorySearchMap[categoryId] || ["electronic component"];
+    let allProducts: TMEProduct[] = [];
+    const maxProductsPerTerm = Math.ceil(limit / searchTerms.length);
+
+    // Search with multiple terms to get diverse results
+    for (const term of searchTerms) {
+      try {
+        const products = await this.searchProducts(term, maxProductsPerTerm);
+        allProducts = allProducts.concat(products);
+        
+        // Stop if we have enough products
+        if (allProducts.length >= limit) break;
+      } catch (error) {
+        console.log(`Search failed for term: ${term}`);
+        continue;
+      }
+    }
+
+    // Remove duplicates based on Symbol
+    const uniqueProducts = allProducts.filter((product, index, self) => 
+      index === self.findIndex(p => p.Symbol === product.Symbol)
+    );
+
+    return {
+      products: uniqueProducts.slice(0, limit),
+      total: uniqueProducts.length
+    };
+  }
+
   async getProductDetails(symbols: string[]): Promise<TMEProduct[]> {
     if (symbols.length === 0) return [];
 
@@ -874,142 +951,7 @@ export class TMEApiService {
     return rootCategories;
   }
 
-  /**
-   * Get products by category for preview using TME search
-   */
-  async getProductsByCategory(categoryId: number, limit: number = 100, offset: number = 0): Promise<{ success: boolean; products?: TMEProduct[]; totalProducts?: number; hasMore?: boolean; message?: string }> {
-    try {
-      console.log(`Fetching products for category ${categoryId}...`);
-      
-      // Map category IDs to search terms for real TME product retrieval
-      const categorySearchMap: { [key: number]: string } = {
-        // Semiconductors
-        1000: "semiconductor", 1001: "microcontroller", 1002: "processor", 1003: "memory", 
-        1004: "transistor", 1005: "diode", 1006: "logic circuit",
-        
-        // Embedded and IoT Systems
-        2000: "development board", 2001: "arduino", 2002: "raspberry pi", 2003: "esp32", 
-        2004: "development kit", 2005: "evaluation board",
-        
-        // Optoelectronics  
-        3000: "led", 3001: "led", 3002: "led strip", 3003: "photodiode", 
-        3004: "optocoupler", 3005: "laser diode",
-        
-        // Light Sources
-        4000: "led module", 4001: "led module", 4002: "led controller", 4003: "backlight",
-        
-        // Passives
-        5000: "resistor", 5001: "resistor", 5002: "capacitor", 5003: "inductor", 
-        5004: "ferrite", 5005: "crystal", 5006: "filter",
-        
-        // Connectors
-        6000: "connector", 6001: "pin header", 6002: "terminal block", 6003: "usb connector",
-        6004: "audio connector", 6005: "rf connector", 6006: "power connector",
-        
-        // Power and Circuit Protection
-        7000: "power supply", 7001: "voltage regulator", 7002: "dc converter", 7003: "fuse",
-        7004: "circuit breaker", 7005: "surge protector",
-        
-        // Switches and Indicators
-        8000: "switch", 8001: "push button", 8002: "toggle switch", 8003: "rotary switch",
-        8004: "dip switch", 8005: "encoder", 8006: "potentiometer",
-        
-        // Sound Sources
-        9000: "buzzer", 9001: "buzzer", 9002: "speaker", 9003: "microphone",
-        
-        // Relays and Contactors
-        10000: "relay", 10001: "relay", 10002: "solid state relay", 10003: "reed relay",
-        
-        // Transformers and Ferrite Cores (Heavy/Unsuitable)
-        11000: "transformer", 11001: "transformer", 11002: "current transformer", 11003: "ferrite core",
-        
-        // Heating Systems (Heavy/Unsuitable)
-        12000: "heating", 12001: "heating element", 12002: "temperature controller",
-        
-        // Pneumatics (Heavy/Unsuitable)
-        13000: "pneumatic", 13001: "pneumatic cylinder", 13002: "pneumatic valve",
-        
-        // Wires and Cables
-        14000: "wire", 14001: "wire", 14002: "coaxial cable", 14003: "ribbon cable", 14004: "jumper wire",
-        
-        // Tools and Equipment (Heavy/Unsuitable)
-        15000: "tool", 15001: "soldering", 15002: "multimeter", 15003: "power supply", 15004: "oscilloscope",
-        
-        // Additional categories
-        16000: "automation", 17000: "mechanical", 18000: "hydraulic", 19000: "workplace",
-        20000: "office", 21000: "audio", 22000: "computer", 23000: "book", 24000: "electronic"
-      };
 
-      const searchTerm = categorySearchMap[categoryId] || "electronic component";
-      
-      // Use modified search approach to get more products for pagination
-      // Since TME API has limitations, we'll use multiple search variations to get more results
-      const searchVariations = [
-        searchTerm,
-        `${searchTerm} electronic`,
-        `${searchTerm} component`,
-        `${searchTerm} module`,
-        `${searchTerm} board`
-      ];
-      
-      let allProducts: TMEProduct[] = [];
-      let searchIndex = 0;
-      
-      // Try different search variations to get more products
-      while (allProducts.length < limit * 2 && searchIndex < searchVariations.length) {
-        const currentSearch = searchVariations[searchIndex];
-        const batchProducts = await this.searchProducts(currentSearch, 20);
-        
-        if (batchProducts && batchProducts.length > 0) {
-          // Remove duplicates based on Symbol
-          const uniqueProducts = batchProducts.filter(
-            product => !allProducts.some(existing => existing.Symbol === product.Symbol)
-          );
-          allProducts.push(...uniqueProducts);
-        }
-        
-        searchIndex++;
-        
-        // Add small delay between API calls
-        if (searchIndex < searchVariations.length) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-      }
-      
-      if (allProducts.length === 0) {
-        return {
-          success: true,
-          products: [],
-          totalProducts: 0,
-          hasMore: false,
-          message: `No products found for category ${categoryId}`
-        };
-      }
-      
-      // Apply pagination to the collected products
-      const startIndex = offset;
-      const endIndex = offset + limit;
-      const paginatedProducts = allProducts.slice(startIndex, endIndex);
-      const hasMore = endIndex < allProducts.length || allProducts.length >= limit * 2;
-      
-      console.log(`Successfully fetched ${paginatedProducts.length} products for category ${categoryId} (page ${Math.floor(offset/limit) + 1}) from ${allProducts.length} total found`);
-      
-      return {
-        success: true,
-        products: paginatedProducts,
-        totalProducts: allProducts.length + (hasMore ? limit : 0), // Estimate more available
-        hasMore: hasMore,
-        message: `Found ${paginatedProducts.length} of ${allProducts.length}+ products in category ${categoryId}`
-      };
-
-    } catch (error) {
-      console.error("Failed to fetch category products:", error);
-      return {
-        success: false,
-        message: `Failed to fetch category products: ${(error as Error).message}`
-      };
-    }
-  }
 
   /**
    * Map TME category to CRM category

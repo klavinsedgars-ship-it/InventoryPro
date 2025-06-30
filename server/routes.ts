@@ -3424,64 +3424,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let totalProducts = 0;
       
       try {
-        // Use TME search API with category-specific search terms
-        const categorySearchTerms: Record<string, string> = {
-          // Main categories from TME API
-          "1000": "microcontroller pic atmega stm32",
-          "1001": "semiconductor transistor diode",
-          "1002": "integrated circuit ic chip",
-          "1003": "optoelectronics led display",
-          "1004": "passive component resistor capacitor",
-          "1005": "electromechanical relay switch",
-          "1006": "power supply transformer",
-          "1007": "connector terminal plug",
-          "1008": "cable wire harness",
-          "1009": "tool equipment meter",
-          "1010": "automation control sensor",
-          "1011": "thermal heating element",
-          "1012": "pneumatic valve actuator",
-          "1013": "sound speaker buzzer",
-          "1014": "development board arduino",
-          "1015": "embedded module iot",
-          "1016": "battery power source",
-          "1017": "enclosure housing box",
-          "1018": "cooling fan heatsink",
-          "1019": "protection circuit fuse",
-          "1020": "lighting led lamp",
-          // Additional specific categories
-          "100001": "arduino development board",
-          "100002": "raspberry pi computer",
-          "100003": "sensor temperature pressure",
-          "100004": "capacitor ceramic electrolytic",
-          "100005": "resistor carbon metal film",
-          "100006": "transistor mosfet bjt",
-          "100007": "microcontroller pic atmega",
-          "100008": "led diode light",
-          "100009": "power supply adapter",
-          "100010": "connector terminal plug",
-          "11000": "semiconductors ic chip",
-          "12000": "embedded iot module",
-          "13000": "optoelectronics led display",
-          "14000": "light source lamp bulb",
-          "15000": "passive component",
-          "16000": "power circuit protection",
-          "17000": "switch button relay",
-          "18000": "sound speaker buzzer",
-          "19000": "relay contactor",
-          "20000": "transformer ferrite",
-          "21000": "heating thermal element",
-          "22000": "pneumatic valve",
-          "23000": "wire cable harness",
-          "24000": "tool equipment meter",
-          "25000": "automation control"
-        };
+        console.log(`🔍 Fetching TME products for category: ${categoryId}, page: ${pageNum}, limit: ${limitNum}`);
         
-        const searchTerm = categorySearchTerms[categoryId as string] || "electronic";
-        console.log(`🔍 Searching TME for category ${categoryId} with term: ${searchTerm}`);
-        
-        const searchResults = await tmeApi.searchProducts(searchTerm, Math.min(limitNum, 100));
-        products = searchResults || [];
-        totalProducts = products.length;
+        // Use the new comprehensive category-based product fetching
+        const categoryResults = await tmeApi.getProductsByCategory(categoryId as string, pageNum, limitNum);
+        products = categoryResults.products || [];
+        totalProducts = categoryResults.total;
         
         console.log(`✅ Found ${products.length} products for category ${categoryId}`);
       } catch (error) {
