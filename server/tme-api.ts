@@ -244,14 +244,16 @@ export class TMEApiService {
     }
   }
 
-  async searchProducts(query: string, limit: number = 20): Promise<TMEProduct[]> {
+  async searchProducts(query: string, limit: number = 100): Promise<TMEProduct[]> {
     // Use only the essential parameters as per TME API documentation
     const response = await this.makeRequest<TMEProduct>("/Products/Search.json", {
       SearchPlain: query,
       SearchWithStock: "1", // Boolean to filter products with stock only
     });
 
-    return response.Data.ProductList || [];
+    const products = response.Data.ProductList || [];
+    // Return up to the specified limit
+    return products.slice(0, limit);
   }
 
   async getProductDetails(symbols: string[]): Promise<TMEProduct[]> {

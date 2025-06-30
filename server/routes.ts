@@ -3426,6 +3426,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         // Use TME search API with category-specific search terms
         const categorySearchTerms: Record<string, string> = {
+          // Main categories from TME API
+          "1000": "microcontroller pic atmega stm32",
+          "1001": "semiconductor transistor diode",
+          "1002": "integrated circuit ic chip",
+          "1003": "optoelectronics led display",
+          "1004": "passive component resistor capacitor",
+          "1005": "electromechanical relay switch",
+          "1006": "power supply transformer",
+          "1007": "connector terminal plug",
+          "1008": "cable wire harness",
+          "1009": "tool equipment meter",
+          "1010": "automation control sensor",
+          "1011": "thermal heating element",
+          "1012": "pneumatic valve actuator",
+          "1013": "sound speaker buzzer",
+          "1014": "development board arduino",
+          "1015": "embedded module iot",
+          "1016": "battery power source",
+          "1017": "enclosure housing box",
+          "1018": "cooling fan heatsink",
+          "1019": "protection circuit fuse",
+          "1020": "lighting led lamp",
+          // Additional specific categories
           "100001": "arduino development board",
           "100002": "raspberry pi computer",
           "100003": "sensor temperature pressure",
