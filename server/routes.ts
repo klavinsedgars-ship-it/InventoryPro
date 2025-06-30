@@ -551,6 +551,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // TME Test Enhanced Sync (for validating complete data integration)
+  app.post("/api/tme/test-enhanced-sync", requireAuth, async (req, res) => {
+    try {
+      const { symbol } = req.body;
+      if (!symbol) {
+        return res.status(400).json({ error: "Symbol required for testing" });
+      }
+
+      console.log(`Testing enhanced TME sync for single product: ${symbol}`);
+      
+      const { tmeApi } = await import("./tme-api");
+      
+      // Search for the specific product to simulate new product import
+      const searchResult = await tmeApi.searchProducts(symbol, 1);
+      
+      if (!searchResult.success || !searchResult.products || searchResult.products.length === 0) {
+        return res.json({
+          success: false,
+          message: `Product ${symbol} not found in TME catalog`,
+          testType: "enhanced_sync_test"
+        });
+      }
+
+      const product = searchResult.products[0];
+      
+      // Get price data
+      const prices = await tmeApi.getProductPrice([symbol]);
+      const price = prices?.[0];
+      
+      // Get stock data
+      const stocks = await tmeApi.getProductStock([symbol]);
+      const stock = stocks?.[0];
+      
+      // Apply dynamic pricing
+      const { calculateDynamicPrice } = await import("./dynamic-pricing");
+      const supplierPrice = price?.PriceList?.[0]?.PriceValue || 0;
+      const pricingResult = calculateDynamicPrice(supplierPrice);
+      
+      const completeProductData = {
+        symbol: symbol,
+        name: product.Description,
+        supplierPrice: supplierPrice,
+        dynamicPrice: pricingResult.finalPrice,
+        marginTier: pricingResult.marginTier,
+        marginPercentage: pricingResult.marginPercentage,
+        realStock: stock?.Amount || 0,
+        stockStatus: (stock?.Amount || 0) > 0 ? "in_stock" : "out_of_stock",
+        imageUrl: product.Photo?.replace(/^\/\//, 'https://') || null,
+        dataSheet: product.DataSheet || null,
+        productUrl: product.ProductInformationPage || null,
+        category: "Electronics",
+        hasCompleteData: !!(supplierPrice && stock && product.Description)
+      };
+
+      console.log(`✅ Enhanced sync test complete for ${symbol}:`, JSON.stringify(completeProductData, null, 2));
+      
+      return res.json({
+        success: true,
+        message: `Enhanced sync test completed for ${symbol}`,
+        productData: completeProductData,
+        testType: "enhanced_sync_test"
+      });
+      
+    } catch (error) {
+      console.error('TME enhanced sync test error:', error);
+      return res.status(500).json({
+        error: 'Failed to test enhanced TME sync',
+        message: (error as Error).message,
+        success: false
+      });
+    }
+  });
+
   // TME Update All Stock endpoint
   app.post("/api/tme/update-all-stock", requireAuth, async (req, res) => {
     try {

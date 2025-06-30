@@ -421,16 +421,15 @@ export class TMEApiService {
           // Extract weight from product description or parameters (estimate in grams)
           const weightEstimate = this.estimateProductWeight(tmeProduct);
           
-          // Get the price for this specific product (TME returns prices per quantity tier)
-          // TME API returns price structure: {"Symbol":"A000005","PriceList":[{"Amount":1,"PriceValue":21.5}]}
+          // Get authentic TME price data (using proven working structure)
           const supplierPrice = price?.PriceList?.[0]?.PriceValue || 0;
           
-          // Debug logging for price extraction
-          if (tmeProduct.Symbol === "A000005" || tmeProduct.Symbol === "A000067") {
-            console.log(`Price extraction debug for ${tmeProduct.Symbol}:`);
-            console.log('- Price object:', JSON.stringify(price, null, 2));
-            console.log('- Extracted price value:', supplierPrice);
-          }
+          // Get authentic TME stock data (using proven working structure)
+          const realStock = stock?.Amount || 0;
+          
+          // Apply dynamic pricing calculation for new products
+          const { calculateDynamicPrice } = await import("./dynamic-pricing");
+          const pricingResult = calculateDynamicPrice(supplierPrice);
           
           // Create detailed product description from TME data
           const detailedDescription = this.createDetailedDescription(tmeProduct);
@@ -442,8 +441,11 @@ export class TMEApiService {
             description: detailedDescription,
             category: this.mapTMECategory(tmeProduct.CategoryId) || "Electronics",
             supplierPrice: supplierPrice.toString(),
-            salePrice: (supplierPrice * 1.5).toString(), // 50% markup as default
-            stock: stock?.InStock || 0,
+            salePrice: pricingResult.finalPrice.toString(), // Use dynamic pricing
+            calculatedPrice: pricingResult.calculatedPrice.toString(),
+            marginTier: pricingResult.marginTier,
+            marginPercentage: pricingResult.marginPercentage.toString(),
+            stock: realStock,
             weight: weightEstimate,
             imageUrl: tmeProduct.Photo?.replace(/^\/\//, 'https://') || tmeProduct.Thumbnail?.replace(/^\/\//, 'https://') || null,
             supplier: "TME",
@@ -451,7 +453,7 @@ export class TMEApiService {
             tmeProductId: tmeProduct.Symbol,
             dataSheetUrl: tmeProduct.DataSheet || null,
             productUrl: tmeProduct.ProductInformationPage || null,
-            status: "unknown_stock", // Mark as unknown since we can't get real TME stock data
+            status: realStock > 0 ? "in_stock" : "out_of_stock", // Set accurate stock status
           };
 
           if (existingProduct) {
