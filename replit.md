@@ -200,9 +200,6 @@ Changelog:
 - June 29, 2025. Verified template application with live eBay listings (Arduino, ESP32, LED Strip) - consistent professional appearance achieved
 - June 29, 2025. Fixed HTML formatting - templates now display as properly structured pages with professional styling instead of plain text
 - June 29, 2025. Removed "Package Includes" section from template structure per user requirements
-- June 30, 2025. **TME API CREDENTIALS UPDATED**: Successfully updated to new TME API credentials (Token: 4c7c4c076d049b050b7db3a648c6ef61c4bd1daad6c5ab09df, Customer: 40026843, Contact: 642966)
-- June 30, 2025. Fixed environment variable loading using dotenv with override to ensure new TME credentials are properly loaded
-- June 30, 2025. TME API authentication verified - credentials loading correctly but still requires API key activation from TME support
 ```
 
 ## User Preferences
