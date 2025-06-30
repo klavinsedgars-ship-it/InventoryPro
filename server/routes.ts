@@ -9,7 +9,7 @@ import {
   type Product,
   type User 
 } from "@shared/schema";
-import { ZodError } from "zod";
+import { ZodError, z } from "zod";
 import bcrypt from "bcryptjs";
 import { tmeApi } from "./tme-api";
 import { ebayApi } from "./ebay-api";
@@ -501,7 +501,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put("/api/products/:id", requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const updateData = insertProductSchema.partial().parse(req.body);
+      
+      // Convert number fields to strings for decimal database fields
+      const requestBody = { ...req.body };
+      const decimalFields = ['weight', 'supplierPrice', 'salePrice', 'calculatedPrice', 'marginPercentage', 'margin'];
+      
+      decimalFields.forEach(field => {
+        if (requestBody[field] !== undefined && typeof requestBody[field] === 'number') {
+          requestBody[field] = String(requestBody[field]);
+        }
+      });
+      
+      const updateData = insertProductSchema.partial().parse(requestBody);
       
       const product = await storage.updateProduct(id, updateData);
       if (!product) {
