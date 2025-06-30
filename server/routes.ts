@@ -3430,10 +3430,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`✅ Found ${products.length} products for category ${categoryId}`);
       } catch (error) {
         console.error("TME search error:", error);
-        return res.status(500).json({
-          success: false,
-          error: "Failed to fetch products from TME API"
-        });
+        
+        // Fallback: Get existing products from database and map to categories
+        console.log(`🔄 Using database fallback for category ${categoryId}`);
+        try {
+          const storage = await import("./storage");
+          const dbProducts = await storage.DatabaseStorage.getAllProducts();
+          
+          // Filter products by category mapping
+          const categoryMappings: Record<string, string[]> = {
+            "1000": ["microcontroller", "arduino", "esp32", "raspberry", "atmega", "stm32"],
+            "1001": ["arduino"],
+            "1002": ["development", "board", "eval"],
+            "2000": ["transistor", "mosfet", "diode", "semiconductor"],
+            "2001": ["transistor", "mosfet", "bjt"],
+            "2002": ["diode", "rectifier", "schottky"],
+            "2003": ["ic", "chip", "processor"],
+            "3000": ["led", "display", "opto"],
+            "3001": ["led"],
+            "5000": ["resistor", "capacitor", "inductor"],
+            "5001": ["resistor"],
+            "5002": ["capacitor"],
+            "6000": ["connector", "header", "terminal"],
+            "7000": ["power", "regulator", "converter"],
+            "8000": ["switch", "button", "relay"],
+            "10000": ["sensor", "temperature", "pressure"]
+          };
+          
+          const keywords = categoryMappings[categoryId] || [];
+          const filteredProducts = dbProducts.filter(product => {
+            const searchText = `${product.name} ${product.description || ""}`.toLowerCase();
+            return keywords.some(keyword => searchText.includes(keyword.toLowerCase()));
+          });
+          
+          // Convert to TME format
+          products = filteredProducts.map(product => ({
+            Symbol: product.sku,
+            Description: product.name,
+            Producer: product.supplier || "Various",
+            Category: product.category,
+            Photo: product.imageUrl || "",
+            Thumbnail: product.imageUrl || "",
+            EAN: product.ean || "",
+            ProductInformationPage: product.productUrl || "",
+            Parameters: []
+          }));
+          
+          totalProducts = products.length;
+          console.log(`✅ Database fallback: Found ${products.length} products for category ${categoryId}`);
+          
+        } catch (fallbackError) {
+          console.error("Database fallback failed:", fallbackError);
+          return res.status(500).json({
+            success: false,
+            error: "TME API unavailable and database fallback failed"
+          });
+        }
       }
 
       // Apply frontend filters
