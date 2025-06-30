@@ -57,7 +57,7 @@ export function TMEBrowserNew({ user }: TMEBrowserProps) {
   });
 
   const { data: productsData, isLoading: productsLoading } = useQuery({
-    queryKey: [`/api/tme/categories/${selectedCategory?.CategoryId}/products`, currentPage],
+    queryKey: [`/api/tme/categories/${selectedCategory?.CategoryId}/products?page=${currentPage}&limit=${productsPerPage}`],
     enabled: !!selectedCategory,
     staleTime: 60000, // 1 minute
   });
@@ -161,7 +161,7 @@ export function TMEBrowserNew({ user }: TMEBrowserProps) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header />
+      <Header title="TME Product Browser" />
       <div className="flex">
         <Sidebar />
         <main className="flex-1 p-6">
@@ -351,33 +351,39 @@ export function TMEBrowserNew({ user }: TMEBrowserProps) {
                         </div>
 
                         {/* Pagination Controls */}
-                        {filteredProducts.length >= productsPerPage && (
-                          <div className="flex items-center justify-between mt-6">
-                            <div className="text-sm text-gray-700">
-                              Showing {((currentPage - 1) * productsPerPage) + 1} to {Math.min(currentPage * productsPerPage, filteredProducts.length)} of {filteredProducts.length} products
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                                disabled={currentPage === 1}
-                              >
-                                <ChevronLeft className="w-4 h-4" />
-                                Previous
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setCurrentPage(currentPage + 1)}
-                                disabled={filteredProducts.length < productsPerPage}
-                              >
-                                Next
-                                <ChevronRight className="w-4 h-4" />
-                              </Button>
-                            </div>
+                        <div className="flex items-center justify-between mt-6">
+                          <div className="text-sm text-gray-700">
+                            Showing {((currentPage - 1) * productsPerPage) + 1} to {Math.min(currentPage * productsPerPage, productsData?.totalProducts || filteredProducts.length)} of {productsData?.totalProducts || filteredProducts.length} products
+                            {productSearchTerm && (
+                              <span className="text-blue-600 ml-2">
+                                (filtered from {productsData?.totalProducts || 0} total)
+                              </span>
+                            )}
                           </div>
-                        )}
+                          <div className="flex items-center space-x-2">
+                            <span className="text-sm text-gray-500">
+                              Page {currentPage} of {productsData?.totalPages || 1}
+                            </span>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                              disabled={currentPage === 1}
+                            >
+                              <ChevronLeft className="w-4 h-4" />
+                              Previous
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setCurrentPage(currentPage + 1)}
+                              disabled={!productsData?.hasMore}
+                            >
+                              Next
+                              <ChevronRight className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </div>
                       </>
                     )}
                   </CardContent>
