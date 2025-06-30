@@ -137,24 +137,37 @@ export class TMEApiService {
     
     const url = `${this.baseUrl}${endpoint}`;
     
-    const requestParams = {
-      ...params,
+    // Step 1: Prepare all parameters (including authentication) but WITHOUT ApiSignature
+    const paramsForSignature: Record<string, any> = {
       Token: this.credentials.token,
-      CustomerNumber: this.credentials.customerNumber,
-      ContactNumber: this.credentials.contactNumber,
+      Language: "EN",
+      ...params
     };
 
-    const signature = this.generateApiSignature('POST', url, requestParams);
-    const finalParams = { ...requestParams, Signature: signature };
+    // Country is only required for anonymous tokens (45 chars), not private tokens (50 chars)
+    if (this.credentials.token.length === 45) {
+      paramsForSignature.Country = "US";
+    }
+
+    // Step 2: Generate API signature (IMPORTANT: ApiSignature parameter is NOT included in signature calculation)
+    const apiSignature = this.generateApiSignature("POST", url, paramsForSignature);
+    
+    // Step 3: Add signature to parameters AFTER signature calculation
+    const finalParams = {
+      ...paramsForSignature,
+      ApiSignature: apiSignature
+    };
 
     const formData = new URLSearchParams();
     Object.entries(finalParams).forEach(([key, value]) => {
-      if (Array.isArray(value)) {
-        value.forEach((item, index) => {
-          formData.append(`${key}[${index}]`, String(item));
-        });
-      } else {
-        formData.append(key, String(value));
+      if (value !== undefined && value !== null) {
+        if (Array.isArray(value)) {
+          value.forEach((item, index) => {
+            formData.append(`${key}[${index}]`, String(item));
+          });
+        } else {
+          formData.append(key, String(value));
+        }
       }
     });
 
@@ -220,17 +233,8 @@ export class TMEApiService {
     try {
       console.log(`🚀 ULTRA FAST search for category ${categoryId}, targeting ${limit} products`);
       
-      // First, check TME API credentials and try authentication test
-      try {
-        // Use the Categories endpoint for authentication test as it's a known working endpoint
-        await this.makeRequest<any>("/Categories/GetCategories.json", { Language: "EN" });
-        console.log(`✅ TME API authentication successful`);
-      } catch (authError) {
-        console.log(`❌ TME API authentication failed: ${authError}`);
-        
-        // Return fallback message when TME API is unavailable
-        throw new Error(`TME API access denied. Please check API credentials - they may have expired or been restricted.`);
-      }
+      // Skip authentication test for now and directly try product search
+      console.log(`✅ TME API credentials loaded, proceeding with product search`);
       
       // Strategy 1: Try TME's direct category endpoint first
       try {
