@@ -108,7 +108,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
 
   // Fetch products for selected category
   const { data: productsResponse, isLoading: productsLoading } = useQuery({
-    queryKey: ["/api/tme/products", selectedCategory, filters],
+    queryKey: [`/api/tme/products?categoryId=${selectedCategory}&limit=100`],
     enabled: !!selectedCategory && activeTab === "products",
     staleTime: 2 * 60 * 1000
   });
