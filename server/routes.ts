@@ -3389,6 +3389,277 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // TME Product Browser endpoints
+  app.get("/api/tme/products", async (req, res) => {
+    try {
+      const { 
+        categoryId, 
+        page = "1", 
+        limit = "100", 
+        search = "", 
+        priceMin = "", 
+        priceMax = "", 
+        stockMin = "", 
+        weightMax = "",
+        producer = "",
+        inStockOnly = "true"
+      } = req.query;
+
+      if (!categoryId) {
+        return res.status(400).json({
+          success: false,
+          error: "Category ID is required"
+        });
+      }
+
+      console.log(`🔍 Fetching TME products for category: ${categoryId}, page: ${page}, limit: ${limit}`);
+
+      // Get products by category from TME API
+      const pageNum = parseInt(page as string);
+      const limitNum = parseInt(limit as string);
+      const offset = (pageNum - 1) * limitNum;
+
+      // Fetch products from TME API by category
+      let products: any[] = [];
+      let totalProducts = 0;
+      
+      try {
+        // Use TME search API with category-specific search terms
+        const categorySearchTerms: Record<string, string> = {
+          "100001": "arduino",
+          "100002": "raspberry pi",
+          "100003": "sensor",
+          "100004": "capacitor",
+          "100005": "resistor",
+          "100006": "transistor",
+          "100007": "microcontroller",
+          "100008": "led",
+          "100009": "power supply",
+          "100010": "connector"
+        };
+        
+        const searchTerm = categorySearchTerms[categoryId as string] || "electronic";
+        console.log(`🔍 Searching TME for category ${categoryId} with term: ${searchTerm}`);
+        
+        const searchResults = await tmeApi.searchProducts(searchTerm, limitNum);
+        products = searchResults || [];
+        totalProducts = products.length;
+        
+        console.log(`✅ Found ${products.length} products for category ${categoryId}`);
+      } catch (error) {
+        console.error("TME search error:", error);
+        return res.status(500).json({
+          success: false,
+          error: "Failed to fetch products from TME API"
+        });
+      }
+
+      // Apply frontend filters
+      if (search) {
+        const searchLower = (search as string).toLowerCase();
+        products = products.filter((p: any) => 
+          p.Description?.toLowerCase().includes(searchLower) ||
+          p.Symbol?.toLowerCase().includes(searchLower) ||
+          p.Producer?.toLowerCase().includes(searchLower)
+        );
+      }
+
+      if (priceMin) {
+        const minPrice = parseFloat(priceMin as string);
+        products = products.filter((p: any) => parseFloat(p.Price || "0") >= minPrice);
+      }
+
+      if (priceMax) {
+        const maxPrice = parseFloat(priceMax as string);
+        products = products.filter((p: any) => parseFloat(p.Price || "0") <= maxPrice);
+      }
+
+      if (stockMin) {
+        const minStock = parseInt(stockMin as string);
+        products = products.filter((p: any) => (p.InStock || 0) >= minStock);
+      }
+
+      if (weightMax) {
+        const maxWeight = parseFloat(weightMax as string);
+        products = products.filter((p: any) => parseFloat(p.Weight || "0") <= maxWeight);
+      }
+
+      if (producer) {
+        const producerLower = (producer as string).toLowerCase();
+        products = products.filter((p: any) => 
+          p.Producer?.toLowerCase().includes(producerLower)
+        );
+      }
+
+      // Update total after filtering
+      const filteredTotal = products.length;
+
+      res.json({
+        success: true,
+        products: products,
+        total: totalProducts, // Keep original total for pagination
+        filtered: filteredTotal,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(totalProducts / limitNum)
+      });
+
+    } catch (error) {
+      console.error("TME products fetch error:", error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to fetch TME products"
+      });
+    }
+  });
+
+  // Sync selected TME products
+  app.post("/api/tme/sync-selected", async (req, res) => {
+    try {
+      const { productSymbols, settings } = req.body;
+
+      if (!productSymbols || !Array.isArray(productSymbols) || productSymbols.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: "Product symbols array is required"
+        });
+      }
+
+      console.log(`🔄 Starting sync of ${productSymbols.length} selected products with settings:`, settings);
+
+      let syncedCount = 0;
+      let updatedCount = 0;
+      let failedCount = 0;
+      const errors: string[] = [];
+
+      // Process products in batches to avoid API rate limits
+      const batchSize = 5;
+      for (let i = 0; i < productSymbols.length; i += batchSize) {
+        const batch = productSymbols.slice(i, i + batchSize);
+        
+        for (const symbol of batch) {
+          try {
+            console.log(`📦 Processing product: ${symbol}`);
+
+            // Get product details from TME
+            const productResponse = await tmeApi.getProductDetails(symbol);
+            if (!productResponse.success || !productResponse.product) {
+              console.error(`❌ Failed to get details for ${symbol}:`, productResponse.error);
+              failedCount++;
+              errors.push(`Failed to get details for ${symbol}: ${productResponse.error}`);
+              continue;
+            }
+
+            const product = productResponse.product;
+
+            // Get pricing info
+            const pricesResponse = await tmeApi.getProductPrices([symbol]);
+            let supplierPrice = "0";
+            if (pricesResponse.success && pricesResponse.prices?.[symbol]) {
+              const priceData = pricesResponse.prices[symbol];
+              supplierPrice = priceData.PriceList?.[0]?.PriceValue || priceData.Price || "0";
+            }
+
+            // Get stock info if available
+            let stockData = null;
+            try {
+              const stockResponse = await tmeApi.getProductStock([symbol]);
+              if (stockResponse.success && stockResponse.stocks?.[symbol]) {
+                stockData = stockResponse.stocks[symbol];
+              }
+            } catch (stockError) {
+              console.warn(`⚠️ Could not get stock data for ${symbol}:`, stockError);
+            }
+
+            // Apply dynamic pricing if enabled
+            let pricingResult = {
+              finalPrice: supplierPrice,
+              calculatedPrice: supplierPrice,
+              marginTier: "No Margin",
+              marginPercentage: 0
+            };
+
+            if (settings.applyDynamicPricing) {
+              const { calculateDynamicPrice } = await import("./dynamic-pricing");
+              pricingResult = calculateDynamicPrice(supplierPrice);
+            }
+
+            // Prepare product data with proper type conversions
+            const productData = {
+              name: product.Description,
+              sku: product.Symbol,
+              ean: product.EAN || null,
+              category: product.Category,
+              description: product.Description,
+              supplierPrice: String(Number(supplierPrice)),
+              salePrice: String(Number(pricingResult.finalPrice)),
+              calculatedPrice: String(Number(pricingResult.calculatedPrice)),
+              marginTier: pricingResult.marginTier,
+              marginPercentage: String(Number(pricingResult.marginPercentage)),
+              stock: stockData?.Amount || 100,
+              status: "active",
+              weight: String(Number(product.Weight) || 10),
+              imageUrl: product.Photo ? `https:${product.Photo}` : null,
+              dataSheetUrl: product.DataSheet ? `https://www.tme.eu${product.DataSheet}` : null,
+              productUrl: product.ProductInformationPage ? `https://www.tme.eu${product.ProductInformationPage}` : null,
+              supplier: "tme",
+              supplierProductId: product.Symbol,
+              useStockLimit: settings.useStockLimit || false,
+              ebayStockLimit: settings.useStockLimit ? settings.ebayStockLimit : null
+            };
+
+            // Check if product already exists
+            const existingProduct = await storage.getProductBySku(productData.sku);
+            
+            if (existingProduct) {
+              // Update existing product
+              await storage.updateProduct(existingProduct.id, productData);
+              updatedCount++;
+              console.log(`✅ Updated product: ${symbol}`);
+            } else {
+              // Create new product
+              await storage.createProduct(productData);
+              syncedCount++;
+              console.log(`✅ Created product: ${symbol}`);
+            }
+
+          } catch (error) {
+            console.error(`❌ Error processing ${symbol}:`, error);
+            failedCount++;
+            errors.push(`Error processing ${symbol}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          }
+        }
+
+        // Add delay between batches to respect API rate limits
+        if (i + batchSize < productSymbols.length) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+
+      const totalProcessed = syncedCount + updatedCount + failedCount;
+
+      res.json({
+        success: true,
+        results: {
+          totalRequested: productSymbols.length,
+          totalProcessed: totalProcessed,
+          syncedCount: syncedCount,
+          updatedCount: updatedCount,
+          failedCount: failedCount,
+          errors: errors
+        },
+        message: `Sync completed: ${syncedCount} new, ${updatedCount} updated, ${failedCount} failed`
+      });
+
+    } catch (error) {
+      console.error("Sync selected products error:", error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to sync selected products"
+      });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

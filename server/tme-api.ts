@@ -1022,6 +1022,148 @@ export class TMEApiService {
     
     return 'Electronics';
   }
+  /**
+   * Get products by category ID with pagination and filtering
+   */
+  async getProductsByCategory(categoryId: string, options: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    inStockOnly?: boolean;
+  } = {}): Promise<{
+    success: boolean;
+    products?: any[];
+    total?: number;
+    error?: string;
+  }> {
+    try {
+      const { page = 1, limit = 100, search = "", inStockOnly = true } = options;
+      
+      console.log(`🔍 TME API: Getting products for category ${categoryId}, page ${page}, limit ${limit}`);
+
+      // Build search parameters
+      const searchParams = new URLSearchParams({
+        Country: this.country,
+        Language: this.language,
+        Token: this.token,
+        CustomerNumber: this.customerNumber.toString(),
+        ContactNumber: this.contactNumber.toString(),
+        CategoryId: categoryId,
+        SearchPlain: search,
+        InStock: inStockOnly ? "1" : "0"
+      });
+
+      // Add pagination
+      const offset = (page - 1) * limit;
+      searchParams.append("SearchPage", page.toString());
+      searchParams.append("SearchPageSize", limit.toString());
+
+      const url = `${this.baseUrl}/Products/GetProductsByCategory.json`;
+      const signature = this.generateSignature("POST", url, searchParams);
+      searchParams.append("ApiSignature", signature);
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: searchParams.toString()
+      });
+
+      if (!response.ok) {
+        throw new Error(`TME API error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.Status && data.Status.toLowerCase() !== "ok") {
+        throw new Error(`TME API returned error: ${data.Message || "Unknown error"}`);
+      }
+
+      const products = data.Data?.ProductList || [];
+      const total = data.Data?.Amount || products.length;
+
+      console.log(`✅ TME API: Found ${products.length} products (total: ${total})`);
+
+      return {
+        success: true,
+        products: products,
+        total: total
+      };
+
+    } catch (error) {
+      console.error("Get products by category failed:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to get products by category"
+      };
+    }
+  }
+
+  /**
+   * Get detailed product information by symbol
+   */
+  async getProductDetails(symbol: string): Promise<{
+    success: boolean;
+    product?: any;
+    error?: string;
+  }> {
+    try {
+      console.log(`🔍 TME API: Getting details for product ${symbol}`);
+
+      const searchParams = new URLSearchParams({
+        Country: this.country,
+        Language: this.language,
+        Token: this.token,
+        CustomerNumber: this.customerNumber.toString(),
+        ContactNumber: this.contactNumber.toString(),
+        SymbolList: JSON.stringify([symbol])
+      });
+
+      const url = `${this.baseUrl}/Products/GetProducts.json`;
+      const signature = this.generateSignature("POST", url, searchParams);
+      searchParams.append("ApiSignature", signature);
+
+      const response = await fetch(url, {
+        method: "POST", 
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: searchParams.toString()
+      });
+
+      if (!response.ok) {
+        throw new Error(`TME API error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.Status && data.Status.toLowerCase() !== "ok") {
+        throw new Error(`TME API returned error: ${data.Message || "Unknown error"}`);
+      }
+
+      const products = data.Data?.ProductList || [];
+      const product = products[0];
+
+      if (!product) {
+        throw new Error(`Product ${symbol} not found`);
+      }
+
+      console.log(`✅ TME API: Got details for product ${symbol}`);
+
+      return {
+        success: true,
+        product: product
+      };
+
+    } catch (error) {
+      console.error(`Get product details failed for ${symbol}:`, error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to get product details"
+      };
+    }
+  }
 }
 
 export const tmeApi = new TMEApiService();
