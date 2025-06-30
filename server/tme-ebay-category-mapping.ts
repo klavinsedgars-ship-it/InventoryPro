@@ -218,6 +218,215 @@ export const TME_EBAY_CATEGORY_MAPPINGS: CategoryMapping[] = [
     confidence: 7
   },
 
+  // Advanced Microprocessors and Computing
+  {
+    tmeCategory: "ARM Microprocessors",
+    tmeCategoryKeywords: ["arm", "cortex", "microprocessor", "cpu", "processor"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 9
+  },
+  {
+    tmeCategory: "Microchip Microprocessors", 
+    tmeCategoryKeywords: ["microchip", "pic", "dspic", "processor", "mcu"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 9
+  },
+  {
+    tmeCategory: "Single Board Computers",
+    tmeCategoryKeywords: ["sbc", "single board", "computer", "raspberry", "computing"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other", 
+    confidence: 8
+  },
+
+  // Communication Modules
+  {
+    tmeCategory: "WiFi Modules",
+    tmeCategoryKeywords: ["wifi", "wireless", "802.11", "wlan", "esp"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 9
+  },
+  {
+    tmeCategory: "Bluetooth Modules", 
+    tmeCategoryKeywords: ["bluetooth", "ble", "wireless", "bt"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 9
+  },
+  {
+    tmeCategory: "LoRa Modules",
+    tmeCategoryKeywords: ["lora", "lorawan", "long range", "lpwan"],
+    ebayCategory: "58277", 
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 8
+  },
+  {
+    tmeCategory: "GSM/GPRS Modules",
+    tmeCategoryKeywords: ["gsm", "gprs", "cellular", "sim", "mobile"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 8
+  },
+  {
+    tmeCategory: "GNSS (GPS) modules",
+    tmeCategoryKeywords: ["gps", "gnss", "navigation", "positioning", "location"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 8
+  },
+
+  // Power Management
+  {
+    tmeCategory: "DC-DC Converters",
+    tmeCategoryKeywords: ["dc-dc", "converter", "buck", "boost", "step-down", "step-up"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 8
+  },
+  {
+    tmeCategory: "Voltage Regulators",
+    tmeCategoryKeywords: ["regulator", "ldo", "voltage", "stabilizer"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other", 
+    confidence: 8
+  },
+  {
+    tmeCategory: "Battery Management",
+    tmeCategoryKeywords: ["battery", "charger", "bms", "power management"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 7
+  },
+
+  // Interface and Conversion
+  {
+    tmeCategory: "USB Controllers",
+    tmeCategoryKeywords: ["usb", "controller", "interface", "ftdi"],
+    ebayCategory: "58277", 
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 8
+  },
+  {
+    tmeCategory: "UART/Serial Converters",
+    tmeCategoryKeywords: ["uart", "serial", "rs232", "rs485", "converter"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 8
+  },
+  {
+    tmeCategory: "Level Shifters",
+    tmeCategoryKeywords: ["level shifter", "voltage translator", "logic level"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 7
+  },
+
+  // Memory and Storage
+  {
+    tmeCategory: "Memory ICs",
+    tmeCategoryKeywords: ["memory", "ram", "flash", "eeprom", "sram"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 8
+  },
+  {
+    tmeCategory: "SD Card Modules",
+    tmeCategoryKeywords: ["sd card", "microsd", "storage", "memory card"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 7
+  },
+
+  // Motor Control
+  {
+    tmeCategory: "Motor Drivers",
+    tmeCategoryKeywords: ["motor driver", "stepper", "servo", "h-bridge"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 8
+  },
+  {
+    tmeCategory: "Stepper Motors",
+    tmeCategoryKeywords: ["stepper", "step motor", "nema"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 8
+  },
+
+  // Specialized Components
+  {
+    tmeCategory: "Crystal Oscillators",
+    tmeCategoryKeywords: ["crystal", "oscillator", "quartz", "frequency"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other", 
+    confidence: 8
+  },
+  {
+    tmeCategory: "Real Time Clocks",
+    tmeCategoryKeywords: ["rtc", "real time clock", "clock", "timer"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 8
+  },
+  {
+    tmeCategory: "Watchdog Timers",
+    tmeCategoryKeywords: ["watchdog", "timer", "reset", "supervisor"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 7
+  },
+
+  // Test and Measurement
+  {
+    tmeCategory: "Signal Generators",
+    tmeCategoryKeywords: ["signal generator", "function generator", "waveform"],
+    ebayCategory: "58277", 
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 7
+  },
+  {
+    tmeCategory: "Multimeters",
+    tmeCategoryKeywords: ["multimeter", "dmm", "meter", "measurement"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 6
+  },
+
+  // Enclosures and Mechanical
+  {
+    tmeCategory: "Enclosures",
+    tmeCategoryKeywords: ["enclosure", "case", "box", "housing"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 6
+  },
+  {
+    tmeCategory: "Heat Sinks",
+    tmeCategoryKeywords: ["heat sink", "heatsink", "cooling", "thermal"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 7
+  },
+
+  // Industrial and Automation
+  {
+    tmeCategory: "Industrial Modules",
+    tmeCategoryKeywords: ["industrial", "automation", "plc", "control"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 6
+  },
+  {
+    tmeCategory: "Solid State Relays",
+    tmeCategoryKeywords: ["solid state", "relay", "ssr", "switching"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 8
+  },
+
   // Generic fallback for electronics
   {
     tmeCategory: "Electronics",
