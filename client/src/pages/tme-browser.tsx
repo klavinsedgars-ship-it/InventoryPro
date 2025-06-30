@@ -111,7 +111,7 @@ export function TMEBrowser({ user }: TMEBrowserProps) {
       const firstCategoryId = Array.from(selectedCategories)[0];
       const searchTerm = categorySearchMap[firstCategoryId] || "electronic";
       
-      const response = await fetch('/api/tme/sync', {
+      const response = await fetch('/api/sync/tme', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -121,14 +121,15 @@ export function TMEBrowser({ user }: TMEBrowserProps) {
       });
 
       if (!response.ok) {
-        throw new Error('Sync failed');
+        const errorData = await response.json().catch(() => ({ error: 'Sync failed' }));
+        throw new Error(errorData.error || 'Sync failed');
       }
 
       const result = await response.json();
       
       toast({
         title: "Sync Successful",
-        description: `Successfully synced ${result.productsAdded} products from ${searchTerm} category.`,
+        description: `Successfully synced ${result.productsAdded || result.syncedCount || 'several'} products from ${searchTerm} category.`,
       });
       
       // Clear selection after successful sync
