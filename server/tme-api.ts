@@ -241,16 +241,27 @@ export class TMEApiService {
   async getProductPrices(symbols: string[]): Promise<TMEPrice[]> {
     if (symbols.length === 0) return [];
 
-    // Try a smaller batch first to avoid signature issues with large arrays
-    const batchSize = 5;
-    const symbolsBatch = symbols.slice(0, batchSize);
+    // Try individual requests for now to avoid array parameter issues
+    const prices: TMEPrice[] = [];
+    
+    // Process one symbol at a time to avoid array signature validation issues
+    for (const symbol of symbols) {
+      try {
+        const response = await this.makeRequest<TMEPrice>("/Products/GetPrices.json", {
+          SymbolList: [symbol], // Single item array
+          Currency: "EUR", // Use EUR to match TME native currency
+        });
+        
+        if (response.Data.PriceList) {
+          prices.push(...response.Data.PriceList);
+        }
+      } catch (error) {
+        console.log(`Failed to get price for ${symbol}:`, error);
+        // Continue with other symbols
+      }
+    }
 
-    const response = await this.makeRequest<TMEPrice>("/Products/GetPrices.json", {
-      SymbolList: symbolsBatch.join(";"), // Use semicolon-separated format for now
-      Currency: "USD",
-    });
-
-    return response.Data.PriceList || [];
+    return prices;
   }
 
   async getProductStock(symbols: string[]): Promise<TMEStock[]> {
