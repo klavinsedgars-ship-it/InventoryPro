@@ -1,5 +1,6 @@
 import { storage } from "./storage";
 import { ebayOAuth } from "./ebay-oauth";
+import { generateEbayListing } from "./ebay-listing-template";
 
 interface EbayCredentials {
   appId: string;
@@ -496,6 +497,53 @@ export class EbayApiService {
       .replace(/'/g, '&#39;');
   }
 
+  private createReviseItemXML(listingData: any, authToken: string): string {
+    const escapedTitle = this.escapeXml(listingData.title);
+    const escapedDescription = this.escapeXml(listingData.description);
+    const pictureURLs = listingData.pictureURLs || [];
+    
+    const pictureXML = pictureURLs.length > 0 ? `
+      <PictureDetails>
+        ${pictureURLs.map((url: string) => `<PictureURL>${this.escapeXml(url)}</PictureURL>`).join('')}
+      </PictureDetails>
+    ` : '';
+
+    return `<?xml version="1.0" encoding="utf-8"?>
+<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials>
+    <eBayAuthToken>${authToken}</eBayAuthToken>
+  </RequesterCredentials>
+  <Item>
+    <ItemID>${listingData.itemId}</ItemID>
+    <Title>${escapedTitle}</Title>
+    <Description><![CDATA[${listingData.description}]]></Description>
+    <StartPrice>${listingData.startPrice}</StartPrice>
+    <Quantity>${listingData.quantity}</Quantity>
+    <CategoryID>${listingData.categoryId}</CategoryID>
+    <ConditionID>1000</ConditionID>
+    <ListingDuration>GTC</ListingDuration>
+    <ListingType>FixedPriceItem</ListingType>
+    <Currency>GBP</Currency>
+    <Country>GB</Country>
+    <Location>London, UK</Location>
+    <PaymentMethods>PayPal</PaymentMethods>
+    <PayPalEmailAddress>seller@example.com</PayPalEmailAddress>
+    ${pictureXML}
+    <SellerProfiles>
+      <SellerShippingProfile>
+        <ShippingProfileID>209735065019</ShippingProfileID>
+      </SellerShippingProfile>
+      <SellerReturnProfile>
+        <ReturnProfileID>163760688019</ReturnProfileID>
+      </SellerReturnProfile>
+      <SellerPaymentProfile>
+        <PaymentProfileID>209734969019</PaymentProfileID>
+      </SellerPaymentProfile>
+    </SellerProfiles>
+  </Item>
+</ReviseFixedPriceItemRequest>`;
+  }
+
   private createEndItemXML(itemId: string, authToken: string): string {
     return `<?xml version="1.0" encoding="utf-8"?>
 <EndItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -820,6 +868,112 @@ export class EbayApiService {
     }
 
     return policies;
+  }
+
+  async updateProduct(productId: number, updateData?: Partial<EbayListingRequest>): Promise<EbayApiResponse> {
+    try {
+      // Get product data and eBay item ID
+      const product = await storage.getProduct(productId);
+      if (!product) {
+        return { success: false, message: "Product not found" };
+      }
+
+      if (!product.ebayItemId || !product.listedOnEbay) {
+        return { success: false, message: "Product is not currently listed on eBay" };
+      }
+
+      console.log(`Updating eBay listing for product ${productId}, eBay Item ID: ${product.ebayItemId}`);
+
+      // Generate listing data from product (similar to listProduct but for updates)
+      const listingTemplate = generateEbayListing(product);
+      const authToken = await this.getAccessToken();
+      
+      const listingData = {
+        itemId: product.ebayItemId,
+        title: updateData?.title || listingTemplate.title,
+        description: updateData?.description || listingTemplate.htmlDescription,
+        startPrice: updateData?.startPrice || Number(product.salePrice),
+        quantity: updateData?.quantity || product.stock,
+        categoryId: updateData?.categoryId || "58277", // Electronics components
+        condition: updateData?.condition || "New",
+        pictureURLs: product.imageUrl ? [product.imageUrl] : undefined,
+        ...updateData
+      };
+
+      console.log("Updating eBay listing with data:", {
+        itemId: listingData.itemId,
+        title: listingData.title,
+        price: listingData.startPrice,
+        quantity: listingData.quantity
+      });
+
+      // Create ReviseFixedPriceItem XML request
+      const xmlRequest = this.createReviseItemXML(listingData, authToken);
+      console.log("Making eBay ReviseFixedPriceItem API call");
+      
+      const response = await this.makeTradingApiRequest(xmlRequest, 'ReviseFixedPriceItem');
+      
+      // Parse response for success
+      const ackMatch = response.match(/<Ack>(.*?)<\/Ack>/);
+      const isSuccess = ackMatch && (ackMatch[1] === 'Success' || ackMatch[1] === 'Warning');
+      
+      if (isSuccess) {
+        console.log("eBay listing updated successfully");
+        
+        // Log the update
+        await storage.createSyncLog({
+          source: "ebay",
+          operation: "update_listing", 
+          status: "success",
+          message: `Updated eBay listing for product ${product.name}`,
+          details: JSON.stringify({
+            productId,
+            ebayItemId: product.ebayItemId,
+            updatedFields: Object.keys(updateData || {})
+          })
+        });
+
+        return {
+          success: true,
+          itemId: product.ebayItemId,
+          message: "eBay listing updated successfully"
+        };
+      } else {
+        const errorMatch = response.match(/<LongMessage>(.*?)<\/LongMessage>/);
+        const errorMessage = errorMatch ? errorMatch[1] : "Unknown eBay update error";
+        
+        console.log("eBay update failed:", errorMessage);
+        
+        await storage.createSyncLog({
+          source: "ebay", 
+          operation: "update_listing",
+          status: "error",
+          message: `Failed to update eBay listing: ${errorMessage}`,
+          details: JSON.stringify({ productId, ebayItemId: product.ebayItemId, error: errorMessage })
+        });
+
+        return {
+          success: false,
+          message: `eBay update failed: ${errorMessage}`
+        };
+      }
+      
+    } catch (error) {
+      console.error("Error updating eBay listing:", error);
+      
+      await storage.createSyncLog({
+        source: "ebay",
+        operation: "update_listing", 
+        status: "error",
+        message: `Error updating eBay listing: ${(error as Error).message}`,
+        details: JSON.stringify({ productId, error: (error as Error).message })
+      });
+
+      return {
+        success: false,
+        message: `Failed to update eBay listing: ${(error as Error).message}`
+      };
+    }
   }
 
   async unlistProduct(productId: number): Promise<EbayApiResponse> {
