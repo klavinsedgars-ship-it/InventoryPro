@@ -568,10 +568,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const stockData = stocks.find(s => s.Symbol === symbol);
       
       if (stockData) {
-        console.log(`Real TME stock for ${symbol}: ${stockData.InStock} units`);
+        console.log(`Real TME stock for ${symbol}: ${stockData.Amount} units`);
         return res.json({
           symbol: symbol,
-          realStock: stockData.InStock,
+          realStock: stockData.Amount,
           source: 'TME_API',
           success: true
         });

@@ -273,39 +273,58 @@ export class TMEApiService {
   async getProductStock(symbols: string[]): Promise<TMEStock[]> {
     if (symbols.length === 0) return [];
 
-    // Use the correct TME API endpoint for stock information
     const batchSize = 5;
     const symbolsBatch = symbols.slice(0, batchSize);
-
+    
+    // Try method 1: Products/GetStocks endpoint (dedicated stock endpoint)
     try {
-      const response = await this.makeRequest<TMEStock>("/Products/GetProductsData.json", {
+      console.log(`🔍 Trying TME GetStocks endpoint for symbols: ${symbolsBatch.join(", ")}`);
+      const response = await this.makeRequest<any>("/Products/GetStocks.json", {
         SymbolList: symbolsBatch,
         Currency: "EUR",
         Language: "EN"
       });
 
-      // Extract stock information from the product data response
-      const stockList = response.Data.ProductList.map((product: any) => ({
-        Symbol: product.Symbol,
-        InStock: product.InStock || 0,
-        Unit: product.Unit || "pcs"
-      }));
-
-      return stockList;
+      if (response.Data?.ProductList) {
+        console.log(`✅ GetStocks success! Got ${response.Data.ProductList.length} stock records`);
+        return response.Data.ProductList.map((product: any) => ({
+          Symbol: product.Symbol,
+          Amount: product.Amount || 0,
+          Unit: product.Unit || "pcs"
+        }));
+      }
     } catch (error) {
-      console.log(`Stock API call failed for symbols ${symbolsBatch.join(", ")}: ${error.message}`);
-      // Return realistic varied stock data instead of fixed 100
-      return symbolsBatch.map(symbol => {
-        // Use 0 stock to indicate we don't have real data
-        console.log(`❌ No real stock data available for ${symbol} - TME API access restricted`);
-        return {
-          Symbol: symbol,
-          InStock: 0, // Set to 0 to indicate unknown/unavailable
-          Unit: "pcs",
-          Amount: 1
-        };
-      });
+      console.log(`❌ GetStocks failed: ${(error as Error).message}`);
     }
+
+    // Try method 2: Products/GetPricesAndStocks endpoint (combined endpoint)
+    try {
+      console.log(`🔍 Trying TME GetPricesAndStocks endpoint for symbols: ${symbolsBatch.join(", ")}`);
+      const response = await this.makeRequest<any>("/Products/GetPricesAndStocks.json", {
+        SymbolList: symbolsBatch,
+        Currency: "EUR",
+        Language: "EN"
+      });
+
+      if (response.Data?.ProductList) {
+        console.log(`✅ GetPricesAndStocks success! Got ${response.Data.ProductList.length} stock+price records`);
+        return response.Data.ProductList.map((product: any) => ({
+          Symbol: product.Symbol,
+          Amount: product.Amount || 0,
+          Unit: product.Unit || "pcs"
+        }));
+      }
+    } catch (error) {
+      console.log(`❌ GetPricesAndStocks failed: ${(error as Error).message}`);
+    }
+
+    // Final fallback: Return 0 stock to indicate unknown data
+    console.log(`❌ All TME stock endpoints failed for symbols: ${symbolsBatch.join(", ")}`);
+    return symbolsBatch.map(symbol => ({
+      Symbol: symbol,
+      Amount: 0, // Set to 0 to indicate unknown/unavailable
+      Unit: "pcs"
+    }));
   }
 
   async syncProductsFromTME(searchQuery: string = "arduino", limit: number = 10) {
