@@ -330,9 +330,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (supplierPrice >= tierMin && supplierPrice <= tierMax) {
             const result = calculateDynamicPrice(supplierPrice);
             await storage.updateProduct(product.id, {
-              calculatedPrice: result.finalPrice,
+              calculatedPrice: result.finalPrice.toString(),
               marginTier: result.marginTier,
-              marginPercentage: result.marginPercentage
+              marginPercentage: result.marginPercentage.toString()
             });
             updatedCount++;
           }
@@ -389,9 +389,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (supplierPrice >= tierMin && supplierPrice <= tierMax) {
             const result = calculateDynamicPrice(supplierPrice);
             await storage.updateProduct(product.id, {
-              calculatedPrice: result.finalPrice,
+              calculatedPrice: result.finalPrice.toString(),
               marginTier: result.marginTier,
-              marginPercentage: result.marginPercentage
+              marginPercentage: result.marginPercentage.toString()
             });
             updatedCount++;
           }
