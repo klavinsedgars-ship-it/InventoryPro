@@ -83,6 +83,20 @@ export const TME_EBAY_CATEGORY_MAPPINGS: CategoryMapping[] = [
     confidence: 10
   },
   {
+    tmeCategory: "THT universal diodes",
+    tmeCategoryKeywords: ["diode", "rectifying", "tht", "through hole", "universal", "silicon"],
+    ebayCategory: "175673",
+    ebayCategoryName: "Electronics Components - Semiconductors & Actives - Diodes", 
+    confidence: 10
+  },
+  {
+    tmeCategory: "SMD diodes",
+    tmeCategoryKeywords: ["diode", "smd", "surface mount", "rectifying", "switching"],
+    ebayCategory: "175673",
+    ebayCategoryName: "Electronics Components - Semiconductors & Actives - Diodes",
+    confidence: 10
+  },
+  {
     tmeCategory: "Integrated Circuits",
     tmeCategoryKeywords: ["ic", "integrated circuit", "amplifier", "regulator", "timer", "logic", "analog"],
     ebayCategory: "58277",
