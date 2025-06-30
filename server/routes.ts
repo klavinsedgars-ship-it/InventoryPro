@@ -551,6 +551,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // TME Test Stock endpoint
+  app.post("/api/tme/test-stock", requireAuth, async (req, res) => {
+    try {
+      const { symbol } = req.body;
+      
+      if (!symbol) {
+        return res.status(400).json({ error: 'Symbol is required' });
+      }
+
+      console.log(`Testing real TME stock for symbol: ${symbol}`);
+      
+      // Try to get real stock data from TME
+      const { tmeApi } = await import("./tme-api");
+      const stocks = await tmeApi.getProductStock([symbol]);
+      const stockData = stocks.find(s => s.Symbol === symbol);
+      
+      if (stockData) {
+        console.log(`Real TME stock for ${symbol}: ${stockData.InStock} units`);
+        return res.json({
+          symbol: symbol,
+          realStock: stockData.InStock,
+          source: 'TME_API',
+          success: true
+        });
+      } else {
+        console.log(`No stock data found for ${symbol}`);
+        return res.json({
+          symbol: symbol,
+          realStock: null,
+          source: 'NOT_FOUND',
+          success: false
+        });
+      }
+    } catch (error) {
+      console.error('TME stock test error:', error);
+      return res.status(500).json({
+        error: 'Failed to fetch real TME stock',
+        message: (error as Error).message,
+        success: false
+      });
+    }
+  });
+
   // TME sync routes
   app.post("/api/sync/tme", requireAuth, async (req, res) => {
     try {
