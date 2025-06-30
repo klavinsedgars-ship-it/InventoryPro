@@ -83,11 +83,17 @@ export class TMEApiService {
 
   constructor() {
     this.credentials = {
-      token: process.env.TME_TOKEN || "31e955195075d0a74f5a...",
+      token: process.env.TME_TOKEN || "05bb5ef39f7b451aad7892c53e39db484ca8dd25693a599f96",
       customerNumber: process.env.TME_CUSTOMER_NUMBER || "40071812",
       contactNumber: process.env.TME_CONTACT_NUMBER || "676772",
-      applicationSecret: process.env.TME_APPLICATION_SECRET || "d89d00191de2b7a6834f"
+      applicationSecret: process.env.TME_APPLICATION_SECRET || "670056035f042574c976"
     };
+
+    console.log('✅ TME API initialized with credentials:');
+    console.log('- Token (first 20 chars):', this.credentials.token.substring(0, 20) + '...');
+    console.log('- Customer Number:', this.credentials.customerNumber);
+    console.log('- Contact Number:', this.credentials.contactNumber);
+    console.log('- Application Secret (first 10 chars):', this.credentials.applicationSecret.substring(0, 10) + '...');
   }
 
   private generateApiSignature(method: string, url: string, params: Record<string, any>): string {
