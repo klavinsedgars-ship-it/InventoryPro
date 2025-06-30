@@ -748,7 +748,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // TME Category Browser endpoints
-  app.get("/api/tme/categories", requireAuth, async (req, res) => {
+  app.get("/api/tme/categories", async (req, res) => {
     try {
       console.log("Fetching complete TME category tree...");
       const { tmeApi } = await import("./tme-api");
@@ -776,7 +776,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/tme/categories/:categoryId/products", requireAuth, async (req, res) => {
+  app.get("/api/tme/categories/:categoryId/products", async (req, res) => {
     try {
       const categoryId = parseInt(req.params.categoryId);
       const limit = parseInt(req.query.limit as string) || 20;
