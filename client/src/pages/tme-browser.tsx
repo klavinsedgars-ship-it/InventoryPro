@@ -482,102 +482,79 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                     Loading products...
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {products.map((product) => (
-                      <Card
+                  <div className="space-y-2">
+                    {products.map((product: TMEProduct) => (
+                      <div
                         key={product.Symbol}
-                        className={`relative ${
-                          selectedProducts.has(product.Symbol) ? "ring-2 ring-blue-500" : ""
+                        className={`border rounded-lg p-4 flex items-center space-x-4 hover:bg-gray-50 ${
+                          selectedProducts.has(product.Symbol) ? "ring-2 ring-blue-500 bg-blue-50" : ""
                         }`}
                       >
-                        <div className="absolute top-2 left-2 z-10">
-                          <Checkbox
-                            checked={selectedProducts.has(product.Symbol)}
-                            onCheckedChange={() => toggleProductSelection(product.Symbol)}
-                          />
-                        </div>
+                        <Checkbox
+                          checked={selectedProducts.has(product.Symbol)}
+                          onCheckedChange={() => toggleProductSelection(product.Symbol)}
+                        />
                         
-                        <div className="absolute top-2 right-2 z-10">
-                          {isProductSynced(product.Symbol) ? (
-                            <Badge variant="default" className="bg-green-600">
-                              <CheckCircle2 className="h-3 w-3 mr-1" />
-                              Synced
-                            </Badge>
-                          ) : isSuitableProduct(product) ? (
-                            <Badge variant="secondary" className="bg-blue-100 text-blue-800">
-                              <Zap className="h-3 w-3 mr-1" />
-                              Suitable
-                            </Badge>
+                        <div className="flex-shrink-0 w-16 h-16 bg-gray-100 rounded flex items-center justify-center">
+                          {product.Photo ? (
+                            <img 
+                              src={`https:${product.Photo}`} 
+                              alt={product.Description}
+                              className="max-w-full max-h-full object-contain"
+                            />
                           ) : (
-                            <Badge variant="outline" className="bg-yellow-100 text-yellow-800">
-                              <AlertCircle className="h-3 w-3 mr-1" />
-                              Check
-                            </Badge>
+                            <Package className="h-8 w-8 text-gray-400" />
                           )}
                         </div>
-
-                        <CardContent className="p-4 pt-8">
-                          <div className="space-y-2">
-                            <div className="flex items-center space-x-2">
-                              {product.Thumbnail && (
-                                <img
-                                  src={`https:${product.Thumbnail}`}
-                                  alt={product.Description}
-                                  className="w-12 h-12 object-contain rounded"
-                                />
-                              )}
-                              <div className="flex-1 min-w-0">
-                                <h3 className="font-semibold text-sm truncate">
-                                  {product.Symbol}
-                                </h3>
-                                <p className="text-xs text-gray-600 truncate">
-                                  {product.Producer}
-                                </p>
+                        
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-gray-900 truncate">
+                                {product.Symbol}
+                              </p>
+                              <p className="text-sm text-gray-600 line-clamp-2">
+                                {product.Description}
+                              </p>
+                              <div className="mt-1 flex items-center space-x-4 text-xs text-gray-500">
+                                <span>Producer: {product.Producer}</span>
+                                <span>Stock: {product.InStock || 0}</span>
+                                <span>Price: €{product.Price || "N/A"}</span>
                               </div>
                             </div>
                             
-                            <p className="text-xs text-gray-700 line-clamp-2">
-                              {product.Description}
-                            </p>
-                            
-                            <div className="flex justify-between items-center text-xs">
-                              <span className="font-medium text-green-600">
-                                €{product.Price}
-                              </span>
-                              <span className={`${product.InStock > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                Stock: {product.InStock}
-                              </span>
+                            <div className="flex-shrink-0 ml-4 flex flex-col items-end space-y-2">
+                              {isProductSynced(product.Symbol) ? (
+                                <Badge variant="default" className="bg-green-600">
+                                  <CheckCircle className="h-3 w-3 mr-1" />
+                                  Synced
+                                </Badge>
+                              ) : isSuitableProduct(product) ? (
+                                <Badge variant="secondary" className="bg-blue-100 text-blue-800">
+                                  <Zap className="h-3 w-3 mr-1" />
+                                  Suitable
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="bg-yellow-100 text-yellow-800">
+                                  <AlertCircle className="h-3 w-3 mr-1" />
+                                  Check
+                                </Badge>
+                              )}
+                              
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => window.open(`https://www.tme.eu/en/details/${product.Symbol}/`, '_blank')}
+                              >
+                                <Eye className="h-3 w-3 mr-1" />
+                                View
+                              </Button>
                             </div>
-                            
-                            <div className="text-xs text-gray-500">
-                              Weight: {product.Weight}g
-                            </div>
-                            
-                            <Dialog>
-                              <DialogTrigger asChild>
-                                <Button variant="outline" size="sm" className="w-full">
-                                  <Eye className="h-3 w-3 mr-1" />
-                                  View Details
-                                </Button>
-                              </DialogTrigger>
-                              <DialogContent className="max-w-2xl">
-                                <DialogHeader>
-                                  <DialogTitle>{product.Symbol}</DialogTitle>
-                                  <DialogDescription>{product.Description}</DialogDescription>
-                                </DialogHeader>
-                                <div className="space-y-4">
-                                  <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                      <strong>Producer:</strong> {product.Producer}
-                                    </div>
-                                    <div>
-                                      <strong>Price:</strong> €{product.Price}
-                                    </div>
-                                    <div>
-                                      <strong>Stock:</strong> {product.InStock} {product.Unit}
-                                    </div>
-                                    <div>
-                                      <strong>Weight:</strong> {product.Weight}g
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                                     </div>
                                   </div>
                                   {product.Photo && (
