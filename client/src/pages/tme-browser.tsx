@@ -27,6 +27,8 @@ import {
   Settings
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { Sidebar } from "@/components/layout/sidebar";
+import { Header } from "@/components/layout/header";
 
 interface TMEProduct {
   Symbol: string;
@@ -114,6 +116,25 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   // Fetch products for selected category
   const { data: productsData, isLoading: productsLoading, refetch: refetchProducts } = useQuery({
     queryKey: ["/api/tme/products", selectedCategory, currentPage, productsPerPage, filters],
+    queryFn: async () => {
+      if (!selectedCategory) return { products: [], total: 0 };
+      
+      const params = new URLSearchParams({
+        categoryId: selectedCategory,
+        page: currentPage.toString(),
+        limit: productsPerPage.toString(),
+        search: filters.search,
+        priceMin: filters.priceMin,
+        priceMax: filters.priceMax,
+        stockMin: filters.stockMin,
+        weightMax: filters.weightMax,
+        producer: filters.producer,
+        inStockOnly: filters.inStockOnly.toString()
+      });
+      
+      const response = await fetch(`/api/tme/products?${params}`);
+      return response.json();
+    },
     enabled: !!selectedCategory,
     staleTime: 2 * 60 * 1000 // 2 minutes
   });
