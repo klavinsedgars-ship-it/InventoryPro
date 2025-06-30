@@ -392,7 +392,7 @@ export class EbayApiService {
     <Title>${this.escapeXml(listingData.title)}</Title>
     <Description><![CDATA[${listingData.description}]]></Description>
     <PrimaryCategory>
-      <CategoryID>58277</CategoryID>
+      <CategoryID>${listingData.categoryId}</CategoryID>
     </PrimaryCategory>
     <StartPrice currencyID="GBP">${listingData.startPrice}</StartPrice>
     <Quantity>${listingData.quantity}</Quantity>
@@ -545,7 +545,7 @@ export class EbayApiService {
     <Title>${this.escapeXml(listingData.title)}</Title>
     <Description><![CDATA[${listingData.description}]]></Description>
     <PrimaryCategory>
-      <CategoryID>58277</CategoryID>
+      <CategoryID>${listingData.categoryId}</CategoryID>
     </PrimaryCategory>
     <StartPrice currencyID="GBP">${listingData.startPrice}</StartPrice>
     <Quantity>${listingData.quantity}</Quantity>
@@ -938,7 +938,7 @@ export class EbayApiService {
         description: finalDescription,
         startPrice: updateData?.startPrice || Number(product.salePrice),
         quantity: updateData?.quantity || product.stock,
-        categoryId: updateData?.categoryId || "58277", // Electronics components
+        categoryId: updateData?.categoryId || categoryMapping.categoryId, // Use automatically mapped category
         condition: updateData?.condition || "New",
         pictureURLs: product.imageUrl ? [product.imageUrl] : undefined,
         ...updateData
