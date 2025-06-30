@@ -543,6 +543,86 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // Test new TME credentials directly
+  app.get("/api/debug/tme-new", requireAuth, async (req, res) => {
+    const newCredentials = {
+      token: "4c7c4c076d049b050b7db3a648c6ef61c4bd1daad6c5ab09df",
+      customerNumber: "40026843",
+      contactNumber: "642966"
+    };
+
+    try {
+      // Test multiple TME API endpoints with new credentials
+      const testResults = [];
+
+      // Test 1: Categories endpoint
+      try {
+        const response1 = await fetch("https://api.tme.eu/Products/GetCategories.json", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json"
+          },
+          body: new URLSearchParams({
+            Token: newCredentials.token,
+            Country: "US",
+            Language: "EN"
+          })
+        });
+        const data1 = await response1.json();
+        testResults.push({
+          endpoint: "GetCategories",
+          status: response1.status,
+          response: data1
+        });
+      } catch (error) {
+        testResults.push({
+          endpoint: "GetCategories",
+          error: error.message
+        });
+      }
+
+      // Test 2: Search endpoint
+      try {
+        const response2 = await fetch("https://api.tme.eu/Products/Search.json", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json"
+          },
+          body: new URLSearchParams({
+            Token: newCredentials.token,
+            Country: "US",
+            Language: "EN",
+            SearchPlain: "arduino",
+            SearchWithStock: "1"
+          })
+        });
+        const data2 = await response2.json();
+        testResults.push({
+          endpoint: "Search",
+          status: response2.status,
+          response: data2
+        });
+      } catch (error) {
+        testResults.push({
+          endpoint: "Search",
+          error: error.message
+        });
+      }
+
+      res.json({
+        credentials: newCredentials,
+        tests: testResults
+      });
+    } catch (error) {
+      res.status(500).json({
+        error: error.message,
+        credentials: newCredentials
+      });
+    }
+  });
+
   // TME API Debug endpoint
   app.get("/api/debug/tme", requireAuth, async (req, res) => {
     try {
