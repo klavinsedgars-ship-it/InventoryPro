@@ -318,6 +318,7 @@ export function TMEBrowserNew({ user }: TMEBrowserProps) {
                                 <TableHead>Product</TableHead>
                                 <TableHead>Producer</TableHead>
                                 <TableHead>SKU</TableHead>
+                                <TableHead>MOQ</TableHead>
                                 <TableHead>Category</TableHead>
                                 <TableHead className="w-24">Actions</TableHead>
                               </TableRow>
@@ -358,6 +359,12 @@ export function TMEBrowserNew({ user }: TMEBrowserProps) {
                                   </TableCell>
                                   <TableCell>
                                     <code className="text-xs bg-gray-100 px-2 py-1 rounded">{product.Symbol}</code>
+                                  </TableCell>
+                                  <TableCell>
+                                    <span className="text-sm font-medium text-orange-600">
+                                      1+ pcs
+                                    </span>
+                                    <p className="text-xs text-gray-500">See pricing tiers</p>
                                   </TableCell>
                                   <TableCell>
                                     <span className="text-xs text-gray-600">{product.Category}</span>

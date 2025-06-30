@@ -2979,8 +2979,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const priceData = productPrices.find(p => p.Symbol === product.Symbol);
           const stockData = productStock.find(s => s.Symbol === product.Symbol);
 
-          // Calculate supplier price
+          // Calculate supplier price and MOQ
           const supplierPrice = priceData?.PriceList?.[0]?.PriceValue || 0;
+          const minOrderQuantity = priceData?.PriceList?.[0]?.Amount || 1;
           
           // Calculate dynamic pricing
           const { calculateDynamicPrice } = await import("./dynamic-pricing");
@@ -3008,6 +3009,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             stock: stockData?.Amount || 100,
             status: "active",
             weight: Number(product.Weight) || 10,
+            minOrderQuantity: minOrderQuantity,
             imageUrl: product.Photo ? `https:${product.Photo}` : null,
             dataSheetUrl: product.DataSheet ? `https://www.tme.eu${product.DataSheet}` : null,
             productUrl: product.ProductInformationPage ? `https://www.tme.eu${product.ProductInformationPage}` : null,
