@@ -241,8 +241,12 @@ export class TMEApiService {
   async getProductPrices(symbols: string[]): Promise<TMEPrice[]> {
     if (symbols.length === 0) return [];
 
+    // Try a smaller batch first to avoid signature issues with large arrays
+    const batchSize = 5;
+    const symbolsBatch = symbols.slice(0, batchSize);
+
     const response = await this.makeRequest<TMEPrice>("/Products/GetPrices.json", {
-      SymbolList: symbols, // Pass as array, not joined string
+      SymbolList: symbolsBatch.join(";"), // Use semicolon-separated format for now
       Currency: "USD",
     });
 
@@ -252,8 +256,12 @@ export class TMEApiService {
   async getProductStock(symbols: string[]): Promise<TMEStock[]> {
     if (symbols.length === 0) return [];
 
+    // Try a smaller batch first to avoid signature issues with large arrays  
+    const batchSize = 5;
+    const symbolsBatch = symbols.slice(0, batchSize);
+
     const response = await this.makeRequest<TMEStock>("/Products/GetStock.json", {
-      SymbolList: symbols, // Pass as array, not joined string
+      SymbolList: symbolsBatch.join(";"), // Use semicolon-separated format for now
     });
 
     return response.Data.StockList || [];
