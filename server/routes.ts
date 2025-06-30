@@ -330,9 +330,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (supplierPrice >= tierMin && supplierPrice <= tierMax) {
             const result = calculateDynamicPrice(supplierPrice);
             await storage.updateProduct(product.id, {
-              calculatedPrice: result.finalPrice.toString(),
+              calculatedPrice: String(result.finalPrice),
               marginTier: result.marginTier,
-              marginPercentage: result.marginPercentage.toString()
+              marginPercentage: String(result.marginPercentage)
             });
             updatedCount++;
           }
@@ -389,9 +389,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (supplierPrice >= tierMin && supplierPrice <= tierMax) {
             const result = calculateDynamicPrice(supplierPrice);
             await storage.updateProduct(product.id, {
-              calculatedPrice: result.finalPrice.toString(),
+              calculatedPrice: String(result.finalPrice),
               marginTier: result.marginTier,
-              marginPercentage: result.marginPercentage.toString()
+              marginPercentage: String(result.marginPercentage)
             });
             updatedCount++;
           }
@@ -566,7 +566,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Search for the specific product to simulate new product import
       const searchResult = await tmeApi.searchProducts(symbol, 1);
       
-      if (!searchResult.success || !searchResult.products || searchResult.products.length === 0) {
+      if (!searchResult || searchResult.length === 0) {
         return res.json({
           success: false,
           message: `Product ${symbol} not found in TME catalog`,
@@ -574,10 +574,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      const product = searchResult.products[0];
+      const product = searchResult[0];
       
       // Get price data
-      const prices = await tmeApi.getProductPrice([symbol]);
+      const prices = await tmeApi.getProductPrices([symbol]);
       const price = prices?.[0];
       
       // Get stock data
@@ -1077,7 +1077,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (error) {
         testResults.push({
           endpoint: "GetCategories",
-          error: error.message
+          error: (error as Error).message
         });
       }
 
@@ -1106,7 +1106,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (error) {
         testResults.push({
           endpoint: "Search",
-          error: error.message
+          error: (error as Error).message
         });
       }
 
@@ -1116,7 +1116,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       res.status(500).json({
-        error: error.message,
+        error: (error as Error).message,
         credentials: newCredentials
       });
     }
