@@ -294,7 +294,7 @@ export function Products({ user }: ProductsProps) {
       <div className="ml-64">
         <Header 
           title="Products" 
-          subtitle="Manage your inventory and product listings"
+          subtitle="Manage your inventory and product listings (sorted by latest synced)"
         />
         
         <div className="p-6">
@@ -302,6 +302,15 @@ export function Products({ user }: ProductsProps) {
           <div className="mb-6 space-y-4">
             <div className="flex justify-between items-center">
               <div className="flex items-center space-x-4">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/products"] })}
+                  className="flex items-center space-x-1"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  <span>Refresh</span>
+                </Button>
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                   <Input
