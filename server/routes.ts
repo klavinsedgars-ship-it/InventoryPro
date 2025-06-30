@@ -3007,7 +3007,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             marginPercentage: Number(pricingResult.marginPercentage),
             stock: stockData?.Amount || 100,
             status: "active",
-            weight: product.Weight || 10,
+            weight: Number(product.Weight) || 10,
             imageUrl: product.Photo ? `https:${product.Photo}` : null,
             dataSheetUrl: product.DataSheet ? `https://www.tme.eu${product.DataSheet}` : null,
             productUrl: product.ProductInformationPage ? `https://www.tme.eu${product.ProductInformationPage}` : null,
