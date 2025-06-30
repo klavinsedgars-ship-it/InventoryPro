@@ -46,6 +46,7 @@ export function TMEBrowser({ user }: TMEBrowserProps) {
   const [expandedCategories, setExpandedCategories] = useState<Set<number>>(new Set());
   const [selectedCategory, setSelectedCategory] = useState<TMECategory | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [productSearchTerm, setProductSearchTerm] = useState("");
   const [selectedCategories, setSelectedCategories] = useState<Set<number>>(new Set());
   const [syncLoading, setSyncLoading] = useState(false);
 
@@ -59,6 +60,18 @@ export function TMEBrowser({ user }: TMEBrowserProps) {
     enabled: !!selectedCategory,
     staleTime: 60000, // 1 minute
   });
+
+  // Filter products based on search term
+  const filteredProducts = productsData?.products?.filter((product: TMEProduct) => {
+    if (!productSearchTerm) return true;
+    const searchLower = productSearchTerm.toLowerCase();
+    return (
+      product.Description.toLowerCase().includes(searchLower) ||
+      product.Producer.toLowerCase().includes(searchLower) ||
+      product.Symbol.toLowerCase().includes(searchLower) ||
+      product.Category.toLowerCase().includes(searchLower)
+    );
+  }) || [];
 
   const toggleCategory = (categoryId: number) => {
     const newExpanded = new Set(expandedCategories);
@@ -381,11 +394,24 @@ export function TMEBrowser({ user }: TMEBrowserProps) {
                 {/* Product Preview */}
                 <Card>
                   <CardHeader>
-                    <CardTitle>
-                      {selectedCategory ? (
-                        <span>Products in: {selectedCategory.NameEn || selectedCategory.Name}</span>
-                      ) : (
-                        <span>Select a category to preview products</span>
+                    <CardTitle className="flex items-center justify-between">
+                      <span>
+                        {selectedCategory ? (
+                          `Products in: ${selectedCategory.NameEn || selectedCategory.Name}`
+                        ) : (
+                          "Select a category to preview products"
+                        )}
+                      </span>
+                      {selectedCategory && (
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <Input
+                            placeholder="Search products..."
+                            value={productSearchTerm}
+                            onChange={(e) => setProductSearchTerm(e.target.value)}
+                            className="pl-10 w-64"
+                          />
+                        </div>
                       )}
                     </CardTitle>
                   </CardHeader>
@@ -396,8 +422,9 @@ export function TMEBrowser({ user }: TMEBrowserProps) {
                       ) : (
                         <ScrollArea className="h-96">
                           <div className="space-y-3">
-                            {productsData?.products?.map((product: TMEProduct) => (
-                              <div key={product.Symbol} className="border rounded p-3 hover:bg-gray-50">
+                            {filteredProducts.length > 0 ? (
+                              filteredProducts.map((product: TMEProduct) => (
+                                <div key={product.Symbol} className="border rounded p-3 hover:bg-gray-50">
                                 <div className="flex items-start space-x-3">
                                   {product.Photo && (
                                     <img 
@@ -417,7 +444,13 @@ export function TMEBrowser({ user }: TMEBrowserProps) {
                                   </div>
                                 </div>
                               </div>
-                            ))}
+                              ))
+                            ) : (
+                              <div className="text-center py-8 text-gray-500">
+                                <Package className="w-8 h-8 mx-auto mb-2 text-gray-300" />
+                                <p>No products found matching "{productSearchTerm}"</p>
+                              </div>
+                            )}
                           </div>
                         </ScrollArea>
                       )
