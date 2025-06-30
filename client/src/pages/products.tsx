@@ -521,14 +521,9 @@ export function Products({ user }: ProductsProps) {
                           {formatCurrency(product.salePrice)}
                         </td>
                         <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-900">
-                          {product.stock === 0 && product.supplier === "TME" ? (
-                            <div className="flex items-center space-x-1">
-                              <span className="text-gray-500">Unknown</span>
-                              <span className="text-xs text-gray-400" title="TME stock data requires special API permissions">⚠️</span>
-                            </div>
-                          ) : (
-                            product.stock
-                          )}
+                          <span className={product.stock === 0 ? "text-red-600" : "text-gray-900"}>
+                            {product.stock.toLocaleString()}
+                          </span>
                         </td>
                         <td className="px-2 py-3 whitespace-nowrap">
                           <Badge 
