@@ -304,6 +304,8 @@ export function ProductModal({ isOpen, onClose, product }: ProductModalProps) {
                   <Input 
                     id="weight"
                     type="number"
+                    step="0.01"
+                    min="0"
                     {...form.register("weight")}
                     className="mt-1"
                   />
