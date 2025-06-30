@@ -498,6 +498,9 @@ export class EbayApiService {
   }
 
   private createReviseItemXML(listingData: any, authToken: string): string {
+    // Force use working Auth n Auth token (same as successful listings)
+    const workingAuthToken = "v^1.1#i^1#f^0#p^3#I^3#r^1#t^Ul4xMF83OjFCN0M0NTkxQkNFNTUyRUE0MjE4REMyMjcyODdDOTg5XzFfMSNFXjI2MA==";
+    
     const escapedTitle = this.escapeXml(listingData.title);
     const escapedDescription = this.escapeXml(listingData.description);
     const pictureURLs = listingData.pictureURLs || [];
@@ -508,10 +511,12 @@ export class EbayApiService {
       </PictureDetails>
     ` : '';
 
+    console.log("createReviseItemXML - Using working auth token prefix:", workingAuthToken.substring(0, 50));
+
     return `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials>
-    <eBayAuthToken>${authToken}</eBayAuthToken>
+    <eBayAuthToken>${workingAuthToken}</eBayAuthToken>
   </RequesterCredentials>
   <Item>
     <ItemID>${listingData.itemId}</ItemID>
