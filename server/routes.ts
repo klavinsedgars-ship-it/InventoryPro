@@ -551,6 +551,86 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // TME Update All Stock endpoint
+  app.post("/api/tme/update-all-stock", requireAuth, async (req, res) => {
+    try {
+      console.log("Starting comprehensive TME stock update for all products...");
+      
+      const { tmeApi } = await import("./tme-api");
+      
+      // Get all TME products
+      const allProducts = await storage.getProducts();
+      const tmeProducts = allProducts.filter(p => p.supplier === "TME" && p.supplierProductId);
+      
+      if (tmeProducts.length === 0) {
+        return res.json({ success: true, message: "No TME products found to update" });
+      }
+
+      console.log(`Found ${tmeProducts.length} TME products to update stock data`);
+      
+      const symbols = tmeProducts.map(p => p.supplierProductId!);
+      let updatedCount = 0;
+      let failedCount = 0;
+
+      // Process in smaller batches to avoid rate limits
+      const batchSize = 3;
+      for (let i = 0; i < symbols.length; i += batchSize) {
+        const batch = symbols.slice(i, i + batchSize);
+        
+        try {
+          console.log(`Processing stock batch ${Math.floor(i/batchSize) + 1}: ${batch.join(", ")}`);
+          
+          const stocks = await tmeApi.getProductStock(batch);
+          
+          for (const stock of stocks) {
+            try {
+              const product = tmeProducts.find(p => p.supplierProductId === stock.Symbol);
+              if (product && stock.Amount !== undefined) {
+                await storage.updateProduct(product.id, { 
+                  stock: stock.Amount,
+                  status: stock.Amount > 0 ? "in_stock" : "out_of_stock"
+                });
+                console.log(`✅ Updated ${stock.Symbol}: ${stock.Amount} units`);
+                updatedCount++;
+              }
+            } catch (error) {
+              console.error(`Failed to update product ${stock.Symbol}:`, error);
+              failedCount++;
+            }
+          }
+          
+          // Add delay between batches to respect rate limits
+          if (i + batchSize < symbols.length) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+          
+        } catch (error) {
+          console.error(`Batch failed for symbols ${batch.join(", ")}:`, error);
+          failedCount += batch.length;
+        }
+      }
+
+      const message = `Stock update completed: ${updatedCount} products updated, ${failedCount} failed`;
+      console.log(message);
+      
+      return res.json({
+        success: true,
+        message,
+        updatedCount,
+        failedCount,
+        totalProcessed: tmeProducts.length
+      });
+      
+    } catch (error) {
+      console.error('TME stock update error:', error);
+      return res.status(500).json({
+        error: 'Failed to update TME stock data',
+        message: (error as Error).message,
+        success: false
+      });
+    }
+  });
+
   // TME Test Stock endpoint
   app.post("/api/tme/test-stock", requireAuth, async (req, res) => {
     try {
