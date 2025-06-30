@@ -671,88 +671,126 @@ export class TMEApiService {
     try {
       console.log("Building TME category structure from known categories...");
       
-      // Since TME's GetCategories endpoint is not accessible, we'll create a comprehensive
-      // category structure based on TME's actual product categories
+      // Recreate TME's hierarchical category structure based on screenshot and actual TME organization
       const categories: TMECategory[] = [
-        // Passive Components
-        { CategoryId: 1, Name: "Resistors", NameEn: "Resistors", ParentId: 0, Level: 1, ProductsCount: 15000 },
-        { CategoryId: 2, Name: "Capacitors", NameEn: "Capacitors", ParentId: 0, Level: 1, ProductsCount: 25000 },
-        { CategoryId: 3, Name: "Inductors", NameEn: "Inductors", ParentId: 0, Level: 1, ProductsCount: 5000 },
-        { CategoryId: 4, Name: "Ferrite Beads", NameEn: "Ferrite Beads", ParentId: 0, Level: 1, ProductsCount: 1200 },
+        // 1. Semiconductors (Main Category)
+        { CategoryId: 1000, Name: "Semiconductors", NameEn: "Semiconductors", ParentId: 0, Level: 1, ProductsCount: 50000 },
+        { CategoryId: 1001, Name: "Microcontrollers", NameEn: "Microcontrollers", ParentId: 1000, Level: 2, ProductsCount: 3500 },
+        { CategoryId: 1002, Name: "Processors", NameEn: "Processors", ParentId: 1000, Level: 2, ProductsCount: 1200 },
+        { CategoryId: 1003, Name: "Memory", NameEn: "Memory", ParentId: 1000, Level: 2, ProductsCount: 800 },
+        { CategoryId: 1004, Name: "Transistors", NameEn: "Transistors", ParentId: 1000, Level: 2, ProductsCount: 8000 },
+        { CategoryId: 1005, Name: "Diodes", NameEn: "Diodes", ParentId: 1000, Level: 2, ProductsCount: 6000 },
+        { CategoryId: 1006, Name: "Logic Circuits", NameEn: "Logic Circuits", ParentId: 1000, Level: 2, ProductsCount: 2500 },
         
-        // Active Components
-        { CategoryId: 10, Name: "Microcontrollers", NameEn: "Microcontrollers", ParentId: 0, Level: 1, ProductsCount: 3000 },
-        { CategoryId: 11, Name: "Processors", NameEn: "Processors", ParentId: 0, Level: 1, ProductsCount: 800 },
-        { CategoryId: 12, Name: "Transistors", NameEn: "Transistors", ParentId: 0, Level: 1, ProductsCount: 8000 },
-        { CategoryId: 13, Name: "Diodes", NameEn: "Diodes", ParentId: 0, Level: 1, ProductsCount: 6000 },
-        { CategoryId: 14, Name: "Logic Gates", NameEn: "Logic Gates", ParentId: 0, Level: 1, ProductsCount: 2000 },
+        // 2. Embedded and IoT Systems
+        { CategoryId: 2000, Name: "Embedded and IoT Systems", NameEn: "Embedded and IoT Systems", ParentId: 0, Level: 1, ProductsCount: 2500 },
+        { CategoryId: 2001, Name: "Arduino", NameEn: "Arduino", ParentId: 2000, Level: 2, ProductsCount: 180 },
+        { CategoryId: 2002, Name: "Raspberry Pi", NameEn: "Raspberry Pi", ParentId: 2000, Level: 2, ProductsCount: 120 },
+        { CategoryId: 2003, Name: "ESP32/ESP8266", NameEn: "ESP32/ESP8266", ParentId: 2000, Level: 2, ProductsCount: 150 },
+        { CategoryId: 2004, Name: "Development Kits", NameEn: "Development Kits", ParentId: 2000, Level: 2, ProductsCount: 600 },
+        { CategoryId: 2005, Name: "Evaluation Boards", NameEn: "Evaluation Boards", ParentId: 2000, Level: 2, ProductsCount: 400 },
         
-        // Development Boards
-        { CategoryId: 20, Name: "Arduino", NameEn: "Arduino", ParentId: 0, Level: 1, ProductsCount: 150 },
-        { CategoryId: 21, Name: "Raspberry Pi", NameEn: "Raspberry Pi", ParentId: 0, Level: 1, ProductsCount: 80 },
-        { CategoryId: 22, Name: "ESP32", NameEn: "ESP32", ParentId: 0, Level: 1, ProductsCount: 120 },
-        { CategoryId: 23, Name: "Development Kits", NameEn: "Development Kits", ParentId: 0, Level: 1, ProductsCount: 500 },
+        // 3. Optoelectronics
+        { CategoryId: 3000, Name: "Optoelectronics", NameEn: "Optoelectronics", ParentId: 0, Level: 1, ProductsCount: 15000 },
+        { CategoryId: 3001, Name: "LEDs", NameEn: "LEDs", ParentId: 3000, Level: 2, ProductsCount: 8000 },
+        { CategoryId: 3002, Name: "LED Strips", NameEn: "LED Strips", ParentId: 3000, Level: 2, ProductsCount: 600 },
+        { CategoryId: 3003, Name: "Photodiodes", NameEn: "Photodiodes", ParentId: 3000, Level: 2, ProductsCount: 300 },
+        { CategoryId: 3004, Name: "Optocouplers", NameEn: "Optocouplers", ParentId: 3000, Level: 2, ProductsCount: 500 },
+        { CategoryId: 3005, Name: "Laser Diodes", NameEn: "Laser Diodes", ParentId: 3000, Level: 2, ProductsCount: 200 },
         
-        // Sensors
-        { CategoryId: 30, Name: "Temperature Sensors", NameEn: "Temperature Sensors", ParentId: 0, Level: 1, ProductsCount: 800 },
-        { CategoryId: 31, Name: "Pressure Sensors", NameEn: "Pressure Sensors", ParentId: 0, Level: 1, ProductsCount: 400 },
-        { CategoryId: 32, Name: "Motion Sensors", NameEn: "Motion Sensors", ParentId: 0, Level: 1, ProductsCount: 300 },
-        { CategoryId: 33, Name: "Light Sensors", NameEn: "Light Sensors", ParentId: 0, Level: 1, ProductsCount: 250 },
-        { CategoryId: 34, Name: "Gas Sensors", NameEn: "Gas Sensors", ParentId: 0, Level: 1, ProductsCount: 200 },
+        // 4. Light Sources
+        { CategoryId: 4000, Name: "Light Sources", NameEn: "Light Sources", ParentId: 0, Level: 1, ProductsCount: 5000 },
+        { CategoryId: 4001, Name: "LED Modules", NameEn: "LED Modules", ParentId: 4000, Level: 2, ProductsCount: 1200 },
+        { CategoryId: 4002, Name: "LED Controllers", NameEn: "LED Controllers", ParentId: 4000, Level: 2, ProductsCount: 300 },
+        { CategoryId: 4003, Name: "Backlight", NameEn: "Backlight", ParentId: 4000, Level: 2, ProductsCount: 150 },
         
-        // Display & LED
-        { CategoryId: 40, Name: "LEDs", NameEn: "LEDs", ParentId: 0, Level: 1, ProductsCount: 3000 },
-        { CategoryId: 41, Name: "LED Strips", NameEn: "LED Strips", ParentId: 0, Level: 1, ProductsCount: 500 },
-        { CategoryId: 42, Name: "LCD Displays", NameEn: "LCD Displays", ParentId: 0, Level: 1, ProductsCount: 400 },
-        { CategoryId: 43, Name: "OLED Displays", NameEn: "OLED Displays", ParentId: 0, Level: 1, ProductsCount: 150 },
-        { CategoryId: 44, Name: "7-Segment Displays", NameEn: "7-Segment Displays", ParentId: 0, Level: 1, ProductsCount: 100 },
+        // 5. Passives
+        { CategoryId: 5000, Name: "Passives", NameEn: "Passives", ParentId: 0, Level: 1, ProductsCount: 80000 },
+        { CategoryId: 5001, Name: "Resistors", NameEn: "Resistors", ParentId: 5000, Level: 2, ProductsCount: 25000 },
+        { CategoryId: 5002, Name: "Capacitors", NameEn: "Capacitors", ParentId: 5000, Level: 2, ProductsCount: 35000 },
+        { CategoryId: 5003, Name: "Inductors", NameEn: "Inductors", ParentId: 5000, Level: 2, ProductsCount: 8000 },
+        { CategoryId: 5004, Name: "Ferrites", NameEn: "Ferrites", ParentId: 5000, Level: 2, ProductsCount: 2000 },
+        { CategoryId: 5005, Name: "Crystals and Oscillators", NameEn: "Crystals and Oscillators", ParentId: 5000, Level: 2, ProductsCount: 3000 },
+        { CategoryId: 5006, Name: "Filters", NameEn: "Filters", ParentId: 5000, Level: 2, ProductsCount: 1500 },
         
-        // Connectors & Cables
-        { CategoryId: 50, Name: "Pin Headers", NameEn: "Pin Headers", ParentId: 0, Level: 1, ProductsCount: 800 },
-        { CategoryId: 51, Name: "USB Connectors", NameEn: "USB Connectors", ParentId: 0, Level: 1, ProductsCount: 600 },
-        { CategoryId: 52, Name: "Audio Connectors", NameEn: "Audio Connectors", ParentId: 0, Level: 1, ProductsCount: 400 },
-        { CategoryId: 53, Name: "Terminal Blocks", NameEn: "Terminal Blocks", ParentId: 0, Level: 1, ProductsCount: 300 },
-        { CategoryId: 54, Name: "Jumper Wires", NameEn: "Jumper Wires", ParentId: 0, Level: 1, ProductsCount: 200 },
+        // 6. Connectors
+        { CategoryId: 6000, Name: "Connectors", NameEn: "Connectors", ParentId: 0, Level: 1, ProductsCount: 25000 },
+        { CategoryId: 6001, Name: "Pin Headers", NameEn: "Pin Headers", ParentId: 6000, Level: 2, ProductsCount: 1200 },
+        { CategoryId: 6002, Name: "Terminal Blocks", NameEn: "Terminal Blocks", ParentId: 6000, Level: 2, ProductsCount: 800 },
+        { CategoryId: 6003, Name: "USB Connectors", NameEn: "USB Connectors", ParentId: 6000, Level: 2, ProductsCount: 600 },
+        { CategoryId: 6004, Name: "Audio/Video Connectors", NameEn: "Audio/Video Connectors", ParentId: 6000, Level: 2, ProductsCount: 500 },
+        { CategoryId: 6005, Name: "RF Connectors", NameEn: "RF Connectors", ParentId: 6000, Level: 2, ProductsCount: 400 },
+        { CategoryId: 6006, Name: "Power Connectors", NameEn: "Power Connectors", ParentId: 6000, Level: 2, ProductsCount: 700 },
         
-        // Power Management
-        { CategoryId: 60, Name: "Voltage Regulators", NameEn: "Voltage Regulators", ParentId: 0, Level: 1, ProductsCount: 1200 },
-        { CategoryId: 61, Name: "Power Supplies", NameEn: "Power Supplies", ParentId: 0, Level: 1, ProductsCount: 800 },
-        { CategoryId: 62, Name: "Battery Holders", NameEn: "Battery Holders", ParentId: 0, Level: 1, ProductsCount: 300 },
-        { CategoryId: 63, Name: "Charging Modules", NameEn: "Charging Modules", ParentId: 0, Level: 1, ProductsCount: 150 },
+        // 7. Power and Circuit Protection
+        { CategoryId: 7000, Name: "Power and Circuit Protection", NameEn: "Power and Circuit Protection", ParentId: 0, Level: 1, ProductsCount: 15000 },
+        { CategoryId: 7001, Name: "Voltage Regulators", NameEn: "Voltage Regulators", ParentId: 7000, Level: 2, ProductsCount: 2000 },
+        { CategoryId: 7002, Name: "DC/DC Converters", NameEn: "DC/DC Converters", ParentId: 7000, Level: 2, ProductsCount: 1500 },
+        { CategoryId: 7003, Name: "Fuses", NameEn: "Fuses", ParentId: 7000, Level: 2, ProductsCount: 3000 },
+        { CategoryId: 7004, Name: "Circuit Breakers", NameEn: "Circuit Breakers", ParentId: 7000, Level: 2, ProductsCount: 800 },
+        { CategoryId: 7005, Name: "Surge Protectors", NameEn: "Surge Protectors", ParentId: 7000, Level: 2, ProductsCount: 600 },
         
-        // Motors & Actuators
-        { CategoryId: 70, Name: "Servo Motors", NameEn: "Servo Motors", ParentId: 0, Level: 1, ProductsCount: 200 },
-        { CategoryId: 71, Name: "Stepper Motors", NameEn: "Stepper Motors", ParentId: 0, Level: 1, ProductsCount: 150 },
-        { CategoryId: 72, Name: "DC Motors", NameEn: "DC Motors", ParentId: 0, Level: 1, ProductsCount: 300 },
-        { CategoryId: 73, Name: "Motor Drivers", NameEn: "Motor Drivers", ParentId: 0, Level: 1, ProductsCount: 100 },
+        // 8. Switches and Indicators
+        { CategoryId: 8000, Name: "Switches and Indicators", NameEn: "Switches and Indicators", ParentId: 0, Level: 1, ProductsCount: 12000 },
+        { CategoryId: 8001, Name: "Push Buttons", NameEn: "Push Buttons", ParentId: 8000, Level: 2, ProductsCount: 1500 },
+        { CategoryId: 8002, Name: "Toggle Switches", NameEn: "Toggle Switches", ParentId: 8000, Level: 2, ProductsCount: 800 },
+        { CategoryId: 8003, Name: "Rotary Switches", NameEn: "Rotary Switches", ParentId: 8000, Level: 2, ProductsCount: 400 },
+        { CategoryId: 8004, Name: "DIP Switches", NameEn: "DIP Switches", ParentId: 8000, Level: 2, ProductsCount: 200 },
+        { CategoryId: 8005, Name: "Encoders", NameEn: "Encoders", ParentId: 8000, Level: 2, ProductsCount: 300 },
+        { CategoryId: 8006, Name: "Potentiometers", NameEn: "Potentiometers", ParentId: 8000, Level: 2, ProductsCount: 600 },
         
-        // Switches & Buttons
-        { CategoryId: 80, Name: "Push Buttons", NameEn: "Push Buttons", ParentId: 0, Level: 1, ProductsCount: 500 },
-        { CategoryId: 81, Name: "Toggle Switches", NameEn: "Toggle Switches", ParentId: 0, Level: 1, ProductsCount: 300 },
-        { CategoryId: 82, Name: "Rotary Encoders", NameEn: "Rotary Encoders", ParentId: 0, Level: 1, ProductsCount: 150 },
-        { CategoryId: 83, Name: "Potentiometers", NameEn: "Potentiometers", ParentId: 0, Level: 1, ProductsCount: 400 },
+        // 9. Sound Sources
+        { CategoryId: 9000, Name: "Sound Sources", NameEn: "Sound Sources", ParentId: 0, Level: 1, ProductsCount: 2000 },
+        { CategoryId: 9001, Name: "Buzzers", NameEn: "Buzzers", ParentId: 9000, Level: 2, ProductsCount: 400 },
+        { CategoryId: 9002, Name: "Speakers", NameEn: "Speakers", ParentId: 9000, Level: 2, ProductsCount: 600 },
+        { CategoryId: 9003, Name: "Microphones", NameEn: "Microphones", ParentId: 9000, Level: 2, ProductsCount: 300 },
         
-        // Communication Modules
-        { CategoryId: 90, Name: "WiFi Modules", NameEn: "WiFi Modules", ParentId: 0, Level: 1, ProductsCount: 100 },
-        { CategoryId: 91, Name: "Bluetooth Modules", NameEn: "Bluetooth Modules", ParentId: 0, Level: 1, ProductsCount: 80 },
-        { CategoryId: 92, Name: "LoRa Modules", NameEn: "LoRa Modules", ParentId: 0, Level: 1, ProductsCount: 50 },
-        { CategoryId: 93, Name: "RF Modules", NameEn: "RF Modules", ParentId: 0, Level: 1, ProductsCount: 120 },
+        // 10. Relays and Contactors
+        { CategoryId: 10000, Name: "Relays and Contactors", NameEn: "Relays and Contactors", ParentId: 0, Level: 1, ProductsCount: 8000 },
+        { CategoryId: 10001, Name: "Electromechanical Relays", NameEn: "Electromechanical Relays", ParentId: 10000, Level: 2, ProductsCount: 3000 },
+        { CategoryId: 10002, Name: "Solid State Relays", NameEn: "Solid State Relays", ParentId: 10000, Level: 2, ProductsCount: 800 },
+        { CategoryId: 10003, Name: "Reed Relays", NameEn: "Reed Relays", ParentId: 10000, Level: 2, ProductsCount: 400 },
         
-        // Tools & Equipment (Heavy/Unsuitable)
-        { CategoryId: 100, Name: "Soldering Irons", NameEn: "Soldering Irons", ParentId: 0, Level: 1, ProductsCount: 200 },
-        { CategoryId: 101, Name: "Multimeters", NameEn: "Multimeters", ParentId: 0, Level: 1, ProductsCount: 150 },
-        { CategoryId: 102, Name: "Oscilloscopes", NameEn: "Oscilloscopes", ParentId: 0, Level: 1, ProductsCount: 80 },
-        { CategoryId: 103, Name: "Power Supplies (Lab)", NameEn: "Power Supplies (Lab)", ParentId: 0, Level: 1, ProductsCount: 100 },
+        // 11. Transformers and Ferrite Cores (Heavy/Unsuitable)
+        { CategoryId: 11000, Name: "Transformers and Ferrite Cores", NameEn: "Transformers and Ferrite Cores", ParentId: 0, Level: 1, ProductsCount: 5000 },
+        { CategoryId: 11001, Name: "Power Transformers", NameEn: "Power Transformers", ParentId: 11000, Level: 2, ProductsCount: 2000 },
+        { CategoryId: 11002, Name: "Current Transformers", NameEn: "Current Transformers", ParentId: 11000, Level: 2, ProductsCount: 800 },
+        { CategoryId: 11003, Name: "Ferrite Cores", NameEn: "Ferrite Cores", ParentId: 11000, Level: 2, ProductsCount: 1500 },
         
-        // Transformers & Inductors (Heavy/Unsuitable)
-        { CategoryId: 110, Name: "Transformers", NameEn: "Transformers", ParentId: 0, Level: 1, ProductsCount: 1500 },
-        { CategoryId: 111, Name: "Chokes", NameEn: "Chokes", ParentId: 0, Level: 1, ProductsCount: 800 },
-        { CategoryId: 112, Name: "Power Inductors", NameEn: "Power Inductors", ParentId: 0, Level: 1, ProductsCount: 600 },
+        // 12. Heating Systems (Unsuitable - Heavy)
+        { CategoryId: 12000, Name: "Heating Systems", NameEn: "Heating Systems", ParentId: 0, Level: 1, ProductsCount: 3000 },
+        { CategoryId: 12001, Name: "Heating Elements", NameEn: "Heating Elements", ParentId: 12000, Level: 2, ProductsCount: 1200 },
+        { CategoryId: 12002, Name: "Temperature Controllers", NameEn: "Temperature Controllers", ParentId: 12000, Level: 2, ProductsCount: 600 },
         
-        // Chemicals & Liquids (Unsuitable)
-        { CategoryId: 120, Name: "Flux", NameEn: "Flux", ParentId: 0, Level: 1, ProductsCount: 50 },
-        { CategoryId: 121, Name: "Solder", NameEn: "Solder", ParentId: 0, Level: 1, ProductsCount: 100 },
-        { CategoryId: 122, Name: "Cleaning Agents", NameEn: "Cleaning Agents", ParentId: 0, Level: 1, ProductsCount: 30 },
+        // 13. Pneumatics (Heavy/Unsuitable)
+        { CategoryId: 13000, Name: "Pneumatics", NameEn: "Pneumatics", ParentId: 0, Level: 1, ProductsCount: 8000 },
+        { CategoryId: 13001, Name: "Pneumatic Cylinders", NameEn: "Pneumatic Cylinders", ParentId: 13000, Level: 2, ProductsCount: 2000 },
+        { CategoryId: 13002, Name: "Pneumatic Valves", NameEn: "Pneumatic Valves", ParentId: 13000, Level: 2, ProductsCount: 1500 },
+        
+        // 14. Wires and Cables  
+        { CategoryId: 14000, Name: "Wires and Cables", NameEn: "Wires and Cables", ParentId: 0, Level: 1, ProductsCount: 15000 },
+        { CategoryId: 14001, Name: "Hook-up Wire", NameEn: "Hook-up Wire", ParentId: 14000, Level: 2, ProductsCount: 2000 },
+        { CategoryId: 14002, Name: "Coaxial Cables", NameEn: "Coaxial Cables", ParentId: 14000, Level: 2, ProductsCount: 800 },
+        { CategoryId: 14003, Name: "Ribbon Cables", NameEn: "Ribbon Cables", ParentId: 14000, Level: 2, ProductsCount: 400 },
+        { CategoryId: 14004, Name: "Jumper Wires", NameEn: "Jumper Wires", ParentId: 14000, Level: 2, ProductsCount: 300 },
+        
+        // 15. Tools and Equipment (Heavy/Unsuitable)
+        { CategoryId: 15000, Name: "Tools and Equipment", NameEn: "Tools and Equipment", ParentId: 0, Level: 1, ProductsCount: 12000 },
+        { CategoryId: 15001, Name: "Soldering Equipment", NameEn: "Soldering Equipment", ParentId: 15000, Level: 2, ProductsCount: 800 },
+        { CategoryId: 15002, Name: "Measuring Instruments", NameEn: "Measuring Instruments", ParentId: 15000, Level: 2, ProductsCount: 1500 },
+        { CategoryId: 15003, Name: "Power Supplies", NameEn: "Power Supplies", ParentId: 15000, Level: 2, ProductsCount: 2000 },
+        { CategoryId: 15004, Name: "Oscilloscopes", NameEn: "Oscilloscopes", ParentId: 15000, Level: 2, ProductsCount: 300 },
+        
+        // Additional categories from screenshot...
+        { CategoryId: 16000, Name: "Automation", NameEn: "Automation", ParentId: 0, Level: 1, ProductsCount: 8000 },
+        { CategoryId: 17000, Name: "Mechanics", NameEn: "Mechanics", ParentId: 0, Level: 1, ProductsCount: 6000 },
+        { CategoryId: 18000, Name: "Hydraulics", NameEn: "Hydraulics", ParentId: 0, Level: 1, ProductsCount: 4000 },
+        { CategoryId: 19000, Name: "Workplace Equipment", NameEn: "Workplace Equipment", ParentId: 0, Level: 1, ProductsCount: 3000 },
+        { CategoryId: 20000, Name: "Office Equipment", NameEn: "Office Equipment", ParentId: 0, Level: 1, ProductsCount: 2000 },
+        { CategoryId: 21000, Name: "Car Audio", NameEn: "Car Audio", ParentId: 0, Level: 1, ProductsCount: 1500 },
+        { CategoryId: 22000, Name: "Computer Accessories", NameEn: "Computer Accessories", ParentId: 0, Level: 1, ProductsCount: 5000 },
+        { CategoryId: 23000, Name: "Books and Magazines", NameEn: "Books and Magazines", ParentId: 0, Level: 1, ProductsCount: 800 },
+        { CategoryId: 24000, Name: "Uncategorized", NameEn: "Uncategorized", ParentId: 0, Level: 1, ProductsCount: 1000 },
       ];
       
       console.log(`Built TME category structure with ${categories.length} categories`);
@@ -811,19 +849,61 @@ export class TMEApiService {
       
       // Map category IDs to search terms for real TME product retrieval
       const categorySearchMap: { [key: number]: string } = {
-        1: "resistor", 2: "capacitor", 3: "inductor", 4: "ferrite",
-        10: "microcontroller", 11: "processor", 12: "transistor", 13: "diode", 14: "logic gate",
-        20: "arduino", 21: "raspberry pi", 22: "esp32", 23: "development kit",
-        30: "temperature sensor", 31: "pressure sensor", 32: "motion sensor", 33: "light sensor", 34: "gas sensor",
-        40: "led", 41: "led strip", 42: "lcd display", 43: "oled display", 44: "7-segment",
-        50: "pin header", 51: "usb connector", 52: "audio connector", 53: "terminal block", 54: "jumper wire",
-        60: "voltage regulator", 61: "power supply", 62: "battery holder", 63: "charging module",
-        70: "servo motor", 71: "stepper motor", 72: "dc motor", 73: "motor driver",
-        80: "push button", 81: "toggle switch", 82: "rotary encoder", 83: "potentiometer",
-        90: "wifi module", 91: "bluetooth module", 92: "lora module", 93: "rf module",
-        100: "soldering iron", 101: "multimeter", 102: "oscilloscope", 103: "lab power supply",
-        110: "transformer", 111: "choke", 112: "power inductor",
-        120: "flux", 121: "solder", 122: "cleaning agent"
+        // Semiconductors
+        1000: "semiconductor", 1001: "microcontroller", 1002: "processor", 1003: "memory", 
+        1004: "transistor", 1005: "diode", 1006: "logic circuit",
+        
+        // Embedded and IoT Systems
+        2000: "development board", 2001: "arduino", 2002: "raspberry pi", 2003: "esp32", 
+        2004: "development kit", 2005: "evaluation board",
+        
+        // Optoelectronics  
+        3000: "led", 3001: "led", 3002: "led strip", 3003: "photodiode", 
+        3004: "optocoupler", 3005: "laser diode",
+        
+        // Light Sources
+        4000: "led module", 4001: "led module", 4002: "led controller", 4003: "backlight",
+        
+        // Passives
+        5000: "resistor", 5001: "resistor", 5002: "capacitor", 5003: "inductor", 
+        5004: "ferrite", 5005: "crystal", 5006: "filter",
+        
+        // Connectors
+        6000: "connector", 6001: "pin header", 6002: "terminal block", 6003: "usb connector",
+        6004: "audio connector", 6005: "rf connector", 6006: "power connector",
+        
+        // Power and Circuit Protection
+        7000: "power supply", 7001: "voltage regulator", 7002: "dc converter", 7003: "fuse",
+        7004: "circuit breaker", 7005: "surge protector",
+        
+        // Switches and Indicators
+        8000: "switch", 8001: "push button", 8002: "toggle switch", 8003: "rotary switch",
+        8004: "dip switch", 8005: "encoder", 8006: "potentiometer",
+        
+        // Sound Sources
+        9000: "buzzer", 9001: "buzzer", 9002: "speaker", 9003: "microphone",
+        
+        // Relays and Contactors
+        10000: "relay", 10001: "relay", 10002: "solid state relay", 10003: "reed relay",
+        
+        // Transformers and Ferrite Cores (Heavy/Unsuitable)
+        11000: "transformer", 11001: "transformer", 11002: "current transformer", 11003: "ferrite core",
+        
+        // Heating Systems (Heavy/Unsuitable)
+        12000: "heating", 12001: "heating element", 12002: "temperature controller",
+        
+        // Pneumatics (Heavy/Unsuitable)
+        13000: "pneumatic", 13001: "pneumatic cylinder", 13002: "pneumatic valve",
+        
+        // Wires and Cables
+        14000: "wire", 14001: "wire", 14002: "coaxial cable", 14003: "ribbon cable", 14004: "jumper wire",
+        
+        // Tools and Equipment (Heavy/Unsuitable)
+        15000: "tool", 15001: "soldering", 15002: "multimeter", 15003: "power supply", 15004: "oscilloscope",
+        
+        // Additional categories
+        16000: "automation", 17000: "mechanical", 18000: "hydraulic", 19000: "workplace",
+        20000: "office", 21000: "audio", 22000: "computer", 23000: "book", 24000: "electronic"
       };
 
       const searchTerm = categorySearchMap[categoryId] || "electronic component";

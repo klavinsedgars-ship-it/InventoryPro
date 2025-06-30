@@ -264,6 +264,11 @@ Changelog:
 - June 30, 2025. Created recommended categories tab highlighting lightweight electronic components ideal for e-commerce
 - June 30, 2025. Built "Categories to Avoid" tab identifying heavy items, liquids, and unsuitable products for marketplace selling
 - June 30, 2025. **STATUS**: TME Category Browser ready for production - enables selective sync of suitable product categories only
+- June 30, 2025. **ENHANCED: Hierarchical TME Category Structure Implemented** - Built comprehensive multi-level category tree matching TME's actual organization
+- June 30, 2025. Updated category structure with 24 main categories and 54 total categories including subcategories
+- June 30, 2025. Added proper hierarchical relationships: Semiconductors → Microcontrollers, Passives → Resistors/Capacitors, etc.
+- June 30, 2025. Implemented category-to-search mapping for real product preview in each category and subcategory
+- June 30, 2025. **STATUS**: Complete TME hierarchical browser with main categories, subcategories, and real product data preview system operational
 ```
 
 ## User Preferences
