@@ -1,3 +1,7 @@
+import dotenv from "dotenv";
+// Force load .env file to override any cached environment variables
+dotenv.config({ override: true });
+
 import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import MemoryStore from "memorystore";
