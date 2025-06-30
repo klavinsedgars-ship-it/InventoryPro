@@ -788,6 +788,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get TME API usage statistics
+  app.get("/api/tme/usage", async (req, res) => {
+    try {
+      const { tmeApi } = await import("./tme-api");
+      const usage = tmeApi.getApiUsage();
+      
+      res.json({
+        success: true,
+        usage: usage,
+        limits: {
+          daily: usage.dailyLimit,
+          perMinute: usage.rateLimitPerMinute
+        },
+        recommendations: usage.status === 'WARNING' ? [
+          "You've used over 80% of your daily limit",
+          "Consider reducing API calls or upgrading your TME plan"
+        ] : usage.status === 'LIMIT_EXCEEDED' ? [
+          "Daily limit exceeded - API calls will fail until tomorrow",
+          "Contact TME support to increase your daily limit"
+        ] : [
+          "API usage is within normal limits"
+        ]
+      });
+    } catch (error) {
+      console.error("Failed to get TME usage:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to get TME usage statistics"
+      });
+    }
+  });
+
   app.get("/api/tme/categories/:categoryId/products", async (req, res) => {
     try {
       const categoryId = parseInt(req.params.categoryId);
