@@ -533,6 +533,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Environment Debug endpoint
+  app.get("/api/debug/env", requireAuth, async (req, res) => {
+    res.json({
+      token_length: process.env.TME_API_TOKEN?.length || 0,
+      customer_number: process.env.TME_CUSTOMER_NUMBER || "not_set",
+      contact_number: process.env.TME_CONTACT_NUMBER || "not_set",
+      token_prefix: process.env.TME_API_TOKEN?.substring(0, 20) || "not_set"
+    });
+  });
+
   // TME API Debug endpoint
   app.get("/api/debug/tme", requireAuth, async (req, res) => {
     try {
