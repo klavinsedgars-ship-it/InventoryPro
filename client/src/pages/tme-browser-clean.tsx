@@ -99,10 +99,12 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   const queryClient = useQueryClient();
 
   // Fetch TME categories
-  const { data: categories = [], isLoading: categoriesLoading } = useQuery({
+  const { data: categoriesResponse, isLoading: categoriesLoading } = useQuery({
     queryKey: ["/api/tme/categories"],
     staleTime: 5 * 60 * 1000
   });
+
+  const categories = (categoriesResponse as any)?.categories || [];
 
   // Fetch products for selected category
   const { data: productsResponse, isLoading: productsLoading } = useQuery({
@@ -122,11 +124,13 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   // Sync selected products mutation
   const syncMutation = useMutation({
     mutationFn: async (data: { productSymbols: string[]; settings: SyncSettings }) => {
-      const response = await apiRequest("/api/tme/sync-selected", {
+      const response = await fetch("/api/tme/sync-selected", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data)
       });
-      return response;
+      if (!response.ok) throw new Error("Sync failed");
+      return response.json();
     },
     onSuccess: () => {
       toast({
@@ -173,7 +177,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   };
 
   const isProductSynced = (symbol: string): boolean => {
-    return existingProducts.some((p: any) => p.sku === symbol || p.supplierProductId === symbol);
+    return (existingProducts as any[]).some((p: any) => p.sku === symbol || p.supplierProductId === symbol);
   };
 
   const isSuitableProduct = (product: TMEProduct): boolean => {
@@ -199,7 +203,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     <div className="min-h-screen bg-gray-50">
       <Sidebar user={user} />
       <div className="ml-64">
-        <Header user={user} />
+        <Header title="TME Browser" />
         <main className="p-6">
           <div className="space-y-6">
             <div className="flex items-center justify-between">
