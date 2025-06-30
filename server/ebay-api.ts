@@ -2,6 +2,7 @@ import { storage } from "./storage";
 import { ebayOAuth } from "./ebay-oauth";
 import { generateEbayListing } from "./ebay-listing-template";
 import { calculateEbayStock } from "./stock-manager";
+import { findEbayCategoryForTMEProduct } from "./tme-ebay-category-mapping";
 
 interface EbayCredentials {
   appId: string;
@@ -186,11 +187,20 @@ export class EbayApiService {
         reason: stockInfo.limitReason
       });
 
+      // Automatically determine the best eBay category for this TME product
+      const categoryMapping = findEbayCategoryForTMEProduct(product);
+      console.log(`Category mapping for ${product.name}:`, {
+        productCategory: product.category,
+        suggestedEbayCategory: categoryMapping.categoryId,
+        categoryName: categoryMapping.categoryName,
+        confidence: categoryMapping.confidence
+      });
+
       // Prepare listing data for eBay Trading API
       const listingData = {
         title: listingDetails.title || templateData?.title || product.name,
         description: listingDetails.description || templateData?.htmlDescription || templateData?.description || product.description || `${product.name} - High quality electronics component`,
-        categoryId: listingDetails.categoryId || "175673", // Default electronics category
+        categoryId: listingDetails.categoryId || categoryMapping.categoryId, // Use automatically mapped category
         startPrice: listingDetails.startPrice || parseFloat(product.salePrice) || 0,
         quantity: listingDetails.quantity || ebayQuantity, // Use calculated eBay stock
         listingDuration: listingDetails.listingDuration || "Days_7",

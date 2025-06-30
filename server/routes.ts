@@ -3323,6 +3323,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Category Mapping Endpoints
+  
+  // Get all TME to eBay category mappings
+  app.get("/api/category-mappings", async (req, res) => {
+    try {
+      const { getAllCategoryMappings } = await import("./tme-ebay-category-mapping");
+      const mappings = getAllCategoryMappings();
+      
+      res.json({
+        success: true,
+        mappings: mappings
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: (error as Error).message
+      });
+    }
+  });
+
+  // Get category mapping for a specific product
+  app.get("/api/category-mappings/product/:productId", async (req, res) => {
+    try {
+      const productId = parseInt(req.params.productId);
+      const product = await storage.getProduct(productId);
+      
+      if (!product) {
+        return res.status(404).json({
+          success: false,
+          error: "Product not found"
+        });
+      }
+
+      const { findEbayCategoryForTMEProduct, getCategorySuggestions } = await import("./tme-ebay-category-mapping");
+      const bestMatch = findEbayCategoryForTMEProduct(product);
+      const suggestions = getCategorySuggestions(product);
+      
+      res.json({
+        success: true,
+        product: {
+          id: product.id,
+          name: product.name,
+          category: product.category
+        },
+        bestMatch: bestMatch,
+        suggestions: suggestions
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: (error as Error).message
+      });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
