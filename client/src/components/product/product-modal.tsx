@@ -357,7 +357,7 @@ export function ProductModal({ isOpen, onClose, product }: ProductModalProps) {
                   </div>
                 </div>
                 <Checkbox 
-                  checked={form.watch("listedOnEbay")}
+                  checked={form.watch("listedOnEbay") || false}
                   onCheckedChange={(checked) => form.setValue("listedOnEbay", !!checked)}
                 />
               </div>
@@ -373,7 +373,7 @@ export function ProductModal({ isOpen, onClose, product }: ProductModalProps) {
                   </div>
                 </div>
                 <Checkbox 
-                  checked={form.watch("listedOnAmazon")}
+                  checked={form.watch("listedOnAmazon") || false}
                   onCheckedChange={(checked) => form.setValue("listedOnAmazon", !!checked)}
                 />
               </div>
