@@ -418,56 +418,8 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                         </div>
                       ))}
                     </div>
-                    
-                    {totalPages > 1 && (
-                      <div className="flex items-center justify-between mt-6 py-4 border-t">
-                        <div className="flex items-center space-x-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setCurrentPage(1)}
-                            disabled={currentPage === 1}
-                          >
-                            First
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setCurrentPage(currentPage - 1)}
-                            disabled={currentPage === 1}
-                          >
-                            Previous
-                          </Button>
-                        </div>
-                        
-                        <div className="flex items-center space-x-2">
-                          <span className="text-sm text-gray-600">
-                            Page {currentPage} of {totalPages}
-                          </span>
-                        </div>
-                        
-                        <div className="flex items-center space-x-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setCurrentPage(currentPage + 1)}
-                            disabled={currentPage === totalPages}
-                          >
-                            Next
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setCurrentPage(totalPages)}
-                            disabled={currentPage === totalPages}
-                          >
-                            Last
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
+                  )}
+                </div>
               </TabsContent>
             </Tabs>
           </div>
