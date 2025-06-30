@@ -145,6 +145,29 @@ export const TME_EBAY_CATEGORY_MAPPINGS: CategoryMapping[] = [
     confidence: 7
   },
 
+  // Audio and Sound Equipment
+  {
+    tmeCategory: "Electromagnetic Sounders with Generator",
+    tmeCategoryKeywords: ["sound", "transducer", "siren", "buzzer", "alarm", "speaker", "sounder", "electromagnetic"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 9
+  },
+  {
+    tmeCategory: "Sound Equipment",
+    tmeCategoryKeywords: ["sound", "audio", "speaker", "microphone", "buzzer", "siren", "alarm", "transducer", "sounder"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other", 
+    confidence: 9
+  },
+  {
+    tmeCategory: "Speakers",
+    tmeCategoryKeywords: ["speaker", "woofer", "tweeter", "driver", "audio", "sound"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 8
+  },
+
   // Switches and Controls
   {
     tmeCategory: "Switches",
