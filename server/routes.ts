@@ -250,6 +250,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Apply dynamic pricing to all products
+  app.post("/api/pricing/apply-bulk", requireAuth, async (req, res) => {
+    try {
+      // Get all products
+      const products = await storage.getProducts();
+      
+      // Filter products with valid supplier prices (> 0)
+      const validProducts = products.filter(p => parseFloat(p.supplierPrice) > 0);
+      
+      let updatedCount = 0;
+      let errors: string[] = [];
+
+      for (const product of validProducts) {
+        try {
+          const pricingResult = calculateDynamicPrice(parseFloat(product.supplierPrice));
+          
+          if (!pricingResult.isValid) {
+            errors.push(`Product ${product.name}: ${pricingResult.errors.join(', ')}`);
+            continue;
+          }
+
+          // Update product with calculated pricing
+          await storage.updateProduct(product.id, {
+            calculatedPrice: pricingResult.finalPrice.toString(),
+            marginTier: pricingResult.marginTier,
+            marginPercentage: pricingResult.marginPercentage.toString(),
+            priceUpdatedAt: new Date(),
+            useCalculatedPrice: true,
+            salePrice: pricingResult.finalPrice.toString()
+          });
+          
+          updatedCount++;
+        } catch (error) {
+          errors.push(`Product ${product.name}: ${(error as Error).message}`);
+        }
+      }
+
+      res.json({
+        success: true,
+        updatedCount,
+        totalProducts: validProducts.length,
+        skippedProducts: products.length - validProducts.length,
+        errors,
+        message: `Successfully applied dynamic pricing to ${updatedCount} products`
+      });
+    } catch (error) {
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to apply bulk pricing" 
+      });
+    }
+  });
+
   // Create new pricing tier
   app.post("/api/pricing/tiers", async (req, res) => {
     try {
