@@ -535,6 +535,14 @@ export class EbayApiService {
     <ConditionID>1000</ConditionID>
     <DispatchTimeMax>3</DispatchTimeMax>
     ${pictureXML}
+    <ShippingDetails>
+      <ShippingType>Flat</ShippingType>
+      <ShippingServiceOptions>
+        <ShippingServicePriority>1</ShippingServicePriority>
+        <ShippingService>UK_RoyalMailSecondClassStandard</ShippingService>
+        <ShippingServiceCost currencyID="GBP">3.50</ShippingServiceCost>
+      </ShippingServiceOptions>
+    </ShippingDetails>
     <SellerProfiles>
       <SellerPaymentProfile>
         <PaymentProfileID>209734844019</PaymentProfileID>
@@ -873,7 +881,7 @@ export class EbayApiService {
     return policies;
   }
 
-  async updateProduct(productId: number, updateData?: Partial<EbayListingRequest>): Promise<EbayApiResponse> {
+  async updateProduct(productId: number, updateData?: Partial<EbayListingRequest>, forceDescriptionRefresh: boolean = true): Promise<EbayApiResponse> {
     try {
       // Get product data and eBay item ID
       const product = await storage.getProduct(productId);
@@ -896,10 +904,15 @@ export class EbayApiService {
       console.log("Generated listing template description length:", listingTemplate.htmlDescription.length);
       console.log("Generated template description preview:", listingTemplate.htmlDescription.substring(0, 200));
       
+      // Add unique timestamp to force eBay to recognize description changes
+      const timestamp = new Date().getTime();
+      const uniqueMarker = `<!-- Updated: ${timestamp} -->`;
+      const finalDescription = updateData?.description || (uniqueMarker + listingTemplate.htmlDescription);
+      
       const listingData = {
         itemId: product.ebayItemId,
         title: updateData?.title || listingTemplate.title,
-        description: updateData?.description || listingTemplate.htmlDescription,
+        description: finalDescription,
         startPrice: updateData?.startPrice || Number(product.salePrice),
         quantity: updateData?.quantity || product.stock,
         categoryId: updateData?.categoryId || "58277", // Electronics components
@@ -910,7 +923,9 @@ export class EbayApiService {
 
       console.log("Generated listing template description length:", listingTemplate.htmlDescription.length);
       console.log("Generated template description preview:", listingTemplate.htmlDescription.substring(0, 300));
-      console.log("Using description in update:", listingData.description === listingTemplate.htmlDescription ? "HTML template" : "Custom description");
+      console.log("Using description in update: HTML template with unique marker");
+      console.log("Final description length:", finalDescription.length);
+      console.log("Unique marker:", uniqueMarker);
 
       console.log("Updating eBay listing with data:", {
         itemId: listingData.itemId,
