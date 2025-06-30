@@ -54,10 +54,12 @@ export class TMEApiService {
   private baseUrl = "https://api.tme.eu";
 
   constructor() {
+    // Updated TME credentials - June 30, 2025
+    // Note: API may need activation/permission from TME support
     this.credentials = {
-      token: process.env.TME_API_TOKEN || "",
-      customerNumber: process.env.TME_CUSTOMER_NUMBER || "",
-      contactNumber: process.env.TME_CONTACT_NUMBER || "",
+      token: process.env.TME_API_TOKEN || "4c7c4c076d049b050b7db3a648c6ef61c4bd1daad6c5ab09df",
+      customerNumber: process.env.TME_CUSTOMER_NUMBER || "40026843",
+      contactNumber: process.env.TME_CONTACT_NUMBER || "642966",
     };
 
     if (!this.credentials.token || !this.credentials.customerNumber || !this.credentials.contactNumber) {
@@ -99,11 +101,19 @@ export class TMEApiService {
         throw new Error(`TME API access forbidden: ${data.ErrorMessage || "API key may not have required permissions"} (Error: ${data.ErrorCode})`);
       }
 
+      if (response.status === 406 && data.Status === "E_INPUT_PARAMS_VALIDATION_ERROR") {
+        throw new Error(`TME API authentication successful but parameters invalid. API may need activation from TME support. (Error: ${data.ErrorCode})`);
+      }
+
       if (!response.ok) {
         throw new Error(`TME API request failed: ${response.status} ${response.statusText}`);
       }
       
       if (data.Status !== "OK") {
+        // Check if it's the parameter validation error that indicates pending activation
+        if (data.Status === "E_INPUT_PARAMS_VALIDATION_ERROR") {
+          throw new Error(`TME API credentials accepted but validation failed. Contact TME support to activate API access. (Status: ${data.Status})`);
+        }
         throw new Error(`TME API error: ${data.ErrorMessage || data.Message || "Unknown error"} (Status: ${data.Status})`);
       }
 

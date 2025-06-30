@@ -1,10 +1,11 @@
 // TME API Debug Tool - Testing authentication methods
 
 export async function debugTMEAuthentication() {
+  // Updated TME credentials - June 30, 2025
   const credentials = {
-    token: process.env.TME_API_TOKEN || "",
-    customerNumber: process.env.TME_CUSTOMER_NUMBER || "",
-    contactNumber: process.env.TME_CONTACT_NUMBER || "",
+    token: process.env.TME_API_TOKEN || "4c7c4c076d049b050b7db3a648c6ef61c4bd1daad6c5ab09df",
+    customerNumber: process.env.TME_CUSTOMER_NUMBER || "40026843",
+    contactNumber: process.env.TME_CONTACT_NUMBER || "642966",
   };
 
   console.log("TME API Debug Information:");
@@ -124,10 +125,11 @@ export async function debugTMEAuthentication() {
 
 // Test function for specific search query
 export async function testTMESearch(query: string = "arduino") {
+  // Updated TME credentials - June 30, 2025
   const credentials = {
-    token: process.env.TME_API_TOKEN || "",
-    customerNumber: process.env.TME_CUSTOMER_NUMBER || "",
-    contactNumber: process.env.TME_CONTACT_NUMBER || "",
+    token: process.env.TME_API_TOKEN || "4c7c4c076d049b050b7db3a648c6ef61c4bd1daad6c5ab09df",
+    customerNumber: process.env.TME_CUSTOMER_NUMBER || "40026843",
+    contactNumber: process.env.TME_CONTACT_NUMBER || "642966",
   };
 
   // Based on TME API documentation - correct endpoint structure
