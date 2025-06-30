@@ -339,20 +339,27 @@ export class TMEApiService {
 
       // Get prices and stock for all products (full operation restored)
       const symbols = products.map(p => p.Symbol);
+      console.log('TME products being processed:', symbols.slice(0, 5)); // Debug: show first 5 symbols
       
       let priceMap = new Map();
       let stockMap = new Map();
       
+      // Handle prices and stock separately to avoid one failure breaking the other
       try {
-        const [prices, stocks] = await Promise.all([
-          this.getProductPrices(symbols),
-          this.getProductStock(symbols)
-        ]);
+        const prices = await this.getProductPrices(symbols);
         priceMap = new Map(prices.map(p => [p.Symbol, p]));
+        console.log('✅ Price map created with', priceMap.size, 'entries');
+        console.log('First 3 price entries:', Array.from(priceMap.entries()).slice(0, 3));
+      } catch (priceError) {
+        console.log("Price API calls failed:", (priceError as Error).message);
+      }
+      
+      try {
+        const stocks = await this.getProductStock(symbols);
         stockMap = new Map(stocks.map(s => [s.Symbol, s]));
-      } catch (priceStockError) {
-        console.log("Price/Stock API calls failed, continuing with product sync only:", (priceStockError as Error).message);
-        // Continue with empty maps - we still have product data
+        console.log('✅ Stock map created with', stockMap.size, 'entries');
+      } catch (stockError) {
+        console.log("Stock API calls failed:", (stockError as Error).message);
       }
 
       let processedCount = 0;
@@ -374,6 +381,13 @@ export class TMEApiService {
           // Get the price for this specific product (TME returns prices per quantity tier)
           // TME API returns price structure: {"Symbol":"A000005","PriceList":[{"Amount":1,"PriceValue":21.5}]}
           const supplierPrice = price?.PriceList?.[0]?.PriceValue || 0;
+          
+          // Debug logging for price extraction
+          if (tmeProduct.Symbol === "A000005" || tmeProduct.Symbol === "A000067") {
+            console.log(`Price extraction debug for ${tmeProduct.Symbol}:`);
+            console.log('- Price object:', JSON.stringify(price, null, 2));
+            console.log('- Extracted price value:', supplierPrice);
+          }
           
           // Create detailed product description from TME data
           const detailedDescription = this.createDetailedDescription(tmeProduct);
