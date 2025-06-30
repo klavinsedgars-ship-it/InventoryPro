@@ -180,6 +180,34 @@ export function Products({ user }: ProductsProps) {
     },
   });
 
+  const updateEbayListingMutation = useMutation({
+    mutationFn: async (productId: number) => {
+      const response = await apiRequest("POST", "/api/ebay/update", { productId });
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      if (data.success) {
+        toast({
+          title: "eBay Listing Updated",
+          description: "Product details successfully synced to eBay marketplace.",
+        });
+      } else {
+        toast({
+          title: "Update Failed",
+          description: data.error || "Failed to update eBay listing.",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Update Failed",
+        description: error.message || "Failed to update eBay listing.",
+        variant: "destructive",
+      });
+    },
+  });
+
   // Helper function to get product thumbnail
   const getProductThumbnail = (product: Product) => {
     if (product.imageUrl) {
@@ -557,6 +585,18 @@ export function Products({ user }: ProductsProps) {
                                     title="View on eBay"
                                   >
                                     <ExternalLink className="h-3 w-3 text-blue-500" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-4 w-4 p-0"
+                                    onClick={() => {
+                                      updateEbayListingMutation.mutate(product.id);
+                                    }}
+                                    disabled={updateEbayListingMutation.isPending}
+                                    title="Update eBay listing"
+                                  >
+                                    <RefreshCw className="h-3 w-3 text-blue-500" />
                                   </Button>
                                   <Button
                                     variant="ghost"

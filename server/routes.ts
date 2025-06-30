@@ -2467,6 +2467,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Update eBay listing endpoint
+  app.post("/api/ebay/update", requireAuth, async (req, res) => {
+    try {
+      const { productId, updateData } = req.body;
+      
+      if (!productId) {
+        return res.status(400).json({ 
+          success: false, 
+          error: "Product ID is required" 
+        });
+      }
+
+      console.log(`Updating eBay listing for product ${productId}`);
+      
+      const result = await ebayApi.updateProduct(productId, updateData);
+      
+      if (result.success) {
+        res.json({
+          success: true,
+          message: result.message,
+          itemId: result.itemId
+        });
+      } else {
+        res.status(400).json({
+          success: false,
+          error: result.message
+        });
+      }
+      
+    } catch (error) {
+      console.error("eBay update API error:", error);
+      res.status(500).json({ 
+        success: false, 
+        error: "Failed to update eBay listing" 
+      });
+    }
+  });
+
   app.get("/api/sync/logs", requireAuth, async (req, res) => {
     try {
       const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;

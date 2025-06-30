@@ -1025,8 +1025,7 @@ export class EbayApiService {
           return {
             success: false,
             message: `Failed to unlist "${product.name}" from eBay: Token expired. The product is still listed on eBay. Please refresh your eBay token to unlist products.`,
-            errors: [errorMessage],
-            tokenExpired: true
+            errors: [errorMessage]
           };
         }
         
