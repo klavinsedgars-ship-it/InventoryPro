@@ -798,21 +798,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`Fetching products for TME category ${categoryId}, page ${page}, limit ${limit}...`);
       const { tmeApi } = await import("./tme-api");
       
-      const result = await tmeApi.getProductsByCategory(categoryId, limit, offset);
-      
-      if (!result.success) {
-        return res.status(500).json(result);
-      }
+      const result = await tmeApi.getProductsByCategory(categoryId.toString(), page, limit);
       
       res.json({
         success: true,
         products: result.products,
         categoryId: categoryId,
-        totalProducts: result.totalProducts || result.products?.length || 0,
+        totalProducts: result.total || result.products?.length || 0,
         currentPage: page,
-        totalPages: Math.ceil((result.totalProducts || result.products?.length || 0) / limit),
-        hasMore: result.hasMore || false,
-        message: result.message
+        totalPages: Math.ceil((result.total || result.products?.length || 0) / limit),
+        hasMore: result.products.length >= limit,
+        message: `Found ${result.products.length} products for category ${categoryId}`
       });
       
     } catch (error) {
