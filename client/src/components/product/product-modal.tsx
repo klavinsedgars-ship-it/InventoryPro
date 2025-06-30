@@ -168,7 +168,7 @@ export function ProductModal({ isOpen, onClose, product }: ProductModalProps) {
       supplierPrice: data.supplierPrice,
       salePrice: data.salePrice,
       stock: parseInt(data.stock),
-      weight: data.weight ? parseInt(data.weight) : undefined,
+      weight: data.weight ? parseFloat(data.weight) : undefined,
     };
 
     if (product) {
