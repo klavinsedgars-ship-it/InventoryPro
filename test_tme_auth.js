@@ -3,7 +3,7 @@
  * Tests TME API with correct credentials and signature generation
  */
 
-const crypto = require('crypto');
+import crypto from 'crypto';
 
 // TME Credentials from user
 const credentials = {

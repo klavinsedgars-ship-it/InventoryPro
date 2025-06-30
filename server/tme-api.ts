@@ -178,13 +178,28 @@ export class TMEApiService {
     const responseText = await response.text();
     let data: TMEApiResponse<T>;
     
+    console.log(`🔍 TME API Response Debug:`, {
+      status: response.status,
+      statusText: response.statusText,
+      responseLength: responseText.length,
+      responsePreview: responseText.substring(0, 200)
+    });
+    
     try {
       data = JSON.parse(responseText) as TMEApiResponse<T>;
     } catch (parseError) {
+      console.error(`❌ TME API JSON parse error:`, parseError);
       throw new Error(`TME API returned invalid JSON: ${response.status} ${response.statusText}`);
     }
     
     if (!response.ok || data.Status !== "OK") {
+      console.error(`❌ TME API Error Details:`, {
+        status: data.Status,
+        errorMessage: data.ErrorMessage,
+        message: data.Message,
+        errorCode: data.ErrorCode,
+        errors: data.Error
+      });
       throw new Error(`TME API error: ${data.ErrorMessage || data.Message || "Unknown error"}`);
     }
 
@@ -207,7 +222,8 @@ export class TMEApiService {
       
       // First, check TME API credentials and try authentication test
       try {
-        await this.makeRequest<any>("/Utils/GetTimeLeft.json", {});
+        // Use the Categories endpoint for authentication test as it's a known working endpoint
+        await this.makeRequest<any>("/Categories/GetCategories.json", { Language: "EN" });
         console.log(`✅ TME API authentication successful`);
       } catch (authError) {
         console.log(`❌ TME API authentication failed: ${authError}`);
