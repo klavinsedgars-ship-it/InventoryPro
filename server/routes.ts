@@ -779,12 +779,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/tme/categories/:categoryId/products", async (req, res) => {
     try {
       const categoryId = parseInt(req.params.categoryId);
-      const limit = parseInt(req.query.limit as string) || 20;
+      const limit = parseInt(req.query.limit as string) || 100; // Increased default limit
+      const page = parseInt(req.query.page as string) || 1;
+      const offset = (page - 1) * limit;
       
-      console.log(`Fetching products for TME category ${categoryId}...`);
+      console.log(`Fetching products for TME category ${categoryId}, page ${page}, limit ${limit}...`);
       const { tmeApi } = await import("./tme-api");
       
-      const result = await tmeApi.getProductsByCategory(categoryId, limit);
+      const result = await tmeApi.getProductsByCategory(categoryId, limit, offset);
       
       if (!result.success) {
         return res.status(500).json(result);
@@ -794,7 +796,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         success: true,
         products: result.products,
         categoryId: categoryId,
-        totalProducts: result.products?.length || 0,
+        totalProducts: result.totalProducts || result.products?.length || 0,
+        currentPage: page,
+        totalPages: Math.ceil((result.totalProducts || result.products?.length || 0) / limit),
+        hasMore: result.hasMore || false,
         message: result.message
       });
       

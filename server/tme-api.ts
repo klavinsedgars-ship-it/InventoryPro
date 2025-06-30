@@ -920,7 +920,7 @@ export class TMEApiService {
   /**
    * Get products by category for preview using TME search
    */
-  async getProductsByCategory(categoryId: number, limit: number = 20): Promise<{ success: boolean; products?: TMEProduct[]; message?: string }> {
+  async getProductsByCategory(categoryId: number, limit: number = 100, offset: number = 0): Promise<{ success: boolean; products?: TMEProduct[]; totalProducts?: number; hasMore?: boolean; message?: string }> {
     try {
       console.log(`Fetching products for category ${categoryId}...`);
       
@@ -985,23 +985,34 @@ export class TMEApiService {
 
       const searchTerm = categorySearchMap[categoryId] || "electronic component";
       
-      // Use existing search functionality to get real TME products
-      const products = await this.searchProducts(searchTerm, limit);
+      // Use existing search functionality to get real TME products with higher limit for pagination
+      const totalLimit = Math.max(limit * 3, 200); // Fetch more products to simulate pagination
+      const allProducts = await this.searchProducts(searchTerm, totalLimit);
       
-      if (!products || products.length === 0) {
+      if (!allProducts || allProducts.length === 0) {
         return {
           success: true,
           products: [],
+          totalProducts: 0,
+          hasMore: false,
           message: `No products found for category ${categoryId}`
         };
       }
       
-      console.log(`Successfully fetched ${products.length} products for category ${categoryId}`);
+      // Simulate pagination by slicing the results
+      const startIndex = offset;
+      const endIndex = offset + limit;
+      const paginatedProducts = allProducts.slice(startIndex, endIndex);
+      const hasMore = endIndex < allProducts.length;
+      
+      console.log(`Successfully fetched ${paginatedProducts.length} products for category ${categoryId} (page ${Math.floor(offset/limit) + 1})`);
       
       return {
         success: true,
-        products: products,
-        message: `Found ${products.length} products in category ${categoryId}`
+        products: paginatedProducts,
+        totalProducts: allProducts.length,
+        hasMore: hasMore,
+        message: `Found ${paginatedProducts.length} of ${allProducts.length} products in category ${categoryId}`
       };
 
     } catch (error) {

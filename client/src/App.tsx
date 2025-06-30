@@ -9,7 +9,7 @@ import { Products } from "@/pages/products";
 import { Categories } from "@/pages/categories";
 import { Marketplaces } from "@/pages/marketplaces";
 import { TMESync } from "@/pages/sync";
-import { TMEBrowser } from "@/pages/tme-browser";
+import { TMEBrowserNew as TMEBrowser } from "@/pages/tme-browser-new";
 import { Settings } from "@/pages/settings";
 import { Reports } from "@/pages/reports";
 import { QueueManagement } from "@/pages/queue-management";
