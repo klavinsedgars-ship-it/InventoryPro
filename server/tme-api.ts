@@ -424,7 +424,7 @@ export class TMEApiService {
             category: this.mapTMECategory(tmeProduct.CategoryId) || "Electronics",
             supplierPrice: supplierPrice.toString(),
             salePrice: (supplierPrice * 1.5).toString(), // 50% markup as default
-            stock: stock?.Amount || 0,
+            stock: stock?.InStock || 0,
             weight: weightEstimate,
             imageUrl: tmeProduct.Photo?.replace(/^\/\//, 'https://') || tmeProduct.Thumbnail?.replace(/^\/\//, 'https://') || null,
             supplier: "TME",
@@ -432,7 +432,7 @@ export class TMEApiService {
             tmeProductId: tmeProduct.Symbol,
             dataSheetUrl: tmeProduct.DataSheet || null,
             productUrl: tmeProduct.ProductInformationPage || null,
-            status: (stock?.Amount || 0) > 0 ? "active" : "out_of_stock",
+            status: (stock?.InStock || 0) > 0 ? "in_stock" : "out_of_stock",
           };
 
           if (existingProduct) {
