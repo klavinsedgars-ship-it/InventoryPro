@@ -498,6 +498,9 @@ export function Products({ user }: ProductsProps) {
                       <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
                         Stock
                       </th>
+                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
+                        Min Qty
+                      </th>
                       <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
                         Status
                       </th>
@@ -552,6 +555,17 @@ export function Products({ user }: ProductsProps) {
                           <span className={product.stock === 0 ? "text-red-600" : "text-gray-900"}>
                             {product.stock.toLocaleString()}
                           </span>
+                        </td>
+                        <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-900">
+                          {product.isMultipack ? (
+                            <div className="flex items-center space-x-1">
+                              <Badge variant="outline" className="text-xs">
+                                {product.minOrderQuantity}x
+                              </Badge>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-500">1</span>
+                          )}
                         </td>
                         <td className="px-2 py-3 whitespace-nowrap">
                           <Badge 
