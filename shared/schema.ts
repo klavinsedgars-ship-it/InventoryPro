@@ -25,7 +25,9 @@ export const products = pgTable("products", {
   marginPercentage: decimal("margin_percentage", { precision: 5, scale: 2 }), // applied margin %
   priceUpdatedAt: timestamp("price_updated_at"), // last price calculation
   useCalculatedPrice: boolean("use_calculated_price").default(true), // use dynamic vs manual pricing
-  stock: integer("stock").notNull().default(0),
+  stock: integer("stock").notNull().default(0), // Real TME stock
+  ebayStockLimit: integer("ebay_stock_limit").notNull().default(3), // Max stock to show on eBay
+  useStockLimit: boolean("use_stock_limit").default(true), // Whether to apply eBay stock limits
   weight: decimal("weight", { precision: 8, scale: 2 }), // in grams
   margin: decimal("margin", { precision: 5, scale: 2 }), // percentage (legacy field)
   status: text("status").notNull().default("active"), // active, inactive, out_of_stock

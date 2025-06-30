@@ -1,6 +1,7 @@
 import { storage } from "./storage";
 import { ebayOAuth } from "./ebay-oauth";
 import { generateEbayListing } from "./ebay-listing-template";
+import { calculateEbayStock } from "./stock-manager";
 
 interface EbayCredentials {
   appId: string;

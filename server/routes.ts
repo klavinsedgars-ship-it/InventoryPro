@@ -31,6 +31,7 @@ import {
   validatePricingConfig,
   formatPrice
 } from "./dynamic-pricing";
+import { calculateEbayStock, calculateBulkEbayStock, validateStockLimit, getRecommendedStockLimit } from "./stock-manager";
 
 // Type for authenticated requests
 interface AuthenticatedRequest extends Request {
@@ -3170,6 +3171,154 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({
         success: false,
         error: "Failed to sync random products"
+      });
+    }
+  });
+
+  // Stock Management Endpoints
+  
+  // Get stock information for all products
+  app.get("/api/stock/info", async (req, res) => {
+    try {
+      const products = await storage.getProducts();
+      const stockInfo = calculateBulkEbayStock(products);
+      
+      res.json({
+        success: true,
+        stockInfo: stockInfo.map(item => ({
+          id: item.id,
+          ...item.stockInfo
+        }))
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: (error as Error).message
+      });
+    }
+  });
+  
+  // Update stock limit for a product
+  app.patch("/api/products/:id/stock-limit", async (req, res) => {
+    try {
+      const productId = parseInt(req.params.id);
+      const { ebayStockLimit, useStockLimit } = req.body;
+      
+      if (ebayStockLimit !== undefined) {
+        const validation = validateStockLimit(ebayStockLimit);
+        if (!validation.valid) {
+          return res.status(400).json({
+            success: false,
+            error: validation.error
+          });
+        }
+      }
+      
+      const updateData: any = {};
+      if (ebayStockLimit !== undefined) updateData.ebayStockLimit = ebayStockLimit;
+      if (useStockLimit !== undefined) updateData.useStockLimit = useStockLimit;
+      
+      await storage.updateProduct(productId, updateData);
+      const updatedProduct = await storage.getProduct(productId);
+      
+      if (!updatedProduct) {
+        return res.status(404).json({
+          success: false,
+          error: "Product not found"
+        });
+      }
+      
+      const stockInfo = calculateEbayStock(updatedProduct);
+      
+      res.json({
+        success: true,
+        product: updatedProduct,
+        stockInfo
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: (error as Error).message
+      });
+    }
+  });
+  
+  // Bulk update stock limits
+  app.post("/api/stock/bulk-update", async (req, res) => {
+    try {
+      const { productIds, ebayStockLimit, useStockLimit } = req.body;
+      
+      if (!Array.isArray(productIds) || productIds.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: "Product IDs array is required"
+        });
+      }
+      
+      if (ebayStockLimit !== undefined) {
+        const validation = validateStockLimit(ebayStockLimit);
+        if (!validation.valid) {
+          return res.status(400).json({
+            success: false,
+            error: validation.error
+          });
+        }
+      }
+      
+      const updateData: any = {};
+      if (ebayStockLimit !== undefined) updateData.ebayStockLimit = ebayStockLimit;
+      if (useStockLimit !== undefined) updateData.useStockLimit = useStockLimit;
+      
+      const results = [];
+      for (const productId of productIds) {
+        try {
+          await storage.updateProduct(productId, updateData);
+          const product = await storage.getProduct(productId);
+          if (product) {
+            results.push({
+              id: productId,
+              success: true,
+              stockInfo: calculateEbayStock(product)
+            });
+          }
+        } catch (error) {
+          results.push({
+            id: productId,
+            success: false,
+            error: (error as Error).message
+          });
+        }
+      }
+      
+      res.json({
+        success: true,
+        results,
+        updated: results.filter(r => r.success).length,
+        failed: results.filter(r => !r.success).length
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: (error as Error).message
+      });
+    }
+  });
+  
+  // Get recommended stock limit for a category
+  app.get("/api/stock/recommended/:category", async (req, res) => {
+    try {
+      const category = decodeURIComponent(req.params.category);
+      const recommendedLimit = getRecommendedStockLimit(category);
+      
+      res.json({
+        success: true,
+        category,
+        recommendedLimit
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: (error as Error).message
       });
     }
   });
