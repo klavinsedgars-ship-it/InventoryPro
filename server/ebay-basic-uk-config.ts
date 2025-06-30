@@ -31,9 +31,9 @@ export function createBasicUKListingXML(product: any, authToken: string): string
         <ReturnProfileID>161272624019</ReturnProfileID>
       </SellerReturnProfile>
     </SellerProfiles>
-    <PictureDetails>
-      <PictureURL>https://images.unsplash.com/photo-1553062407-98eeb64c6a62</PictureURL>
-    </PictureDetails>
+    ${product.imageUrl ? `<PictureDetails>
+      <PictureURL>${product.imageUrl}</PictureURL>
+    </PictureDetails>` : ''}
   </Item>
 </AddFixedPriceItemRequest>`;
 }
