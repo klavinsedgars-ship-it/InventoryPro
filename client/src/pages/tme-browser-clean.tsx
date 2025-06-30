@@ -35,7 +35,9 @@ interface TMEProduct {
     Amount: number;
     PriceValue: string;
   }>;
-  InStock: number;
+  InStock?: number;
+  Amount?: number;
+  Stock?: number;
   Unit: string;
   Weight: string;
   EAN: string;
@@ -381,7 +383,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                 </p>
                                 <div className="mt-1 flex items-center space-x-4 text-xs text-gray-500">
                                   <span>Producer: {product.Producer}</span>
-                                  <span>Stock: {product.InStock || 0}</span>
+                                  <span>Stock: {product.InStock || product.Amount || product.Stock || 0}</span>
                                   <span>Price: €{product.Price || "N/A"}</span>
                                 </div>
                               </div>
