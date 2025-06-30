@@ -843,6 +843,88 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // TME sync specific multipack components with progress tracking
+  app.post("/api/sync/tme/multipacks", requireAuth, async (req, res) => {
+    try {
+      console.log("Starting TME multipack component sync...");
+      const { tmeApi } = await import("./tme-api");
+      
+      // Array of specific component types known to have minimum quantities
+      const multipackQueries = [
+        { query: "SMD0603-10K-1%", description: "0603 Resistors (typically 50+ minimums)", limit: 3 },
+        { query: "C0603C104K", description: "0603 Ceramic Capacitors (typically 100+ minimums)", limit: 3 },
+        { query: "CF1/4W-1K", description: "Through-hole Resistors (typically 50+ minimums)", limit: 2 },
+        { query: "RC0402FR", description: "0402 Resistors (typically 100+ minimums)", limit: 2 },
+        { query: "SMD0805-100N", description: "0805 Capacitors (typically 25+ minimums)", limit: 3 }
+      ];
+      
+      let totalProcessed = 0;
+      let totalMultipacks = 0;
+      const results = [];
+      
+      for (let i = 0; i < multipackQueries.length; i++) {
+        const { query, description, limit } = multipackQueries[i];
+        console.log(`Processing ${i + 1}/${multipackQueries.length}: ${description}`);
+        
+        try {
+          const result = await tmeApi.syncProductsFromTME(query, limit);
+          results.push({
+            query,
+            description,
+            processed: result.productsProcessed || 0,
+            success: result.success,
+            progress: `${i + 1}/${multipackQueries.length}`
+          });
+          
+          totalProcessed += result.productsProcessed || 0;
+          
+          // Count multipacks from the recent results
+          if (result.success) {
+            const products = await storage.getProducts();
+            const recentMultipacks = products.filter(p => 
+              p.isMultipack && 
+              p.minOrderQuantity && 
+              p.minOrderQuantity > 1
+            );
+            totalMultipacks = recentMultipacks.length;
+          }
+          
+          // Delay between queries to respect API limits
+          if (i < multipackQueries.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        } catch (error) {
+          console.error(`Failed to sync ${query}:`, error);
+          results.push({
+            query,
+            description,
+            processed: 0,
+            success: false,
+            error: (error as Error).message,
+            progress: `${i + 1}/${multipackQueries.length}`
+          });
+        }
+      }
+      
+      console.log(`TME multipack sync completed: ${totalProcessed} total products, ${totalMultipacks} multipacks`);
+      
+      res.json({
+        success: true,
+        message: `Successfully synced ${totalProcessed} products, found ${totalMultipacks} with minimum quantities`,
+        totalProcessed,
+        totalMultipacks,
+        progress: "5/5",
+        results
+      });
+    } catch (error) {
+      console.error("TME multipack sync failed:", error);
+      res.status(500).json({ 
+        message: "TME multipack sync failed", 
+        error: (error as Error).message 
+      });
+    }
+  });
+
   // Environment Debug endpoint
   app.get("/api/debug/env", requireAuth, async (req, res) => {
     res.json({
