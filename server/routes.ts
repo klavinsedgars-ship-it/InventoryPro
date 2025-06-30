@@ -3012,7 +3012,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           };
 
           // Check if product already exists
-          const existingProduct = await storage.getProductBySKU(productData.sku);
+          const existingProduct = await storage.getProductBySku(productData.sku);
           
           if (existingProduct) {
             // Update existing product

@@ -192,7 +192,7 @@ export function TMEBrowserNew({ user }: TMEBrowserProps) {
       <Header title="TME Product Browser" />
       <div className="flex">
         <Sidebar />
-        <main className="flex-1 p-6">
+        <main className="flex-1 p-6 ml-64 mt-16">
           <div className="max-w-7xl mx-auto">
             <div className="mb-6">
               <h1 className="text-3xl font-bold text-gray-900">TME Product Browser</h1>

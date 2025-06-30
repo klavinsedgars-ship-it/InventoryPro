@@ -258,10 +258,7 @@ export class TMEApiService {
     if (symbols.length === 0) return [];
 
     const response = await this.makeRequest<TMEProduct>("/Products/GetProducts.json", {
-      SymbolList: symbols.join(";"),
-      SearchParameters: "1",
-      SearchPhoto: "1",
-      SearchDatasheet: "1",
+      SymbolList: symbols,
     });
 
     return response.Data.ProductList || [];
