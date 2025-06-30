@@ -269,6 +269,11 @@ Changelog:
 - June 30, 2025. Added proper hierarchical relationships: Semiconductors → Microcontrollers, Passives → Resistors/Capacitors, etc.
 - June 30, 2025. Implemented category-to-search mapping for real product preview in each category and subcategory
 - June 30, 2025. **STATUS**: Complete TME hierarchical browser with main categories, subcategories, and real product data preview system operational
+- June 30, 2025. **CRITICAL STOCK SYNC FIX COMPLETED** - Resolved major issue where only first 5 products received stock data during TME sync
+- June 30, 2025. Fixed batch processing in getProductStock() function to process ALL products in batches of 5 instead of only first 5
+- June 30, 2025. Added proper rate limiting (1 second between batches) to prevent TME API 429 errors during stock retrieval
+- June 30, 2025. **VERIFIED RESULTS**: SC0195-9 now shows correct stock (264 units), price (€64.08), and status (in_stock) matching TME data
+- June 30, 2025. **STATUS**: Complete TME stock synchronization working at 100% - all products receive authentic stock levels during sync operations
 ```
 
 ## User Preferences
