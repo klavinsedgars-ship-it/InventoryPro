@@ -3395,7 +3395,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { 
         categoryId, 
         page = "1", 
-        limit = "100", 
+        limit = "5000", 
         search = "", 
         priceMin = "", 
         priceMax = "", 

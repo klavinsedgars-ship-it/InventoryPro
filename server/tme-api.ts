@@ -258,78 +258,177 @@ export class TMEApiService {
 
   async getProductsByCategory(categoryId: string, page: number = 1, limit: number = 100): Promise<{products: TMEProduct[], total: number}> {
     try {
-      // Try to get products from specific category using TME's category-based endpoint
-      const response = await this.makeRequest<TMEProduct>("/Products/GetParameters.json", {
-        CategoryId: categoryId,
-        SearchWithStock: "1"
-      });
-
-      // If that doesn't work, fall back to targeted search for known categories
-      if (!response.Data?.ProductList || response.Data.ProductList.length === 0) {
-        console.log(`No products found via category ${categoryId}, trying targeted search...`);
-        return await this.getProductsWithTargetedSearch(categoryId, limit);
+      console.log(`🔍 Attempting comprehensive product retrieval for category ${categoryId}, target: ${limit} products`);
+      
+      // Strategy 1: Try TME's direct category endpoint first
+      try {
+        const categoryResponse = await this.makeRequest<TMEProduct>("/Products/GetList.json", {
+          CategoryId: categoryId,
+          SearchWithStock: "1",
+          Country: "EN"
+        });
+        
+        if (categoryResponse.Data?.ProductList && categoryResponse.Data.ProductList.length > 0) {
+          console.log(`✅ Direct category endpoint returned ${categoryResponse.Data.ProductList.length} products`);
+          return {
+            products: categoryResponse.Data.ProductList.slice(0, limit),
+            total: categoryResponse.Data.ProductList.length
+          };
+        }
+      } catch (error) {
+        console.log(`❌ Direct category endpoint failed: ${error}`);
       }
 
-      const products = response.Data.ProductList || [];
-      const total = response.Data.Amount || products.length;
+      // Strategy 2: Aggressive multi-term search approach for maximum coverage
+      return await this.getComprehensiveProductSearch(categoryId, limit);
       
-      // Apply pagination
-      const startIndex = (page - 1) * limit;
-      const paginatedProducts = products.slice(startIndex, startIndex + limit);
-      
-      return {
-        products: paginatedProducts,
-        total: total
-      };
     } catch (error) {
-      console.log(`Category ${categoryId} endpoint failed, trying targeted search...`);
-      return await this.getProductsWithTargetedSearch(categoryId, limit);
+      console.log(`❌ All category retrieval methods failed: ${error}`);
+      return { products: [], total: 0 };
     }
   }
 
-  private async getProductsWithTargetedSearch(categoryId: string, limit: number): Promise<{products: TMEProduct[], total: number}> {
-    // Define specific search terms for known electronic component categories
+  private async getComprehensiveProductSearch(categoryId: string, targetLimit: number): Promise<{products: TMEProduct[], total: number}> {
+    console.log(`🚀 Starting comprehensive search for category ${categoryId}, targeting ${targetLimit} products`);
+    
+    // Massive search terms for maximum product coverage
     const categorySearchMap: Record<string, string[]> = {
-      // Try multiple search terms for better coverage
-      "1000": ["microcontroller", "atmega", "pic", "stm32", "arduino"],
-      "1001": ["transistor", "mosfet", "bjt", "semiconductor"],  
-      "1002": ["integrated circuit", "ic chip", "microprocessor"],
-      "1003": ["led", "display", "oled", "lcd"],
-      "1004": ["resistor", "capacitor", "inductor"],
-      "1005": ["relay", "switch", "button"],
-      "1006": ["power supply", "transformer", "converter"],
-      "1007": ["connector", "terminal", "plug"],
-      "1008": ["cable", "wire", "harness"],
-      "1009": ["multimeter", "oscilloscope", "tool"],
-      "1010": ["sensor", "temperature", "pressure"]
+      "1000": [
+        // Microcontrollers - comprehensive search
+        "microcontroller", "atmega", "pic", "stm32", "arduino", "avr", "arm", "cortex", 
+        "esp32", "esp8266", "raspberry", "teensy", "mcu", "controller", "processor",
+        "atmega328", "atmega32", "pic16", "pic18", "stm32f", "arm7", "arm9", "cortex-m"
+      ],
+      "1001": [
+        // Semiconductors & Transistors
+        "transistor", "mosfet", "bjt", "fets", "igbt", "jfet", "semiconductor", 
+        "npn", "pnp", "n-channel", "p-channel", "power", "switching", "amplifier",
+        "2n2222", "2n3904", "bc547", "irf540", "irfz44", "tip", "but", "irf"
+      ],
+      "1002": [
+        // Integrated Circuits  
+        "integrated circuit", "ic", "chip", "microprocessor", "logic", "analog",
+        "op-amp", "comparator", "timer", "counter", "decoder", "encoder", "multiplexer",
+        "555", "741", "4017", "4020", "74hc", "74ls", "cd40", "lm", "ne"
+      ],
+      "1003": [
+        // LEDs & Displays
+        "led", "display", "oled", "lcd", "segment", "matrix", "strip", "module",
+        "tft", "e-paper", "nixie", "vfd", "character", "graphic", "ssd1306", "nokia"
+      ],
+      "1004": [
+        // Passive Components
+        "resistor", "capacitor", "inductor", "coil", "choke", "ferrite", "crystal",
+        "ceramic", "electrolytic", "tantalum", "film", "carbon", "metal", "smd", "through hole"
+      ],
+      "1005": [
+        // Switches & Relays
+        "relay", "switch", "button", "toggle", "rotary", "slide", "dip", "micro",
+        "push", "momentary", "latching", "spdt", "dpdt", "spst", "contactor"
+      ],
+      "1006": [
+        // Power Components
+        "power supply", "transformer", "converter", "regulator", "inverter", "charger",
+        "switching", "linear", "dc-dc", "ac-dc", "voltage", "current", "lm7805", "lm317"
+      ],
+      "1007": [
+        // Connectors
+        "connector", "terminal", "plug", "socket", "header", "jumper", "block",
+        "usb", "rj45", "audio", "video", "power", "screw", "spring", "phoenix"
+      ],
+      "1008": [
+        // Cables & Wires
+        "cable", "wire", "harness", "ribbon", "coaxial", "twisted", "ethernet",
+        "usb", "audio", "video", "power", "jumper", "breadboard", "dupont"
+      ],
+      "1009": [
+        // Tools & Equipment
+        "multimeter", "oscilloscope", "power supply", "function generator", "soldering",
+        "iron", "station", "meter", "tester", "analyzer", "probe", "tool"
+      ],
+      "1010": [
+        // Sensors
+        "sensor", "temperature", "pressure", "humidity", "motion", "light", "proximity",
+        "accelerometer", "gyroscope", "magnetometer", "gas", "ph", "ultrasonic"
+      ]
     };
 
-    const searchTerms = categorySearchMap[categoryId] || ["electronic component"];
-    let allProducts: TMEProduct[] = [];
-    const maxProductsPerTerm = Math.ceil(limit / searchTerms.length);
+    const searchTerms = categorySearchMap[categoryId] || [
+      "electronic", "component", "module", "board", "kit", "part", "device"
+    ];
 
-    // Search with multiple terms to get diverse results
-    for (const term of searchTerms) {
+    let allProducts: TMEProduct[] = [];
+    let searchCount = 0;
+    const maxSearches = Math.min(searchTerms.length, 50); // Limit to prevent excessive API calls
+
+    console.log(`📊 Will search with ${maxSearches} terms for maximum coverage`);
+
+    // Search with all available terms
+    for (let i = 0; i < maxSearches && allProducts.length < targetLimit; i++) {
+      const term = searchTerms[i];
+      searchCount++;
+      
       try {
-        const products = await this.searchProducts(term, maxProductsPerTerm);
-        allProducts = allProducts.concat(products);
+        console.log(`🔍 Search ${searchCount}/${maxSearches}: "${term}"`);
         
-        // Stop if we have enough products
-        if (allProducts.length >= limit) break;
+        // Get as many products as possible per search (TME usually limits to ~20-100)
+        const products = await this.searchProducts(term, 100);
+        
+        if (products && products.length > 0) {
+          // Remove duplicates based on Symbol
+          const newProducts = products.filter(
+            product => !allProducts.some(existing => existing.Symbol === product.Symbol)
+          );
+          
+          allProducts = allProducts.concat(newProducts);
+          console.log(`✅ Added ${newProducts.length} new products (${allProducts.length} total)`);
+        }
+
+        // Add delay between searches to respect rate limits
+        if (i < maxSearches - 1) {
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+
       } catch (error) {
-        console.log(`Search failed for term: ${term}`);
+        console.log(`❌ Search failed for term "${term}": ${error}`);
         continue;
       }
     }
 
-    // Remove duplicates based on Symbol
-    const uniqueProducts = allProducts.filter((product, index, self) => 
-      index === self.findIndex(p => p.Symbol === product.Symbol)
-    );
+    // If we still don't have enough products, try additional generic searches
+    if (allProducts.length < targetLimit) {
+      const additionalTerms = [
+        "electronic component", "smd", "through hole", "dip", "soic", "sot", 
+        "qfp", "bga", "module", "breakout", "development", "evaluation"
+      ];
+
+      for (const term of additionalTerms) {
+        if (allProducts.length >= targetLimit) break;
+        
+        try {
+          console.log(`🔍 Additional search: "${term}"`);
+          const products = await this.searchProducts(term, 100);
+          
+          if (products && products.length > 0) {
+            const newProducts = products.filter(
+              product => !allProducts.some(existing => existing.Symbol === product.Symbol)
+            );
+            allProducts = allProducts.concat(newProducts);
+            console.log(`✅ Added ${newProducts.length} more products (${allProducts.length} total)`);
+          }
+
+          await new Promise(resolve => setTimeout(resolve, 300));
+        } catch (error) {
+          continue;
+        }
+      }
+    }
+
+    console.log(`🎯 Comprehensive search complete: ${allProducts.length} unique products found for category ${categoryId}`);
 
     return {
-      products: uniqueProducts.slice(0, limit),
-      total: uniqueProducts.length
+      products: allProducts.slice(0, targetLimit),
+      total: allProducts.length
     };
   }
 
