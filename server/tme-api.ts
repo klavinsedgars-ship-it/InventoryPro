@@ -1,9 +1,11 @@
 import { storage } from "./storage";
+import * as crypto from "crypto";
 
 interface TMECredentials {
   token: string;
   customerNumber: string;
   contactNumber: string;
+  applicationSecret: string;
 }
 
 interface TMEProduct {
@@ -54,12 +56,12 @@ export class TMEApiService {
   private baseUrl = "https://api.tme.eu";
 
   constructor() {
-    // Updated TME credentials - June 30, 2025
-    // Note: API may need activation/permission from TME support
+    // Updated TME credentials with Application Secret - June 30, 2025
     this.credentials = {
       token: process.env.TME_API_TOKEN || "4c7c4c076d049b050b7db3a648c6ef61c4bd1daad6c5ab09df",
       customerNumber: process.env.TME_CUSTOMER_NUMBER || "40026843",
       contactNumber: process.env.TME_CONTACT_NUMBER || "642966",
+      applicationSecret: "c691a195bbb557d4f848",
     };
 
     if (!this.credentials.token || !this.credentials.customerNumber || !this.credentials.contactNumber) {
@@ -67,21 +69,56 @@ export class TMEApiService {
     }
   }
 
+  /**
+   * Generate HMAC-SHA1 signature for TME API authentication
+   * Based on TME API documentation and OAuth 1.0a signature process
+   */
+  private generateApiSignature(method: string, url: string, params: Record<string, any>): string {
+    // Step 1: Create the parameter string (alphabetically sorted)
+    const sortedParams = Object.keys(params)
+      .sort()
+      .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(params[key])}`)
+      .join('&');
+
+    // Step 2: Create the signature base string
+    const signatureBaseString = [
+      method.toUpperCase(),
+      encodeURIComponent(url),
+      encodeURIComponent(sortedParams)
+    ].join('&');
+
+    // Step 3: Generate HMAC-SHA1 signature
+    const signature = crypto
+      .createHmac('sha1', this.credentials.applicationSecret)
+      .update(signatureBaseString)
+      .digest('base64');
+
+    return signature;
+  }
+
   private async makeRequest<T>(endpoint: string, params: Record<string, any> = {}): Promise<TMEApiResponse<T>> {
-    // TME API requires specific POST method with form data for most endpoints
-    const formData = new URLSearchParams();
-    
-    // Add authentication - our token is 50 chars (private token), so Country is optional
-    formData.append("Token", this.credentials.token);
-    formData.append("Language", "EN");
-    
+    // Step 1: Prepare all parameters (including authentication)
+    const allParams: Record<string, any> = {
+      Token: this.credentials.token,
+      Language: "EN",
+      ...params
+    };
+
     // Country is only required for anonymous tokens (45 chars), not private tokens (50 chars)
     if (this.credentials.token.length === 45) {
-      formData.append("Country", "US");
+      allParams.Country = "US";
     }
 
-    // Add other parameters
-    Object.entries(params).forEach(([key, value]) => {
+    // Step 2: Generate API signature
+    const fullUrl = `${this.baseUrl}${endpoint}`;
+    const apiSignature = this.generateApiSignature("POST", fullUrl, allParams);
+    
+    // Step 3: Add signature to parameters
+    allParams.ApiSignature = apiSignature;
+
+    // Step 4: Create form data with all parameters including signature
+    const formData = new URLSearchParams();
+    Object.entries(allParams).forEach(([key, value]) => {
       if (value !== undefined && value !== null) {
         formData.append(key, String(value));
       }
