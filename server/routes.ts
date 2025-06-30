@@ -2981,127 +2981,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Sync random products from different categories
-  app.post("/api/tme/sync-selected", async (req: Request, res: Response) => {
-    try {
-      const { symbols } = req.body;
-      
-      if (!symbols || !Array.isArray(symbols) || symbols.length === 0) {
-        return res.status(400).json({
-          success: false,
-          message: "No product symbols provided"
-        });
-      }
 
-      console.log(`Syncing ${symbols.length} selected TME products...`);
-      const { tmeApi } = await import("./tme-api");
-      
-      // Get detailed product information for selected symbols
-      const productDetails = await tmeApi.getProductDetails(symbols);
-      const productPrices = await tmeApi.getProductPrices(symbols);
-      const productStock = await tmeApi.getProductStock(symbols);
-
-      let syncedCount = 0;
-      const errors: string[] = [];
-
-      for (const product of productDetails) {
-        try {
-          // Find corresponding price and stock data
-          const priceData = productPrices.find(p => p.Symbol === product.Symbol);
-          const stockData = productStock.find(s => s.Symbol === product.Symbol);
-
-          // Calculate supplier price
-          const supplierPrice = priceData?.PriceList?.[0]?.PriceValue || 0;
-          
-          // Calculate dynamic pricing
-          const { calculateDynamicPrice } = await import("./dynamic-pricing");
-          const pricingResult = calculateDynamicPrice(supplierPrice);
-
-          console.log(`🔍 Product ${product.Symbol} pricing:`, {
-            supplierPrice,
-            finalPrice: pricingResult.finalPrice,
-            calculatedPrice: pricingResult.calculatedPrice,
-            marginPercentage: pricingResult.marginPercentage
-          });
-
-          // Create product data with proper number handling
-          const productData = {
-            name: product.Description,
-            sku: product.Symbol,
-            ean: product.EAN || null,
-            category: product.Category,
-            description: product.Description,
-            supplierPrice: String(Number(supplierPrice)),
-            salePrice: String(Number(pricingResult.finalPrice)),
-            calculatedPrice: String(Number(pricingResult.calculatedPrice)),
-            marginTier: pricingResult.marginTier,
-            marginPercentage: Number(pricingResult.marginPercentage),
-            stock: stockData?.Amount || 100,
-            status: "active",
-            weight: String(Number(product.Weight) || 10),
-            imageUrl: product.Photo ? `https:${product.Photo}` : null,
-            dataSheetUrl: product.DataSheet ? `https://www.tme.eu${product.DataSheet}` : null,
-            productUrl: product.ProductInformationPage ? `https://www.tme.eu${product.ProductInformationPage}` : null,
-            supplier: "tme",
-            supplierProductId: product.Symbol
-          };
-
-          console.log(`📦 Prepared product data for ${product.Symbol}:`, {
-            supplierPrice: typeof productData.supplierPrice,
-            salePrice: typeof productData.salePrice,
-            calculatedPrice: typeof productData.calculatedPrice
-          });
-
-          // Check if product already exists
-          const existingProduct = await storage.getProductBySku(productData.sku);
-          
-          if (existingProduct) {
-            // Update existing product
-            await storage.updateProduct(existingProduct.id, productData);
-          } else {
-            // Create new product
-            await storage.createProduct(productData);
-          }
-
-          syncedCount++;
-          console.log(`✓ Synced product: ${product.Symbol} - ${product.Description}`);
-
-        } catch (productError) {
-          const errorMsg = `Failed to sync ${product.Symbol}: ${(productError as Error).message}`;
-          console.error(errorMsg);
-          errors.push(errorMsg);
-        }
-      }
-
-      // Create sync log
-      await storage.createSyncLog({
-        source: "tme",
-        operation: "browser_sync",
-        status: syncedCount > 0 ? "success" : "error",
-        message: `Synced ${syncedCount} of ${symbols.length} selected products`,
-        details: JSON.stringify({ 
-          syncedCount, 
-          totalRequested: symbols.length,
-          errors: errors.length > 0 ? errors : undefined
-        })
-      });
-
-      res.json({
-        success: true,
-        productsAdded: syncedCount,
-        totalRequested: symbols.length,
-        errors: errors.length > 0 ? errors : undefined,
-        message: `Successfully synced ${syncedCount} of ${symbols.length} products`
-      });
-
-    } catch (error) {
-      console.error("TME sync failed:", error);
-      res.status(500).json({
-        success: false,
-        message: `Sync failed: ${(error as Error).message}`
-      });
-    }
-  });
 
   app.post("/api/tme/sync-random", async (req: Request, res: Response) => {
     try {
@@ -3582,12 +3462,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Sync selected TME products
   app.post("/api/tme/sync-selected", async (req, res) => {
     try {
+      console.log("📥 Received sync request body:", JSON.stringify(req.body, null, 2));
       const { productSymbols, settings } = req.body;
 
       if (!productSymbols || !Array.isArray(productSymbols) || productSymbols.length === 0) {
+        console.log("❌ Invalid product symbols:", { productSymbols, isArray: Array.isArray(productSymbols) });
         return res.status(400).json({
           success: false,
-          error: "Product symbols array is required"
+          error: "Product symbols array is required",
+          received: { productSymbols, settings }
         });
       }
 
