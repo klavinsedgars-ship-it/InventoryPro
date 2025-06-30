@@ -1,8 +1,8 @@
 // Test script to get exact TME API response
 const credentials = {
-  token: "4c7c4c076d049b050b7db3a648c6ef61c4bd1daad6c5ab09df",
-  customerNumber: "40026843",
-  contactNumber: "642966"
+  token: "31e955195075d0a74f5a57451e8b2bd443871292297c97d307",
+  customerNumber: "40071812",
+  contactNumber: "676772"
 };
 
 async function getExactTMEResponse() {

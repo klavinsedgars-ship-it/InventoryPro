@@ -2,8 +2,8 @@
 import crypto from 'crypto';
 
 const credentials = {
-  token: "4c7c4c076d049b050b7db3a648c6ef61c4bd1daad6c5ab09df",
-  applicationSecret: "c691a195bbb557d4f848"
+  token: "31e955195075d0a74f5a57451e8b2bd443871292297c97d307",
+  applicationSecret: "d89d00191de2b7a6834f"
 };
 
 function generateApiSignature(method, url, params) {

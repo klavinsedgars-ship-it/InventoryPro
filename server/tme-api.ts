@@ -56,13 +56,12 @@ export class TMEApiService {
   private baseUrl = "https://api.tme.eu";
 
   constructor() {
-    // Updated TME credentials with Application Secret - June 30, 2025
-    // Force use of new TME credentials - override environment temporarily
+    // Updated TME credentials with new token and application secret - June 30, 2025
     this.credentials = {
-      token: "4c7c4c076d049b050b7db3a648c6ef61c4bd1daad6c5ab09df",
-      customerNumber: "40026843", 
-      contactNumber: "642966",
-      applicationSecret: "c691a195bbb557d4f848",
+      token: "31e955195075d0a74f5a57451e8b2bd443871292297c97d307",
+      customerNumber: "40071812",
+      contactNumber: "676772", 
+      applicationSecret: "d89d00191de2b7a6834f",
     };
 
     console.log('TME Credentials Debug:');
