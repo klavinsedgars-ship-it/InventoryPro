@@ -381,7 +381,7 @@ export class EbayApiService {
     <ConditionID>1000</ConditionID>
     <DispatchTimeMax>3</DispatchTimeMax>
     <PictureDetails>
-      <PictureURL>${listingData.pictureURLs <PictureURL>${listingData.pictureURLs && listingData.pictureURLs.length > 0 ? listingData.pictureURLs[0] : ""}<PictureURL>${listingData.pictureURLs && listingData.pictureURLs.length > 0 ? listingData.pictureURLs[0] : ""} listingData.pictureURLs.length > 0 ? this.escapeXml(listingData.pictureURLs[0]) : ""}</PictureURL>
+      <PictureURL>${listingData.pictureURLs && listingData.pictureURLs.length > 0 ? this.escapeXml(listingData.pictureURLs[0]) : ""}</PictureURL>
     </PictureDetails>
     <ShippingDetails>
       <ShippingType>Flat</ShippingType>
@@ -450,7 +450,7 @@ export class EbayApiService {
     <ConditionID>1000</ConditionID>
     <DispatchTimeMax>3</DispatchTimeMax>
     <PictureDetails>
-      <PictureURL>${listingData.pictureURLs <PictureURL>${listingData.pictureURLs && listingData.pictureURLs.length > 0 ? listingData.pictureURLs[0] : ""}<PictureURL>${listingData.pictureURLs && listingData.pictureURLs.length > 0 ? listingData.pictureURLs[0] : ""} listingData.pictureURLs.length > 0 ? this.escapeXml(listingData.pictureURLs[0]) : ""}</PictureURL>
+      <PictureURL>${listingData.pictureURLs && listingData.pictureURLs.length > 0 ? this.escapeXml(listingData.pictureURLs[0]) : ""}</PictureURL>
     </PictureDetails>
     <ShippingDetails>
       <ShippingType>Flat</ShippingType>
