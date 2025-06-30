@@ -294,7 +294,11 @@ Changelog:
 - June 30, 2025. Created intelligent category detection using product names, descriptions, and TME categories with confidence scoring
 - June 30, 2025. Fixed category mapping prioritization to prefer exact matches and more specific categories over generic ones
 - June 30, 2025. Resolved eBay miscategorization issue - diodes now correctly map to category 175673 (Semiconductors & Actives - Diodes) instead of generic categories
-- June 30, 2025. **STATUS**: Category mapping prevents products from being incorrectly listed in unrelated categories like "Multimeters"
+- June 30, 2025. **MAJOR FIX: Hardcoded Category Override Issue Resolved** - Fixed critical bug where XML generation functions used hardcoded category "58277" ignoring dynamic mapping
+- June 30, 2025. Added missing audio/sound equipment category mappings for "Electromagnetic Sounders with Generator", "Sound Equipment", and "Speakers"
+- June 30, 2025. Updated createAddItemXML, createVerifyItemXML, and createReviseItemXML functions to use dynamic categoryId from mapping system
+- June 30, 2025. Enhanced products page with sorting indicator showing "latest synced first" and added refresh button for immediate updates
+- June 30, 2025. **STATUS**: Dynamic category mapping now properly applied to all eBay listings - sound transducers correctly categorized instead of "Multimeters"
 ```
 
 ## User Preferences
