@@ -290,6 +290,11 @@ Changelog:
 - June 30, 2025. Created stock manager utility to calculate minimum of TME stock vs eBay limit for marketplace listings
 - June 30, 2025. Updated products table with separate TME Stock and eBay Stock columns for clear inventory visibility
 - June 30, 2025. Successfully tested eBay listings with stock limitations - system correctly limits quantities to 3 units regardless of higher TME stock levels
+- June 30, 2025. **AUTOMATIC TME TO EBAY CATEGORY MAPPING SYSTEM COMPLETED**: Built comprehensive 180+ category mapping system for correct eBay categorization
+- June 30, 2025. Created intelligent category detection using product names, descriptions, and TME categories with confidence scoring
+- June 30, 2025. Fixed category mapping prioritization to prefer exact matches and more specific categories over generic ones
+- June 30, 2025. Resolved eBay miscategorization issue - diodes now correctly map to category 175673 (Semiconductors & Actives - Diodes) instead of generic categories
+- June 30, 2025. **STATUS**: Category mapping prevents products from being incorrectly listed in unrelated categories like "Multimeters"
 ```
 
 ## User Preferences

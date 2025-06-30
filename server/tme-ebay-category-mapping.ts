@@ -222,8 +222,12 @@ export function findEbayCategoryForTMEProduct(product: any): { categoryId: strin
   for (const mapping of TME_EBAY_CATEGORY_MAPPINGS) {
     let score = 0;
     
-    // Direct category match gets highest score
-    if (productCategory.includes(mapping.tmeCategory.toLowerCase())) {
+    // Exact category match gets highest score
+    if (productCategory === mapping.tmeCategory.toLowerCase()) {
+      score += mapping.confidence * 3; // Exact match priority
+    }
+    // Partial category match gets lower score  
+    else if (productCategory.includes(mapping.tmeCategory.toLowerCase())) {
       score += mapping.confidence * 2;
     }
     
@@ -232,6 +236,11 @@ export function findEbayCategoryForTMEProduct(product: any): { categoryId: strin
       if (searchText.includes(keyword.toLowerCase())) {
         score += mapping.confidence;
       }
+    }
+    
+    // Prefer more specific categories by giving bonus for longer category names
+    if (mapping.tmeCategory.length > 15) {
+      score += 1;
     }
     
     if (score > bestScore) {
