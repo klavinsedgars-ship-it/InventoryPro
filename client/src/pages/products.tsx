@@ -50,9 +50,11 @@ export function Products({ user }: ProductsProps) {
     queryKey: ["/api/categories"],
   });
 
-  const { data: stockInfo = [] } = useQuery({
+  const { data: stockInfoResponse } = useQuery({
     queryKey: ["/api/stock/info"],
   });
+  
+  const stockInfo = (stockInfoResponse as any)?.stockInfo || [];
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/products/${id}`),
