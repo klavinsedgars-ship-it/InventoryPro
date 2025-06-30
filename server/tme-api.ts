@@ -80,24 +80,38 @@ export class TMEApiService {
    * Based on TME API documentation and OAuth 1.0a signature process
    */
   private generateApiSignature(method: string, url: string, params: Record<string, any>): string {
-    // Step 1: Create the parameter string (alphabetically sorted) - single encoding
-    const sortedParams = Object.keys(params)
+    // Step 1: Flatten array parameters to indexed format for signature calculation
+    const flattenedParams: Record<string, any> = {};
+    
+    Object.entries(params).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        // Convert arrays to indexed parameters: SymbolList[0]=value1, SymbolList[1]=value2
+        value.forEach((item, index) => {
+          flattenedParams[`${key}[${index}]`] = item;
+        });
+      } else {
+        flattenedParams[key] = value;
+      }
+    });
+
+    // Step 2: Create the parameter string with proper encoding (Version 2 - correct method)
+    const sortedParams = Object.keys(flattenedParams)
       .sort()
-      .map(key => `${key}=${params[key]}`)
+      .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(flattenedParams[key])}`)
       .join('&');
 
-    // Step 2: Create the signature base string with double URL encoding
+    // Step 3: Create the signature base string with single URL encoding
     const signatureBaseString = [
       method.toUpperCase(),
       encodeURIComponent(url),
-      encodeURIComponent(encodeURIComponent(sortedParams)) // Double encoding as per TME docs
+      encodeURIComponent(sortedParams) // Single encoding of pre-encoded parameters
     ].join('&');
 
     console.log('TME Signature Debug:');
     console.log('- Sorted params:', sortedParams);
     console.log('- Base string:', signatureBaseString);
 
-    // Step 3: Generate HMAC-SHA1 signature
+    // Step 4: Generate HMAC-SHA1 signature
     const signature = crypto
       .createHmac('sha1', this.credentials.applicationSecret)
       .update(signatureBaseString)
@@ -130,11 +144,18 @@ export class TMEApiService {
       ApiSignature: apiSignature
     };
 
-    // Step 4: Create form data with all parameters including signature
+    // Step 4: Create form data with all parameters including signature (handle arrays properly)
     const formData = new URLSearchParams();
     Object.entries(allParams).forEach(([key, value]) => {
       if (value !== undefined && value !== null) {
-        formData.append(key, String(value));
+        if (Array.isArray(value)) {
+          // Convert arrays to indexed parameters for form data
+          value.forEach((item, index) => {
+            formData.append(`${key}[${index}]`, String(item));
+          });
+        } else {
+          formData.append(key, String(value));
+        }
       }
     });
 
@@ -217,7 +238,7 @@ export class TMEApiService {
     if (symbols.length === 0) return [];
 
     const response = await this.makeRequest<TMEPrice>("/Products/GetPrices.json", {
-      SymbolList: symbols.join(";"),
+      SymbolList: symbols, // Pass as array, not joined string
       Currency: "USD",
     });
 
@@ -228,7 +249,7 @@ export class TMEApiService {
     if (symbols.length === 0) return [];
 
     const response = await this.makeRequest<TMEStock>("/Products/GetStock.json", {
-      SymbolList: symbols.join(";"),
+      SymbolList: symbols, // Pass as array, not joined string
     });
 
     return response.Data.StockList || [];
