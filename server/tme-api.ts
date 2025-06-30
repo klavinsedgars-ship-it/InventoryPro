@@ -71,11 +71,14 @@ export class TMEApiService {
     // TME API requires specific POST method with form data for most endpoints
     const formData = new URLSearchParams();
     
-    // Add authentication parameters
+    // Add authentication - our token is 50 chars (private token), so Country is optional
     formData.append("Token", this.credentials.token);
-    formData.append("Country", "US");
     formData.append("Language", "EN");
-    formData.append("Currency", "USD");
+    
+    // Country is only required for anonymous tokens (45 chars), not private tokens (50 chars)
+    if (this.credentials.token.length === 45) {
+      formData.append("Country", "US");
+    }
 
     // Add other parameters
     Object.entries(params).forEach(([key, value]) => {
@@ -125,14 +128,10 @@ export class TMEApiService {
   }
 
   async searchProducts(query: string, limit: number = 20): Promise<TMEProduct[]> {
+    // Use only the essential parameters as per TME API documentation
     const response = await this.makeRequest<TMEProduct>("/Products/Search.json", {
       SearchPlain: query,
-      SearchParameters: "1",
-      SearchWithStock: "1",
-      SearchPhoto: "1",
-      SearchDatasheet: "1",
-      SearchCurrency: "USD",
-      SearchLimit: limit.toString(),
+      SearchWithStock: "1", // Boolean to filter products with stock only
     });
 
     return response.Data.ProductList || [];

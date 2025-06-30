@@ -13,17 +13,15 @@ async function getExactTMEResponse() {
     contactNumber: credentials.contactNumber
   });
   
-  // Test 1: POST with form data (current approach)
-  console.log("\n--- TEST 1: POST with form data ---");
+  // Test 1: POST with form data (corrected based on documentation)
+  console.log("\n--- TEST 1: POST with corrected parameters ---");
   try {
     const formData = new URLSearchParams();
     formData.append("Token", credentials.token);
-    formData.append("Country", "US");
     formData.append("Language", "EN");
-    formData.append("Currency", "USD");
+    // Don't include Country for private tokens (50 chars)
     formData.append("SearchPlain", "arduino");
     formData.append("SearchWithStock", "1");
-    formData.append("SearchPhoto", "1");
 
     console.log("Request body:", formData.toString());
     
