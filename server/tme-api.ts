@@ -296,11 +296,11 @@ export class TMEApiService {
       console.log(`Stock API call failed for symbols ${symbolsBatch.join(", ")}: ${error.message}`);
       // Return realistic varied stock data instead of fixed 100
       return symbolsBatch.map(symbol => {
-        const stockLevel = Math.floor(Math.random() * 500) + 25; // 25-525 units
-        console.log(`📦 Generated realistic stock for ${symbol}: ${stockLevel} units`);
+        // Use 0 stock to indicate we don't have real data
+        console.log(`❌ No real stock data available for ${symbol} - TME API access restricted`);
         return {
           Symbol: symbol,
-          InStock: stockLevel,
+          InStock: 0, // Set to 0 to indicate unknown/unavailable
           Unit: "pcs",
           Amount: 1
         };
@@ -432,7 +432,7 @@ export class TMEApiService {
             tmeProductId: tmeProduct.Symbol,
             dataSheetUrl: tmeProduct.DataSheet || null,
             productUrl: tmeProduct.ProductInformationPage || null,
-            status: (stock?.InStock || 0) > 0 ? "in_stock" : "out_of_stock",
+            status: "unknown_stock", // Mark as unknown since we can't get real TME stock data
           };
 
           if (existingProduct) {
