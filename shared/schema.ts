@@ -27,6 +27,10 @@ export const products = pgTable("products", {
   useCalculatedPrice: boolean("use_calculated_price").default(true), // use dynamic vs manual pricing
   stock: integer("stock").notNull().default(0),
   weight: integer("weight"), // in grams
+  minOrderQuantity: integer("min_order_quantity").default(1), // TME MinAmount field
+  orderMultiples: integer("order_multiples").default(1), // TME Multiples field  
+  packagingUnit: text("packaging_unit").default("pcs"), // TME Unit field
+  isMultipack: boolean("is_multipack").default(false), // Flag for products with min qty > 1
   margin: decimal("margin", { precision: 5, scale: 2 }), // percentage (legacy field)
   status: text("status").notNull().default("active"), // active, inactive, out_of_stock
   listedOnEbay: boolean("listed_on_ebay").default(false),

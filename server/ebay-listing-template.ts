@@ -37,10 +37,18 @@ export function generateEbayListing(product: Product): ListingTemplate {
  * Generate SEO-optimized title (80 character limit)
  */
 function generateTitle(product: Product, specs: ProductSpecs): string {
-  const name = product.name || 'Electronic Component';
+  let name = product.name || 'Electronic Component';
   const manufacturer = specs.manufacturer || specs.brand || '';
   const model = specs.model || specs.partNumber || '';
   const category = specs.category || 'Electronics';
+  
+  // Handle multipack products - ensure quantity is in title
+  if (product.isMultipack && product.minOrderQuantity && product.minOrderQuantity > 1) {
+    // If title doesn't already contain quantity prefix, add it
+    if (!name.match(/^\d+x\s/)) {
+      name = `${product.minOrderQuantity}x ${name}`;
+    }
+  }
   
   // Build title components
   const components = [
@@ -110,9 +118,23 @@ function generateDescription(product: Product, specs: ProductSpecs, category: st
   if (product.ean) sections.push(`EAN: ${product.ean}`);
   sections.push('');
   
-  // Package contents
+  // Package contents - handle multipack products
   sections.push('📦 PACKAGE CONTENTS:');
-  sections.push(`• 1x ${product.name || 'Electronic Component'}`);
+  
+  if (product.isMultipack && product.minOrderQuantity && product.minOrderQuantity > 1) {
+    // For multipack products, emphasize the pack quantity
+    const baseProductName = product.name?.replace(/^\d+x\s/, '') || 'Electronic Component';
+    sections.push(`**THIS IS A PACK OF ${product.minOrderQuantity} PIECES**`);
+    sections.push(`• ${product.minOrderQuantity}x ${baseProductName}`);
+    sections.push(`• Sold as a complete pack only`);
+    sections.push(`• Cannot be split or sold individually`);
+    const perPiecePrice = (parseFloat(product.salePrice) / product.minOrderQuantity).toFixed(2);
+    sections.push(`• Effective price per piece: £${perPiecePrice}`);
+  } else {
+    // For single products
+    sections.push(`• 1x ${product.name || 'Electronic Component'}`);
+  }
+  
   if (specs.accessories) {
     specs.accessories.toString().split(',').forEach(accessory => {
       sections.push(`• ${accessory.trim()}`);
