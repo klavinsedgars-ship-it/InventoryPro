@@ -78,6 +78,9 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
   const [showSyncDialog, setShowSyncDialog] = useState(false);
   const [syncProgress, setSyncProgress] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [displayLimit] = useState(100); // Show 100 products per page in UI
+  const [totalProductsAvailable, setTotalProductsAvailable] = useState(0);
   const [syncSettings, setSyncSettings] = useState<SyncSettings>({
     applyDynamicPricing: true,
     useStockLimit: true,
@@ -106,12 +109,19 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
 
   const categories = (categoriesResponse as any)?.categories || [];
 
-  // Fetch products for selected category
+  // Fetch products for selected category with comprehensive search
   const { data: productsResponse, isLoading: productsLoading } = useQuery({
-    queryKey: [`/api/tme/products?categoryId=${selectedCategory}&limit=100`],
+    queryKey: [`/api/tme/products?categoryId=${selectedCategory}&limit=5000`],
     enabled: !!selectedCategory && activeTab === "products",
-    staleTime: 2 * 60 * 1000
+    staleTime: 5 * 60 * 1000
   });
+  
+  // Update total when data changes
+  useEffect(() => {
+    if (productsResponse?.total) {
+      setTotalProductsAvailable(productsResponse.total);
+    }
+  }, [productsResponse]);
 
   // Fetch existing products to check for duplicates
   const { data: existingProducts = [] } = useQuery({
@@ -119,7 +129,19 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     staleTime: 60 * 1000
   });
 
-  const products = (productsResponse as any)?.products || [];
+  const allProducts = (productsResponse as any)?.products || [];
+  const totalProducts = (productsResponse as any)?.total || allProducts.length;
+  
+  // Apply pagination to display products
+  const startIndex = (currentPage - 1) * displayLimit;
+  const endIndex = startIndex + displayLimit;
+  const products = allProducts.slice(startIndex, endIndex);
+  const totalPages = Math.ceil(totalProducts / displayLimit);
+  
+  // Reset to page 1 when category changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedCategory]);
 
   // Sync selected products mutation
   const syncMutation = useMutation({
@@ -282,9 +304,16 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
               <TabsContent value="products">
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
-                    <h2 className="text-lg font-semibold">
-                      Products ({products.length} total)
-                    </h2>
+                    <div className="flex flex-col">
+                      <h2 className="text-lg font-semibold">
+                        Products ({totalProducts.toLocaleString()} total)
+                      </h2>
+                      {totalPages > 1 && (
+                        <p className="text-sm text-gray-500">
+                          Showing {startIndex + 1}-{Math.min(endIndex, totalProducts)} of {totalProducts.toLocaleString()}
+                        </p>
+                      )}
+                    </div>
                     
                     {products.length > 0 && (
                       <div className="flex items-center space-x-2">
