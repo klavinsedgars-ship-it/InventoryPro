@@ -274,6 +274,9 @@ Changelog:
 - June 30, 2025. Added proper rate limiting (1 second between batches) to prevent TME API 429 errors during stock retrieval
 - June 30, 2025. **VERIFIED RESULTS**: SC0195-9 now shows correct stock (264 units), price (€64.08), and status (in_stock) matching TME data
 - June 30, 2025. **STATUS**: Complete TME stock synchronization working at 100% - all products receive authentic stock levels during sync operations
+- June 30, 2025. **EBAY UPDATE TEMPLATE FIXED**: Resolved issue where eBay update function was using old simple template instead of professional unified template
+- June 30, 2025. Fixed XML structure mismatch between new listings and updates - aligned ReviseFixedPriceItem XML format with AddFixedPriceItem format
+- June 30, 2025. eBay update functionality now properly uses professional unified templates with styled sections, maintaining consistency across all listings
 ```
 
 ## User Preferences
