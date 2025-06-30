@@ -347,95 +347,97 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                       Loading products...
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      {products.map((product: TMEProduct) => (
-                        <div
-                          key={product.Symbol}
-                          className={`border rounded-lg p-4 flex items-center space-x-4 hover:bg-gray-50 ${
-                            selectedProducts.has(product.Symbol) ? "ring-2 ring-blue-500 bg-blue-50" : ""
-                          }`}
-                        >
-                          <Checkbox
-                            checked={selectedProducts.has(product.Symbol)}
-                            onCheckedChange={() => toggleProductSelection(product.Symbol)}
-                          />
-                          
-                          <div className="flex-shrink-0 w-16 h-16 bg-gray-100 rounded flex items-center justify-center">
-                            {product.Photo ? (
-                              <img 
-                                src={`https:${product.Photo}`} 
-                                alt={product.Description}
-                                className="max-w-full max-h-full object-contain"
-                              />
-                            ) : (
-                              <Package className="h-8 w-8 text-gray-400" />
-                            )}
-                          </div>
-                          
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-start justify-between">
-                              <div className="flex-1">
-                                <p className="text-sm font-medium text-gray-900 truncate">
-                                  {product.Symbol}
-                                </p>
-                                <p className="text-sm text-gray-600 line-clamp-2">
-                                  {product.Description}
-                                </p>
-                                <div className="mt-1 flex items-center space-x-4 text-xs text-gray-500">
-                                  <span>Producer: {product.Producer}</span>
-                                  <span>Stock: {product.InStock || product.Amount || product.Stock || 0}</span>
-                                  <span>Price: €{product.Price || "N/A"}</span>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        {products.map((product: TMEProduct) => (
+                          <div
+                            key={product.Symbol}
+                            className={`border rounded-lg p-4 flex items-center space-x-4 hover:bg-gray-50 ${
+                              selectedProducts.has(product.Symbol) ? "ring-2 ring-blue-500 bg-blue-50" : ""
+                            }`}
+                          >
+                            <Checkbox
+                              checked={selectedProducts.has(product.Symbol)}
+                              onCheckedChange={() => toggleProductSelection(product.Symbol)}
+                            />
+                            
+                            <div className="flex-shrink-0 w-16 h-16 bg-gray-100 rounded flex items-center justify-center">
+                              {product.Photo ? (
+                                <img 
+                                  src={`https:${product.Photo}`} 
+                                  alt={product.Description}
+                                  className="max-w-full max-h-full object-contain"
+                                />
+                              ) : (
+                                <Package className="h-8 w-8 text-gray-400" />
+                              )}
+                            </div>
+                            
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1">
+                                  <p className="text-sm font-medium text-gray-900 truncate">
+                                    {product.Symbol}
+                                  </p>
+                                  <p className="text-sm text-gray-600 line-clamp-2">
+                                    {product.Description}
+                                  </p>
+                                  <div className="mt-1 flex items-center space-x-4 text-xs text-gray-500">
+                                    <span>Producer: {product.Producer}</span>
+                                    <span>Stock: {product.InStock || product.Amount || product.Stock || 0}</span>
+                                    <span>Price: €{product.Price || "N/A"}</span>
+                                  </div>
                                 </div>
-                              </div>
-                              
-                              <div className="flex-shrink-0 ml-4 flex flex-col items-end space-y-2">
-                                {isProductSynced(product.Symbol) ? (
-                                  <Badge variant="default" className="bg-green-600">
-                                    <CheckCircle2 className="h-3 w-3 mr-1" />
-                                    Synced
-                                  </Badge>
-                                ) : isSuitableProduct(product) ? (
-                                  <Badge variant="secondary" className="bg-blue-100 text-blue-800">
-                                    <Zap className="h-3 w-3 mr-1" />
-                                    Suitable
-                                  </Badge>
-                                ) : (
-                                  <Badge variant="outline" className="bg-yellow-100 text-yellow-800">
-                                    <AlertCircle className="h-3 w-3 mr-1" />
-                                    Check
-                                  </Badge>
-                                )}
                                 
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => window.open(`https://www.tme.eu/en/details/${product.Symbol}/`, '_blank')}
-                                >
-                                  <Eye className="h-3 w-3 mr-1" />
-                                  View
-                                </Button>
+                                <div className="flex-shrink-0 ml-4 flex flex-col items-end space-y-2">
+                                  {isProductSynced(product.Symbol) ? (
+                                    <Badge variant="default" className="bg-green-600">
+                                      <CheckCircle2 className="h-3 w-3 mr-1" />
+                                      Synced
+                                    </Badge>
+                                  ) : isSuitableProduct(product) ? (
+                                    <Badge variant="secondary" className="bg-blue-100 text-blue-800">
+                                      <Zap className="h-3 w-3 mr-1" />
+                                      Suitable
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="bg-yellow-100 text-yellow-800">
+                                      <AlertCircle className="h-3 w-3 mr-1" />
+                                      Check
+                                    </Badge>
+                                  )}
+                                  
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => window.open(`https://www.tme.eu/en/details/${product.Symbol}/`, '_blank')}
+                                  >
+                                    <Eye className="h-3 w-3 mr-1" />
+                                    View
+                                  </Button>
+                                </div>
                               </div>
                             </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                    
-                    {totalPages > 1 && (
-                      <div className="flex items-center justify-between border-t pt-4 mt-4">
-                        <div className="text-sm text-gray-500">
-                          Showing {startIndex + 1}-{Math.min(endIndex, totalProducts)} of {totalProducts} products (Page {currentPage} of {totalPages})
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <Button variant="outline" size="sm" onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1}>
-                            Previous
-                          </Button>
-                          <Button variant="outline" size="sm" onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages}>
-                            Next
-                          </Button>
-                        </div>
+                        ))}
                       </div>
-                    )}
+                      
+                      {totalPages > 1 && (
+                        <div className="flex items-center justify-between border-t pt-4">
+                          <div className="text-sm text-gray-500">
+                            Showing {startIndex + 1}-{Math.min(endIndex, totalProducts)} of {totalProducts} products (Page {currentPage} of {totalPages})
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Button variant="outline" size="sm" onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1}>
+                              Previous
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages}>
+                              Next
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               </TabsContent>
