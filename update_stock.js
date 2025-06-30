@@ -1,9 +1,7 @@
-// Quick stock update script for all TME products
+// Quick stock update script for remaining TME products with unknown stock
 const TMESymbols = [
-  "ABX00028", "A000005", "A000067", "A000066", "A000062", "ABX00087",
-  "ABX00083", "ABX00033", "ABX00080", "ABX00019", "ABX00092", "ABX00063",
-  "A000073", "A000062", "ABX00028", "A000066", "ABX00087", "A000005",
-  "A000067", "ABX00083"
+  "A000024", "A000053", "A000073", "ABX00012", "ABX00019",
+  "ABX00063", "ABX00092", "AFX00002", "AFX00005", "K000007", "T050000"
 ];
 
 async function updateAllStock() {
