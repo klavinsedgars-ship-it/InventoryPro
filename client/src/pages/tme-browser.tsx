@@ -208,8 +208,8 @@ export default function TMEBrowser() {
 
   const selectAllProducts = () => {
     const newSelected = new Set(selectedProducts);
-    const suitableProducts = products.filter(p => isSuitableProduct(p));
-    suitableProducts.forEach(p => newSelected.add(p.Symbol));
+    const suitableProducts = products.filter((p: TMEProduct) => isSuitableProduct(p));
+    suitableProducts.forEach((p: TMEProduct) => newSelected.add(p.Symbol));
     setSelectedProducts(newSelected);
   };
 
@@ -228,7 +228,7 @@ export default function TMEBrowser() {
   };
 
   const isProductSynced = (productSymbol: string): boolean => {
-    return existingProducts?.some((p: any) => p.sku === productSymbol) || false;
+    return (existingProducts as any)?.some((p: any) => p.sku === productSymbol) || false;
   };
 
   const handleSync = async () => {

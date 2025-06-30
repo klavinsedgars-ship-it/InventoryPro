@@ -3542,30 +3542,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
             console.log(`📦 Processing product: ${symbol}`);
 
             // Get product details from TME
-            const productResponse = await tmeApi.getProductDetails(symbol);
-            if (!productResponse.success || !productResponse.product) {
-              console.error(`❌ Failed to get details for ${symbol}:`, productResponse.error);
+            const productDetails = await tmeApi.getProductDetails([symbol]);
+            if (!productDetails || productDetails.length === 0) {
+              console.error(`❌ Failed to get details for ${symbol}`);
               failedCount++;
-              errors.push(`Failed to get details for ${symbol}: ${productResponse.error}`);
+              errors.push(`Failed to get details for ${symbol}`);
               continue;
             }
 
-            const product = productResponse.product;
+            const product = productDetails[0];
 
             // Get pricing info
             const pricesResponse = await tmeApi.getProductPrices([symbol]);
             let supplierPrice = "0";
-            if (pricesResponse.success && pricesResponse.prices?.[symbol]) {
-              const priceData = pricesResponse.prices[symbol];
-              supplierPrice = priceData.PriceList?.[0]?.PriceValue || priceData.Price || "0";
+            if (pricesResponse && pricesResponse.length > 0) {
+              const priceData = pricesResponse[0];
+              supplierPrice = priceData.PriceList?.[0]?.PriceValue?.toString() || "0";
             }
 
             // Get stock info if available
             let stockData = null;
             try {
               const stockResponse = await tmeApi.getProductStock([symbol]);
-              if (stockResponse.success && stockResponse.stocks?.[symbol]) {
-                stockData = stockResponse.stocks[symbol];
+              if (stockResponse && stockResponse.length > 0) {
+                stockData = stockResponse[0];
               }
             } catch (stockError) {
               console.warn(`⚠️ Could not get stock data for ${symbol}:`, stockError);
@@ -3573,15 +3573,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
             // Apply dynamic pricing if enabled
             let pricingResult = {
-              finalPrice: supplierPrice,
-              calculatedPrice: supplierPrice,
+              finalPrice: parseFloat(supplierPrice),
+              calculatedPrice: parseFloat(supplierPrice),
               marginTier: "No Margin",
               marginPercentage: 0
             };
 
             if (settings.applyDynamicPricing) {
               const { calculateDynamicPrice } = await import("./dynamic-pricing");
-              pricingResult = calculateDynamicPrice(supplierPrice);
+              const result = calculateDynamicPrice(supplierPrice);
+              pricingResult = {
+                finalPrice: result.finalPrice,
+                calculatedPrice: result.calculatedPrice,
+                marginTier: result.marginTier,
+                marginPercentage: result.marginPercentage
+              };
             }
 
             // Prepare product data with proper type conversions
@@ -3597,12 +3603,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
               marginTier: pricingResult.marginTier,
               marginPercentage: String(Number(pricingResult.marginPercentage)),
               stock: stockData?.Amount || 100,
-              status: "active",
+              status: "active" as const,
               weight: String(Number(product.Weight) || 10),
               imageUrl: product.Photo ? `https:${product.Photo}` : null,
               dataSheetUrl: product.DataSheet ? `https://www.tme.eu${product.DataSheet}` : null,
               productUrl: product.ProductInformationPage ? `https://www.tme.eu${product.ProductInformationPage}` : null,
-              supplier: "tme",
+              supplier: "tme" as const,
               supplierProductId: product.Symbol,
               useStockLimit: settings.useStockLimit || false,
               ebayStockLimit: settings.useStockLimit ? settings.ebayStockLimit : null
