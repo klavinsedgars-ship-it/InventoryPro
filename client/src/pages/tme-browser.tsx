@@ -47,6 +47,7 @@ export function TMEBrowser({ user }: TMEBrowserProps) {
   const [selectedCategory, setSelectedCategory] = useState<TMECategory | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategories, setSelectedCategories] = useState<Set<number>>(new Set());
+  const [syncLoading, setSyncLoading] = useState(false);
 
   const { data: categoriesData, isLoading: categoriesLoading } = useQuery({
     queryKey: ["/api/tme/categories"],
@@ -77,6 +78,71 @@ export function TMEBrowser({ user }: TMEBrowserProps) {
       newSelected.add(categoryId);
     }
     setSelectedCategories(newSelected);
+  };
+
+  const syncSelectedCategories = async () => {
+    if (selectedCategories.size === 0) {
+      toast({
+        title: "No Categories Selected",
+        description: "Please select categories to sync products from.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSyncLoading(true);
+    try {
+      // Get search terms for selected categories
+      const categorySearchMap: { [key: number]: string } = {
+        1000: "semiconductor", 1001: "microcontroller", 1002: "processor", 1003: "memory", 
+        1004: "transistor", 1005: "diode", 1006: "logic circuit",
+        2000: "development board", 2001: "arduino", 2002: "raspberry pi", 2003: "esp32", 
+        2004: "development kit", 2005: "evaluation board",
+        3000: "led", 3001: "led", 3002: "led strip", 3003: "photodiode", 
+        3004: "optocoupler", 3005: "laser diode",
+        5000: "resistor", 5001: "resistor", 5002: "capacitor", 5003: "inductor", 
+        5004: "ferrite", 5005: "crystal", 5006: "filter",
+        6000: "connector", 6001: "pin header", 6002: "terminal block", 6003: "usb connector",
+        7000: "power supply", 7001: "voltage regulator", 7002: "dc converter", 7003: "fuse",
+        8000: "switch", 8001: "push button", 8002: "toggle switch", 8003: "rotary switch",
+      };
+
+      // Sync products from the first selected category (for demonstration)
+      const firstCategoryId = Array.from(selectedCategories)[0];
+      const searchTerm = categorySearchMap[firstCategoryId] || "electronic";
+      
+      const response = await fetch('/api/tme/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          searchQuery: searchTerm, 
+          limit: 10 
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Sync failed');
+      }
+
+      const result = await response.json();
+      
+      toast({
+        title: "Sync Successful",
+        description: `Successfully synced ${result.productsAdded} products from ${searchTerm} category.`,
+      });
+      
+      // Clear selection after successful sync
+      setSelectedCategories(new Set());
+      
+    } catch (error) {
+      toast({
+        title: "Sync Failed",
+        description: "Failed to sync products. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setSyncLoading(false);
+    }
   };
 
   const renderCategory = (category: TMECategory, level: number = 0) => {
@@ -226,6 +292,47 @@ export function TMEBrowser({ user }: TMEBrowserProps) {
           title="TME Category Browser" 
           subtitle="Explore TME product catalog and select categories for sync"
         />
+        
+        {/* Total Product Count and Sync Controls */}
+        <div className="bg-white border-b p-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-6">
+              <div>
+                <div className="text-sm text-gray-500">Total TME Products</div>
+                <div className="text-2xl font-bold text-blue-600">
+                  {categoriesData?.categories?.reduce((sum: number, cat: TMECategory) => sum + cat.ProductsCount, 0)?.toLocaleString() || "0"}
+                </div>
+              </div>
+              {selectedCategories.size > 0 && (
+                <div>
+                  <div className="text-sm text-gray-500">Selected Categories</div>
+                  <div className="text-xl font-semibold text-green-600">
+                    {selectedCategories.size} categories ({categoriesData?.categories?.filter((cat: TMECategory) => selectedCategories.has(cat.CategoryId))
+                      .reduce((sum: number, cat: TMECategory) => sum + cat.ProductsCount, 0)?.toLocaleString() || "0"} products)
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            {selectedCategories.size > 0 && (
+              <div className="flex space-x-2">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setSelectedCategories(new Set())}
+                >
+                  Clear Selection
+                </Button>
+                <Button 
+                  onClick={syncSelectedCategories}
+                  disabled={syncLoading}
+                  className="bg-blue-600 hover:bg-blue-700"
+                >
+                  {syncLoading ? "Syncing..." : `Sync ${selectedCategories.size} Categories`}
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
         
         <div className="p-6">
           <Tabs defaultValue="browse" className="space-y-6">
