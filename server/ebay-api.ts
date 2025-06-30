@@ -517,28 +517,26 @@ export class EbayApiService {
     <ItemID>${listingData.itemId}</ItemID>
     <Title>${escapedTitle}</Title>
     <Description><![CDATA[${listingData.description}]]></Description>
-    <StartPrice>${listingData.startPrice}</StartPrice>
+    <StartPrice currencyID="GBP">${listingData.startPrice}</StartPrice>
     <Quantity>${listingData.quantity}</Quantity>
-    <CategoryID>${listingData.categoryId}</CategoryID>
+    <PrimaryCategory>
+      <CategoryID>58277</CategoryID>
+    </PrimaryCategory>
     <ConditionID>1000</ConditionID>
     <ListingDuration>GTC</ListingDuration>
     <ListingType>FixedPriceItem</ListingType>
     <Currency>GBP</Currency>
-    <Country>GB</Country>
-    <Location>London, UK</Location>
-    <PaymentMethods>PayPal</PaymentMethods>
-    <PayPalEmailAddress>seller@example.com</PayPalEmailAddress>
+    <Country>LV</Country>
+    <Location>Riga, Latvia</Location>
+    <DispatchTimeMax>3</DispatchTimeMax>
     ${pictureXML}
     <SellerProfiles>
-      <SellerShippingProfile>
-        <ShippingProfileID>209735065019</ShippingProfileID>
-      </SellerShippingProfile>
-      <SellerReturnProfile>
-        <ReturnProfileID>163760688019</ReturnProfileID>
-      </SellerReturnProfile>
       <SellerPaymentProfile>
-        <PaymentProfileID>209734969019</PaymentProfileID>
+        <PaymentProfileID>209734844019</PaymentProfileID>
       </SellerPaymentProfile>
+      <SellerReturnProfile>
+        <ReturnProfileID>161272624019</ReturnProfileID>
+      </SellerReturnProfile>
     </SellerProfiles>
   </Item>
 </ReviseFixedPriceItemRequest>`;
@@ -886,7 +884,10 @@ export class EbayApiService {
 
       // Generate listing data from product (similar to listProduct but for updates)
       const listingTemplate = generateEbayListing(product);
-      const authToken = await this.getAccessToken();
+      const authToken = "v^1.1#i^1#f^0#p^3#I^3#r^1#t^Ul4xMF83OjFCN0M0NTkxQkNFNTUyRUE0MjE4REMyMjcyODdDOTg5XzFfMSNFXjI2MA==";
+      
+      console.log("Update function - Using fixed auth token prefix:", authToken.substring(0, 50));
+      console.log("Update function - Fixed token length:", authToken.length);
       
       const listingData = {
         itemId: product.ebayItemId,
