@@ -57,12 +57,19 @@ export class TMEApiService {
 
   constructor() {
     // Updated TME credentials with Application Secret - June 30, 2025
+    // Force use of new TME credentials - override environment temporarily
     this.credentials = {
-      token: process.env.TME_API_TOKEN || "4c7c4c076d049b050b7db3a648c6ef61c4bd1daad6c5ab09df",
-      customerNumber: process.env.TME_CUSTOMER_NUMBER || "40026843",
-      contactNumber: process.env.TME_CONTACT_NUMBER || "642966",
+      token: "4c7c4c076d049b050b7db3a648c6ef61c4bd1daad6c5ab09df",
+      customerNumber: "40026843", 
+      contactNumber: "642966",
       applicationSecret: "c691a195bbb557d4f848",
     };
+
+    console.log('TME Credentials Debug:');
+    console.log('- Token (first 20 chars):', this.credentials.token.substring(0, 20) + '...');
+    console.log('- Customer Number:', this.credentials.customerNumber);
+    console.log('- Contact Number:', this.credentials.contactNumber);
+    console.log('- Application Secret:', this.credentials.applicationSecret);
 
     if (!this.credentials.token || !this.credentials.customerNumber || !this.credentials.contactNumber) {
       throw new Error("TME API credentials not properly configured");
