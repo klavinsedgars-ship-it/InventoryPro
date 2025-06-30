@@ -258,6 +258,12 @@ Changelog:
 - June 30, 2025. Fixed image URLs using TME's cloudimg.io CDN with proper watermarking and dimensions
 - June 30, 2025. All products now display professional product photos with TME branding and optimization
 - June 30, 2025. **STATUS**: Complete product dataset with authentic images, pricing, and specifications ready for marketplace listing
+- June 30, 2025. **MAJOR FEATURE: TME Category Browser Implemented** - Built comprehensive TME catalog exploration system
+- June 30, 2025. Added complete TME category tree browsing with hierarchical navigation and product preview functionality
+- June 30, 2025. Implemented category filtering system to identify suitable vs unsuitable products (heavy items, liquids, etc.)
+- June 30, 2025. Created recommended categories tab highlighting lightweight electronic components ideal for e-commerce
+- June 30, 2025. Built "Categories to Avoid" tab identifying heavy items, liquids, and unsuitable products for marketplace selling
+- June 30, 2025. **STATUS**: TME Category Browser ready for production - enables selective sync of suitable product categories only
 ```
 
 ## User Preferences

@@ -10,7 +10,8 @@ import {
   BarChart3,
   Database,
   FileText,
-  Cog
+  Cog,
+  Search
 } from "lucide-react";
 
 const navigation = [
@@ -18,6 +19,7 @@ const navigation = [
   { name: 'Products', href: '/products', icon: Package },
   { name: 'Marketplaces', href: '/marketplaces', icon: ShoppingCart },
   { name: 'TME Sync', href: '/sync', icon: RefreshCw },
+  { name: 'TME Browser', href: '/tme-browser', icon: Search },
   { name: 'Configuration', href: '/configuration', icon: Cog },
   { name: 'Queue Manager', href: '/queue', icon: Database },
   { name: 'Templates', href: '/templates', icon: FileText },

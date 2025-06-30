@@ -88,6 +88,7 @@ function AppContent() {
       <Route path="/products" component={() => <Products user={user} />} />
       <Route path="/marketplaces" component={() => <Marketplaces user={user} />} />
       <Route path="/sync" component={() => <TMESync user={user} />} />
+      <Route path="/tme-browser" component={() => <TMEBrowser user={user} />} />
       <Route path="/configuration" component={() => <Configuration user={user} />} />
       <Route path="/queue" component={() => <QueueManagement user={user} />} />
       <Route path="/templates" component={() => <TemplatePreview user={user} />} />
