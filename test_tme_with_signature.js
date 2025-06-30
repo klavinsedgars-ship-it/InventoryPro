@@ -1,5 +1,5 @@
 // Test TME API with HMAC-SHA1 signature
-const crypto = require('crypto');
+import crypto from 'crypto';
 
 const credentials = {
   token: "4c7c4c076d049b050b7db3a648c6ef61c4bd1daad6c5ab09df",
@@ -43,9 +43,11 @@ async function testTMEWithSignature() {
   };
 
   const url = "https://api.tme.eu/Products/Search.json";
+  
+  // CRITICAL: Calculate signature WITHOUT ApiSignature parameter
   const signature = generateApiSignature("POST", url, params);
   
-  // Add signature to parameters
+  // Add signature to parameters AFTER calculation
   params.ApiSignature = signature;
   
   console.log("Parameters:", Object.keys(params));

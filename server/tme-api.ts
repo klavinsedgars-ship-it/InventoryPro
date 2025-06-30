@@ -74,18 +74,22 @@ export class TMEApiService {
    * Based on TME API documentation and OAuth 1.0a signature process
    */
   private generateApiSignature(method: string, url: string, params: Record<string, any>): string {
-    // Step 1: Create the parameter string (alphabetically sorted)
+    // Step 1: Create the parameter string (alphabetically sorted) - single encoding
     const sortedParams = Object.keys(params)
       .sort()
-      .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(params[key])}`)
+      .map(key => `${key}=${params[key]}`)
       .join('&');
 
-    // Step 2: Create the signature base string
+    // Step 2: Create the signature base string with double URL encoding
     const signatureBaseString = [
       method.toUpperCase(),
       encodeURIComponent(url),
-      encodeURIComponent(sortedParams)
+      encodeURIComponent(encodeURIComponent(sortedParams)) // Double encoding as per TME docs
     ].join('&');
+
+    console.log('TME Signature Debug:');
+    console.log('- Sorted params:', sortedParams);
+    console.log('- Base string:', signatureBaseString);
 
     // Step 3: Generate HMAC-SHA1 signature
     const signature = crypto
@@ -93,12 +97,13 @@ export class TMEApiService {
       .update(signatureBaseString)
       .digest('base64');
 
+    console.log('- Generated signature:', signature);
     return signature;
   }
 
   private async makeRequest<T>(endpoint: string, params: Record<string, any> = {}): Promise<TMEApiResponse<T>> {
-    // Step 1: Prepare all parameters (including authentication)
-    const allParams: Record<string, any> = {
+    // Step 1: Prepare all parameters (including authentication) but WITHOUT ApiSignature
+    const paramsForSignature: Record<string, any> = {
       Token: this.credentials.token,
       Language: "EN",
       ...params
@@ -106,15 +111,18 @@ export class TMEApiService {
 
     // Country is only required for anonymous tokens (45 chars), not private tokens (50 chars)
     if (this.credentials.token.length === 45) {
-      allParams.Country = "US";
+      paramsForSignature.Country = "US";
     }
 
-    // Step 2: Generate API signature
+    // Step 2: Generate API signature (IMPORTANT: ApiSignature parameter is NOT included in signature calculation)
     const fullUrl = `${this.baseUrl}${endpoint}`;
-    const apiSignature = this.generateApiSignature("POST", fullUrl, allParams);
+    const apiSignature = this.generateApiSignature("POST", fullUrl, paramsForSignature);
     
-    // Step 3: Add signature to parameters
-    allParams.ApiSignature = apiSignature;
+    // Step 3: Add signature to parameters AFTER signature calculation
+    const allParams = {
+      ...paramsForSignature,
+      ApiSignature: apiSignature
+    };
 
     // Step 4: Create form data with all parameters including signature
     const formData = new URLSearchParams();
