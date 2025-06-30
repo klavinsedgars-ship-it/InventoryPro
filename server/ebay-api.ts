@@ -520,19 +520,19 @@ export class EbayApiService {
   </RequesterCredentials>
   <Item>
     <ItemID>${listingData.itemId}</ItemID>
-    <Title>${escapedTitle}</Title>
+    <Title>${this.escapeXml(listingData.title)}</Title>
     <Description><![CDATA[${listingData.description}]]></Description>
-    <StartPrice currencyID="GBP">${listingData.startPrice}</StartPrice>
-    <Quantity>${listingData.quantity}</Quantity>
     <PrimaryCategory>
       <CategoryID>58277</CategoryID>
     </PrimaryCategory>
-    <ConditionID>1000</ConditionID>
+    <StartPrice currencyID="GBP">${listingData.startPrice}</StartPrice>
+    <Quantity>${listingData.quantity}</Quantity>
     <ListingDuration>GTC</ListingDuration>
-    <ListingType>FixedPriceItem</ListingType>
-    <Currency>GBP</Currency>
     <Country>LV</Country>
+    <Currency>GBP</Currency>
     <Location>Riga, Latvia</Location>
+    <ListingType>FixedPriceItem</ListingType>
+    <ConditionID>1000</ConditionID>
     <DispatchTimeMax>3</DispatchTimeMax>
     ${pictureXML}
     <SellerProfiles>
@@ -893,6 +893,8 @@ export class EbayApiService {
       
       console.log("Update function - Using fixed auth token prefix:", authToken.substring(0, 50));
       console.log("Update function - Fixed token length:", authToken.length);
+      console.log("Generated listing template description length:", listingTemplate.htmlDescription.length);
+      console.log("Generated template description preview:", listingTemplate.htmlDescription.substring(0, 200));
       
       const listingData = {
         itemId: product.ebayItemId,
@@ -905,6 +907,10 @@ export class EbayApiService {
         pictureURLs: product.imageUrl ? [product.imageUrl] : undefined,
         ...updateData
       };
+
+      console.log("Generated listing template description length:", listingTemplate.htmlDescription.length);
+      console.log("Generated template description preview:", listingTemplate.htmlDescription.substring(0, 300));
+      console.log("Using description in update:", listingData.description === listingTemplate.htmlDescription ? "HTML template" : "Custom description");
 
       console.log("Updating eBay listing with data:", {
         itemId: listingData.itemId,
