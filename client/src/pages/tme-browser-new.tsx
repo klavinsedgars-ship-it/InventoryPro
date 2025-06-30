@@ -108,6 +108,39 @@ export function TMEBrowserNew({ user }: TMEBrowserProps) {
     }
   };
 
+  const findHighMOQProducts = async () => {
+    try {
+      const response = await fetch('/api/tme/find-high-moq', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      });
+
+      const result = await response.json();
+
+      if (result.success && result.products?.length > 0) {
+        toast({
+          title: "High MOQ Products Found", 
+          description: `Found ${result.products.length} products with MOQ > 1 piece. Here are some examples: ${result.products.slice(0,2).map(p => `${p.Symbol} (MOQ: ${p.MinOrderQuantity})`).join(', ')}`,
+        });
+      } else {
+        toast({
+          title: "Search Complete",
+          description: "Searched electronic components but most have MOQ of 1 piece. Try searching for specific bulk components like resistor reels or capacitor tapes.",
+        });
+      }
+    } catch (error) {
+      console.error('High MOQ search error:', error);
+      toast({
+        title: "Search Failed",
+        description: "Failed to search for high MOQ products.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleSyncSelected = async () => {
     if (selectedProducts.size === 0) {
       toast({
@@ -249,8 +282,8 @@ export function TMEBrowserNew({ user }: TMEBrowserProps) {
                         )}
                       </div>
                       
-                      {selectedCategory && (
-                        <div className="flex items-center space-x-4">
+                      <div className="flex items-center space-x-4">
+                        {selectedCategory && (
                           <div className="relative">
                             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                             <Input
@@ -260,19 +293,29 @@ export function TMEBrowserNew({ user }: TMEBrowserProps) {
                               className="pl-10 w-64"
                             />
                           </div>
-                          
-                          {selectedProducts.size > 0 && (
-                            <Button 
-                              onClick={handleSyncSelected}
-                              disabled={syncLoading}
-                              className="flex items-center space-x-2"
-                            >
-                              <Download className="w-4 h-4" />
-                              <span>Sync {selectedProducts.size} Products</span>
-                            </Button>
-                          )}
-                        </div>
-                      )}
+                        )}
+                        
+                        <Button 
+                          variant="outline"
+                          onClick={findHighMOQProducts}
+                          disabled={productsLoading}
+                          className="flex items-center space-x-2"
+                        >
+                          <Search className="w-4 h-4" />
+                          <span>Find High MOQ</span>
+                        </Button>
+                        
+                        {selectedProducts.size > 0 && (
+                          <Button 
+                            onClick={handleSyncSelected}
+                            disabled={syncLoading}
+                            className="flex items-center space-x-2"
+                          >
+                            <Download className="w-4 h-4" />
+                            <span>Sync {selectedProducts.size} Products</span>
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </CardHeader>
                   
