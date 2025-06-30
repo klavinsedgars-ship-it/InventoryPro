@@ -2986,18 +2986,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const { calculateDynamicPrice } = await import("./dynamic-pricing");
           const pricingResult = calculateDynamicPrice(supplierPrice);
 
-          // Create product data
+          console.log(`🔍 Product ${product.Symbol} pricing:`, {
+            supplierPrice,
+            finalPrice: pricingResult.finalPrice,
+            calculatedPrice: pricingResult.calculatedPrice,
+            marginPercentage: pricingResult.marginPercentage
+          });
+
+          // Create product data with proper number handling
           const productData = {
             name: product.Description,
             sku: product.Symbol,
             ean: product.EAN || null,
             category: product.Category,
             description: product.Description,
-            supplierPrice: supplierPrice.toString(),
-            salePrice: pricingResult.finalPrice.toString(),
-            calculatedPrice: pricingResult.calculatedPrice.toString(),
+            supplierPrice: Number(supplierPrice),
+            salePrice: Number(pricingResult.finalPrice),
+            calculatedPrice: Number(pricingResult.calculatedPrice),
             marginTier: pricingResult.marginTier,
-            marginPercentage: pricingResult.marginPercentage.toString(),
+            marginPercentage: Number(pricingResult.marginPercentage),
             stock: stockData?.Amount || 100,
             status: "active",
             weight: product.Weight || 10,
@@ -3007,6 +3014,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             supplier: "tme",
             supplierProductId: product.Symbol
           };
+
+          console.log(`📦 Prepared product data for ${product.Symbol}:`, {
+            supplierPrice: typeof productData.supplierPrice,
+            salePrice: typeof productData.salePrice,
+            calculatedPrice: typeof productData.calculatedPrice
+          });
 
           // Check if product already exists
           const existingProduct = await storage.getProductBySku(productData.sku);
