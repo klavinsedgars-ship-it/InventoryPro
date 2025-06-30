@@ -747,6 +747,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // TME Category Browser endpoints
+  app.get("/api/tme/categories", requireAuth, async (req, res) => {
+    try {
+      console.log("Fetching complete TME category tree...");
+      const { tmeApi } = await import("./tme-api");
+      
+      const result = await tmeApi.getAllCategories();
+      
+      if (!result.success) {
+        return res.status(500).json(result);
+      }
+      
+      res.json({
+        success: true,
+        categories: result.categories,
+        totalCategories: result.categories?.length || 0,
+        message: result.message
+      });
+      
+    } catch (error) {
+      console.error("Failed to fetch TME categories:", error);
+      res.status(500).json({ 
+        success: false, 
+        message: `Failed to fetch TME categories: ${(error as Error).message}`,
+        error: (error as Error).message
+      });
+    }
+  });
+
+  app.get("/api/tme/categories/:categoryId/products", requireAuth, async (req, res) => {
+    try {
+      const categoryId = parseInt(req.params.categoryId);
+      const limit = parseInt(req.query.limit as string) || 20;
+      
+      console.log(`Fetching products for TME category ${categoryId}...`);
+      const { tmeApi } = await import("./tme-api");
+      
+      const result = await tmeApi.getProductsByCategory(categoryId, limit);
+      
+      if (!result.success) {
+        return res.status(500).json(result);
+      }
+      
+      res.json({
+        success: true,
+        products: result.products,
+        categoryId: categoryId,
+        totalProducts: result.products?.length || 0,
+        message: result.message
+      });
+      
+    } catch (error) {
+      console.error("Failed to fetch category products:", error);
+      res.status(500).json({ 
+        success: false, 
+        message: `Failed to fetch category products: ${(error as Error).message}`,
+        error: (error as Error).message
+      });
+    }
+  });
+
   // TME sync routes
   app.post("/api/sync/tme", requireAuth, async (req, res) => {
     try {
@@ -759,8 +820,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("TME sync failed:", error);
       res.status(500).json({ 
         success: false, 
-        message: error.message || "TME sync failed",
-        error: error.message
+        message: (error as Error).message || "TME sync failed",
+        error: (error as Error).message
       });
     }
   });

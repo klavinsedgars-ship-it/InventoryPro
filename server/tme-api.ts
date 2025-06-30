@@ -58,7 +58,18 @@ interface TMEApiResponse<T> {
     ProductList?: T[];
     PriceList?: T[];
     StockList?: T[];
+    CategoryList?: T[];
   };
+}
+
+interface TMECategory {
+  CategoryId: number;
+  Name: string;
+  NameEn: string;
+  ParentId: number;
+  Level: number;
+  ProductsCount: number;
+  Subcategories?: TMECategory[];
 }
 
 export class TMEApiService {
@@ -650,6 +661,145 @@ export class TMEApiService {
     description += `TME Symbol: ${product.Symbol}\n`;
     
     return description.trim();
+  }
+
+  /**
+   * Get all TME categories for browsing and selection
+   */
+  async getAllCategories(): Promise<{ success: boolean; categories?: TMECategory[]; message?: string }> {
+    try {
+      console.log("Fetching TME category tree...");
+      
+      const params = {
+        Token: this.credentials.token,
+        Country: "GB",
+        Language: "EN"
+      };
+
+      const signature = this.generateApiSignature("POST", `${this.baseUrl}/Products/GetCategories.json`, params);
+      
+      const response = await fetch(`${this.baseUrl}/Products/GetCategories.json`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "X-TME-Signature": signature
+        },
+        body: new URLSearchParams(params).toString()
+      });
+
+      if (!response.ok) {
+        throw new Error(`TME API request failed: ${response.status} ${response.statusText}`);
+      }
+
+      const data: TMEApiResponse<TMECategory> = await response.json();
+      
+      if (data.Status !== "OK") {
+        throw new Error(data.ErrorMessage || "TME API returned an error");
+      }
+
+      const categories = data.Data.CategoryList || [];
+      console.log(`Successfully fetched ${categories.length} TME categories`);
+      
+      // Build hierarchical structure
+      const hierarchicalCategories = this.buildCategoryHierarchy(categories);
+      
+      return {
+        success: true,
+        categories: hierarchicalCategories,
+        message: `Found ${categories.length} categories in TME catalog`
+      };
+
+    } catch (error) {
+      console.error("Failed to fetch TME categories:", error);
+      return {
+        success: false,
+        message: `Failed to fetch TME categories: ${(error as Error).message}`
+      };
+    }
+  }
+
+  /**
+   * Build hierarchical category structure from flat list
+   */
+  private buildCategoryHierarchy(categories: TMECategory[]): TMECategory[] {
+    const categoryMap = new Map<number, TMECategory>();
+    const rootCategories: TMECategory[] = [];
+
+    // Create map of all categories
+    categories.forEach(cat => {
+      categoryMap.set(cat.CategoryId, { ...cat, Subcategories: [] });
+    });
+
+    // Build hierarchy
+    categories.forEach(cat => {
+      const category = categoryMap.get(cat.CategoryId)!;
+      
+      if (cat.ParentId === 0 || !categoryMap.has(cat.ParentId)) {
+        // Root category
+        rootCategories.push(category);
+      } else {
+        // Child category
+        const parent = categoryMap.get(cat.ParentId)!;
+        if (!parent.Subcategories) parent.Subcategories = [];
+        parent.Subcategories.push(category);
+      }
+    });
+
+    return rootCategories;
+  }
+
+  /**
+   * Get products by category for preview
+   */
+  async getProductsByCategory(categoryId: number, limit: number = 20): Promise<{ success: boolean; products?: TMEProduct[]; message?: string }> {
+    try {
+      console.log(`Fetching products for category ${categoryId}...`);
+      
+      const params = {
+        Token: this.credentials.token,
+        Country: "GB",
+        Language: "EN",
+        CategoryId: categoryId.toString(),
+        SearchLimit: limit.toString()
+      };
+
+      const signature = this.generateApiSignature("POST", `${this.baseUrl}/Products/GetProductsInCategory.json`, params);
+      
+      const response = await fetch(`${this.baseUrl}/Products/GetProductsInCategory.json`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "X-TME-Signature": signature
+        },
+        body: new URLSearchParams(params).toString()
+      });
+
+      if (!response.ok) {
+        throw new Error(`TME API request failed: ${response.status} ${response.statusText}`);
+      }
+
+      const data: TMEApiResponse<TMEProduct> = await response.json();
+      
+      if (data.Status !== "OK") {
+        throw new Error(data.ErrorMessage || "TME API returned an error");
+      }
+
+      const products = data.Data.ProductList || [];
+      console.log(`Found ${products.length} products in category ${categoryId}`);
+      
+      return {
+        success: true,
+        products: products,
+        message: `Found ${products.length} products in category`
+      };
+
+    } catch (error) {
+      console.error("Failed to fetch category products:", error);
+      return {
+        success: false,
+        message: `Failed to fetch products: ${(error as Error).message}`
+      };
+    }
   }
 
   /**
