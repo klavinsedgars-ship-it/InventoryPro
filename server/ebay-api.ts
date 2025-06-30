@@ -164,8 +164,11 @@ export class EbayApiService {
           const { generateUnifiedEbayTemplate } = await import("./ebay-unified-template");
           templateData = generateUnifiedEbayTemplate(product);
           console.log("Unified template generated for product:", product.name);
+          console.log("Template data keys:", Object.keys(templateData || {}));
+          console.log("Template title:", templateData?.title);
         } catch (error) {
           console.warn("Template generation failed, using basic listing:", error);
+          templateData = null;
         }
       }
 
@@ -911,6 +914,10 @@ export class EbayApiService {
 
       // Generate listing data from product (similar to listProduct but for updates)
       const listingTemplate = generateEbayListing(product);
+      
+      // Automatically determine the best eBay category for this TME product (for updates)
+      const categoryMapping = findEbayCategoryForTMEProduct(product);
+      
       const authToken = "v^1.1#i^1#f^0#p^3#I^3#r^1#t^Ul4xMF83OjFCN0M0NTkxQkNFNTUyRUE0MjE4REMyMjcyODdDOTg5XzFfMSNFXjI2MA==";
       
       console.log("Update function - Using fixed auth token prefix:", authToken.substring(0, 50));
