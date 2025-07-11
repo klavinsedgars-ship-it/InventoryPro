@@ -467,7 +467,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     app.get("/api/tme/test", async (req, res) => {
       try {
         console.log("🧪 Testing TME API connection...");
-        
+
         // Test basic connectivity with account status
         const response = await fetch("https://api.tme.eu/Accounts/GetAccountStatus.json", {
           method: 'POST',
@@ -515,16 +515,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     app.get("/api/tme/categories", async (req, res) => {
       try {
         console.log("Fetching TME categories...");
-  
+
         const categories = await tmeApi.getAllCategories();
-  
+
         res.json({
           success: true,
           categories: categories,
           totalCategories: categories.length,
           message: `Found ${categories.length} categories`
         });
-  
+
       } catch (error) {
         console.error("Failed to fetch TME categories:", error);
         res.status(500).json({ 
@@ -534,7 +534,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
     });
-  
+
     // Get TME products by category with enhanced filtering
     app.get("/api/tme/products", async (req, res) => {
       try {
@@ -549,24 +549,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
           producer = "",
           inStockOnly = "true"
         } = req.query;
-  
+
         if (!categoryId) {
           return res.status(400).json({
             success: false,
             error: "Category ID is required"
           });
         }
-  
+
         console.log(`🔍 Fetching TME products for category: ${categoryId}, page: ${page}, limit: ${limit}`);
-  
+
         const pageNum = parseInt(page as string);
         const limitNum = parseInt(limit as string);
-  
+
         // Fetch products from TME API
         const result = await tmeApi.getProductsByCategory(categoryId as string, pageNum, limitNum);
-  
+
         let products = result.products || [];
-  
+
         // Apply client-side filters
         if (search) {
           const searchLower = (search as string).toLowerCase();
@@ -576,14 +576,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             p.Producer?.toLowerCase().includes(searchLower)
           );
         }
-  
+
         if (producer) {
           const producerLower = (producer as string).toLowerCase();
           products = products.filter((p: any) => 
             p.Producer?.toLowerCase().includes(producerLower)
           );
         }
-  
+
         res.json({
           success: true,
           products: products,
@@ -594,7 +594,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           totalPages: Math.ceil(result.total / limitNum),
           categoryId: categoryId
         });
-  
+
       } catch (error) {
         console.error("TME products fetch error:", error);
         res.status(500).json({
@@ -603,39 +603,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
     });
-  
+
     // Get enhanced product information (details + prices + stock)
     app.post("/api/tme/enhanced-info", async (req, res) => {
       try {
         const { symbols } = req.body;
-  
-        if (!symbols || !Array.isArray(symbols)) {
-          return res.status(400).json({
-            success: false,
-            error: "Symbols array is required"
+
+        if (!symbols || !Array.isArray(symbols) || symbols.length === 0) {
+          return res.status(400).json({ 
+            success: false, 
+            error: "Invalid symbols array" 
           });
         }
-  
+
         console.log(`📊 Getting enhanced info for ${symbols.length} products`);
-  
+
         const enhancedInfo = await tmeApi.getEnhancedProductInfo(symbols);
-  
+
+        console.log(`✅ Enhanced info result: ${enhancedInfo.length} products with data`);
+
         res.json(enhancedInfo);
-  
+
       } catch (error) {
-        console.error("Enhanced product info error:", error);
+        console.error("Enhanced info error:", error);
         res.status(500).json({
           success: false,
           error: error instanceof Error ? error.message : "Failed to get enhanced product info"
         });
       }
     });
-  
+
     // Get TME API usage statistics
     app.get("/api/tme/usage", async (req, res) => {
       try {
         const usage = tmeApi.getApiUsage();
-  
+
         res.json({
           success: true,
           usage: usage,
@@ -661,42 +663,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
     });
-  
+
     // Sync selected TME products - Enhanced
     app.post("/api/tme/sync-selected", async (req, res) => {
       try {
         console.log("📥 Received sync request:", JSON.stringify(req.body, null, 2));
         const { productSymbols, settings } = req.body;
-  
+
         if (!productSymbols || !Array.isArray(productSymbols) || productSymbols.length === 0) {
           return res.status(400).json({
             success: false,
             error: "Product symbols array is required"
           });
         }
-  
+
         console.log(`🔄 Starting sync of ${productSymbols.length} selected products`);
-  
+
         let syncedCount = 0;
         let updatedCount = 0;
         let failedCount = 0;
         const errors: string[] = [];
-  
+
         // Get enhanced product information in batches
         const batchSize = 10;
         for (let i = 0; i < productSymbols.length; i += batchSize) {
           const batch = productSymbols.slice(i, i + batchSize);
-  
+
           try {
             console.log(`📦 Processing batch ${Math.floor(i/batchSize) + 1}: ${batch.join(", ")}`);
-  
+
             // Get enhanced product info (details + prices + stock)
             const enhancedProducts = await tmeApi.getEnhancedProductInfo(batch);
-  
+
             for (const enhanced of enhancedProducts) {
               try {
                 const { product, price, stock } = enhanced;
-  
+
                 // Calculate pricing
                 const supplierPrice = price?.PriceList?.[0]?.PriceValue || 0;
                 let pricingResult = {
@@ -705,7 +707,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   marginTier: "No Margin",
                   marginPercentage: 0
                 };
-  
+
                 if (settings.applyDynamicPricing && supplierPrice > 0) {
                   const { calculateDynamicPrice } = await import("./dynamic-pricing");
                   const result = calculateDynamicPrice(supplierPrice);
@@ -716,7 +718,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                     marginPercentage: result.marginPercentage
                   };
                 }
-  
+
                 // Prepare product data
                 const productData = {
                   name: product.Description,
@@ -740,10 +742,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   useStockLimit: settings.useStockLimit || false,
                   ebayStockLimit: settings.useStockLimit ? settings.ebayStockLimit : null
                 };
-  
+
                 // Check if product already exists
                 const existingProduct = await storage.getProductBySku(productData.sku);
-  
+
                 if (existingProduct) {
                   await storage.updateProduct(existingProduct.id, productData);
                   updatedCount++;
@@ -753,28 +755,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   syncedCount++;
                   console.log(`✅ Created product: ${product.Symbol}`);
                 }
-  
+
               } catch (error) {
                 console.error(`❌ Error processing ${enhanced.product.Symbol}:`, error);
                 failedCount++;
                 errors.push(`Error processing ${enhanced.product.Symbol}: ${error instanceof Error ? error.message : 'Unknown error'}`);
               }
             }
-  
+
             // Rate limiting between batches
             if (i + batchSize < productSymbols.length) {
               await new Promise(resolve => setTimeout(resolve, 1000));
             }
-  
+
           } catch (error) {
             console.error(`❌ Batch processing failed:`, error);
             failedCount += batch.length;
             errors.push(`Batch processing failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
           }
         }
-  
+
         const totalProcessed = syncedCount + updatedCount + failedCount;
-  
+
         res.json({
           success: true,
           results: {
@@ -787,7 +789,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           },
           message: `Sync completed: ${syncedCount} new, ${updatedCount} updated, ${failedCount} failed`
         });
-  
+
       } catch (error) {
         console.error("Sync selected products error:", error);
         res.status(500).json({
@@ -854,7 +856,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/pricing/tiers", async (req, res) => {
     try {
       const { min, max, multiplier, label, marginPercentage } = req.body;
-      
+
       // Create the tier in the database
       const createdTier = await storage.createPricingTier({
         min: min.toString(),
@@ -867,13 +869,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Trigger recalculation for all affected products
       const products = await storage.getProducts();
       let updatedCount = 0;
-      
+
       for (const product of products) {
         if (product.supplierPrice) {
           const supplierPrice = parseFloat(product.supplierPrice);
           const tierMin = parseFloat(createdTier.min);
           const tierMax = parseFloat(createdTier.max);
-          
+
           if (supplierPrice >= tierMin && supplierPrice <= tierMax) {
             const result = calculateDynamicPrice(supplierPrice);
             await storage.updateProduct(product.id, {
@@ -906,8 +908,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { id } = req.params;
       const { min, max, multiplier, label, marginPercentage } = req.body;
-      
-      // Update the tier in the database
+
+      // Update the tier in thedatabase
       const updatedTier = await storage.updatePricingTier(parseInt(id), {
         min: min.toString(),
         max: max.toString(),
@@ -926,13 +928,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Trigger recalculation for all products in this tier range
       const products = await storage.getProducts();
       let updatedCount = 0;
-      
+
       for (const product of products) {
         if (product.supplierPrice) {
           const supplierPrice = parseFloat(product.supplierPrice);
           const tierMin = parseFloat(updatedTier.min);
           const tierMax = parseFloat(updatedTier.max);
-          
+
           if (supplierPrice >= tierMin && supplierPrice <= tierMax) {
             const result = calculateDynamicPrice(supplierPrice);
             await storage.updateProduct(product.id, {
@@ -964,16 +966,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/pricing/tiers/:id", requireAuth, async (req, res) => {
     try {
       const { id } = req.params;
-      
+
       const deleted = await storage.deletePricingTier(parseInt(id));
-      
+
       if (!deleted) {
         return res.status(404).json({ 
           success: false, 
           error: "Pricing tier not found" 
         });
       }
-      
+
       res.json({ 
         success: true, 
         message: "Pricing tier deleted successfully"
@@ -1202,22 +1204,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         // Get all products
         const products = await storage.getProducts();
-  
+
         // Filter products with valid supplier prices (> 0)
         const validProducts = products.filter(p => parseFloat(p.supplierPrice) > 0);
-  
+
         let updatedCount = 0;
         let errors: string[] = [];
-  
+
         for (const product of validProducts) {
           try {
             const pricingResult = calculateDynamicPrice(parseFloat(product.supplierPrice));
-  
+
             if (!pricingResult.isValid) {
               errors.push(`Product ${product.name}: ${pricingResult.errors.join(', ')}`);
               continue;
             }
-  
+
             // Update product with calculated pricing
             await storage.updateProduct(product.id, {
               calculatedPrice: pricingResult.finalPrice.toString(),
@@ -1227,13 +1229,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
               useCalculatedPrice: true,
               salePrice: pricingResult.finalPrice.toString()
             });
-  
+
             updatedCount++;
           } catch (error) {
             errors.push(`Product ${product.name}: ${(error as Error).message}`);
           }
         }
-  
+
         res.json({
           success: true,
           updatedCount,
@@ -1276,7 +1278,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const productId = parseInt(req.params.id);
       const { ebayStockLimit, useStockLimit } = req.body;
-      
+
       if (ebayStockLimit !== undefined) {
         const validation = validateStockLimit(ebayStockLimit);
         if (!validation.valid) {
@@ -1286,23 +1288,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         }
       }
-      
+
       const updateData: any = {};
       if (ebayStockLimit !== undefined) updateData.ebayStockLimit = ebayStockLimit;
       if (useStockLimit !== undefined) updateData.useStockLimit = useStockLimit;
-      
+
       await storage.updateProduct(productId, updateData);
       const updatedProduct = await storage.getProduct(productId);
-      
+
       if (!updatedProduct) {
         return res.status(404).json({
           success: false,
           error: "Product not found"
         });
       }
-      
+
       const stockInfo = calculateEbayStock(updatedProduct);
-      
+
       res.json({
         success: true,
         product: updatedProduct,
@@ -1315,13 +1317,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     }
   });
-  
+
     // Get recommended stock limit for a category
     app.get("/api/stock/recommended/:category", async (req, res) => {
       try {
         const category = decodeURIComponent(req.params.category);
         const recommendedLimit = getRecommendedStockLimit(category);
-        
+
         res.json({
           success: true,
           category,

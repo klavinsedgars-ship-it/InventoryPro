@@ -225,10 +225,15 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
 
   // Enhanced product loading
   const loadEnhancedProductInfo = async (productSymbols: string[]) => {
-    if (productSymbols.length === 0) return;
+    if (productSymbols.length === 0) {
+      setEnhancedProducts([]);
+      return;
+    }
     
     setLoadingEnhanced(true);
     try {
+      console.log('Loading enhanced info for:', productSymbols.slice(0, 5)); // Debug log
+      
       const response = await fetch('/api/tme/enhanced-info', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -237,10 +242,15 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
       
       if (response.ok) {
         const enhanced = await response.json();
+        console.log('Enhanced data received:', enhanced.length, 'products'); // Debug log
         setEnhancedProducts(enhanced);
+      } else {
+        console.error('Enhanced info request failed:', response.status, response.statusText);
+        setEnhancedProducts([]);
       }
     } catch (error) {
       console.error('Failed to load enhanced product info:', error);
+      setEnhancedProducts([]);
     } finally {
       setLoadingEnhanced(false);
     }
@@ -251,6 +261,8 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     if (products.length > 0) {
       const symbols = products.slice(0, 20).map((p: TMEProduct) => p.Symbol); // Limit for API efficiency
       loadEnhancedProductInfo(symbols);
+    } else {
+      setEnhancedProducts([]);
     }
   }, [products]);
 
@@ -590,18 +602,23 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                       </p>
                                       <div className="mt-1 flex items-center space-x-4 text-xs text-gray-500">
                                         <span>Producer: {product.Producer}</span>
-                                        {enhanced?.stock && (
+                                        {enhanced?.stock ? (
                                           <span className={enhanced.stock.Amount > 0 ? "text-green-600" : "text-red-600"}>
                                             Stock: {enhanced.stock.Amount.toLocaleString()} {enhanced.stock.Unit}
                                           </span>
+                                        ) : loadingEnhanced ? (
+                                          <span className="text-gray-400">Loading stock...</span>
+                                        ) : (
+                                          <span className="text-gray-400">Stock: Unknown</span>
                                         )}
-                                        {enhanced?.price && enhanced.price.PriceList[0] && (
+                                        {enhanced?.price && enhanced.price.PriceList?.[0] ? (
                                           <span className="text-blue-600">
                                             Price: €{enhanced.price.PriceList[0].PriceValue.toFixed(2)}
                                           </span>
-                                        )}
-                                        {loadingEnhanced && !enhanced && (
-                                          <span className="text-gray-400">Loading pricing...</span>
+                                        ) : loadingEnhanced ? (
+                                          <span className="text-gray-400">Loading price...</span>
+                                        ) : (
+                                          <span className="text-gray-400">Price: Unknown</span>
                                         )}
                                       </div>
                                     </div>
