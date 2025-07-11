@@ -149,12 +149,26 @@ export class TMEApiService {
       this.callsThisMinute = 0;
     }
     
+    // More conservative rate limiting - 30 calls per minute instead of 60
+    const safeRateLimit = 30;
+    
     // Check rate limits
-    if (this.callsThisMinute >= this.rateLimitPerMinute) {
+    if (this.callsThisMinute >= safeRateLimit) {
       const waitTime = 60000 - (now - this.lastCallTimestamp);
       console.log(`🚦 Rate limit reached. Waiting ${waitTime}ms...`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
       this.callsThisMinute = 0;
+    }
+    
+    // Add minimum delay between calls to avoid overwhelming the API
+    if (this.lastCallTimestamp > 0) {
+      const timeSinceLastCall = now - this.lastCallTimestamp;
+      const minimumDelay = 1000; // 1 second minimum between calls
+      if (timeSinceLastCall < minimumDelay) {
+        const waitTime = minimumDelay - timeSinceLastCall;
+        console.log(`⏱️ Waiting ${waitTime}ms between API calls...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
     }
     
     if (this.callCount >= this.dailyLimit) {
@@ -245,6 +259,19 @@ export class TMEApiService {
           errorCode: data.ErrorCode,
           errors: data.Error
         });
+        
+        // Handle specific error types
+        if (data.Status === "E_TOO_MANY_REQUESTS") {
+          // Wait longer for rate limit errors
+          console.log('⏸️ Rate limit hit, waiting 5 seconds...');
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          throw new Error(`TME API rate limit exceeded. Please try again later.`);
+        }
+        
+        if (data.Status === "E_INPUT_PARAMS_VALIDATION_ERROR") {
+          throw new Error(`TME API parameter validation error: ${JSON.stringify(data.Error)}`);
+        }
+        
         throw new Error(`TME API error: ${data.ErrorMessage || data.Message || "Unknown error"}`);
       }
 
@@ -312,8 +339,8 @@ export class TMEApiService {
       
       const response = await this.makeRequest<TMEProduct>("/Products/Search.json", {
         SearchPlain: query,
-        SearchWithStock: "1",
-        SearchPhoto: "1"
+        SearchWithStock: "1"
+        // Removed SearchPhoto as it's not a valid parameter
       });
 
       const products = response.Data.ProductList || [];
@@ -337,8 +364,8 @@ export class TMEApiService {
       const searchTerms = this.getCategorySearchTerms(categoryId);
       let allProducts: TMEProduct[] = [];
       
-      // Try multiple search terms to get diverse products
-      for (const searchTerm of searchTerms.slice(0, 3)) { // Limit to 3 terms to avoid rate limits
+      // Try only 1-2 search terms to avoid rate limits and API errors
+      for (const searchTerm of searchTerms.slice(0, 2)) {
         try {
           console.log(`🔍 Searching for "${searchTerm}" in category ${categoryId}`);
           
@@ -354,21 +381,22 @@ export class TMEApiService {
             console.log(`✅ Found ${newProducts.length} new products, total: ${allProducts.length}`);
             
             // If we have enough products, break early
-            if (allProducts.length >= limit * 2) break;
+            if (allProducts.length >= limit) break;
           }
           
-          // Small delay between searches to avoid rate limiting
-          await new Promise(resolve => setTimeout(resolve, 500));
+          // Longer delay between searches to avoid rate limiting
+          await new Promise(resolve => setTimeout(resolve, 2000));
           
         } catch (searchError) {
           console.warn(`Search failed for "${searchTerm}":`, searchError);
-          continue;
+          // Don't continue to next search on API errors, use mock data instead
+          break;
         }
       }
       
       // If no products found through search, return mock data for development
       if (allProducts.length === 0) {
-        console.log(`🔄 No products found, returning mock data for category ${categoryId}`);
+        console.log(`🔄 No products found via API, returning mock data for category ${categoryId}`);
         return this.getMockProductsForCategory(categoryId, page, limit);
       }
       
@@ -377,7 +405,7 @@ export class TMEApiService {
       const endIndex = startIndex + limit;
       const paginatedProducts = allProducts.slice(startIndex, endIndex);
       
-      console.log(`📄 Returning ${paginatedProducts.length} products (page ${page}/${Math.ceil(allProducts.length / limit)})`);
+      console.log(`📄 Returning ${paginatedProducts.length} real products (page ${page}/${Math.ceil(allProducts.length / limit)})`);
       
       return {
         products: paginatedProducts,
