@@ -243,6 +243,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
       if (response.ok) {
         const enhanced = await response.json();
         console.log('Enhanced data received:', enhanced.length, 'products'); // Debug log
+        console.log('Sample enhanced product:', enhanced[0]); // Debug log
         setEnhancedProducts(enhanced);
       } else {
         console.error('Enhanced info request failed:', response.status, response.statusText);
@@ -602,16 +603,16 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                       </p>
                                       <div className="mt-1 flex items-center space-x-4 text-xs text-gray-500">
                                         <span>Producer: {product.Producer}</span>
-                                        {enhanced?.stock ? (
+                                        {enhanced?.stock && enhanced.stock.Amount !== undefined ? (
                                           <span className={enhanced.stock.Amount > 0 ? "text-green-600" : "text-red-600"}>
-                                            Stock: {enhanced.stock.Amount.toLocaleString()} {enhanced.stock.Unit}
+                                            Stock: {enhanced.stock.Amount.toLocaleString()} {enhanced.stock.Unit || 'pcs'}
                                           </span>
                                         ) : loadingEnhanced ? (
                                           <span className="text-gray-400">Loading stock...</span>
                                         ) : (
                                           <span className="text-gray-400">Stock: Unknown</span>
                                         )}
-                                        {enhanced?.price && enhanced.price.PriceList?.[0] ? (
+                                        {enhanced?.price && enhanced.price.PriceList && enhanced.price.PriceList.length > 0 && enhanced.price.PriceList[0].PriceValue ? (
                                           <span className="text-blue-600">
                                             Price: €{enhanced.price.PriceList[0].PriceValue.toFixed(2)}
                                           </span>
@@ -717,12 +718,12 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                 </div>
                               </div>
                               <div className="text-right">
-                                {enhanced?.price && enhanced.price.PriceList[0] && (
+                                {enhanced?.price && enhanced.price.PriceList && enhanced.price.PriceList.length > 0 && enhanced.price.PriceList[0].PriceValue && (
                                   <div className="text-sm font-medium">
                                     €{enhanced.price.PriceList[0].PriceValue.toFixed(2)}
                                   </div>
                                 )}
-                                {enhanced?.stock && (
+                                {enhanced?.stock && enhanced.stock.Amount !== undefined && (
                                   <div className="text-xs text-gray-600">
                                     Stock: {enhanced.stock.Amount}
                                   </div>
