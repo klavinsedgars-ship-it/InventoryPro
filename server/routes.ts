@@ -463,6 +463,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     // TME API routes - Enhanced
 
+    // Test TME API connection
+    app.get("/api/tme/test", async (req, res) => {
+      try {
+        console.log("🧪 Testing TME API connection...");
+        
+        // Test basic connectivity with account status
+        const response = await fetch("https://api.tme.eu/Accounts/GetAccountStatus.json", {
+          method: 'POST',
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+            "User-Agent": "TME-API-Client/1.0"
+          },
+          body: new URLSearchParams({
+            Token: process.env.TME_TOKEN || "05bb5ef39f7b451aad7892c53e39db484ca8dd25693a599f96",
+            Language: "EN"
+          }).toString()
+        });
+
+        const responseText = await response.text();
+        console.log("📥 TME API Response:", responseText.substring(0, 500));
+
+        if (response.ok) {
+          const data = JSON.parse(responseText);
+          res.json({
+            success: true,
+            status: "TME API connection successful",
+            data: data,
+            responseCode: response.status
+          });
+        } else {
+          res.json({
+            success: false,
+            status: "TME API connection failed",
+            error: `HTTP ${response.status}: ${response.statusText}`,
+            response: responseText.substring(0, 1000)
+          });
+        }
+      } catch (error) {
+        console.error("❌ TME API test failed:", error);
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error",
+          status: "TME API test failed"
+        });
+      }
+    });
+
     // Get TME categories
     app.get("/api/tme/categories", async (req, res) => {
       try {
