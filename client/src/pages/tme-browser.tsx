@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -146,7 +145,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     queryKey: ["/api/tme/products", selectedCategory, currentPage, productsPerPage, filters],
     queryFn: async () => {
       if (!selectedCategory) return { products: [], total: 0 };
-      
+
       const params = new URLSearchParams({
         categoryId: selectedCategory,
         page: currentPage.toString(),
@@ -158,7 +157,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
         producer: filters.producer,
         inStockOnly: filters.inStockOnly.toString()
       });
-      
+
       const response = await fetch(`/api/tme/products?${params}`);
       if (!response.ok) {
         throw new Error('Failed to fetch products');
@@ -229,17 +228,17 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
       setEnhancedProducts([]);
       return;
     }
-    
+
     setLoadingEnhanced(true);
     try {
       console.log('Loading enhanced info for:', productSymbols.slice(0, 5)); // Debug log
-      
+
       const response = await fetch('/api/tme/enhanced-info', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbols: productSymbols })
       });
-      
+
       if (response.ok) {
         const enhanced = await response.json();
         console.log('Enhanced data received:', enhanced.length, 'products'); // Debug log
@@ -393,7 +392,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                     </div>
                   </Card>
                 )}
-                
+
                 <Button
                   onClick={() => setShowSyncDialog(true)}
                   disabled={selectedProducts.size === 0}
@@ -567,7 +566,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                           {products.map((product: TMEProduct) => {
                             const enhanced = getEnhancedProductInfo(product.Symbol);
                             const thumbnail = getProductThumbnail(product);
-                            
+
                             return (
                               <div
                                 key={product.Symbol}
@@ -579,7 +578,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                   checked={selectedProducts.has(product.Symbol)}
                                   onCheckedChange={() => toggleProductSelection(product.Symbol)}
                                 />
-                                
+
                                 <div className="flex-shrink-0 w-16 h-16 bg-gray-100 rounded flex items-center justify-center border">
                                   {thumbnail ? (
                                     <img 
@@ -591,7 +590,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                     <Package className="h-8 w-8 text-gray-400" />
                                   )}
                                 </div>
-                                
+
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-start justify-between">
                                     <div className="flex-1">
@@ -623,7 +622,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                         )}
                                       </div>
                                     </div>
-                                    
+
                                     <div className="flex-shrink-0 ml-4 flex flex-col items-end space-y-2">
                                       {isProductSynced(product.Symbol) ? (
                                         <Badge variant="default" className="bg-green-600">
@@ -641,7 +640,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                           Check
                                         </Badge>
                                       )}
-                                      
+
                                       <Button
                                         variant="outline"
                                         size="sm"
@@ -682,22 +681,22 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                     Review and configure sync settings for {selectedProducts.size} selected products
                   </DialogDescription>
                 </DialogHeader>
-                
+
                 <Tabs defaultValue="preview" className="w-full">
                   <TabsList className="grid w-full grid-cols-2">
                     <TabsTrigger value="preview">Preview</TabsTrigger>
                     <TabsTrigger value="settings">Settings</TabsTrigger>
                   </TabsList>
-                  
+
                   <TabsContent value="preview" className="space-y-4">
                     <ScrollArea className="h-[400px]">
                       <div className="space-y-2">
                         {Array.from(selectedProducts).map(symbol => {
                           const product = products.find((p: TMEProduct) => p.Symbol === symbol);
                           const enhanced = getEnhancedProductInfo(symbol);
-                          
+
                           if (!product) return null;
-                          
+
                           return (
                             <div key={symbol} className="flex items-center justify-between p-3 border rounded">
                               <div className="flex items-center space-x-3">
@@ -738,7 +737,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                       </div>
                     </ScrollArea>
                   </TabsContent>
-                  
+
                   <TabsContent value="settings" className="space-y-4">
                     <div className="space-y-4">
                       <div className="flex items-center space-x-2">
@@ -753,7 +752,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                           Apply dynamic pricing with margin tiers
                         </label>
                       </div>
-                      
+
                       <div className="flex items-center space-x-2">
                         <Checkbox
                           id="stock-limit"
@@ -766,7 +765,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                           Apply eBay stock limitation
                         </label>
                       </div>
-                      
+
                       {syncSettings.useStockLimit && (
                         <div className="ml-6">
                           <label className="text-sm text-gray-600">eBay stock limit:</label>
@@ -785,7 +784,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                           />
                         </div>
                       )}
-                      
+
                       <div className="flex items-center space-x-2">
                         <Checkbox
                           id="auto-category"
@@ -801,7 +800,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                     </div>
                   </TabsContent>
                 </Tabs>
-                
+
                 <div className="flex justify-between items-center">
                   <Button variant="outline" onClick={() => setShowSyncDialog(false)}>
                     Cancel
@@ -820,7 +819,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                     )}
                   </Button>
                 </div>
-                
+
                 {isSyncing && (
                   <div className="space-y-2">
                     <Progress value={syncProgress} className="w-full" />
