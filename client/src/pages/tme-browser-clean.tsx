@@ -112,9 +112,9 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
 
   const categories = (categoriesResponse as any)?.categories || [];
 
-  // Fetch products for selected category with comprehensive search
+  // Fetch products for selected category with proper pagination
   const { data: productsResponse, isLoading: productsLoading } = useQuery({
-    queryKey: [`/api/tme/products?categoryId=${selectedCategory}&limit=5000`],
+    queryKey: [`/api/tme/products?categoryId=${selectedCategory}&page=${currentPage}&limit=${displayLimit}`],
     enabled: !!selectedCategory && activeTab === "products",
     staleTime: 5 * 60 * 1000
   });
@@ -132,21 +132,15 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     staleTime: 60 * 1000
   });
 
-  const allProducts = (productsResponse as any)?.products || [];
-  const totalProducts = (productsResponse as any)?.total || allProducts.length;
-
-  // Apply pagination to display products
-  const startIndex = (currentPage - 1) * displayLimit;
-  const endIndex = startIndex + displayLimit;
-  const products = allProducts.slice(startIndex, endIndex);
+  const products = (productsResponse as any)?.products || [];
+  const totalProducts = (productsResponse as any)?.total || 0;
 
   // Fetch enhanced product information for current page
   const { data: enhancedProducts = [], isLoading: enhancedLoading } = useQuery({
-    queryKey: [`/api/tme/enhanced-info`, selectedCategory, currentPage, startIndex, endIndex],
+    queryKey: [`/api/tme/enhanced-info`, selectedCategory, currentPage],
     queryFn: async () => {
       if (!products.length) return [];
       
-      console.log(`🔍 Fetching enhanced info for page ${currentPage}, products:`, products.map((p: any) => p.Symbol).slice(0, 3));
       const symbols = products.map((p: any) => p.Symbol);
       const response = await fetch('/api/tme/enhanced-info', {
         method: 'POST',
@@ -155,9 +149,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
       });
       
       if (!response.ok) return [];
-      const result = await response.json();
-      console.log(`✅ Enhanced info received for ${result.length} products`);
-      return result;
+      return response.json();
     },
     enabled: !!selectedCategory && activeTab === "products" && products.length > 0,
     staleTime: 30 * 1000  // Reduce cache time to 30 seconds for testing
@@ -178,6 +170,8 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   });
   
   const totalPages = Math.ceil(totalProducts / displayLimit);
+  const startIndex = (currentPage - 1) * displayLimit;
+  const endIndex = startIndex + displayLimit;
   
   // Reset to page 1 when category changes
   useEffect(() => {

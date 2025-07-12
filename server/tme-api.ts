@@ -355,17 +355,30 @@ export class TMEApiService {
     }
   }
 
-  // Get products by category with pagination
-  async getProductsByCategory(categoryId: string, page: number = 1, limit: number = 100): Promise<{products: TMEProduct[], total: number}> {
+  // Get products by category with pagination - enhanced with page-specific searches
+  async getProductsByCategory(categoryId: string, page: number = 1, limit: number = 20): Promise<{products: TMEProduct[], total: number}> {
     console.log(`🔍 Getting products for category ${categoryId}, page ${page}, limit ${limit}`);
     
     try {
-      // Use the search endpoint with category-specific terms since GetList may not exist
+      // Get category-specific search terms
       const searchTerms = this.getCategorySearchTerms(categoryId);
       let allProducts: TMEProduct[] = [];
       
-      // Try only 1-2 search terms to avoid rate limits and API errors
-      for (const searchTerm of searchTerms.slice(0, 2)) {
+      // Calculate which search terms to use for this page to ensure variety
+      const termsPerPage = Math.max(2, Math.ceil(searchTerms.length / 10)); // Use 2-5 terms per page
+      const startTermIndex = ((page - 1) * termsPerPage) % searchTerms.length;
+      const pageSearchTerms = [];
+      
+      // Get search terms for this page in a rotating fashion
+      for (let i = 0; i < termsPerPage && pageSearchTerms.length < 6; i++) {
+        const termIndex = (startTermIndex + i) % searchTerms.length;
+        pageSearchTerms.push(searchTerms[termIndex]);
+      }
+      
+      console.log(`📄 Page ${page} will search for: ${pageSearchTerms.join(', ')}`);
+      
+      // Search with page-specific terms
+      for (const searchTerm of pageSearchTerms) {
         try {
           console.log(`🔍 Searching for "${searchTerm}" in category ${categoryId}`);
           
@@ -380,17 +393,16 @@ export class TMEApiService {
             allProducts = allProducts.concat(newProducts);
             console.log(`✅ Found ${newProducts.length} new products, total: ${allProducts.length}`);
             
-            // If we have enough products, break early
-            if (allProducts.length >= limit) break;
+            // Break if we have enough products for this page
+            if (allProducts.length >= limit * 2) break;
           }
           
-          // Longer delay between searches to avoid rate limiting
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          // Rate limiting between searches
+          await new Promise(resolve => setTimeout(resolve, 800));
           
         } catch (searchError) {
           console.warn(`Search failed for "${searchTerm}":`, searchError);
-          // Don't continue to next search on API errors, use mock data instead
-          break;
+          continue;
         }
       }
       
@@ -400,16 +412,17 @@ export class TMEApiService {
         return this.getMockProductsForCategory(categoryId, page, limit);
       }
       
-      // Apply pagination
-      const startIndex = (page - 1) * limit;
-      const endIndex = startIndex + limit;
-      const paginatedProducts = allProducts.slice(startIndex, endIndex);
+      // Estimate total products available for this category (conservative estimate)
+      const estimatedTotal = searchTerms.length * 100; // Assume ~100 products per search term
       
-      console.log(`📄 Returning ${paginatedProducts.length} real products (page ${page}/${Math.ceil(allProducts.length / limit)})`);
+      // Return products for this page (no slicing since we fetched page-specific results)
+      const pageProducts = allProducts.slice(0, limit);
+      
+      console.log(`📄 Returning ${pageProducts.length} real products (page ${page}) of estimated ${estimatedTotal} total`);
       
       return {
-        products: paginatedProducts,
-        total: allProducts.length
+        products: pageProducts,
+        total: estimatedTotal
       };
       
     } catch (error) {
