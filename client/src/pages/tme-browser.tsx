@@ -566,6 +566,13 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                           {products.map((product: TMEProduct) => {
                             const enhanced = getEnhancedProductInfo(product.Symbol);
                             const thumbnail = getProductThumbnail(product);
+                            
+                            // Debug logging
+                            if (product.Symbol === products[0]?.Symbol) {
+                              console.log('Debug - First product enhanced data:', enhanced);
+                              console.log('Debug - Enhanced stock:', enhanced?.stock);
+                              console.log('Debug - Enhanced price:', enhanced?.price);
+                            }
 
                             return (
                               <div
@@ -611,7 +618,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                         ) : (
                                           <span className="text-gray-400">Stock: Unknown</span>
                                         )}
-                                        {enhanced?.price && enhanced.price.PriceList && enhanced.price.PriceList.length > 0 && enhanced.price.PriceList[0].PriceValue ? (
+                                        {enhanced?.price && enhanced.price.PriceList && enhanced.price.PriceList.length > 0 && enhanced.price.PriceList[0]?.PriceValue ? (
                                           <span className="text-blue-600">
                                             Price: €{enhanced.price.PriceList[0].PriceValue.toFixed(2)}
                                           </span>
