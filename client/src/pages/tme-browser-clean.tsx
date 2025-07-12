@@ -135,12 +135,18 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   const allProducts = (productsResponse as any)?.products || [];
   const totalProducts = (productsResponse as any)?.total || allProducts.length;
 
+  // Apply pagination to display products
+  const startIndex = (currentPage - 1) * displayLimit;
+  const endIndex = startIndex + displayLimit;
+  const products = allProducts.slice(startIndex, endIndex);
+
   // Fetch enhanced product information for current page
-  const { data: enhancedProducts = [] } = useQuery({
-    queryKey: [`/api/tme/enhanced-info`, selectedCategory, currentPage],
+  const { data: enhancedProducts = [], isLoading: enhancedLoading } = useQuery({
+    queryKey: [`/api/tme/enhanced-info`, selectedCategory, currentPage, startIndex, endIndex],
     queryFn: async () => {
       if (!products.length) return [];
       
+      console.log(`🔍 Fetching enhanced info for page ${currentPage}, products:`, products.map((p: any) => p.Symbol).slice(0, 3));
       const symbols = products.map((p: any) => p.Symbol);
       const response = await fetch('/api/tme/enhanced-info', {
         method: 'POST',
@@ -149,16 +155,13 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
       });
       
       if (!response.ok) return [];
-      return response.json();
+      const result = await response.json();
+      console.log(`✅ Enhanced info received for ${result.length} products`);
+      return result;
     },
     enabled: !!selectedCategory && activeTab === "products" && products.length > 0,
-    staleTime: 2 * 60 * 1000
+    staleTime: 30 * 1000  // Reduce cache time to 30 seconds for testing
   });
-  
-  // Apply pagination to display products
-  const startIndex = (currentPage - 1) * displayLimit;
-  const endIndex = startIndex + displayLimit;
-  const products = allProducts.slice(startIndex, endIndex);
   
   // Merge products with enhanced data
   const currentPageProducts = products.map((product: any) => {
