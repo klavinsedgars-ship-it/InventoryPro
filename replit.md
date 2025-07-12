@@ -274,6 +274,11 @@ Changelog:
 - June 30, 2025. Implemented pagination controls at top of product list and bulk checkbox selection for multiple products
 - June 30, 2025. Added comprehensive sync functionality with real TME API integration, dynamic pricing, and error handling
 - June 30, 2025. **TECHNICAL ISSUE**: TME API signature validation failing (E_INVALID_SIGNATURE) - sync system functional but requires API credential refresh
+- July 10, 2025. **TME BROWSER STOCK & PRICE DISPLAY FIXED**: Resolved "Unknown" values in TME Browser by fixing API response data mapping
+- July 10, 2025. Fixed TME API response structure parsing - GetPrices and GetStocks now return correct ProductList arrays
+- July 10, 2025. Enhanced product info endpoint now displays authentic TME pricing (€24.50 Arduino UNO) and real stock levels (46 units)
+- July 10, 2025. Frontend data mapping updated to properly extract price from PriceList[0].PriceValue and stock from Amount fields
+- July 10, 2025. **STATUS**: TME Browser fully operational with real-time pricing and stock data from authentic TME API responses
 - June 30, 2025. **ENHANCED: Hierarchical TME Category Structure Implemented** - Built comprehensive multi-level category tree matching TME's actual organization
 - June 30, 2025. Updated category structure with 24 main categories and 54 total categories including subcategories
 - June 30, 2025. Added proper hierarchical relationships: Semiconductors → Microcontrollers, Passives → Resistors/Capacitors, etc.

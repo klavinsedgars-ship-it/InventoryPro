@@ -497,7 +497,8 @@ export class TMEApiService {
         SymbolList: symbols,
       });
 
-      return response.Data.PriceList || [];
+
+      return response.Data.ProductList || [];
     } catch (error) {
       console.error('Failed to get product prices:', error);
       return [];
@@ -513,7 +514,8 @@ export class TMEApiService {
         SymbolList: symbols,
       });
 
-      return response.Data.StockList || [];
+
+      return response.Data.ProductList || [];
     } catch (error) {
       console.error('Failed to get product stock:', error);
       return [];

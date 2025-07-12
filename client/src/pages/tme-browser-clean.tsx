@@ -134,12 +134,46 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
 
   const allProducts = (productsResponse as any)?.products || [];
   const totalProducts = (productsResponse as any)?.total || allProducts.length;
+
+  // Fetch enhanced product information for current page
+  const { data: enhancedProducts = [] } = useQuery({
+    queryKey: [`/api/tme/enhanced-info`, selectedCategory, currentPage],
+    queryFn: async () => {
+      if (!products.length) return [];
+      
+      const symbols = products.map((p: any) => p.Symbol);
+      const response = await fetch('/api/tme/enhanced-info', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbols })
+      });
+      
+      if (!response.ok) return [];
+      return response.json();
+    },
+    enabled: !!selectedCategory && activeTab === "products" && products.length > 0,
+    staleTime: 2 * 60 * 1000
+  });
   
   // Apply pagination to display products
   const startIndex = (currentPage - 1) * displayLimit;
   const endIndex = startIndex + displayLimit;
   const products = allProducts.slice(startIndex, endIndex);
-  const currentPageProducts = products;
+  
+  // Merge products with enhanced data
+  const currentPageProducts = products.map((product: any) => {
+    const enhanced = enhancedProducts.find((e: any) => e.product.Symbol === product.Symbol);
+    if (enhanced) {
+      return {
+        ...product,
+        Price: enhanced.price?.PriceList?.[0]?.PriceValue || 0,
+        InStock: enhanced.stock?.Amount || 0,
+        Weight: enhanced.product?.Weight || product.Weight || 0
+      };
+    }
+    return product;
+  });
+  
   const totalPages = Math.ceil(totalProducts / displayLimit);
   
   // Reset to page 1 when category changes
@@ -428,7 +462,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                       </div>
                       
                       <div className="space-y-2">
-                        {products.map((product: TMEProduct) => (
+                        {currentPageProducts.map((product: TMEProduct) => (
                           <div
                             key={product.Symbol}
                             className={`border rounded-lg p-4 flex items-center space-x-4 hover:bg-gray-50 ${
@@ -463,8 +497,8 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                   </p>
                                   <div className="mt-1 flex items-center space-x-4 text-xs text-gray-500">
                                     <span>Producer: {product.Producer}</span>
-                                    <span>Stock: {product.InStock || product.Amount || product.Stock || 0}</span>
-                                    <span>Price: €{product.Price || "N/A"}</span>
+                                    <span>Stock: {product.InStock || product.Amount || product.Stock || "Loading..."}</span>
+                                    <span>Price: €{product.Price ? Number(product.Price).toFixed(2) : "Loading..."}</span>
                                   </div>
                                 </div>
                                 
