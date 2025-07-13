@@ -18,6 +18,7 @@ import { TemplatePreview } from "@/pages/template-preview";
 import Configuration from "@/pages/configuration";
 import { Login } from "@/pages/login";
 import NotFound from "@/pages/not-found";
+import ImageProcessingPage from './pages/image-processing';
 
 function AppContent() {
   // Temporary bypass for authentication - using mock user
@@ -95,6 +96,7 @@ function AppContent() {
       <Route path="/templates" component={() => <TemplatePreview user={user} />} />
       <Route path="/reports" component={() => <Reports user={user} />} />
       <Route path="/settings" component={() => <Settings user={user} />} />
+      <Route path="/image-processing" component={() => <ImageProcessingPage />} />
       <Route component={NotFound} />
     </Switch>
   );

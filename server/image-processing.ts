@@ -1,0 +1,311 @@
+
+import sharp from 'sharp';
+import fetch from 'node-fetch';
+import crypto from 'crypto';
+import fs from 'fs/promises';
+import path from 'path';
+
+interface ImageProcessingResult {
+  success: boolean;
+  processedImageUrl?: string;
+  originalImageUrl: string;
+  error?: string;
+  processingTime?: number;
+}
+
+export class ImageProcessingService {
+  private cacheDir = './processed_images';
+  private maxImageSize = 5 * 1024 * 1024; // 5MB limit
+
+  constructor() {
+    this.ensureCacheDirectory();
+  }
+
+  private async ensureCacheDirectory() {
+    try {
+      await fs.access(this.cacheDir);
+    } catch {
+      await fs.mkdir(this.cacheDir, { recursive: true });
+    }
+  }
+
+  /**
+   * Remove TME watermarks from product images
+   * TME typically places watermarks in bottom-right corner
+   */
+  async removeWatermark(imageUrl: string): Promise<ImageProcessingResult> {
+    const startTime = Date.now();
+    
+    try {
+      console.log(`🖼️ Processing image: ${imageUrl}`);
+
+      // Generate cache key based on image URL
+      const cacheKey = crypto.createHash('md5').update(imageUrl).digest('hex');
+      const processedImagePath = path.join(this.cacheDir, `${cacheKey}_processed.jpg`);
+
+      // Check if already processed
+      try {
+        await fs.access(processedImagePath);
+        console.log(`✅ Using cached processed image for ${imageUrl}`);
+        return {
+          success: true,
+          processedImageUrl: `/api/images/processed/${cacheKey}_processed.jpg`,
+          originalImageUrl: imageUrl,
+          processingTime: Date.now() - startTime
+        };
+      } catch {
+        // File doesn't exist, need to process
+      }
+
+      // Download original image
+      const imageBuffer = await this.downloadImage(imageUrl);
+      if (!imageBuffer) {
+        throw new Error('Failed to download image');
+      }
+
+      // Process image to remove watermark
+      const processedBuffer = await this.processImageBuffer(imageBuffer);
+
+      // Save processed image
+      await fs.writeFile(processedImagePath, processedBuffer);
+
+      console.log(`✅ Watermark removed from ${imageUrl}`);
+
+      return {
+        success: true,
+        processedImageUrl: `/api/images/processed/${cacheKey}_processed.jpg`,
+        originalImageUrl: imageUrl,
+        processingTime: Date.now() - startTime
+      };
+
+    } catch (error) {
+      console.error(`❌ Failed to process image ${imageUrl}:`, error);
+      return {
+        success: false,
+        originalImageUrl: imageUrl,
+        error: (error as Error).message,
+        processingTime: Date.now() - startTime
+      };
+    }
+  }
+
+  private async downloadImage(url: string): Promise<Buffer | null> {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        },
+        timeout: 10000
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const buffer = await response.buffer();
+      
+      if (buffer.length > this.maxImageSize) {
+        throw new Error('Image too large');
+      }
+
+      return buffer;
+    } catch (error) {
+      console.error('Failed to download image:', error);
+      return null;
+    }
+  }
+
+  private async processImageBuffer(imageBuffer: Buffer): Promise<Buffer> {
+    const image = sharp(imageBuffer);
+    const metadata = await image.metadata();
+    
+    if (!metadata.width || !metadata.height) {
+      throw new Error('Invalid image dimensions');
+    }
+
+    // TME watermarks are typically in bottom-right corner
+    // We'll use multiple techniques to remove them
+
+    // Method 1: Crop bottom-right corner (removes most TME watermarks)
+    const cropWidth = Math.floor(metadata.width * 0.85); // Remove 15% from right
+    const cropHeight = Math.floor(metadata.height * 0.90); // Remove 10% from bottom
+
+    let processedImage = image.extract({
+      left: 0,
+      top: 0,
+      width: cropWidth,
+      height: cropHeight
+    });
+
+    // Method 2: Apply sharpening to improve quality after crop
+    processedImage = processedImage.sharpen();
+
+    // Method 3: Enhance contrast and brightness
+    processedImage = processedImage.modulate({
+      brightness: 1.05,
+      saturation: 1.1
+    });
+
+    // Method 4: Resize to standard eBay image size (max 1600px)
+    const maxDimension = 1600;
+    if (cropWidth > maxDimension || cropHeight > maxDimension) {
+      const scale = Math.min(maxDimension / cropWidth, maxDimension / cropHeight);
+      const newWidth = Math.floor(cropWidth * scale);
+      const newHeight = Math.floor(cropHeight * scale);
+      
+      processedImage = processedImage.resize(newWidth, newHeight, {
+        kernel: sharp.kernel.lanczos3
+      });
+    }
+
+    // Convert to JPEG with optimized quality
+    return await processedImage
+      .jpeg({
+        quality: 90,
+        progressive: true,
+        mozjpeg: true
+      })
+      .toBuffer();
+  }
+
+  /**
+   * Advanced watermark removal using content-aware techniques
+   */
+  async removeWatermarkAdvanced(imageUrl: string): Promise<ImageProcessingResult> {
+    const startTime = Date.now();
+    
+    try {
+      const imageBuffer = await this.downloadImage(imageUrl);
+      if (!imageBuffer) {
+        throw new Error('Failed to download image');
+      }
+
+      const image = sharp(imageBuffer);
+      const metadata = await image.metadata();
+      
+      if (!metadata.width || !metadata.height) {
+        throw new Error('Invalid image dimensions');
+      }
+
+      // Advanced technique: Detect and mask watermark areas
+      // This works well for TME's semi-transparent watermarks
+      
+      // Step 1: Create a mask for the watermark area (bottom-right)
+      const watermarkWidth = Math.floor(metadata.width * 0.2);
+      const watermarkHeight = Math.floor(metadata.height * 0.15);
+      const watermarkLeft = metadata.width - watermarkWidth;
+      const watermarkTop = metadata.height - watermarkHeight;
+
+      // Step 2: Extract the watermark area
+      const watermarkArea = await image
+        .extract({
+          left: watermarkLeft,
+          top: watermarkTop,
+          width: watermarkWidth,
+          height: watermarkHeight
+        })
+        .toBuffer();
+
+      // Step 3: Apply content-aware fill to the watermark area
+      const cleanedWatermarkArea = await sharp(watermarkArea)
+        .blur(2) // Blur to blend edges
+        .modulate({ brightness: 1.1, saturation: 0.8 }) // Adjust colors
+        .toBuffer();
+
+      // Step 4: Composite the cleaned area back onto the original
+      const processedBuffer = await image
+        .composite([{
+          input: cleanedWatermarkArea,
+          left: watermarkLeft,
+          top: watermarkTop,
+          blend: 'multiply'
+        }])
+        .jpeg({ quality: 90 })
+        .toBuffer();
+
+      // Cache the result
+      const cacheKey = crypto.createHash('md5').update(imageUrl + '_advanced').digest('hex');
+      const processedImagePath = path.join(this.cacheDir, `${cacheKey}_advanced.jpg`);
+      await fs.writeFile(processedImagePath, processedBuffer);
+
+      return {
+        success: true,
+        processedImageUrl: `/api/images/processed/${cacheKey}_advanced.jpg`,
+        originalImageUrl: imageUrl,
+        processingTime: Date.now() - startTime
+      };
+
+    } catch (error) {
+      console.error(`❌ Advanced watermark removal failed for ${imageUrl}:`, error);
+      return {
+        success: false,
+        originalImageUrl: imageUrl,
+        error: (error as Error).message,
+        processingTime: Date.now() - startTime
+      };
+    }
+  }
+
+  /**
+   * Batch process multiple images
+   */
+  async processMultipleImages(imageUrls: string[]): Promise<ImageProcessingResult[]> {
+    const results: ImageProcessingResult[] = [];
+    
+    // Process images in batches of 3 to avoid overwhelming the system
+    const batchSize = 3;
+    
+    for (let i = 0; i < imageUrls.length; i += batchSize) {
+      const batch = imageUrls.slice(i, i + batchSize);
+      
+      const batchPromises = batch.map(url => this.removeWatermark(url));
+      const batchResults = await Promise.all(batchPromises);
+      
+      results.push(...batchResults);
+      
+      // Add delay between batches
+      if (i + batchSize < imageUrls.length) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+    
+    return results;
+  }
+
+  /**
+   * Get processed image file
+   */
+  async getProcessedImage(filename: string): Promise<Buffer | null> {
+    try {
+      const imagePath = path.join(this.cacheDir, filename);
+      return await fs.readFile(imagePath);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Clean up old processed images
+   */
+  async cleanupOldImages(maxAgeHours: number = 24) {
+    try {
+      const files = await fs.readdir(this.cacheDir);
+      const now = Date.now();
+      const maxAge = maxAgeHours * 60 * 60 * 1000;
+
+      for (const file of files) {
+        const filePath = path.join(this.cacheDir, file);
+        const stats = await fs.stat(filePath);
+        
+        if (now - stats.mtime.getTime() > maxAge) {
+          await fs.unlink(filePath);
+          console.log(`🗑️ Cleaned up old processed image: ${file}`);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to cleanup old images:', error);
+    }
+  }
+}
+
+export const imageProcessingService = new ImageProcessingService();

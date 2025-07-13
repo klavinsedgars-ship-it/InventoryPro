@@ -32,6 +32,7 @@ import {
   formatPrice
 } from "./dynamic-pricing";
 import { calculateEbayStock, calculateBulkEbayStock, validateStockLimit, getRecommendedStockLimit } from "./stock-manager";
+import { imageProcessingService } from "./image-processing";
 
 // Type for authenticated requests
 interface AuthenticatedRequest extends Request {
@@ -1199,58 +1200,396 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-    // Apply dynamic pricing to all products
-    app.post("/api/pricing/apply-bulk", requireAuth, async (req, res) => {
+    // TME API routes - Enhanced
+
+    // Test TME API connection
+    app.get("/api/tme/test", async (req, res) => {
       try {
-        // Get all products
-        const products = await storage.getProducts();
+        console.log("🧪 Testing TME API connection...");
 
-        // Filter products with valid supplier prices (> 0)
-        const validProducts = products.filter(p => parseFloat(p.supplierPrice) > 0);
+        // Test basic connectivity with account status
+        const response = await fetch("https://api.tme.eu/Accounts/GetAccountStatus.json", {
+          method: 'POST',
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+            "User-Agent": "TME-API-Client/1.0"
+          },
+          body: new URLSearchParams({
+            Token: process.env.TME_TOKEN || "05bb5ef39f7b451aad7892c53e39db484ca8dd25693a599f96",
+            Language: "EN"
+          }).toString()
+        });
 
-        let updatedCount = 0;
-        let errors: string[] = [];
+        const responseText = await response.text();
+        console.log("📥 TME API Response:", responseText.substring(0, 500));
 
-        for (const product of validProducts) {
-          try {
-            const pricingResult = calculateDynamicPrice(parseFloat(product.supplierPrice));
+        if (response.ok) {
+          const data = JSON.parse(responseText);
+          res.json({
+            success: true,
+            status: "TME API connection successful",
+            data: data,
+            responseCode: response.status
+          });
+        } else {
+          res.json({
+            success: false,
+            status: "TME API connection failed",
+            error: `HTTP ${response.status}: ${response.statusText}`,
+            response: responseText.substring(0, 1000)
+          });
+        }
+      } catch (error) {
+        console.error("❌ TME API test failed:", error);
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error",
+          status: "TME API test failed"
+        });
+      }
+    });
 
-            if (!pricingResult.isValid) {
-              errors.push(`Product ${product.name}: ${pricingResult.errors.join(', ')}`);
-              continue;
-            }
+    // Get TME categories
+    app.get("/api/tme/categories", async (req, res) => {
+      try {
+        console.log("Fetching TME categories...");
 
-            // Update product with calculated pricing
-            await storage.updateProduct(product.id, {
-              calculatedPrice: pricingResult.finalPrice.toString(),
-              marginTier: pricingResult.marginTier,
-              marginPercentage: pricingResult.marginPercentage.toString(),
-              priceUpdatedAt: new Date(),
-              useCalculatedPrice: true,
-              salePrice: pricingResult.finalPrice.toString()
-            });
+        const categories = await tmeApi.getAllCategories();
 
-            updatedCount++;
-          } catch (error) {
-            errors.push(`Product ${product.name}: ${(error as Error).message}`);
-          }
+        res.json({
+          success: true,
+          categories: categories,
+          totalCategories: categories.length,
+          message: `Found ${categories.length} categories`
+        });
+
+      } catch (error) {
+        console.error("Failed to fetch TME categories:", error);
+        res.status(500).json({ 
+          success: false, 
+          message: `Failed to fetch TME categories: ${(error as Error).message}`,
+          error: (error as Error).message
+        });
+      }
+    });
+
+    // Get TME products by category with enhanced filtering
+    app.get("/api/tme/products", async (req, res) => {
+      try {
+        const { 
+          categoryId, 
+          page = "1", 
+          limit = "50", 
+          search = "", 
+          priceMin = "", 
+          priceMax = "", 
+          stockMin = "1", 
+          producer = "",
+          inStockOnly = "true"
+        } = req.query;
+
+        if (!categoryId) {
+          return res.status(400).json({
+            success: false,
+            error: "Category ID is required"
+          });
+        }
+
+        console.log(`🔍 Fetching TME products for category: ${categoryId}, page: ${page}, limit: ${limit}`);
+
+        const pageNum = parseInt(page as string);
+        const limitNum = parseInt(limit as string);
+
+        // Fetch products from TME API
+        const result = await tmeApi.getProductsByCategory(categoryId as string, pageNum, limitNum);
+
+        let products = result.products || [];
+
+        // Apply client-side filters
+        if (search) {
+          const searchLower = (search as string).toLowerCase();
+          products = products.filter((p: any) => 
+            p.Description?.toLowerCase().includes(searchLower) ||
+            p.Symbol?.toLowerCase().includes(searchLower) ||
+            p.Producer?.toLowerCase().includes(searchLower)
+          );
+        }
+
+        if (producer) {
+          const producerLower = (producer as string).toLowerCase();
+          products = products.filter((p: any) => 
+            p.Producer?.toLowerCase().includes(producerLower)
+          );
         }
 
         res.json({
           success: true,
-          updatedCount,
-          totalProducts: validProducts.length,
-          skippedProducts: products.length - validProducts.length,
-          errors,
-          message: `Successfully applied dynamic pricing to ${updatedCount} products`
+          products: products,
+          total: result.total,
+          filtered: products.length,
+          page: pageNum,
+          limit: limitNum,
+          totalPages: Math.ceil(result.total / limitNum),
+          categoryId: categoryId
         });
+
       } catch (error) {
-        res.status(500).json({ 
+        console.error("TME products fetch error:", error);
+        res.status(500).json({
           success: false,
-          message: "Failed to apply bulk pricing" 
+          error: error instanceof Error ? error.message : "Failed to fetch TME products"
         });
       }
     });
+
+    // Get enhanced product information (details + prices + stock)
+    app.post("/api/tme/enhanced-info", async (req, res) => {
+      try {
+        const { symbols } = req.body;
+
+        if (!symbols || !Array.isArray(symbols) || symbols.length === 0) {
+          return res.status(400).json({ 
+            success: false, 
+            error: "Invalid symbols array" 
+          });
+        }
+
+        console.log(`📊 Getting enhanced info for ${symbols.length} products`);
+
+        const enhancedInfo = await tmeApi.getEnhancedProductInfo(symbols);
+
+        console.log(`✅ Enhanced info result: ${enhancedInfo.length} products with data`);
+
+        res.json(enhancedInfo);
+
+      } catch (error) {
+        console.error("Enhanced info error:", error);
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : "Failed to get enhanced product info"
+        });
+      }
+    });
+
+    // Get TME API usage statistics
+    app.get("/api/tme/usage", async (req, res) => {
+      try {
+        const usage = tmeApi.getApiUsage();
+
+        res.json({
+          success: true,
+          usage: usage,
+          limits: {
+            daily: usage.dailyLimit,
+            perMinute: usage.rateLimitPerMinute
+          },
+          recommendations: usage.status === 'WARNING' ? [
+            "You've used over 80% of your daily limit",
+            "Consider reducing API calls or upgrading your TME plan"
+          ] : usage.status === 'LIMIT_EXCEEDED' ? [
+            "Daily limit exceeded - API calls will fail until tomorrow",
+            "Contact TME support to increase your daily limit"
+          ] : [
+            "API usage is within normal limits"
+          ]
+        });
+      } catch (error) {
+        console.error("Failed to get TME usage:", error);
+        res.status(500).json({
+          success: false,
+          error: "Failed to get TME usage statistics"
+        });
+      }
+    });
+
+    // Sync selected TME products - Enhanced
+    app.post("/api/tme/sync-selected", async (req, res) => {
+      try {
+        console.log("📥 Received sync request:", JSON.stringify(req.body, null, 2));
+        const { productSymbols, settings } = req.body;
+
+        if (!productSymbols || !Array.isArray(productSymbols) || productSymbols.length === 0) {
+          return res.status(400).json({
+            success: false,
+            error: "Product symbols array is required"
+          });
+        }
+
+        console.log(`🔄 Starting sync of ${productSymbols.length} selected products`);
+
+        let syncedCount = 0;
+        let updatedCount = 0;
+        let failedCount = 0;
+        const errors: string[] = [];
+
+        // Get enhanced product information in batches
+        const batchSize = 10;
+        for (let i = 0; i < productSymbols.length; i += batchSize) {
+          const batch = productSymbols.slice(i, i + batchSize);
+
+          try {
+            console.log(`📦 Processing batch ${Math.floor(i/batchSize) + 1}: ${batch.join(", ")}`);
+
+            // Get enhanced product info (details + prices + stock)
+            const enhancedProducts = await tmeApi.getEnhancedProductInfo(batch);
+
+            for (const enhanced of enhancedProducts) {
+              try {
+                const { product, price, stock } = enhanced;
+
+                // Calculate pricing
+                const supplierPrice = price?.PriceList?.[0]?.PriceValue || 0;
+                let pricingResult = {
+                  finalPrice: supplierPrice,
+                  calculatedPrice: supplierPrice,
+                  marginTier: "No Margin",
+                  marginPercentage: 0
+                };
+
+                if (settings.applyDynamicPricing && supplierPrice > 0) {
+                  const { calculateDynamicPrice } = await import("./dynamic-pricing");
+                  const result = calculateDynamicPrice(supplierPrice);
+                  pricingResult = {
+                    finalPrice: result.finalPrice,
+                    calculatedPrice: result.calculatedPrice,
+                    marginTier: result.marginTier,
+                    marginPercentage: result.marginPercentage
+                  };
+                }
+
+                // Prepare product data
+                const productData = {
+                  name: product.Description,
+                  sku: product.Symbol,
+                  ean: product.EAN || null,
+                  category: product.Category || "Electronics",
+                  description: product.Description,
+                  supplierPrice: String(Number(supplierPrice)),
+                  salePrice: String(Number(pricingResult.finalPrice)),
+                  calculatedPrice: String(Number(pricingResult.calculatedPrice)),
+                  marginTier: pricingResult.marginTier,
+                  marginPercentage: String(Number(pricingResult.marginPercentage)),
+                  stock: stock?.Amount || 100,
+                  status: "active" as const,
+                  weight: String(Number(product.Weight) || 10),
+                  imageUrl: product.Photo ? (product.Photo.startsWith('//') ? `https:${product.Photo}` : product.Photo) : null,
+                  dataSheetUrl: product.DataSheet ? `https://www.tme.eu${product.DataSheet}` : null,
+                  productUrl: product.ProductInformationPage ? `https://www.tme.eu${product.ProductInformationPage}` : null,
+                  supplier: "tme" as const,
+                  supplierProductId: product.Symbol,
+                  useStockLimit: settings.useStockLimit || false,
+                  ebayStockLimit: settings.useStockLimit ? settings.ebayStockLimit : null
+                };
+
+                // Check if product already exists
+                const existingProduct = await storage.getProductBySku(productData.sku);
+
+                if (existingProduct) {
+                  await storage.updateProduct(existingProduct.id, productData);
+                  updatedCount++;
+                  console.log(`✅ Updated product: ${product.Symbol}`);
+                } else {
+                  await storage.createProduct(productData);
+                  syncedCount++;
+                  console.log(`✅ Created product: ${product.Symbol}`);
+                }
+
+              } catch (error) {
+                console.error(`❌ Error processing ${enhanced.product.Symbol}:`, error);
+                failedCount++;
+                errors.push(`Error processing ${enhanced.product.Symbol}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+              }
+            }
+
+            // Rate limiting between batches
+            if (i + batchSize < productSymbols.length) {
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+
+          } catch (error) {
+            console.error(`❌ Batch processing failed:`, error);
+            failedCount += batch.length;
+            errors.push(`Batch processing failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          }
+        }
+
+        const totalProcessed = syncedCount + updatedCount + failedCount;
+
+        res.json({
+          success: true,
+          results: {
+            totalRequested: productSymbols.length,
+            totalProcessed: totalProcessed,
+            syncedCount: syncedCount,
+            updatedCount: updatedCount,
+            failedCount: failedCount,
+            errors: errors
+          },
+          message: `Sync completed: ${syncedCount} new, ${updatedCount} updated, ${failedCount} failed`
+        });
+
+      } catch (error) {
+        console.error("Sync selected products error:", error);
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : "Failed to sync selected products"
+        });
+      }
+    });
+
+  // Apply dynamic pricing to all products
+  app.post("/api/pricing/apply-bulk", requireAuth, async (req, res) => {
+    try {
+      // Get all products
+      const products = await storage.getProducts();
+
+      // Filter products with valid supplier prices (> 0)
+      const validProducts = products.filter(p => parseFloat(p.supplierPrice) > 0);
+
+      let updatedCount = 0;
+      let errors: string[] = [];
+
+      for (const product of validProducts) {
+        try {
+          const pricingResult = calculateDynamicPrice(parseFloat(product.supplierPrice));
+
+          if (!pricingResult.isValid) {
+            errors.push(`Product ${product.name}: ${pricingResult.errors.join(', ')}`);
+            continue;
+          }
+
+          // Update product with calculated pricing
+          await storage.updateProduct(product.id, {
+            calculatedPrice: pricingResult.finalPrice.toString(),
+            marginTier: pricingResult.marginTier,
+            marginPercentage: pricingResult.marginPercentage.toString(),
+            priceUpdatedAt: new Date(),
+            useCalculatedPrice: true,
+            salePrice: pricingResult.finalPrice.toString()
+          });
+
+          updatedCount++;
+        } catch (error) {
+          errors.push(`Product ${product.name}: ${(error as Error).message}`);
+        }
+      }
+
+      res.json({
+        success: true,
+        updatedCount,
+        totalProducts: validProducts.length,
+        skippedProducts: products.length - validProducts.length,
+        errors,
+        message: `Successfully applied dynamic pricing to ${updatedCount} products`
+      });
+    } catch (error) {
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to apply bulk pricing" 
+      });
+    }
+  });
 
   // Stock Management Endpoints
   app.get("/api/stock/info", async (req, res) => {
@@ -1344,6 +1683,102 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(logs);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch sync logs" });
+    }
+  });
+
+  // Image processing endpoints
+  app.post('/api/images/process-watermark', async (req, res) => {
+    try {
+      const { imageUrl, advanced = false } = req.body;
+
+      if (!imageUrl) {
+        return res.status(400).json({ error: 'Image URL is required' });
+      }
+
+      console.log(`🖼️ Processing watermark removal for: ${imageUrl}`);
+
+      const result = advanced 
+        ? await imageProcessingService.removeWatermarkAdvanced(imageUrl)
+        : await imageProcessingService.removeWatermark(imageUrl);
+
+      res.json(result);
+    } catch (error) {
+      console.error('Watermark removal failed:', error);
+      res.status(500).json({ 
+        error: 'Failed to process image',
+        details: (error as Error).message 
+      });
+    }
+  });
+
+  app.post('/api/images/process-batch', async (req, res) => {
+    try {
+      const { imageUrls } = req.body;
+
+      if (!Array.isArray(imageUrls) || imageUrls.length === 0) {
+        return res.status(400).json({ error: 'Array of image URLs is required' });
+      }
+
+      if (imageUrls.length > 20) {
+        return res.status(400).json({ error: 'Maximum 20 images per batch' });
+      }
+
+      console.log(`🖼️ Processing batch watermark removal for ${imageUrls.length} images`);
+
+      const results = await imageProcessingService.processMultipleImages(imageUrls);
+
+      const summary = {
+        total: results.length,
+        successful: results.filter(r => r.success).length,
+        failed: results.filter(r => !r.success).length,
+        results
+      };
+
+      res.json(summary);
+    } catch (error) {
+      console.error('Batch watermark removal failed:', error);
+      res.status(500).json({ 
+        error: 'Failed to process image batch',
+        details: (error as Error).message 
+      });
+    }
+  });
+
+  app.get('/api/images/processed/:filename', async (req, res) => {
+    try {
+      const { filename } = req.params;
+
+      const imageBuffer = await imageProcessingService.getProcessedImage(filename);
+
+      if (!imageBuffer) {
+        return res.status(404).json({ error: 'Processed image not found' });
+      }
+
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+      res.send(imageBuffer);
+    } catch (error) {
+      console.error('Failed to serve processed image:', error);
+      res.status(500).json({ error: 'Failed to serve image' });
+    }
+  });
+
+  app.post('/api/images/cleanup', async (req, res) => {
+    try {
+      const { maxAgeHours = 24 } = req.body;
+
+      await imageProcessingService.cleanupOldImages(maxAgeHours);
+
+      res.json({ 
+        success: true, 
+        message: `Cleaned up processed images older than ${maxAgeHours} hours` 
+      });
+    } catch (error) {
+      console.error('Image cleanup failed:', error);
+      res.status(500).json({ 
+        error: 'Failed to cleanup images',
+        details: (error as Error).message 
+      });
     }
   });
 

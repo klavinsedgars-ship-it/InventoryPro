@@ -11,7 +11,8 @@ import {
   Database,
   FileText,
   Cog,
-  Search
+  Search,
+  Image as ImageIcon
 } from "lucide-react";
 
 const navigation = [

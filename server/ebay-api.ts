@@ -3,6 +3,7 @@ import { ebayOAuth } from "./ebay-oauth";
 import { generateEbayListing } from "./ebay-listing-template";
 import { calculateEbayStock } from "./stock-manager";
 import { findEbayCategoryForTMEProduct } from "./tme-ebay-category-mapping";
+import { imageProcessingService } from "./image-processing";
 
 interface EbayCredentials {
   appId: string;
@@ -200,6 +201,32 @@ export class EbayApiService {
         confidence: categoryMapping.confidence
       });
 
+      // Process images to remove TME watermarks
+      let processedImageUrls: string[] = [];
+      if (product.imageUrl) {
+        try {
+          console.log(`🖼️ Processing image for eBay listing: ${product.imageUrl}`);
+          const imageResult = await imageProcessingService.removeWatermark(product.imageUrl);
+          
+          if (imageResult.success && imageResult.processedImageUrl) {
+            // Convert relative URL to absolute URL for eBay
+            const baseUrl = process.env.REPL_URL || 'https://2456a1da-de77-4e0b-816f-7e7cfe47cc15-00-23jr7vbxsin6z.kirk.replit.dev';
+            const absoluteImageUrl = imageResult.processedImageUrl.startsWith('http') 
+              ? imageResult.processedImageUrl 
+              : `${baseUrl}${imageResult.processedImageUrl}`;
+            
+            processedImageUrls = [absoluteImageUrl];
+            console.log(`✅ Watermark removed, using processed image: ${absoluteImageUrl}`);
+          } else {
+            console.log(`⚠️ Watermark removal failed, using original image: ${imageResult.error}`);
+            processedImageUrls = [product.imageUrl];
+          }
+        } catch (error) {
+          console.warn(`⚠️ Image processing failed, using original: ${error}`);
+          processedImageUrls = [product.imageUrl];
+        }
+      }
+
       // Prepare listing data for eBay Trading API
       const listingData = {
         title: listingDetails.title || templateData?.title || product.name,
@@ -209,7 +236,7 @@ export class EbayApiService {
         quantity: listingDetails.quantity || ebayQuantity, // Use calculated eBay stock
         listingDuration: listingDetails.listingDuration || "Days_7",
         condition: listingDetails.condition || "New",
-        pictureURLs: listingDetails.pictureURLs || (product.imageUrl ? [product.imageUrl] : []),
+        pictureURLs: listingDetails.pictureURLs || processedImageUrls,
         shippingPolicyId: shippingPolicyId,
         weight: product.weight,
         shippingDetails: listingDetails.shippingDetails || {
