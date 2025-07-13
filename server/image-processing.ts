@@ -1,6 +1,5 @@
 
 import sharp from 'sharp';
-import fetch from 'node-fetch';
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
@@ -94,15 +93,15 @@ export class ImageProcessingService {
       const response = await fetch(url, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        },
-        timeout: 10000
+        }
       });
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const buffer = await response.buffer();
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
       
       if (buffer.length > this.maxImageSize) {
         throw new Error('Image too large');
