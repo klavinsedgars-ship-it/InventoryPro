@@ -12,6 +12,7 @@ import {
 import { ZodError, z } from "zod";
 import bcrypt from "bcryptjs";
 import { tmeApi } from "./tme-api";
+import { tmeApiOptimized } from "./tme-api-optimized";
 import { ebayApi } from "./ebay-api";
 import { createSimpleUKListingXML } from "./ebay-uk-config";
 import { createBasicUKListingXML } from "./ebay-basic-uk-config";
