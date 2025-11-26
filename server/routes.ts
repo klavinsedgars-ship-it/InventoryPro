@@ -666,8 +666,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     });
 
-    // Sync selected TME products - Enhanced
-    app.post("/api/tme/sync-selected", async (req, res) => {
+    // OPTIMIZED: Sync selected TME products using combined endpoints (80% fewer API calls)
+    app.post("/api/tme/sync-selected-optimized", async (req, res) => {
       try {
         console.log("📥 Received sync request:", JSON.stringify(req.body, null, 2));
         const { productSymbols, settings } = req.body;
@@ -1404,8 +1404,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     });
 
-    // Sync selected TME products - Enhanced
-    app.post("/api/tme/sync-selected", async (req, res) => {
+    // OPTIMIZED: Sync selected TME products using combined endpoints (80% fewer API calls)
+    app.post("/api/tme/sync-selected-optimized", async (req, res) => {
       try {
         console.log("📥 Received sync request:", JSON.stringify(req.body, null, 2));
         const { productSymbols, settings } = req.body;

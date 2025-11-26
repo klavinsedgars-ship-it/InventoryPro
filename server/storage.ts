@@ -202,7 +202,7 @@ export class DatabaseStorage implements IStorage {
 
   async deleteProduct(id: number): Promise<boolean> {
     const result = await db.delete(products).where(eq(products.id, id));
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   async getProductsByCategory(category: string): Promise<Product[]> {
@@ -217,8 +217,6 @@ export class DatabaseStorage implements IStorage {
     minStock?: number;
     maxStock?: number;
   }): Promise<Product[]> {
-    let query = db.select().from(products);
-    
     const conditions = [];
     if (filters.category) conditions.push(eq(products.category, filters.category));
     if (filters.status) conditions.push(eq(products.status, filters.status));
@@ -228,10 +226,10 @@ export class DatabaseStorage implements IStorage {
     if (filters.maxStock !== undefined) conditions.push(lte(products.stock, filters.maxStock));
     
     if (conditions.length > 0) {
-      query = query.where(and(...conditions));
+      return await db.select().from(products).where(and(...conditions)).orderBy(desc(products.createdAt));
     }
     
-    return await query.orderBy(desc(products.createdAt));
+    return await db.select().from(products).orderBy(desc(products.createdAt));
   }
 
   // Category methods
@@ -376,7 +374,7 @@ export class DatabaseStorage implements IStorage {
     });
 
     priorityCounts.forEach(row => {
-      stats.byPriority[`Priority ${row.priority}`] = row.count;
+      stats.byPriority[String(row.priority)] = row.count;
     });
 
     return stats;
@@ -427,7 +425,7 @@ export class DatabaseStorage implements IStorage {
 
   async deleteShippingPolicy(id: string): Promise<boolean> {
     const result = await db.delete(shippingPolicies).where(eq(shippingPolicies.id, id));
-    return result.rowCount! > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 }
 

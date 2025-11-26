@@ -55,6 +55,9 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Import sync queue worker
+  const { syncQueueWorker } = await import("./sync-queue-worker");
+
   const server = await registerRoutes(app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -84,5 +87,9 @@ app.use((req, res, next) => {
     reusePort: true,
   }, () => {
     log(`serving on port ${port}`);
+    
+    // Start the sync queue worker for background product processing
+    syncQueueWorker.start();
+    log(`🚀 Sync Queue Worker started`);
   });
 })();
