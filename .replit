@@ -14,6 +14,10 @@ run = ["npm", "run", "start"]
 localPort = 5000
 externalPort = 80
 
+[[ports]]
+localPort = 42499
+externalPort = 3000
+
 [workflows]
 runButton = "Project"
 
@@ -34,3 +38,11 @@ author = "agent"
 task = "shell.exec"
 args = "npm run dev"
 waitForPort = 5000
+
+[userenv]
+
+[userenv.shared]
+TME_TOKEN = "d7afea65884e5febfc8bd419c6d8a2ff24c5142a28156f36b8"
+TME_CUSTOMER_NUMBER = "40071812"
+TME_CONTACT_NUMBER = "676772"
+TME_APPLICATION_SECRET = "267d30e978ba3ceea916"
