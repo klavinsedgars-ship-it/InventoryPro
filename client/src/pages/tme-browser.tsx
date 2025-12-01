@@ -403,6 +403,8 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     setBulkLoading(true);
     setBulkProgress(0);
     const newSelected = new Set(selectedProducts);
+    let successfulPages = 0;
+    let failedPages = 0;
     
     try {
       for (let page = 1; page <= numPages; page++) {
@@ -410,16 +412,26 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
         
         setBulkProgress(Math.round((page / numPages) * 100));
         
-        const response = await fetch(
-          `/api/tme/products?categoryId=${selectedCategory}&page=${page}&limit=20`,
-          { signal: controller.signal }
-        );
-        
-        if (response.ok) {
-          const data = await response.json();
-          if (data.products) {
-            data.products.forEach((p: TMEProduct) => newSelected.add(p.Symbol));
+        try {
+          const response = await fetch(
+            `/api/tme/products?categoryId=${selectedCategory}&page=${page}&limit=20`,
+            { signal: controller.signal }
+          );
+          
+          if (response.ok) {
+            const data = await response.json();
+            if (data.products) {
+              data.products.forEach((p: TMEProduct) => newSelected.add(p.Symbol));
+              successfulPages++;
+            }
+          } else {
+            failedPages++;
+            console.warn(`Page ${page} failed with status ${response.status}`);
           }
+        } catch (pageError: any) {
+          if (pageError.name === 'AbortError') throw pageError;
+          failedPages++;
+          console.warn(`Page ${page} failed:`, pageError.message);
         }
         
         // Small delay to avoid rate limiting
@@ -430,16 +442,25 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
       
       if (!controller.signal.aborted) {
         setSelectedProducts(newSelected);
-        toast({
-          title: "Bulk selection complete",
-          description: `Selected ${newSelected.size} products from ${numPages} pages`
-        });
+        if (failedPages > 0) {
+          toast({
+            title: "Partial selection complete",
+            description: `Selected ${newSelected.size} products. ${failedPages} pages failed (TME timeout). Try again later.`,
+            variant: "destructive"
+          });
+        } else {
+          toast({
+            title: "Bulk selection complete",
+            description: `Selected ${newSelected.size} products from ${numPages} pages`
+          });
+        }
       }
     } catch (error: any) {
       if (error.name !== 'AbortError') {
+        setSelectedProducts(newSelected);
         toast({
-          title: "Bulk selection failed",
-          description: "Some pages could not be loaded",
+          title: "Selection stopped",
+          description: `Selected ${newSelected.size} products before error. TME API may be overloaded.`,
           variant: "destructive"
         });
       }

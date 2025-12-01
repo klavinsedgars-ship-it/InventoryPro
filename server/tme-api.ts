@@ -263,64 +263,101 @@ export class TMEApiService {
     console.log(`📊 TME API Call #${this.callCount}: ${endpoint}`);
     console.log(`📝 Request params:`, Object.keys(requestParams).join(', '));
 
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "Accept": "application/json",
-          "User-Agent": "TME-API-Client/1.0"
-        },
-        body: formData.toString(),
-      });
+    // Retry configuration
+    const maxRetries = 3;
+    const baseDelayMs = 2000;
+    const timeoutMs = 20000;
 
-      const responseText = await response.text();
-      console.log(`📥 Response status: ${response.status}, length: ${responseText.length}`);
-      
-      if (!response.ok) {
-        console.error(`❌ HTTP Error: ${response.status} ${response.statusText}`);
-        console.error(`❌ Response body:`, responseText.substring(0, 1000));
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-      let data: TMEApiResponse<T>;
       try {
-        data = JSON.parse(responseText) as TMEApiResponse<T>;
-      } catch (parseError) {
-        console.error('❌ JSON parse error:', responseText.substring(0, 500));
-        throw new Error(`Invalid JSON response from TME API`);
-      }
-      
-      if (data.Status !== "OK") {
-        console.error('❌ TME API Error:', {
-          status: data.Status,
-          errorMessage: data.ErrorMessage,
-          errorCode: data.ErrorCode,
-          errors: data.Error
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+            "User-Agent": "TME-API-Client/1.0"
+          },
+          body: formData.toString(),
+          signal: controller.signal
         });
+
+        clearTimeout(timeoutId);
+        const responseText = await response.text();
+        console.log(`📥 Response status: ${response.status}, length: ${responseText.length}`);
         
-        // Handle specific error types
-        if (data.Status === "E_TOO_MANY_REQUESTS") {
-          // Wait longer for rate limit errors
-          console.log('⏸️ Rate limit hit, waiting 5 seconds...');
-          await new Promise(resolve => setTimeout(resolve, 5000));
-          throw new Error(`TME API rate limit exceeded. Please try again later.`);
+        if (!response.ok) {
+          const isRetriable = response.status >= 500 || response.status === 429;
+          console.error(`❌ HTTP Error: ${response.status} ${response.statusText}`);
+          console.error(`❌ Response body:`, responseText.substring(0, 1000));
+          
+          if (isRetriable && attempt < maxRetries) {
+            const delay = baseDelayMs * Math.pow(2, attempt - 1) * (0.8 + Math.random() * 0.4);
+            console.log(`🔄 Retry ${attempt}/${maxRetries} after ${Math.round(delay)}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        let data: TMEApiResponse<T>;
+        try {
+          data = JSON.parse(responseText) as TMEApiResponse<T>;
+        } catch (parseError) {
+          console.error('❌ JSON parse error:', responseText.substring(0, 500));
+          throw new Error(`Invalid JSON response from TME API`);
         }
         
-        if (data.Status === "E_INPUT_PARAMS_VALIDATION_ERROR") {
-          throw new Error(`TME API parameter validation error: ${JSON.stringify(data.Error)}`);
+        if (data.Status !== "OK") {
+          console.error('❌ TME API Error:', {
+            status: data.Status,
+            errorMessage: data.ErrorMessage,
+            errorCode: data.ErrorCode,
+            errors: data.Error
+          });
+          
+          if (data.Status === "E_TOO_MANY_REQUESTS") {
+            if (attempt < maxRetries) {
+              const delay = 5000 * attempt;
+              console.log(`⏸️ Rate limit hit, waiting ${delay/1000}s (retry ${attempt}/${maxRetries})...`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+              continue;
+            }
+            throw new Error(`TME API rate limit exceeded. Please try again later.`);
+          }
+          
+          if (data.Status === "E_INPUT_PARAMS_VALIDATION_ERROR") {
+            throw new Error(`TME API parameter validation error: ${JSON.stringify(data.Error)}`);
+          }
+          
+          throw new Error(`TME API error: ${data.ErrorMessage || data.Message || "Unknown error"}`);
+        }
+
+        console.log(`✅ TME API success: ${endpoint}`);
+        return data;
+
+      } catch (error: any) {
+        clearTimeout(timeoutId);
+        
+        const isAbortError = error.name === 'AbortError';
+        const isNetworkError = error.code === 'ECONNRESET' || error.code === 'ENOTFOUND' || error.code === 'ETIMEDOUT';
+        const isRetriable = isAbortError || isNetworkError;
+        
+        if (isRetriable && attempt < maxRetries) {
+          const delay = baseDelayMs * Math.pow(2, attempt - 1) * (0.8 + Math.random() * 0.4);
+          console.log(`🔄 ${isAbortError ? 'Timeout' : 'Network error'}, retry ${attempt}/${maxRetries} after ${Math.round(delay)}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
         }
         
-        throw new Error(`TME API error: ${data.ErrorMessage || data.Message || "Unknown error"}`);
+        console.error(`❌ TME API request failed after ${attempt} attempts:`, error);
+        throw error;
       }
-
-      console.log(`✅ TME API success: ${endpoint}`);
-      return data;
-
-    } catch (error) {
-      console.error(`❌ TME API request failed:`, error);
-      throw error;
     }
+    
+    throw new Error(`TME API request failed after ${maxRetries} retries`);
   }
 
   // Get raw TME categories response for debugging
