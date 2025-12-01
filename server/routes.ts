@@ -411,6 +411,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Bulk inventory update - aggregates multiple updates into single eBay API calls
+  app.post("/api/ebay/bulk-update-inventory", requireAuth, async (req, res) => {
+    try {
+      const { items } = req.body;
+      
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Items array is required and must not be empty"
+        });
+      }
+
+      // Validate and prepare items
+      const validItems = [];
+      for (const item of items) {
+        if (!item.productId) {
+          continue;
+        }
+        
+        // Get product from database to get eBay item ID
+        const product = await storage.getProduct(item.productId);
+        if (!product || !product.ebayItemId || !product.listedOnEbay) {
+          continue;
+        }
+
+        validItems.push({
+          productId: item.productId,
+          ebayItemId: product.ebayItemId,
+          quantity: item.quantity,
+          price: item.price,
+          sku: product.sku
+        });
+      }
+
+      if (validItems.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "No valid items found for bulk update"
+        });
+      }
+
+      console.log(`📦 Bulk inventory update requested for ${validItems.length} items`);
+      const result = await ebayApi.bulkUpdateInventory(validItems);
+      
+      res.json({
+        success: result.success,
+        processed: result.processed,
+        succeeded: result.succeeded,
+        failed: result.failed,
+        message: `Bulk update: ${result.succeeded} items updated, ${result.failed} failed`
+      });
+    } catch (error) {
+      console.error("Bulk inventory update failed:", error);
+      res.status(500).json({
+        success: false,
+        message: `Bulk update failed: ${(error as Error).message}`
+      });
+    }
+  });
+
   app.post("/api/ebay/unlist", requireAuth, async (req, res) => {
     try {
       const { productId } = req.body;
@@ -1106,167 +1166,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to delete product" });
     }
   });
-
-  // Categories routes
-  app.get("/api/categories", requireAuth, async (req, res) => {
-    try {
-      const categories = await storage.getCategories();
-      res.json(categories);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch categories" });
-    }
-  });
-
-  app.post("/api/categories", requireAuth, async (req, res) => {
-    try {
-      const categoryData = insertCategorySchema.parse(req.body);
-      const category = await storage.createCategory(categoryData);
-      res.status(201).json(category);
-    } catch (error) {
-      if (error instanceof ZodError) {
-        return res.status(400).json({ message: "Invalid input", errors: error.errors });
-      }
-      res.status(500).json({ message: "Failed to create category" });
-    }
-  });
-
-  // eBay API routes
-  app.post("/api/ebay/list", requireAuth, async (req, res) => {
-    try {
-      const { productId, listingDetails } = req.body;
-      const result = await ebayApi.listProduct(productId, listingDetails);
-      res.json(result);
-    } catch (error) {
-      console.error("eBay listing failed:", error);
-      res.status(500).json({ 
-        success: false, 
-        message: (error as Error).message || "eBay listing failed",
-        error: (error as Error).message
-      });
-    }
-  });
-
-  app.post("/api/ebay/bulk-list", requireAuth, async (req, res) => {
-    try {
-      const { productIds, categoryId } = req.body;
-      const result = await ebayApi.bulkListProducts(productIds, categoryId);
-      res.json(result);
-    } catch (error) {
-      console.error("eBay bulk listing failed:", error);
-      res.status(500).json({ 
-        success: false, 
-        message: (error as Error).message || "eBay bulk listing failed",
-        error: (error as Error).message
-      });
-    }
-  });
-
-  app.post("/api/ebay/unlist", requireAuth, async (req, res) => {
-    try {
-      const { productId } = req.body;
-      const result = await ebayApi.unlistProduct(productId);
-      res.json(result);
-    } catch (error) {
-      console.error("eBay unlisting failed:", error);
-      res.json({ 
-        success: false, 
-        message: `Failed to unlist product: ${(error as Error).message}`,
-        errors: [(error as Error).message]
-      });
-    }
-  });
-
-  app.get("/api/ebay/test", requireAuth, async (req, res) => {
-    try {
-      const result = await ebayApi.testConnection();
-      res.json(result);
-    } catch (error) {
-      console.error("eBay test failed:", error);
-      res.status(500).json({ 
-        success: false, 
-        message: (error as Error).message || "eBay test failed",
-        error: (error as Error).message
-      });
-    }
-  });
-
-  app.get("/api/ebay/policies", requireAuth, async (req, res) => {
-    try {
-      const result = await ebayApi.getBusinessPolicies();
-      res.json(result);
-    } catch (error) {
-      console.error("Failed to fetch eBay policies:", error);
-      res.status(500).json({ 
-        success: false, 
-        message: (error as Error).message || "Failed to fetch eBay policies",
-        error: (error as Error).message
-      });
-    }
-  });
-
-  app.get("/api/ebay/categories", requireAuth, async (req, res) => {
-    try {
-      const categories = await ebayApi.getEbayCategories();
-      res.json({ success: true, categories });
-    } catch (error) {
-      console.error("eBay categories fetch failed:", error);
-      res.status(500).json({ 
-        success: false, 
-        message: (error as Error).message || "Failed to fetch eBay categories",
-        error: (error as Error).message
-      });
-    }
-  });
-
-    // TME API routes - Enhanced
-
-    // Test TME API connection
-    app.get("/api/tme/test", async (req, res) => {
-      try {
-        console.log("🧪 Testing TME API connection...");
-
-        // Test basic connectivity with account status
-        const response = await fetch("https://api.tme.eu/Accounts/GetAccountStatus.json", {
-          method: 'POST',
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Accept": "application/json",
-            "User-Agent": "TME-API-Client/1.0"
-          },
-          body: new URLSearchParams({
-            Token: process.env.TME_TOKEN || '',
-            Language: "EN"
-          }).toString()
-        });
-
-        const responseText = await response.text();
-        console.log("📥 TME API Response:", responseText.substring(0, 500));
-
-        if (response.ok) {
-          const data = JSON.parse(responseText);
-          res.json({
-            success: true,
-            status: "TME API connection successful",
-            data: data,
-            responseCode: response.status
-          });
-        } else {
-          res.json({
-            success: false,
-            status: "TME API connection failed",
-            error: `HTTP ${response.status}: ${response.statusText}`,
-            response: responseText.substring(0, 1000)
-          });
-        }
-      } catch (error) {
-        console.error("❌ TME API test failed:", error);
-        res.status(500).json({
-          success: false,
-          error: error instanceof Error ? error.message : "Unknown error",
-          status: "TME API test failed"
-        });
-      }
-    });
 
 
     // OPTIMIZED: Sync selected TME products using combined endpoints (80% fewer API calls)
