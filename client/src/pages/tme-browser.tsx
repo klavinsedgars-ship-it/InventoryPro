@@ -560,7 +560,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                     <CardHeader>
                       <div className="flex items-center justify-between">
                         <CardTitle className="text-lg">
-                          Products ({totalProducts.toLocaleString()} total)
+                          Products ({totalProducts.toLocaleString()} {filters.inStockOnly ? "in stock" : "total"})
                         </CardTitle>
                         <div className="flex items-center gap-2">
                           <Button
