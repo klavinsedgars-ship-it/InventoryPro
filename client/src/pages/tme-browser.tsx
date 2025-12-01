@@ -196,10 +196,9 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
       return response.json();
     },
     onSuccess: (data) => {
-      const { results } = data;
       toast({
         title: "Sync completed successfully",
-        description: `${results.syncedCount} new products created, ${results.updatedCount} updated, ${results.failedCount} failed`
+        description: `${data.syncedCount || 0} new products created, ${data.updatedCount || 0} updated, ${data.failedCount || 0} failed`
       });
       setSelectedProducts(new Set());
       setIsSyncing(false);
