@@ -613,98 +613,93 @@ export function Products({ user }: ProductsProps) {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
+                <table className="w-full divide-y divide-gray-200 table-fixed">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-8">
+                      <th className="px-1 py-2 text-left text-xs font-medium text-gray-500 uppercase w-8">
                         <Checkbox
                           checked={selectedProducts.size === filteredProducts.length && filteredProducts.length > 0}
                           onCheckedChange={handleSelectAll}
                         />
                       </th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-1 py-2 text-left text-xs font-medium text-gray-500 uppercase" style={{width: '180px'}}>
                         Product
                       </th>
-                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">
+                      <th className="px-1 py-2 text-left text-xs font-medium text-gray-500 uppercase" style={{width: '110px'}}>
                         SKU
                       </th>
-                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">
+                      <th className="px-1 py-2 text-left text-xs font-medium text-gray-500 uppercase" style={{width: '100px'}}>
                         Category
                       </th>
-                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
+                      <th className="px-1 py-2 text-right text-xs font-medium text-gray-500 uppercase" style={{width: '55px'}}>
                         Price
                       </th>
-                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
-                        TME Stock
+                      <th className="px-1 py-2 text-right text-xs font-medium text-gray-500 uppercase" style={{width: '50px'}}>
+                        TME
                       </th>
-                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
-                        eBay Stock
+                      <th className="px-1 py-2 text-right text-xs font-medium text-gray-500 uppercase" style={{width: '45px'}}>
+                        eBay
                       </th>
-                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-16">
+                      <th className="px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase" style={{width: '55px'}}>
                         Status
                       </th>
-                      <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">
+                      <th className="px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase" style={{width: '75px'}}>
                         Markets
                       </th>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Actions
+                      <th className="px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase" style={{width: '55px'}}>
+                        Act
                       </th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {filteredProducts.map((product) => (
                       <tr key={product.id} className="hover:bg-gray-50">
-                        <td className="px-2 py-3 whitespace-nowrap">
+                        <td className="px-1 py-2">
                           <Checkbox
                             checked={selectedProducts.has(product.id)}
                             onCheckedChange={() => handleSelectProduct(product.id)}
                           />
                         </td>
-                        <td className="px-3 py-3 whitespace-nowrap">
-                          <div className="flex items-center">
-                            <div className="h-10 w-10 bg-gray-100 rounded-lg mr-3 flex-shrink-0 flex items-center justify-center border">
+                        <td className="px-1 py-2">
+                          <div className="flex items-center gap-2">
+                            <div className="h-8 w-8 bg-gray-100 rounded flex-shrink-0 flex items-center justify-center border">
                               {product.imageUrl ? (
                                 <img 
                                   src={product.imageUrl} 
                                   alt={product.name}
-                                  className="h-8 w-8 object-cover rounded"
+                                  className="h-7 w-7 object-cover rounded"
                                 />
                               ) : (
-                                <span className="text-lg">{getProductThumbnail(product)}</span>
+                                <span className="text-sm">{getProductThumbnail(product)}</span>
                               )}
                             </div>
-                            <div className="min-w-0">
-                              <div className="text-sm font-medium text-gray-900 truncate max-w-48">
+                            <div className="min-w-0 overflow-hidden">
+                              <div className="text-xs font-medium text-gray-900 truncate" title={product.name}>
                                 {product.name}
                               </div>
-                              <div className="text-xs text-gray-500">{product.ean || "No EAN"}</div>
+                              <div className="text-xs text-gray-400 truncate">{product.ean || "No EAN"}</div>
                             </div>
                           </div>
                         </td>
-                        <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-900">
+                        <td className="px-1 py-2 text-xs text-gray-900 truncate" title={product.sku}>
                           {product.sku}
                         </td>
-                        <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-500">
+                        <td className="px-1 py-2 text-xs text-gray-500 truncate" title={product.category}>
                           {product.category}
                         </td>
-                        <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-900">
+                        <td className="px-1 py-2 text-xs text-gray-900 text-right">
                           {formatCurrency(product.salePrice)}
                         </td>
-                        <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-900">
+                        <td className="px-1 py-2 text-xs text-right">
                           <span className={product.stock === 0 ? "text-red-600" : "text-gray-900"}>
                             {product.stock.toLocaleString()}
                           </span>
                         </td>
-                        <td className="px-2 py-3 whitespace-nowrap text-sm text-gray-900">
+                        <td className="px-1 py-2 text-xs text-right">
                           {(() => {
                             const productStockInfo = stockInfo.find((info: any) => info.id === product.id);
-                            if (!productStockInfo) {
-                              return <span className="text-xs text-gray-500">Loading...</span>;
-                            }
-                            
+                            if (!productStockInfo) return <span className="text-gray-400">-</span>;
                             const ebayStock = productStockInfo.ebayStock;
-                            const isLimited = productStockInfo.isLimited;
-                            
                             return (
                               <span className={ebayStock === 0 ? "text-red-600" : "text-green-600"}>
                                 {ebayStock}
@@ -712,125 +707,53 @@ export function Products({ user }: ProductsProps) {
                             );
                           })()}
                         </td>
-                        <td className="px-2 py-3 whitespace-nowrap">
+                        <td className="px-1 py-2 text-center">
                           <Badge 
                             variant="secondary" 
-                            className={`text-xs ${getStatusColor(product.status)}`}
+                            className={`text-xs px-1 py-0 ${getStatusColor(product.status)}`}
                           >
                             {product.status === 'out_of_stock' ? 'Out' : 
-                             product.status.charAt(0).toUpperCase() + product.status.slice(1)}
+                             product.status === 'active' ? 'Active' : 'Off'}
                           </Badge>
                         </td>
-                        <td className="px-2 py-3 whitespace-nowrap">
-                          <div className="space-y-1">
-                            {/* eBay Status */}
-                            <div className="flex items-center space-x-2">
+                        <td className="px-1 py-2">
+                          <div className="flex items-center justify-center gap-1">
+                            <span title="eBay">
                               {product.listedOnEbay ? (
-                                <div className="flex items-center space-x-2">
-                                  <div className="flex items-center space-x-1">
-                                    <CheckCircle className="h-3 w-3 text-green-500" />
-                                    <span className="text-xs text-green-700 font-medium">eBay</span>
-                                  </div>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-4 w-4 p-0"
-                                    onClick={() => {
-                                      if (product.ebayItemId) {
-                                        const ebayUrl = `https://www.ebay.co.uk/itm/${product.ebayItemId}`;
-                                        window.open(ebayUrl, '_blank');
-                                      }
-                                    }}
-                                    title="View on eBay"
-                                  >
-                                    <ExternalLink className="h-3 w-3 text-blue-500" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-4 w-4 p-0"
-                                    onClick={() => {
-                                      updateEbayListingMutation.mutate(product.id);
-                                    }}
-                                    disabled={updateEbayListingMutation.isPending}
-                                    title="Update eBay listing"
-                                  >
-                                    <RefreshCw className="h-3 w-3 text-blue-500" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-4 w-4 p-0"
-                                    onClick={() => {
-                                      if (confirm(`Unlist "${product.name}" from eBay?`)) {
-                                        unlistFromEbayMutation.mutate(product.id);
-                                      }
-                                    }}
-                                    disabled={unlistFromEbayMutation.isPending}
-                                    title="Unlist from eBay"
-                                  >
-                                    <X className="h-3 w-3 text-red-500" />
-                                  </Button>
-                                </div>
+                                <CheckCircle className="h-3 w-3 text-green-500" />
                               ) : (
-                                <div className="flex items-center space-x-1">
-                                  <XCircle className="h-3 w-3 text-gray-400" />
-                                  <span className="text-xs text-gray-500">eBay</span>
-                                </div>
+                                <XCircle className="h-3 w-3 text-gray-300" />
                               )}
-                            </div>
-                            
-                            {/* Amazon Status */}
-                            <div className="flex items-center space-x-2">
+                            </span>
+                            <span title="Amazon">
                               {product.listedOnAmazon ? (
-                                <div className="flex items-center space-x-2">
-                                  <div className="flex items-center space-x-1">
-                                    <CheckCircle className="h-3 w-3 text-green-500" />
-                                    <span className="text-xs text-green-700 font-medium">Amazon</span>
-                                  </div>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-4 w-4 p-0"
-                                    onClick={() => {
-                                      const searchQuery = encodeURIComponent(`${product.name} ${product.sku}`);
-                                      const amazonUrl = `https://www.amazon.com/s?k=${searchQuery}`;
-                                      window.open(amazonUrl, '_blank');
-                                    }}
-                                    title="View on Amazon"
-                                  >
-                                    <ExternalLink className="h-3 w-3 text-blue-500" />
-                                  </Button>
-                                </div>
+                                <CheckCircle className="h-3 w-3 text-orange-500" />
                               ) : (
-                                <div className="flex items-center space-x-1">
-                                  <XCircle className="h-3 w-3 text-gray-400" />
-                                  <span className="text-xs text-gray-500">Amazon</span>
-                                </div>
+                                <XCircle className="h-3 w-3 text-gray-300" />
                               )}
-                            </div>
+                            </span>
                           </div>
                         </td>
-                        <td className="px-3 py-3 whitespace-nowrap text-sm font-medium">
-                          <div className="flex items-center space-x-2">
+                        <td className="px-1 py-2">
+                          <div className="flex items-center justify-center gap-0">
                             <Button 
                               variant="ghost" 
                               size="sm"
                               onClick={() => handleEditProduct(product)}
-                              className="h-8 w-8 p-0 hover:bg-blue-50"
-                              title="Edit product"
+                              className="h-6 w-6 p-0 hover:bg-blue-50"
+                              title="Edit"
                             >
-                              <Edit2 className="h-4 w-4 text-blue-600" />
+                              <Edit2 className="h-3 w-3 text-blue-600" />
                             </Button>
                             <Button 
                               variant="ghost" 
                               size="sm"
                               onClick={() => handleDeleteProduct(product.id)}
-                              className="h-8 w-8 p-0 hover:bg-red-50"
+                              className="h-6 w-6 p-0 hover:bg-red-50"
                               disabled={deleteMutation.isPending}
-                              title="Delete product"
+                              title="Delete"
                             >
-                              <Trash2 className="h-4 w-4 text-red-600" />
+                              <Trash2 className="h-3 w-3 text-red-600" />
                             </Button>
                           </div>
                         </td>
