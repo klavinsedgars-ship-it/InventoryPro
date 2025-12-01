@@ -258,13 +258,14 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
 
   // Load enhanced info when products change
   useEffect(() => {
-    if (products.length > 0) {
-      const symbols = products.slice(0, 20).map((p: TMEProduct) => p.Symbol); // Limit for API efficiency
+    const productList = (productsData as any)?.products || [];
+    if (productList.length > 0) {
+      const symbols = productList.map((p: TMEProduct) => p.Symbol); // Get all visible products
       loadEnhancedProductInfo(symbols);
     } else {
       setEnhancedProducts([]);
     }
-  }, [products]);
+  }, [productsData, currentPage]);
 
   const selectCategory = (categoryId: string) => {
     setSelectedCategory(categoryId);
