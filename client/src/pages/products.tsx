@@ -49,6 +49,7 @@ export function Products({ user }: ProductsProps) {
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 1000]);
   const [stockFilter, setStockFilter] = useState<string>("all");
   const [marketplaceFilter, setMarketplaceFilter] = useState<string>("all");
+  const [moqFilter, setMoqFilter] = useState<string>("all");
 
   const { data: products = [], isLoading } = useQuery<Product[]>({
     queryKey: ["/api/products", { 
@@ -340,8 +341,12 @@ export function Products({ user }: ProductsProps) {
       (marketplaceFilter === "amazon" && product.listedOnAmazon) ||
       (marketplaceFilter === "unlisted" && !product.listedOnEbay && !product.listedOnAmazon);
 
+    const matchesMoq = moqFilter === "all" ||
+      (moqFilter === "single" && (!product.moq || product.moq === 1)) ||
+      (moqFilter === "multipack" && product.moq && product.moq > 1);
+
     return matchesSearch && matchesCategory && matchesStatus && 
-           matchesPrice && matchesStock && matchesMarketplace;
+           matchesPrice && matchesStock && matchesMarketplace && matchesMoq;
   });
 
   return (
@@ -424,6 +429,17 @@ export function Products({ user }: ProductsProps) {
                   <SelectItem value="ebay">eBay</SelectItem>
                   <SelectItem value="amazon">Amazon</SelectItem>
                   <SelectItem value="unlisted">Unlisted</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={moqFilter} onValueChange={setMoqFilter}>
+                <SelectTrigger className="w-28 h-9" data-testid="select-moq">
+                  <SelectValue placeholder="MOQ" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All MOQ</SelectItem>
+                  <SelectItem value="single">Single (1x)</SelectItem>
+                  <SelectItem value="multipack">Multipacks</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -693,7 +709,9 @@ export function Products({ user }: ProductsProps) {
                               {product.moq}x
                             </Badge>
                           ) : (
-                            <span className="text-gray-400 text-xs">1</span>
+                            <Badge variant="outline" className="px-1.5 py-0 text-[10px] bg-gray-50 text-gray-500 border-gray-200">
+                              1x
+                            </Badge>
                           )}
                         </td>
                         <td className="px-1 py-2 text-xs text-gray-500 truncate" title={product.category}>
