@@ -595,6 +595,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     });
 
+    // Debug endpoint to see raw TME categories structure
+    app.get("/api/tme/categories/debug", async (req, res) => {
+      try {
+        console.log("Fetching raw TME categories for debug...");
+        const rawData = await tmeApi.getAllCategoriesRaw();
+        
+        res.json({
+          success: true,
+          rawData: rawData
+        });
+      } catch (error) {
+        console.error("Failed to fetch raw TME categories:", error);
+        res.status(500).json({ 
+          success: false, 
+          error: (error as Error).message
+        });
+      }
+    });
+
     // Get TME categories
     app.get("/api/tme/categories", async (req, res) => {
       try {

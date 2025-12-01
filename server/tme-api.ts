@@ -64,8 +64,9 @@ interface TMEStock {
 interface TMECategory {
   CategoryId: string;
   Name: string;
-  ParentId?: string;
+  ParentId?: string | null;
   ProductCount?: number;
+  SubTreeList?: string[];  // Array of product symbols in this category
   children?: TMECategory[];
 }
 
@@ -80,6 +81,7 @@ interface TMEApiResponse<T> {
     PriceList?: T[];
     StockList?: T[];
     CategoryList?: T[];
+    CategoryTree?: any[];  // TME returns categories in tree structure
   };
 }
 
@@ -306,26 +308,82 @@ export class TMEApiService {
     }
   }
 
-  // Get all available categories
+  // Get raw TME categories response for debugging
+  async getAllCategoriesRaw(): Promise<any> {
+    try {
+      const response = await this.makeRequest<any>("/Products/GetCategories.json");
+      console.log("📋 Raw TME response Data keys:", Object.keys(response.Data || {}));
+      
+      // Log the structure of each key in Data
+      for (const key of Object.keys(response.Data || {})) {
+        const value = response.Data[key];
+        console.log(`📋 Data.${key} type:`, typeof value, Array.isArray(value) ? `(array of ${value.length})` : '');
+        if (Array.isArray(value) && value.length > 0) {
+          console.log(`📋 Sample ${key}[0] keys:`, Object.keys(value[0]));
+        } else if (typeof value === 'object' && value !== null) {
+          console.log(`📋 ${key} object keys:`, Object.keys(value));
+        }
+      }
+      
+      // Return the full Data object for inspection
+      return {
+        dataKeys: Object.keys(response.Data || {}),
+        categoryTree: response.Data?.CategoryTree,
+        categoryList: response.Data?.CategoryList,
+        rawDataSample: JSON.stringify(response.Data).substring(0, 2000)
+      };
+    } catch (error) {
+      console.error("Failed to get raw categories:", error);
+      return { error: String(error) };
+    }
+  }
+
+  // Get all available categories with real product counts from TME
   async getAllCategories(): Promise<TMECategory[]> {
     try {
       const response = await this.makeRequest<any>("/Products/GetCategories.json");
       
-      if (response.Data && response.Data.CategoryList) {
-        return response.Data.CategoryList.map((cat: any) => ({
-          CategoryId: cat.CategoryId,
-          Name: cat.Name,
-          ParentId: cat.ParentId || null,
-          ProductCount: cat.ProductCount || 0
-        }));
+      if (response.Data && response.Data.CategoryTree) {
+        // TME returns CategoryTree as a single root object with SubTree array
+        const rootCategory = response.Data.CategoryTree;
+        const categories = this.parseCategoryTree(rootCategory);
+        console.log(`📁 Parsed ${categories.length} categories from TME with real product counts`);
+        return categories;
       }
       
       // Fallback with comprehensive category structure
+      console.log('⚠️ Using fallback categories - TME response format unexpected');
       return this.getFallbackCategories();
     } catch (error) {
       console.warn('Failed to fetch categories from TME API, using fallback:', error);
       return this.getFallbackCategories();
     }
+  }
+
+  // Parse TME's nested CategoryTree structure into flat array
+  private parseCategoryTree(node: any, parentId: string | null = null): TMECategory[] {
+    const categories: TMECategory[] = [];
+    
+    // Add current node as a category (skip root if Id is 111000)
+    if (node.Id && node.Name) {
+      const category: TMECategory = {
+        CategoryId: String(node.Id),
+        Name: node.Name,
+        ParentId: parentId,
+        ProductCount: node.TotalProducts || 0
+      };
+      categories.push(category);
+    }
+    
+    // Recursively process children if they exist
+    if (node.SubTree && Array.isArray(node.SubTree) && node.SubTree.length > 0) {
+      for (const childNode of node.SubTree) {
+        const childCategories = this.parseCategoryTree(childNode, node.Id ? String(node.Id) : null);
+        categories.push(...childCategories);
+      }
+    }
+    
+    return categories;
   }
 
   private getFallbackCategories(): TMECategory[] {
@@ -377,82 +435,77 @@ export class TMEApiService {
     }
   }
 
-  // Get products by category with pagination - enhanced with page-specific searches
+  // Get products by category with pagination using TME Search API with SearchCategory filter
   async getProductsByCategory(categoryId: string, page: number = 1, limit: number = 20): Promise<{products: TMEProduct[], total: number}> {
     console.log(`🔍 Getting products for category ${categoryId}, page ${page}, limit ${limit}`);
     
     try {
-      // Get category-specific search terms
-      const searchTerms = this.getCategorySearchTerms(categoryId);
-      let allProducts: TMEProduct[] = [];
+      // TME Search API with SearchCategory filter (correct param name)
+      // TME returns 20 products per page, no Limit param available
+      const response = await this.makeRequest<any>("/Products/Search.json", {
+        SearchCategory: categoryId,
+        SearchWithStock: "1",
+        SearchPage: String(page)
+      });
       
-      // Calculate which search terms to use for this page to ensure variety
-      const termsPerPage = Math.max(2, Math.ceil(searchTerms.length / 10)); // Use 2-5 terms per page
-      const startTermIndex = ((page - 1) * termsPerPage) % searchTerms.length;
-      const pageSearchTerms = [];
+      const products = response.Data?.ProductList || [];
+      const totalProducts = response.Data?.Amount || 0;
+      const pageNumber = response.Data?.PageNumber || page;
       
-      // Get search terms for this page in a rotating fashion
-      for (let i = 0; i < termsPerPage && pageSearchTerms.length < 6; i++) {
-        const termIndex = (startTermIndex + i) % searchTerms.length;
-        pageSearchTerms.push(searchTerms[termIndex]);
+      console.log(`✅ TME returned ${products.length} products for category ${categoryId} (page ${pageNumber}), total: ${totalProducts}`);
+      
+      if (products.length > 0) {
+        return {
+          products: products,
+          total: totalProducts
+        };
       }
       
-      console.log(`📄 Page ${page} will search for: ${pageSearchTerms.join(', ')}`);
+      // If no products from SearchCategory, fall back to keyword search
+      console.log(`🔄 No products found with SearchCategory filter, falling back to keyword search`);
+      return this.searchProductsByCategoryKeywords(categoryId, page, limit);
       
-      // Search with page-specific terms
-      for (const searchTerm of pageSearchTerms) {
-        try {
-          console.log(`🔍 Searching for "${searchTerm}" in category ${categoryId}`);
-          
-          const products = await this.searchProducts(searchTerm, 50);
-          
-          if (products && products.length > 0) {
-            // Filter out duplicates
-            const newProducts = products.filter(
-              product => !allProducts.some(existing => existing.Symbol === product.Symbol)
-            );
-            
-            allProducts = allProducts.concat(newProducts);
-            console.log(`✅ Found ${newProducts.length} new products, total: ${allProducts.length}`);
-            
-            // Break if we have enough products for this page
-            if (allProducts.length >= limit * 2) break;
-          }
-          
-          // Rate limiting between searches
-          await new Promise(resolve => setTimeout(resolve, 800));
-          
-        } catch (searchError) {
-          console.warn(`Search failed for "${searchTerm}":`, searchError);
-          continue;
-        }
-      }
-      
-      // If no products found through search, return mock data for development
-      if (allProducts.length === 0) {
-        console.log(`🔄 No products found via API, returning mock data for category ${categoryId}`);
-        return this.getMockProductsForCategory(categoryId, page, limit);
-      }
-      
-      // Estimate total products available for this category (conservative estimate)
-      const estimatedTotal = searchTerms.length * 100; // Assume ~100 products per search term
-      
-      // Return products for this page (no slicing since we fetched page-specific results)
-      const pageProducts = allProducts.slice(0, limit);
-      
-      console.log(`📄 Returning ${pageProducts.length} real products (page ${page}) of estimated ${estimatedTotal} total`);
-      
-      return {
-        products: pageProducts,
-        total: estimatedTotal
-      };
-      
-    } catch (error) {
+    } catch (error: any) {
       console.error(`❌ Failed to get products for category ${categoryId}:`, error);
+      return this.searchProductsByCategoryKeywords(categoryId, page, limit);
+    }
+  }
+
+  // Fallback: search products by category using keywords  
+  private async searchProductsByCategoryKeywords(categoryId: string, page: number, limit: number): Promise<{products: TMEProduct[], total: number}> {
+    const searchTerms = this.getCategorySearchTerms(categoryId);
+    let allProducts: TMEProduct[] = [];
+    
+    // Use 2-3 search terms per page for variety
+    const termsPerPage = 3;
+    const startTermIndex = ((page - 1) * termsPerPage) % searchTerms.length;
+    
+    for (let i = 0; i < termsPerPage && i < searchTerms.length; i++) {
+      const termIndex = (startTermIndex + i) % searchTerms.length;
+      const searchTerm = searchTerms[termIndex];
       
-      // Return mock data as fallback
+      try {
+        const products = await this.searchProducts(searchTerm, 50);
+        const newProducts = products.filter(
+          product => !allProducts.some(existing => existing.Symbol === product.Symbol)
+        );
+        allProducts = allProducts.concat(newProducts);
+        
+        if (allProducts.length >= limit * 2) break;
+        await new Promise(resolve => setTimeout(resolve, 500));
+      } catch (e) {
+        console.warn(`Search failed for "${searchTerm}":`, e);
+      }
+    }
+    
+    if (allProducts.length === 0) {
       return this.getMockProductsForCategory(categoryId, page, limit);
     }
+    
+    return {
+      products: allProducts.slice(0, limit),
+      total: searchTerms.length * 100
+    };
   }
 
   private async searchProductsByCategory(categoryId: string, page: number, limit: number): Promise<{products: TMEProduct[], total: number}> {
