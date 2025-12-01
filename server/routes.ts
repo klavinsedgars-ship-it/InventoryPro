@@ -358,6 +358,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Delete all products endpoint
+  app.delete("/api/products", requireAuth, async (req, res) => {
+    try {
+      const deletedCount = await storage.deleteAllProducts();
+      console.log(`Deleted all products: ${deletedCount} items removed`);
+      res.json({ 
+        success: true, 
+        deletedCount,
+        message: `Successfully deleted ${deletedCount} products` 
+      });
+    } catch (error) {
+      console.error("Failed to delete all products:", error);
+      res.status(500).json({ message: "Failed to delete all products" });
+    }
+  });
+
   // Categories routes
   app.get("/api/categories", requireAuth, async (req, res) => {
     try {

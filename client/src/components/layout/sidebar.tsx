@@ -56,19 +56,22 @@ export function Sidebar({ user }: SidebarProps) {
           {navigation.map((item) => {
             const isActive = location === item.href;
             return (
-              <Link key={item.name} href={item.href}>
-                <a className={cn(
+              <Link 
+                key={item.name} 
+                href={item.href}
+                className={cn(
                   "group flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors",
                   isActive
                     ? "bg-primary/10 text-primary"
                     : "text-gray-700 hover:bg-gray-50"
-                )}>
-                  <item.icon className={cn(
-                    "mr-3 h-5 w-5",
-                    isActive ? "text-primary" : "text-gray-400"
-                  )} />
-                  {item.name}
-                </a>
+                )}
+                data-testid={`nav-${item.name.toLowerCase().replace(/\s+/g, '-')}`}
+              >
+                <item.icon className={cn(
+                  "mr-3 h-5 w-5",
+                  isActive ? "text-primary" : "text-gray-400"
+                )} />
+                {item.name}
               </Link>
             );
           })}
@@ -89,10 +92,12 @@ export function Sidebar({ user }: SidebarProps) {
                   <p className="text-xs text-gray-500 capitalize">{user.role}</p>
                 </div>
               </div>
-              <Link href="/settings">
-                <a className="p-2 rounded-lg hover:bg-gray-100 transition-colors">
-                  <Settings className="h-4 w-4 text-gray-500 hover:text-gray-700" />
-                </a>
+              <Link 
+                href="/settings"
+                className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+                data-testid="nav-settings"
+              >
+                <Settings className="h-4 w-4 text-gray-500 hover:text-gray-700" />
               </Link>
             </div>
           </div>

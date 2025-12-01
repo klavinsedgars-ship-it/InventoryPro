@@ -48,6 +48,7 @@ export interface IStorage {
   createProduct(product: InsertProduct): Promise<Product>;
   updateProduct(id: number, product: Partial<InsertProduct>): Promise<Product | undefined>;
   deleteProduct(id: number): Promise<boolean>;
+  deleteAllProducts(): Promise<number>;
   getProductsByCategory(category: string): Promise<Product[]>;
   getProductsWithFilters(filters: {
     category?: string;
@@ -222,6 +223,11 @@ export class DatabaseStorage implements IStorage {
   async deleteProduct(id: number): Promise<boolean> {
     const result = await db.delete(products).where(eq(products.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  async deleteAllProducts(): Promise<number> {
+    const result = await db.delete(products);
+    return result.rowCount ?? 0;
   }
 
   async getProductsByCategory(category: string): Promise<Product[]> {

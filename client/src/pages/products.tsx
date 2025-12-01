@@ -11,6 +11,17 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { 
   Plus, Search, Filter, Edit2, Trash2, Upload, Download, MoreHorizontal, 
   Eye, X, Package, ShoppingCart, AlertTriangle, CheckCircle, XCircle,
@@ -70,6 +81,26 @@ export function Products({ user }: ProductsProps) {
       toast({
         title: "Error",
         description: error.message || "Failed to delete product.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteAllMutation = useMutation({
+    mutationFn: () => apiRequest("DELETE", "/api/products"),
+    onSuccess: (data: any) => {
+      toast({
+        title: "All Products Deleted",
+        description: `Successfully deleted ${data.deletedCount || 0} products.`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
+      setSelectedProducts(new Set());
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete all products.",
         variant: "destructive",
       });
     },
@@ -381,10 +412,43 @@ export function Products({ user }: ProductsProps) {
                 </Button>
               </div>
 
-              <Button onClick={handleAddProduct}>
-                <Plus className="w-4 h-4 mr-2" />
-                Add Product
-              </Button>
+              <div className="flex items-center space-x-2">
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button 
+                      variant="destructive" 
+                      disabled={products.length === 0 || deleteAllMutation.isPending}
+                      data-testid="button-delete-all"
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      {deleteAllMutation.isPending ? "Deleting..." : "Delete All"}
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete All Products?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will permanently delete all {products.length} products from your inventory. 
+                        This action cannot be undone. Are you sure you want to continue?
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel data-testid="button-cancel-delete">Cancel</AlertDialogCancel>
+                      <AlertDialogAction 
+                        onClick={() => deleteAllMutation.mutate()}
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        data-testid="button-confirm-delete"
+                      >
+                        Yes, Delete All
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+                <Button onClick={handleAddProduct} data-testid="button-add-product">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Product
+                </Button>
+              </div>
             </div>
 
             {/* Bulk Operations Toolbar */}
