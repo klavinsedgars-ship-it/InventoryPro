@@ -347,20 +347,39 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   // Bulk load multiple pages and select all products
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bulkProgress, setBulkProgress] = useState(0);
+  const [bulkAbortController, setBulkAbortController] = useState<AbortController | null>(null);
+  
+  const cancelBulkSelection = () => {
+    if (bulkAbortController) {
+      bulkAbortController.abort();
+      setBulkAbortController(null);
+    }
+    setBulkLoading(false);
+    setBulkProgress(0);
+    toast({
+      title: "Bulk selection cancelled",
+      description: "Selection process was stopped"
+    });
+  };
   
   const bulkSelectPages = async (numPages: number) => {
     if (!selectedCategory) return;
     
+    const controller = new AbortController();
+    setBulkAbortController(controller);
     setBulkLoading(true);
     setBulkProgress(0);
     const newSelected = new Set(selectedProducts);
     
     try {
       for (let page = 1; page <= numPages; page++) {
+        if (controller.signal.aborted) break;
+        
         setBulkProgress(Math.round((page / numPages) * 100));
         
         const response = await fetch(
-          `/api/tme/products?categoryId=${selectedCategory}&page=${page}&limit=20`
+          `/api/tme/products?categoryId=${selectedCategory}&page=${page}&limit=20`,
+          { signal: controller.signal }
         );
         
         if (response.ok) {
@@ -371,25 +390,30 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
         }
         
         // Small delay to avoid rate limiting
-        if (page < numPages) {
+        if (page < numPages && !controller.signal.aborted) {
           await new Promise(resolve => setTimeout(resolve, 300));
         }
       }
       
-      setSelectedProducts(newSelected);
-      toast({
-        title: "Bulk selection complete",
-        description: `Selected ${newSelected.size} products from ${numPages} pages`
-      });
-    } catch (error) {
-      toast({
-        title: "Bulk selection failed",
-        description: "Some pages could not be loaded",
-        variant: "destructive"
-      });
+      if (!controller.signal.aborted) {
+        setSelectedProducts(newSelected);
+        toast({
+          title: "Bulk selection complete",
+          description: `Selected ${newSelected.size} products from ${numPages} pages`
+        });
+      }
+    } catch (error: any) {
+      if (error.name !== 'AbortError') {
+        toast({
+          title: "Bulk selection failed",
+          description: "Some pages could not be loaded",
+          variant: "destructive"
+        });
+      }
     } finally {
       setBulkLoading(false);
       setBulkProgress(0);
+      setBulkAbortController(null);
     }
   };
 
@@ -657,7 +681,17 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                           </div>
                         </div>
                         {bulkLoading && (
-                          <Progress value={bulkProgress} className="mt-2 h-2" />
+                          <div className="mt-2 flex items-center gap-2">
+                            <Progress value={bulkProgress} className="flex-1 h-2" />
+                            <Button
+                              onClick={cancelBulkSelection}
+                              variant="destructive"
+                              size="sm"
+                              data-testid="btn-cancel-bulk"
+                            >
+                              Cancel
+                            </Button>
+                          </div>
                         )}
                       </div>
                     )}

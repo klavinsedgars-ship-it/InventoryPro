@@ -106,6 +106,31 @@ export function Products({ user }: ProductsProps) {
     },
   });
 
+  const deleteSelectedMutation = useMutation({
+    mutationFn: async (productIds: number[]) => {
+      const results = await Promise.all(
+        productIds.map(id => apiRequest("DELETE", `/api/products/${id}`).catch(() => null))
+      );
+      return { deletedCount: results.filter(r => r !== null).length };
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: "Products Deleted",
+        description: `Successfully deleted ${data.deletedCount} selected products.`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
+      setSelectedProducts(new Set());
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete selected products.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleAddProduct = () => {
     setSelectedProduct(null);
     setProductModalOpen(true);
@@ -329,161 +354,196 @@ export function Products({ user }: ProductsProps) {
         />
         
         <div className="p-6">
-          {/* Filters and Search */}
-          <div className="mb-6 space-y-4">
-            <div className="flex justify-between items-center">
-              <div className="flex items-center space-x-4">
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/products"] })}
-                  className="flex items-center space-x-1"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                  <span>Refresh</span>
-                </Button>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                  <Input
-                    placeholder="Search products, SKU, or EAN..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10 w-72"
-                  />
-                </div>
-
-                <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-                  <SelectTrigger className="w-48">
-                    <SelectValue placeholder="All Categories" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Categories</SelectItem>
-                    {categories.map((category) => (
-                      <SelectItem key={category.id} value={category.name}>
-                        {category.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <Select value={selectedStatus} onValueChange={setSelectedStatus}>
-                  <SelectTrigger className="w-32">
-                    <SelectValue placeholder="Status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Status</SelectItem>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="inactive">Inactive</SelectItem>
-                    <SelectItem value="out_of_stock">Out of Stock</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <Select value={stockFilter} onValueChange={setStockFilter}>
-                  <SelectTrigger className="w-32">
-                    <SelectValue placeholder="Stock" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Stock</SelectItem>
-                    <SelectItem value="available">Available</SelectItem>
-                    <SelectItem value="low">Low (&lt;5)</SelectItem>
-                    <SelectItem value="out">Out</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <Select value={marketplaceFilter} onValueChange={setMarketplaceFilter}>
-                  <SelectTrigger className="w-32">
-                    <SelectValue placeholder="Market" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All</SelectItem>
-                    <SelectItem value="ebay">eBay</SelectItem>
-                    <SelectItem value="amazon">Amazon</SelectItem>
-                    <SelectItem value="unlisted">Unlisted</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <Button
-                  variant="outline"
-                  onClick={() => setShowFilters(!showFilters)}
-                  className="flex items-center space-x-2"
-                >
-                  <Filter className="w-4 h-4" />
-                  <span>Price Range</span>
-                </Button>
+          {/* Filters and Search - Compact Layout */}
+          <div className="mb-4 space-y-3">
+            {/* Row 1: Search and Filters */}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/products"] })}
+                data-testid="btn-refresh"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </Button>
+              <div className="relative flex-shrink-0">
+                <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                <Input
+                  placeholder="Search..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-8 w-40 h-9"
+                  data-testid="input-search"
+                />
               </div>
 
-              <div className="flex items-center space-x-2">
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button 
-                      variant="destructive" 
-                      disabled={products.length === 0 || deleteAllMutation.isPending}
-                      data-testid="button-delete-all"
+              <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+                <SelectTrigger className="w-36 h-9" data-testid="select-category">
+                  <SelectValue placeholder="Category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Categories</SelectItem>
+                  {categories.map((category) => (
+                    <SelectItem key={category.id} value={category.name}>
+                      {category.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={selectedStatus} onValueChange={setSelectedStatus}>
+                <SelectTrigger className="w-28 h-9" data-testid="select-status">
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="inactive">Inactive</SelectItem>
+                  <SelectItem value="out_of_stock">Out of Stock</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={stockFilter} onValueChange={setStockFilter}>
+                <SelectTrigger className="w-28 h-9" data-testid="select-stock">
+                  <SelectValue placeholder="Stock" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Stock</SelectItem>
+                  <SelectItem value="available">Available</SelectItem>
+                  <SelectItem value="low">Low (&lt;5)</SelectItem>
+                  <SelectItem value="out">Out</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={marketplaceFilter} onValueChange={setMarketplaceFilter}>
+                <SelectTrigger className="w-24 h-9" data-testid="select-marketplace">
+                  <SelectValue placeholder="Market" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="ebay">eBay</SelectItem>
+                  <SelectItem value="amazon">Amazon</SelectItem>
+                  <SelectItem value="unlisted">Unlisted</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowFilters(!showFilters)}
+                data-testid="btn-price-filter"
+              >
+                <Filter className="w-4 h-4" />
+              </Button>
+
+              <div className="flex-1" />
+
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button 
+                    variant="destructive" 
+                    size="sm"
+                    disabled={products.length === 0 || deleteAllMutation.isPending}
+                    data-testid="button-delete-all"
+                  >
+                    <Trash2 className="w-4 h-4 mr-1" />
+                    {deleteAllMutation.isPending ? "..." : "Delete All"}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete All Products?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will permanently delete all {products.length} products from your inventory. 
+                      This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel data-testid="button-cancel-delete">Cancel</AlertDialogCancel>
+                    <AlertDialogAction 
+                      onClick={() => deleteAllMutation.mutate()}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      data-testid="button-confirm-delete"
                     >
-                      <Trash2 className="w-4 h-4 mr-2" />
-                      {deleteAllMutation.isPending ? "Deleting..." : "Delete All"}
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Delete All Products?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        This will permanently delete all {products.length} products from your inventory. 
-                        This action cannot be undone. Are you sure you want to continue?
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel data-testid="button-cancel-delete">Cancel</AlertDialogCancel>
-                      <AlertDialogAction 
-                        onClick={() => deleteAllMutation.mutate()}
-                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                        data-testid="button-confirm-delete"
-                      >
-                        Yes, Delete All
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-                <Button onClick={handleAddProduct} data-testid="button-add-product">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add Product
-                </Button>
-              </div>
+                      Yes, Delete All
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+              <Button size="sm" onClick={handleAddProduct} data-testid="button-add-product">
+                <Plus className="w-4 h-4 mr-1" />
+                Add
+              </Button>
             </div>
 
             {/* Bulk Operations Toolbar */}
             {selectedProducts.size > 0 && (
-              <Card className="mb-4">
-                <CardContent className="py-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray-600">
-                      {selectedProducts.size} product{selectedProducts.size !== 1 ? 's' : ''} selected
+              <Card>
+                <CardContent className="py-2 px-4">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-sm text-gray-600 font-medium">
+                      {selectedProducts.size} selected
                     </span>
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => bulkListToEbayMutation.mutate(Array.from(selectedProducts))}
                         disabled={bulkListToEbayMutation.isPending}
+                        data-testid="btn-bulk-ebay"
                       >
-                        <Upload className="w-4 h-4 mr-1" />
-                        List on eBay
+                        <Upload className="w-3 h-3 mr-1" />
+                        eBay
                       </Button>
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => bulkListToAmazonMutation.mutate(Array.from(selectedProducts))}
                         disabled={bulkListToAmazonMutation.isPending}
+                        data-testid="btn-bulk-amazon"
                       >
-                        <Upload className="w-4 h-4 mr-1" />
-                        List on Amazon
+                        <Upload className="w-3 h-3 mr-1" />
+                        Amazon
                       </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            disabled={deleteSelectedMutation.isPending}
+                            data-testid="btn-delete-selected"
+                          >
+                            <Trash2 className="w-3 h-3 mr-1" />
+                            {deleteSelectedMutation.isPending ? "..." : "Delete"}
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Delete Selected Products?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              This will permanently delete {selectedProducts.size} selected product{selectedProducts.size !== 1 ? 's' : ''}. 
+                              This action cannot be undone.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction 
+                              onClick={() => deleteSelectedMutation.mutate(Array.from(selectedProducts))}
+                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            >
+                              Yes, Delete Selected
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
                       <Button
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
                         onClick={() => setSelectedProducts(new Set())}
+                        data-testid="btn-clear-selection"
                       >
-                        Clear Selection
+                        <X className="w-3 h-3 mr-1" />
+                        Clear
                       </Button>
                     </div>
                   </div>
