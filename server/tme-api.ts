@@ -5,6 +5,8 @@
  */
 
 import crypto from 'crypto';
+import type { IStorage } from './storage';
+import { storage } from './storage';
 
 interface TMECredentials {
   token: string;
@@ -92,8 +94,10 @@ export class TMEApiService {
   private callsThisMinute = 0;
   private requestQueue: Array<() => Promise<any>> = [];
   private isProcessingQueue = false;
+  private storage: IStorage;
 
   constructor() {
+    this.storage = storage;
     // Validate required environment variables at startup
     const requiredEnvVars = ['TME_TOKEN', 'TME_CUSTOMER_NUMBER', 'TME_CONTACT_NUMBER', 'TME_APPLICATION_SECRET'];
     const missingVars = requiredEnvVars.filter(v => !process.env[v]);
@@ -231,6 +235,13 @@ export class TMEApiService {
     this.callCount++;
     this.callsThisMinute++;
     this.lastCallTimestamp = Date.now();
+    
+    // Track API call in database for persistent usage tracking
+    try {
+      await this.storage.trackApiCall('tme');
+    } catch (error) {
+      console.error('Failed to track API call:', error);
+    }
     
     console.log(`📊 TME API Call #${this.callCount}: ${endpoint}`);
     console.log(`📝 Request params:`, Object.keys(requestParams).join(', '));

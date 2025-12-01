@@ -466,24 +466,20 @@ export class DatabaseStorage implements IStorage {
     const existing = await this.getApiUsage(provider);
     
     if (existing) {
-      // Check if we need to reset (new day)
       const lastReset = new Date(existing.lastResetAt || new Date());
       const now = new Date();
       const isNewDay = lastReset.toDateString() !== now.toDateString();
       
       if (isNewDay) {
-        // Reset for new day
         await db.update(apiUsageTracking)
           .set({ callsToday: 1, lastResetAt: now, updatedAt: now })
           .where(eq(apiUsageTracking.provider, provider));
       } else {
-        // Increment
         await db.update(apiUsageTracking)
           .set({ callsToday: existing.callsToday + 1, updatedAt: now })
           .where(eq(apiUsageTracking.provider, provider));
       }
     } else {
-      // Create new tracking record
       await db.insert(apiUsageTracking).values({
         provider,
         callsToday: 1,
