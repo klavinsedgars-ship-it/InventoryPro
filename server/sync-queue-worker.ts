@@ -1,6 +1,12 @@
 /**
  * Sync Queue Worker - Background processor for TME product synchronization
  * Handles rate limiting and prioritized processing without blocking the UI
+ * 
+ * Designed for 150k+ product scale with:
+ * - Robust status tracking (pending → processing → completed/failed)
+ * - Retry logic with exponential backoff
+ * - One failed item does not crash the worker
+ * - Detailed logging and metrics
  */
 
 import { storage } from "./storage";
@@ -15,9 +21,19 @@ interface QueueWorkerConfig {
   retryDelayMs: number;
 }
 
+interface WorkerMetrics {
+  totalProcessed: number;
+  successCount: number;
+  failedCount: number;
+  retryCount: number;
+  lastProcessedAt: Date | null;
+  startedAt: Date | null;
+}
+
 export class SyncQueueWorker {
   private isRunning = false;
   private config: QueueWorkerConfig;
+  private metrics: WorkerMetrics;
 
   constructor(config: Partial<QueueWorkerConfig> = {}) {
     this.config = {
@@ -25,6 +41,15 @@ export class SyncQueueWorker {
       batchSize: config.batchSize || 10,
       priorityLevels: config.priorityLevels || 4,
       retryDelayMs: config.retryDelayMs || 5000,
+    };
+    
+    this.metrics = {
+      totalProcessed: 0,
+      successCount: 0,
+      failedCount: 0,
+      retryCount: 0,
+      lastProcessedAt: null,
+      startedAt: null,
     };
   }
 
@@ -38,7 +63,8 @@ export class SyncQueueWorker {
     }
 
     this.isRunning = true;
-    console.log("🚀 Sync Queue Worker started");
+    this.metrics.startedAt = new Date();
+    console.log("🚀 Sync Queue Worker started at " + this.metrics.startedAt.toISOString());
     this.processQueue();
   }
 
@@ -143,37 +169,49 @@ export class SyncQueueWorker {
 
       await storage.updateProduct(item.productId, updateData);
 
-      // Mark as completed
+      // Mark as completed with processed timestamp
       await storage.updateSyncQueueItem(item.id, {
         status: "completed",
         retryCount: 0,
+        processedAt: new Date(),
       });
+
+      // Update metrics
+      this.metrics.totalProcessed++;
+      this.metrics.successCount++;
+      this.metrics.lastProcessedAt = new Date();
 
       console.log(`✅ Completed queue item ${item.id}: ${item.operation}`);
     } catch (error) {
+      // Error isolation: one failed item does NOT crash the worker
       console.error(`❌ Error processing queue item ${item.id}:`, error);
+      this.metrics.totalProcessed++;
 
       // Increment retry count
       const newRetryCount = (item.retryCount || 0) + 1;
       const shouldRetry = newRetryCount < (item.maxRetries || 3);
 
       if (shouldRetry) {
-        // Reschedule for retry
+        // Reschedule for retry with exponential backoff delay
+        this.metrics.retryCount++;
         await storage.updateSyncQueueItem(item.id, {
           status: "pending",
           retryCount: newRetryCount,
           errorMessage: error instanceof Error ? error.message : String(error),
+          scheduledFor: new Date(Date.now() + this.config.retryDelayMs * Math.pow(2, newRetryCount - 1)),
         });
         console.log(
           `🔄 Retry scheduled for item ${item.id} (attempt ${newRetryCount}/${item.maxRetries})`
         );
       } else {
-        // Mark as failed
+        // Mark as failed permanently
+        this.metrics.failedCount++;
         await storage.updateSyncQueueItem(item.id, {
           status: "failed",
+          processedAt: new Date(),
           errorMessage: error instanceof Error ? error.message : String(error),
         });
-        console.log(`❌ Queue item ${item.id} failed permanently`);
+        console.log(`❌ Queue item ${item.id} failed permanently after ${item.maxRetries} retries`);
       }
     }
   }
@@ -224,10 +262,41 @@ export class SyncQueueWorker {
   }
 
   /**
-   * Get queue statistics
+   * Get queue statistics with worker metrics
    */
   async getQueueStats() {
-    return await storage.getSyncQueueStats();
+    const queueStats = await storage.getSyncQueueStats();
+    return {
+      ...queueStats,
+      workerMetrics: this.getMetrics(),
+    };
+  }
+
+  /**
+   * Get current worker metrics
+   */
+  getMetrics(): WorkerMetrics & { isRunning: boolean; uptime: number | null } {
+    return {
+      ...this.metrics,
+      isRunning: this.isRunning,
+      uptime: this.metrics.startedAt 
+        ? Math.round((Date.now() - this.metrics.startedAt.getTime()) / 1000) 
+        : null,
+    };
+  }
+
+  /**
+   * Reset worker metrics (for testing or new sync cycle)
+   */
+  resetMetrics() {
+    this.metrics = {
+      totalProcessed: 0,
+      successCount: 0,
+      failedCount: 0,
+      retryCount: 0,
+      lastProcessedAt: null,
+      startedAt: this.metrics.startedAt, // Keep original start time
+    };
   }
 
   /**

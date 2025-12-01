@@ -304,7 +304,7 @@ export class TMEApiServiceOptimized {
     query: string, 
     page: number = 1, 
     withStock: boolean = true
-  ): Promise<{products: TMEProduct[], total: number, pageNumber: number}> {
+  ): Promise<{products: TMEProduct[], total: number, pageNumber: number, totalPages: number}> {
     try {
       console.log(`🔍 Optimized search: "${query}" (page ${page})`);
       
@@ -318,18 +318,87 @@ export class TMEApiServiceOptimized {
       const products = response.Data.ProductList || [];
       const total = response.Data.Amount || 0;
       const pageNumber = response.Data.PageNumber || page;
+      const totalPages = Math.ceil(total / 20);
 
-      console.log(`✅ Found ${products.length} products (page ${pageNumber} of ${Math.ceil(total / 20)})`);
+      console.log(`✅ Found ${products.length} products (page ${pageNumber} of ${totalPages})`);
       
       // Cache products in PostgreSQL for 24hr TTL (replaces in-memory Map)
       for (const p of products) {
         await this.setCachedProduct(p.Symbol, p);
       }
 
-      return { products, total, pageNumber };
+      return { products, total, pageNumber, totalPages };
     } catch (error) {
       console.error(`❌ Search failed:`, error);
-      return { products: [], total: 0, pageNumber: 1 };
+      return { products: [], total: 0, pageNumber: 1, totalPages: 0 };
+    }
+  }
+
+  /**
+   * FULL PAGINATION: Fetch ALL products from a search/category
+   * Loops through all pages respecting TME's PageNumber and TotalPages
+   * Designed for 150k+ product scale with rate limiting
+   * @param query - Search query or category
+   * @param maxPages - Optional limit on pages to fetch (default: all)
+   * @param delayBetweenPages - Delay in ms between page requests (default: 1500ms)
+   */
+  async searchAllProductsPaginated(
+    query: string,
+    maxPages?: number,
+    delayBetweenPages: number = 1500
+  ): Promise<{products: TMEProduct[], totalFetched: number, totalAvailable: number}> {
+    const allProducts: TMEProduct[] = [];
+    let currentPage = 1;
+    let totalAvailable = 0;
+    let totalPages = 1;
+    
+    console.log(`📚 Starting paginated search for: "${query}"`);
+    
+    try {
+      do {
+        const result = await this.searchProductsOptimized(query, currentPage, true);
+        
+        if (currentPage === 1) {
+          totalAvailable = result.total;
+          totalPages = result.totalPages;
+          console.log(`📊 Total available: ${totalAvailable} products across ${totalPages} pages`);
+        }
+        
+        allProducts.push(...result.products);
+        
+        console.log(`📄 Page ${currentPage}/${totalPages}: fetched ${result.products.length} products (total: ${allProducts.length})`);
+        
+        // Stop if we've reached maxPages limit
+        if (maxPages && currentPage >= maxPages) {
+          console.log(`⏹️ Reached maxPages limit (${maxPages})`);
+          break;
+        }
+        
+        // Move to next page
+        currentPage++;
+        
+        // Respect rate limits between pages
+        if (currentPage <= totalPages) {
+          await new Promise(resolve => setTimeout(resolve, delayBetweenPages));
+        }
+        
+      } while (currentPage <= totalPages);
+      
+      console.log(`✅ Pagination complete: fetched ${allProducts.length} of ${totalAvailable} products`);
+      
+      return {
+        products: allProducts,
+        totalFetched: allProducts.length,
+        totalAvailable
+      };
+      
+    } catch (error) {
+      console.error(`❌ Paginated search failed at page ${currentPage}:`, error);
+      return {
+        products: allProducts,
+        totalFetched: allProducts.length,
+        totalAvailable
+      };
     }
   }
 

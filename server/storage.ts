@@ -83,7 +83,7 @@ export interface IStorage {
   createSyncQueueItem(item: InsertSyncQueue): Promise<SyncQueue>;
   createBulkSyncQueueItems(items: InsertSyncQueue[]): Promise<void>;
   getPendingSyncQueueItems(limit?: number): Promise<SyncQueue[]>;
-  updateSyncQueueItem(id: number, updates: Partial<InsertSyncQueue>): Promise<void>;
+  updateSyncQueueItem(id: number, updates: Partial<InsertSyncQueue> & { processedAt?: Date }): Promise<void>;
   getSyncQueueCount(status?: string): Promise<number>;
   getSyncQueueStats(): Promise<{
     pending: number;
@@ -339,7 +339,7 @@ export class DatabaseStorage implements IStorage {
       .limit(limit);
   }
 
-  async updateSyncQueueItem(id: number, updates: Partial<InsertSyncQueue>): Promise<void> {
+  async updateSyncQueueItem(id: number, updates: Partial<InsertSyncQueue> & { processedAt?: Date }): Promise<void> {
     await db
       .update(syncQueue)
       .set(updates)
