@@ -294,8 +294,3 @@ export function formatQuantityLabel(quantity: number): string {
   if (quantity <= 1) return "";
   return `${quantity}x`;
 }
-
-/**
- * Apply rounding rules to calculated price (exported for package pricing)
- */
-function applyRoundingRule(price: number, rule: string): number {

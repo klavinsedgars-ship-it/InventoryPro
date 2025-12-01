@@ -628,6 +628,9 @@ export function Products({ user }: ProductsProps) {
                       <th className="px-1 py-2 text-left text-xs font-medium text-gray-500 uppercase" style={{width: '110px'}}>
                         SKU
                       </th>
+                      <th className="px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase" style={{width: '50px'}}>
+                        MOQ
+                      </th>
                       <th className="px-1 py-2 text-left text-xs font-medium text-gray-500 uppercase" style={{width: '100px'}}>
                         Category
                       </th>
@@ -683,6 +686,15 @@ export function Products({ user }: ProductsProps) {
                         </td>
                         <td className="px-1 py-2 text-xs text-gray-900 truncate" title={product.sku}>
                           {product.sku}
+                        </td>
+                        <td className="px-1 py-2 text-center">
+                          {product.moq && product.moq > 1 ? (
+                            <Badge variant="outline" className="px-1.5 py-0 text-[10px] bg-purple-50 text-purple-700 border-purple-200">
+                              {product.moq}x
+                            </Badge>
+                          ) : (
+                            <span className="text-gray-400 text-xs">1</span>
+                          )}
                         </td>
                         <td className="px-1 py-2 text-xs text-gray-500 truncate" title={product.category}>
                           {product.category}
