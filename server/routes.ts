@@ -34,6 +34,7 @@ import {
 } from "./dynamic-pricing";
 import { calculateEbayStock, calculateBulkEbayStock, validateStockLimit, getRecommendedStockLimit } from "./stock-manager";
 import { imageProcessingService } from "./image-processing";
+import { triggerManualSync } from "./cron-jobs";
 
 // Type for authenticated requests
 interface AuthenticatedRequest extends Request {
@@ -1448,6 +1449,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(logs);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch sync logs" });
+    }
+  });
+
+  app.post("/api/sync/trigger-daily", requireAuth, async (req, res) => {
+    try {
+      console.log('🔧 Manual daily sync triggered via API');
+      
+      const result = await triggerManualSync();
+      
+      res.json({
+        success: true,
+        message: 'Daily sync completed',
+        result: {
+          totalProducts: result.totalProducts,
+          changedProducts: result.changedProducts,
+          queuedItems: result.queuedItems,
+          duration: result.duration
+        }
+      });
+    } catch (error) {
+      console.error('Manual sync trigger failed:', error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to trigger daily sync",
+        error: (error as Error).message
+      });
     }
   });
 
