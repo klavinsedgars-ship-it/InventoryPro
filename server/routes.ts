@@ -744,6 +744,131 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     });
 
+    // Sync selected TME products - alias to optimized endpoint
+    app.post("/api/tme/sync-selected", async (req, res) => {
+      try {
+        console.log("📥 Received sync request:", JSON.stringify(req.body, null, 2));
+        const { productSymbols, settings } = req.body;
+
+        if (!productSymbols || !Array.isArray(productSymbols) || productSymbols.length === 0) {
+          return res.status(400).json({
+            success: false,
+            error: "Product symbols array is required"
+          });
+        }
+
+        console.log(`🔄 Starting sync of ${productSymbols.length} selected products`);
+
+        let syncedCount = 0;
+        let updatedCount = 0;
+        let failedCount = 0;
+        const errors: string[] = [];
+
+        // Get enhanced product information in batches
+        const batchSize = 10;
+        for (let i = 0; i < productSymbols.length; i += batchSize) {
+          const batch = productSymbols.slice(i, i + batchSize);
+
+          try {
+            console.log(`📦 Processing batch ${Math.floor(i/batchSize) + 1}: ${batch.join(", ")}`);
+
+            // Get enhanced product info (details + prices + stock)
+            const enhancedProducts = await tmeApi.getEnhancedProductInfo(batch);
+
+            for (const enhanced of enhancedProducts) {
+              try {
+                const { product, price, stock } = enhanced;
+
+                // Calculate pricing
+                const supplierPrice = price?.PriceList?.[0]?.PriceValue || 0;
+                let pricingResult = {
+                  finalPrice: supplierPrice,
+                  calculatedPrice: supplierPrice,
+                  marginTier: "No Margin",
+                  marginPercentage: 0
+                };
+
+                if (settings?.applyDynamicPricing && supplierPrice > 0) {
+                  const { calculateDynamicPrice } = await import("./dynamic-pricing");
+                  const result = calculateDynamicPrice(supplierPrice);
+                  pricingResult = {
+                    finalPrice: result.finalPrice,
+                    calculatedPrice: result.calculatedPrice,
+                    marginTier: result.marginTier,
+                    marginPercentage: result.marginPercentage
+                  };
+                }
+
+                // Prepare product data
+                const productData = {
+                  name: product.Description || product.Symbol,
+                  sku: product.Symbol,
+                  description: product.Description || "",
+                  category: product.Category || "Electronics",
+                  stock: stock?.Amount || 0,
+                  costPrice: String(supplierPrice),
+                  salePrice: String(pricingResult.finalPrice),
+                  supplierPrice: String(supplierPrice),
+                  supplier: "TME",
+                  imageUrl: product.Photo || null,
+                  status: (stock?.Amount || 0) > 0 ? "active" : "inactive",
+                  ean: product.EAN || null,
+                  weight: product.Weight?.toString() || null,
+                  tmeCategory: product.Category || null,
+                  tmeSymbol: product.Symbol
+                };
+
+                // Check if product already exists by SKU
+                const existingProducts = await storage.getProducts();
+                const existing = existingProducts.find(p => p.sku === product.Symbol);
+
+                if (existing) {
+                  await storage.updateProduct(existing.id, productData);
+                  updatedCount++;
+                } else {
+                  await storage.createProduct(productData as any);
+                  syncedCount++;
+                }
+
+              } catch (itemError) {
+                console.error(`Failed to sync product:`, itemError);
+                failedCount++;
+                errors.push(`Failed to sync: ${(itemError as Error).message}`);
+              }
+            }
+          } catch (batchError) {
+            console.error(`Batch error:`, batchError);
+            failedCount += batch.length;
+            errors.push(`Batch failed: ${(batchError as Error).message}`);
+          }
+        }
+
+        // Log the sync operation
+        await storage.createSyncLog({
+          source: 'tme_browser',
+          operation: 'sync_selected',
+          status: failedCount === 0 ? 'success' : failedCount < productSymbols.length ? 'partial' : 'error',
+          message: `Synced ${syncedCount} new, updated ${updatedCount}, failed ${failedCount}`,
+          details: JSON.stringify({ syncedCount, updatedCount, failedCount, errors })
+        });
+
+        res.json({
+          success: true,
+          syncedCount,
+          updatedCount,
+          failedCount,
+          errors: errors.length > 0 ? errors : undefined
+        });
+
+      } catch (error) {
+        console.error("Sync failed:", error);
+        res.status(500).json({
+          success: false,
+          error: "Sync failed: " + (error as Error).message
+        });
+      }
+    });
+
     // OPTIMIZED: Sync selected TME products using combined endpoints (80% fewer API calls)
     app.post("/api/tme/sync-selected-optimized", async (req, res) => {
       try {
