@@ -8,6 +8,7 @@ import {
   pricingTiers,
   shippingPolicies,
   apiUsageTracking,
+  tmeProductCache,
   type User, 
   type InsertUser, 
   type Product, 
@@ -25,7 +26,9 @@ import {
   type PricingTier,
   type InsertPricingTier,
   type ApiUsageTracking,
-  type InsertApiUsageTracking
+  type InsertApiUsageTracking,
+  type TmeProductCache,
+  type InsertTmeProductCache
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, gte, lte, desc, asc, count } from "drizzle-orm";
@@ -106,6 +109,14 @@ export interface IStorage {
   getApiUsage(provider?: string): Promise<ApiUsageTracking | undefined>;
   trackApiCall(provider: string): Promise<void>;
   resetApiUsageIfNewDay(provider: string): Promise<void>;
+
+  // TME Product Cache - PostgreSQL-based caching for 150k+ products
+  getTmeCachedProduct(symbol: string): Promise<TmeProductCache | undefined>;
+  getTmeCachedProducts(symbols: string[]): Promise<TmeProductCache[]>;
+  setTmeCachedProduct(cache: InsertTmeProductCache): Promise<TmeProductCache>;
+  setTmeCachedProducts(caches: InsertTmeProductCache[]): Promise<void>;
+  getStaleProductSymbols(olderThan24Hours?: boolean): Promise<string[]>;
+  cleanExpiredCache(): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -378,7 +389,10 @@ export class DatabaseStorage implements IStorage {
     };
 
     statusCounts.forEach(row => {
-      stats[row.status as keyof typeof stats] = row.count;
+      if (row.status === 'pending') stats.pending = row.count;
+      else if (row.status === 'processing') stats.processing = row.count;
+      else if (row.status === 'completed') stats.completed = row.count;
+      else if (row.status === 'failed') stats.failed = row.count;
     });
 
     priorityCounts.forEach(row => {
@@ -409,7 +423,7 @@ export class DatabaseStorage implements IStorage {
 
   async deletePricingTier(id: number): Promise<boolean> {
     const result = await db.delete(pricingTiers).where(eq(pricingTiers.id, id));
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   // Shipping Policy methods
@@ -447,7 +461,7 @@ export class DatabaseStorage implements IStorage {
     
     if (existing) {
       // Check if we need to reset (new day)
-      const lastReset = new Date(existing.lastResetAt);
+      const lastReset = new Date(existing.lastResetAt || new Date());
       const now = new Date();
       const isNewDay = lastReset.toDateString() !== now.toDateString();
       
@@ -477,7 +491,7 @@ export class DatabaseStorage implements IStorage {
   async resetApiUsageIfNewDay(provider: string): Promise<void> {
     const existing = await this.getApiUsage(provider);
     if (existing) {
-      const lastReset = new Date(existing.lastResetAt);
+      const lastReset = new Date(existing.lastResetAt || new Date());
       const now = new Date();
       if (lastReset.toDateString() !== now.toDateString()) {
         await db.update(apiUsageTracking)
@@ -485,6 +499,86 @@ export class DatabaseStorage implements IStorage {
           .where(eq(apiUsageTracking.provider, provider));
       }
     }
+  }
+
+  // TME Product Cache methods - PostgreSQL-based caching for 150k+ products
+  async getTmeCachedProduct(symbol: string): Promise<TmeProductCache | undefined> {
+    const now = new Date();
+    const result = await db.select()
+      .from(tmeProductCache)
+      .where(and(
+        eq(tmeProductCache.symbol, symbol),
+        gte(tmeProductCache.expiresAt, now)
+      ))
+      .limit(1);
+    return result[0];
+  }
+
+  async getTmeCachedProducts(symbols: string[]): Promise<TmeProductCache[]> {
+    if (symbols.length === 0) return [];
+    const now = new Date();
+    // Query for each symbol and filter non-expired
+    const results: TmeProductCache[] = [];
+    for (const symbol of symbols) {
+      const cached = await this.getTmeCachedProduct(symbol);
+      if (cached) results.push(cached);
+    }
+    return results;
+  }
+
+  async setTmeCachedProduct(cache: InsertTmeProductCache): Promise<TmeProductCache> {
+    // Upsert: update if exists, insert if not
+    const existing = await db.select()
+      .from(tmeProductCache)
+      .where(eq(tmeProductCache.symbol, cache.symbol))
+      .limit(1);
+    
+    if (existing.length > 0) {
+      const result = await db.update(tmeProductCache)
+        .set({
+          productData: cache.productData,
+          priceData: cache.priceData,
+          stockData: cache.stockData,
+          categoryId: cache.categoryId,
+          fetchedAt: new Date(),
+          expiresAt: cache.expiresAt
+        })
+        .where(eq(tmeProductCache.symbol, cache.symbol))
+        .returning();
+      return result[0];
+    } else {
+      const result = await db.insert(tmeProductCache).values({
+        ...cache,
+        fetchedAt: new Date()
+      }).returning();
+      return result[0];
+    }
+  }
+
+  async setTmeCachedProducts(caches: InsertTmeProductCache[]): Promise<void> {
+    if (caches.length === 0) return;
+    
+    // Process in batches to avoid overwhelming the database
+    const batchSize = 50;
+    for (let i = 0; i < caches.length; i += batchSize) {
+      const batch = caches.slice(i, i + batchSize);
+      await Promise.all(batch.map(cache => this.setTmeCachedProduct(cache)));
+    }
+  }
+
+  async getStaleProductSymbols(olderThan24Hours: boolean = true): Promise<string[]> {
+    const cutoffTime = new Date(Date.now() - (olderThan24Hours ? 24 * 60 * 60 * 1000 : 0));
+    const result = await db.select({ symbol: tmeProductCache.symbol })
+      .from(tmeProductCache)
+      .where(lte(tmeProductCache.expiresAt, cutoffTime));
+    return result.map(r => r.symbol);
+  }
+
+  async cleanExpiredCache(): Promise<number> {
+    const now = new Date();
+    const result = await db.delete(tmeProductCache)
+      .where(lte(tmeProductCache.expiresAt, now));
+    return result.rowCount ?? 0;
   }
 }
 

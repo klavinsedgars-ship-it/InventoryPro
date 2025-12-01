@@ -86,9 +86,8 @@ export class TMEApiServiceOptimized {
   private rateLimitPerMinute = 60;
   private lastCallTimestamp = 0;
   private callsThisMinute = 0;
-  private productCache = new Map<string, any>(); // Local cache to reduce API calls
-  private cacheExpiry = 3600000; // 1 hour
-  private cacheTimes = new Map<string, number>();
+  // PostgreSQL cache replaces in-memory Map for production scalability (150k+ products)
+  private cacheExpiryHours = 24; // Cache TTL in hours
   private storage: IStorage | null = null;
 
   constructor(storage?: IStorage) {
@@ -114,7 +113,45 @@ export class TMEApiServiceOptimized {
     console.log('- Using combined GetPricesAndStocks endpoint');
     console.log('- Credentials loaded from environment variables');
     if (storage) {
-      console.log('- Database persistence enabled for API usage tracking');
+      console.log('- PostgreSQL cache enabled for 150k+ product scalability');
+      console.log('- Cache TTL: 24 hours');
+    }
+  }
+
+  // Check PostgreSQL cache for product data (24hr TTL)
+  private async getCachedProduct(symbol: string): Promise<any | null> {
+    if (!this.storage) return null;
+    
+    try {
+      const cached = await this.storage.getTmeCachedProduct(symbol);
+      if (cached) {
+        return {
+          productData: JSON.parse(cached.productData),
+          priceData: cached.priceData ? JSON.parse(cached.priceData) : null,
+          stockData: cached.stockData ? JSON.parse(cached.stockData) : null
+        };
+      }
+    } catch (error) {
+      console.warn(`Cache read error for ${symbol}:`, error);
+    }
+    return null;
+  }
+
+  // Store product data in PostgreSQL cache
+  private async setCachedProduct(symbol: string, productData: any, priceData?: any, stockData?: any): Promise<void> {
+    if (!this.storage) return;
+    
+    try {
+      const expiresAt = new Date(Date.now() + this.cacheExpiryHours * 60 * 60 * 1000);
+      await this.storage.setTmeCachedProduct({
+        symbol,
+        productData: JSON.stringify(productData),
+        priceData: priceData ? JSON.stringify(priceData) : undefined,
+        stockData: stockData ? JSON.stringify(stockData) : undefined,
+        expiresAt
+      });
+    } catch (error) {
+      console.warn(`Cache write error for ${symbol}:`, error);
     }
   }
 
@@ -284,11 +321,10 @@ export class TMEApiServiceOptimized {
 
       console.log(`✅ Found ${products.length} products (page ${pageNumber} of ${Math.ceil(total / 20)})`);
       
-      // Cache products locally to avoid duplicate API calls
-      products.forEach(p => {
-        this.productCache.set(p.Symbol, p);
-        this.cacheTimes.set(p.Symbol, Date.now());
-      });
+      // Cache products in PostgreSQL for 24hr TTL (replaces in-memory Map)
+      for (const p of products) {
+        await this.setCachedProduct(p.Symbol, p);
+      }
 
       return { products, total, pageNumber };
     } catch (error) {
@@ -335,6 +371,7 @@ export class TMEApiServiceOptimized {
 
   /**
    * OPTIMIZED: Complete product import with minimal API calls
+   * Uses PostgreSQL cache for 24hr TTL - scalable to 150k+ products
    * Before: 3 calls per 10 products = 30 calls for 100
    * After: ~2 calls for 100 products = 93% reduction!
    */
@@ -346,31 +383,36 @@ export class TMEApiServiceOptimized {
     if (symbols.length === 0) return [];
 
     try {
-      console.log(`🚀 Syncing ${symbols.length} products (optimized - minimal API calls)`);
+      console.log(`🚀 Syncing ${symbols.length} products (optimized - PostgreSQL cache + minimal API calls)`);
 
-      // Get prices and stocks in ONE combined call
+      // Get prices and stocks in ONE combined call (always fresh)
       const pricesAndStocks = await this.getProductsPricesAndStocks(symbols);
 
-      // Get detailed product info from cache or make minimal calls
+      // Get detailed product info from PostgreSQL cache or make minimal calls
       const products: TMEProduct[] = [];
-      const symbolsNeedingDetails = [];
+      const symbolsNeedingDetails: string[] = [];
 
       for (const symbol of symbols) {
-        const cached = this.productCache.get(symbol);
-        const cacheTime = this.cacheTimes.get(symbol);
-        
-        if (cached && cacheTime && Date.now() - cacheTime < this.cacheExpiry) {
-          products.push(cached);
+        const cached = await this.getCachedProduct(symbol);
+        if (cached?.productData) {
+          products.push(cached.productData);
+          console.log(`💾 Cache HIT: ${symbol}`);
         } else {
           symbolsNeedingDetails.push(symbol);
         }
       }
 
-      // Only fetch details for products not in cache
+      // Only fetch details for products not in PostgreSQL cache
       if (symbolsNeedingDetails.length > 0) {
-        console.log(`📝 Fetching details for ${symbolsNeedingDetails.length} uncached products`);
+        console.log(`📝 Cache MISS: Fetching details for ${symbolsNeedingDetails.length} products from TME API`);
         const detailedProducts = await this.getProductDetails(symbolsNeedingDetails);
         products.push(...detailedProducts);
+        
+        // Store newly fetched products in PostgreSQL cache
+        for (const p of detailedProducts) {
+          const pricing = pricesAndStocks.find(ps => ps.Symbol === p.Symbol);
+          await this.setCachedProduct(p.Symbol, p, pricing, null);
+        }
       }
 
       // Combine results
@@ -420,24 +462,47 @@ export class TMEApiServiceOptimized {
     }
   }
 
-  getApiUsage() {
+  async getApiUsage() {
+    // Get API usage from PostgreSQL
+    let callsToday = this.callCount;
+    if (this.storage) {
+      try {
+        const usage = await this.storage.getApiUsage('tme');
+        if (usage) {
+          callsToday = usage.callsToday;
+        }
+      } catch (error) {
+        console.warn('Failed to get API usage from database:', error);
+      }
+    }
+    
     return {
-      callsToday: this.callCount,
+      callsToday,
       dailyLimit: this.dailyLimit,
       callsThisMinute: this.callsThisMinute,
       rateLimitPerMinute: this.rateLimitPerMinute,
-      remainingDaily: this.dailyLimit - this.callCount,
-      cacheSize: this.productCache.size,
-      usagePercentage: Math.round((this.callCount / this.dailyLimit) * 100),
-      status: this.callCount >= this.dailyLimit ? 'LIMIT_EXCEEDED' : 
-              this.callCount > (this.dailyLimit * 0.8) ? 'WARNING' : 'OK'
+      remainingDaily: this.dailyLimit - callsToday,
+      cacheType: 'PostgreSQL', // Indicates PostgreSQL-based caching
+      usagePercentage: Math.round((callsToday / this.dailyLimit) * 100),
+      status: callsToday >= this.dailyLimit ? 'LIMIT_EXCEEDED' : 
+              callsToday > (this.dailyLimit * 0.8) ? 'WARNING' : 'OK'
     };
   }
 
-  clearCache() {
-    console.log(`🗑️ Cleared cache (was ${this.productCache.size} items)`);
-    this.productCache.clear();
-    this.cacheTimes.clear();
+  async clearCache(): Promise<number> {
+    if (!this.storage) {
+      console.log('⚠️ No storage configured - cannot clear PostgreSQL cache');
+      return 0;
+    }
+    
+    try {
+      const cleared = await this.storage.cleanExpiredCache();
+      console.log(`🗑️ Cleared ${cleared} expired cache entries from PostgreSQL`);
+      return cleared;
+    } catch (error) {
+      console.error('Failed to clear cache:', error);
+      return 0;
+    }
   }
 }
 

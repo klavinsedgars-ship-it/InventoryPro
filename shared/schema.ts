@@ -44,6 +44,7 @@ export const products = pgTable("products", {
   productUrl: text("product_url"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+  lastSyncedAt: timestamp("last_synced_at"), // When product was last synced from TME
 });
 
 export const categories = pgTable("categories", {
@@ -116,6 +117,18 @@ export const apiUsageTracking = pgTable("api_usage_tracking", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// TME Product Cache - replaces in-memory Map for production scalability
+export const tmeProductCache = pgTable("tme_product_cache", {
+  id: serial("id").primaryKey(),
+  symbol: text("symbol").notNull().unique(), // TME product SKU/Symbol
+  productData: text("product_data").notNull(), // JSON string of product info
+  priceData: text("price_data"), // JSON string of pricing info
+  stockData: text("stock_data"), // JSON string of stock info
+  categoryId: integer("category_id"),
+  fetchedAt: timestamp("fetched_at").defaultNow().notNull(), // When data was fetched
+  expiresAt: timestamp("expires_at").notNull(), // When cache should be refreshed (24 hours)
+});
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
@@ -164,6 +177,11 @@ export const insertApiUsageTrackingSchema = createInsertSchema(apiUsageTracking)
   updatedAt: true,
 });
 
+export const insertTmeProductCacheSchema = createInsertSchema(tmeProductCache).omit({
+  id: true,
+  fetchedAt: true,
+});
+
 // Login schema
 export const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -189,4 +207,6 @@ export type ShippingPolicy = typeof shippingPolicies.$inferSelect;
 export type InsertShippingPolicy = z.infer<typeof insertShippingPolicySchema>;
 export type ApiUsageTracking = typeof apiUsageTracking.$inferSelect;
 export type InsertApiUsageTracking = z.infer<typeof insertApiUsageTrackingSchema>;
+export type TmeProductCache = typeof tmeProductCache.$inferSelect;
+export type InsertTmeProductCache = z.infer<typeof insertTmeProductCacheSchema>;
 export type LoginData = z.infer<typeof loginSchema>;
