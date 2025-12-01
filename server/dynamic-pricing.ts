@@ -29,6 +29,15 @@ export interface PriceCalculationResult {
   errors: string[];
 }
 
+export interface PackagePriceResult extends PriceCalculationResult {
+  moq: number;
+  multiples: number;
+  packageSupplierPrice: number;
+  packageFinalPrice: number;
+  pricePerUnit: number;
+  quantityLabel: string;
+}
+
 // Core pricing configuration based on specification
 export const PRICING_CONFIG: PricingConfig = {
   tiers: [
@@ -224,3 +233,69 @@ export function generatePricingSummary(supplierPrice: number): string {
   
   return `${formatPrice(result.supplierPrice)} → ${formatPrice(result.finalPrice)} (${result.marginTier}, ${actualMargin}% margin)`;
 }
+
+/**
+ * Calculate package price for products sold in multiples (MOQ)
+ * Package Price = Unit Supplier Price × MOQ × margin multiplier
+ * Used for eBay listings that sell in the same quantity as TME's minimum order
+ */
+export function calculatePackagePrice(
+  unitSupplierPrice: number | string,
+  moq: number = 1,
+  multiples: number = 1
+): PackagePriceResult {
+  const numericUnitPrice = typeof unitSupplierPrice === 'string' 
+    ? parseFloat(unitSupplierPrice) 
+    : unitSupplierPrice;
+  
+  // Calculate the package supplier price (what we pay TME for MOQ units)
+  const packageSupplierPrice = numericUnitPrice * moq;
+  
+  // Get per-unit pricing result first
+  const unitResult = calculateDynamicPrice(numericUnitPrice);
+  
+  if (!unitResult.isValid) {
+    return {
+      ...unitResult,
+      moq,
+      multiples,
+      packageSupplierPrice: 0,
+      packageFinalPrice: 0,
+      pricePerUnit: 0,
+      quantityLabel: formatQuantityLabel(moq)
+    };
+  }
+  
+  // Calculate package final price (unit sale price × MOQ)
+  // This is what customers pay for MOQ units on eBay
+  let packageFinalPrice = unitResult.finalPrice * moq;
+  
+  // Apply rounding to package price
+  packageFinalPrice = applyRoundingRule(packageFinalPrice, PRICING_CONFIG.roundingRule);
+  
+  // Calculate effective per-unit price after rounding
+  const pricePerUnit = packageFinalPrice / moq;
+  
+  return {
+    ...unitResult,
+    moq,
+    multiples,
+    packageSupplierPrice: Math.round(packageSupplierPrice * 100) / 100,
+    packageFinalPrice,
+    pricePerUnit: Math.round(pricePerUnit * 100) / 100,
+    quantityLabel: formatQuantityLabel(moq)
+  };
+}
+
+/**
+ * Format quantity label for display (e.g., "10x", "50x", "100x")
+ */
+export function formatQuantityLabel(quantity: number): string {
+  if (quantity <= 1) return "";
+  return `${quantity}x`;
+}
+
+/**
+ * Apply rounding rules to calculated price (exported for package pricing)
+ */
+function applyRoundingRule(price: number, rule: string): number {

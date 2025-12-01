@@ -860,7 +860,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                       <p className="text-xs text-gray-600 line-clamp-1">
                                         {product.Description}
                                       </p>
-                                      <div className="mt-0.5 flex items-center space-x-3 text-[10px] text-gray-500">
+                                      <div className="mt-0.5 flex items-center flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-gray-500">
                                         <span>Producer: {product.Producer}</span>
                                         {enhanced?.stock && enhanced.stock.Amount !== undefined ? (
                                           <span className={enhanced.stock.Amount > 0 ? "text-green-600" : "text-red-600"}>
@@ -879,6 +879,18 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                           <span className="text-gray-400">Loading price...</span>
                                         ) : (
                                           <span className="text-gray-400">Price: Unknown</span>
+                                        )}
+                                        {/* MOQ Badge - displays minimum order quantity */}
+                                        {product.MinAmount && product.MinAmount > 1 && (
+                                          <Badge variant="outline" className="px-1.5 py-0 text-[9px] bg-purple-50 text-purple-700 border-purple-200">
+                                            Min: {product.MinAmount} pcs
+                                          </Badge>
+                                        )}
+                                        {/* Multiples Badge - displays order multiples */}
+                                        {product.Multiples && product.Multiples > 1 && product.Multiples !== product.MinAmount && (
+                                          <Badge variant="outline" className="px-1.5 py-0 text-[9px] bg-indigo-50 text-indigo-700 border-indigo-200">
+                                            ×{product.Multiples}
+                                          </Badge>
                                         )}
                                       </div>
                                     </div>
