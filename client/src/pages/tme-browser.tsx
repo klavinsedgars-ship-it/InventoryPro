@@ -523,65 +523,62 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
       <Sidebar user={user} />
       <div className="ml-64">
         <div className="border-b bg-white">
-          <div className="p-6 pb-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">TME Browser</h1>
-                <p className="text-sm text-gray-600 mt-1">Browse and sync products from TME catalog</p>
-              </div>
-              <div className="flex items-center gap-3">
-                <Card className="p-2.5" data-testid="api-usage-card">
-                  <div className="flex items-center gap-3">
-                    <div className="text-xs border-r pr-3">
-                      <div className="text-[10px] text-gray-500 uppercase font-medium">Per Minute</div>
-                      <div className={`font-semibold ${
-                        (apiUsage?.usage?.callsThisMinute ?? 0) >= (apiUsage?.usage?.safeRateLimit ?? 30) 
-                          ? "text-red-600" 
-                          : "text-green-600"
-                      }`}>
-                        {apiUsage?.usage?.callsThisMinute ?? 0}/{apiUsage?.usage?.safeRateLimit ?? 30}
-                      </div>
-                    </div>
-                    <div className="text-xs">
-                      <div className="text-[10px] text-gray-500 uppercase font-medium">Daily</div>
-                      <div className={`font-semibold ${getApiUsageColor()}`}>
-                        {apiUsage?.usage?.callsToday ?? 0}/{apiUsage?.usage?.dailyLimit ?? 10000}
-                      </div>
-                    </div>
+          <div className="px-6 py-3 flex items-center justify-between">
+            <div>
+              <h1 className="text-lg font-semibold text-gray-900">TME Browser</h1>
+            </div>
+            <div className="flex items-center gap-2">
+              <Card className="p-1.5" data-testid="api-usage-card">
+                <div className="flex items-center gap-2 text-[10px]">
+                  <div className="border-r pr-2">
+                    <span className="text-gray-500">Min: </span>
+                    <span className={`font-semibold ${
+                      (apiUsage?.usage?.callsThisMinute ?? 0) >= (apiUsage?.usage?.safeRateLimit ?? 30) 
+                        ? "text-red-600" 
+                        : "text-green-600"
+                    }`}>
+                      {apiUsage?.usage?.callsThisMinute ?? 0}/{apiUsage?.usage?.safeRateLimit ?? 30}
+                    </span>
                   </div>
-                </Card>
+                  <div>
+                    <span className="text-gray-500">Daily: </span>
+                    <span className={`font-semibold ${getApiUsageColor()}`}>
+                      {apiUsage?.usage?.callsToday ?? 0}/{apiUsage?.usage?.dailyLimit ?? 10000}
+                    </span>
+                  </div>
+                </div>
+              </Card>
 
-                <Button
-                  onClick={() => setShowSyncDialog(true)}
-                  disabled={selectedProducts.size === 0}
-                  className="bg-blue-600 hover:bg-blue-700"
-                  size="sm"
-                >
-                  <Download className="mr-2 h-4 w-4" />
-                  Sync Selected ({selectedProducts.size})
-                </Button>
-              </div>
+              <Button
+                onClick={() => setShowSyncDialog(true)}
+                disabled={selectedProducts.size === 0}
+                className="bg-blue-600 hover:bg-blue-700"
+                size="sm"
+              >
+                <Download className="mr-1 h-3 w-3" />
+                Sync ({selectedProducts.size})
+              </Button>
             </div>
           </div>
         </div>
-        <main className="p-6">
+        <main className="p-4">
           <div className="space-y-6">
             {/* API Status and Sync Button - Moved to Header */}
 
-            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
               {/* Category Tree */}
               <Card className="lg:col-span-1">
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center">
-                    <Package className="mr-2 h-5 w-5" />
+                <CardHeader className="py-3 px-4">
+                  <CardTitle className="text-sm flex items-center">
+                    <Package className="mr-1.5 h-4 w-4" />
                     Categories
                   </CardTitle>
-                  <CardDescription>
-                    {categories.length} categories available
+                  <CardDescription className="text-xs">
+                    {categories.length} available
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
-                  <ScrollArea className="h-[600px]">
+                <CardContent className="px-4 pb-4">
+                  <ScrollArea className="h-[calc(100vh-200px)]">
                     {categoriesLoading ? (
                       <div className="space-y-2">
                         {[...Array(10)].map((_, i) => (
@@ -613,17 +610,17 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
               </Card>
 
               {/* Products Grid */}
-              <div className="lg:col-span-3 space-y-4">
+              <div className="lg:col-span-3 space-y-3">
                 {/* Filters */}
                 <Card>
-                  <CardHeader>
-                    <CardTitle className="text-lg flex items-center">
-                      <Filter className="mr-2 h-5 w-5" />
+                  <CardHeader className="py-2.5 px-4">
+                    <CardTitle className="text-sm flex items-center">
+                      <Filter className="mr-1.5 h-4 w-4" />
                       Filters & Controls
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
+                  <CardContent className="px-4 pb-3">
+                    <div className="space-y-2">
                       {/* Search and Price Filters */}
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                         <Input
@@ -733,10 +730,10 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
 
                 {/* Products */}
                 {selectedCategory ? (
-                  <Card>
-                    <CardHeader>
+                  <Card className="flex-1">
+                    <CardHeader className="py-2.5 px-4">
                       <div className="flex items-center justify-between">
-                        <CardTitle className="text-lg">
+                        <CardTitle className="text-base font-semibold">
                           Products ({totalProducts.toLocaleString()} {filters.inStockOnly ? "in stock" : "total"})
                         </CardTitle>
                         <div className="flex items-center gap-2">
@@ -783,20 +780,21 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                         </div>
                       </div>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="px-4 pb-4">
+                      <ScrollArea className="h-[calc(100vh-320px)]">
                       {productsLoading ? (
-                        <div className="space-y-4">
+                        <div className="space-y-3">
                           {[...Array(5)].map((_, i) => (
                             <div key={i} className="h-20 bg-gray-200 rounded animate-pulse"></div>
                           ))}
                         </div>
                       ) : products.length === 0 ? (
                         <div className="text-center py-8">
-                          <Package className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                          <p className="text-gray-500">No products found</p>
+                          <Package className="h-10 w-10 mx-auto mb-3 text-gray-400" />
+                          <p className="text-sm text-gray-500">No products found</p>
                         </div>
                       ) : (
-                        <div className="space-y-2">
+                        <div className="space-y-1.5">
                           {products.map((product: TMEProduct) => {
                             const enhanced = getEnhancedProductInfo(product.Symbol);
                             const thumbnail = getProductThumbnail(product);
@@ -811,8 +809,8 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                             return (
                               <div
                                 key={product.Symbol}
-                                className={`border rounded-lg p-4 flex items-center space-x-4 hover:bg-gray-50 ${
-                                  selectedProducts.has(product.Symbol) ? "ring-2 ring-blue-500 bg-blue-50" : ""
+                                className={`border rounded p-2.5 flex items-center space-x-3 hover:bg-gray-50 ${
+                                  selectedProducts.has(product.Symbol) ? "ring-1 ring-blue-500 bg-blue-50" : ""
                                 }`}
                               >
                                 <Checkbox
@@ -820,7 +818,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                   onCheckedChange={() => toggleProductSelection(product.Symbol)}
                                 />
 
-                                <div className="flex-shrink-0 w-16 h-16 bg-gray-100 rounded flex items-center justify-center border">
+                                <div className="flex-shrink-0 w-12 h-12 bg-gray-100 rounded flex items-center justify-center border">
                                   {thumbnail ? (
                                     <img 
                                       src={thumbnail} 
@@ -835,13 +833,13 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-start justify-between">
                                     <div className="flex-1">
-                                      <p className="text-sm font-medium text-gray-900 truncate">
+                                      <p className="text-xs font-medium text-gray-900 truncate">
                                         {product.Symbol}
                                       </p>
-                                      <p className="text-sm text-gray-600 line-clamp-2">
+                                      <p className="text-xs text-gray-600 line-clamp-1">
                                         {product.Description}
                                       </p>
-                                      <div className="mt-1 flex items-center space-x-4 text-xs text-gray-500">
+                                      <div className="mt-0.5 flex items-center space-x-3 text-[10px] text-gray-500">
                                         <span>Producer: {product.Producer}</span>
                                         {enhanced?.stock && enhanced.stock.Amount !== undefined ? (
                                           <span className={enhanced.stock.Amount > 0 ? "text-green-600" : "text-red-600"}>
@@ -898,6 +896,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                           })}
                         </div>
                       )}
+                      </ScrollArea>
                     </CardContent>
                   </Card>
                 ) : (
