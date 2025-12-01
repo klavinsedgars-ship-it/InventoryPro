@@ -975,6 +975,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   };
                 }
 
+                // Get MOQ (minimum order quantity) and multiples from TME product
+                const moq = product.MinAmount || 1;
+                const multiples = product.Multiples || 1;
+
                 // Prepare product data
                 const productData = {
                   name: product.Description,
@@ -988,6 +992,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   marginTier: pricingResult.marginTier,
                   marginPercentage: String(Number(pricingResult.marginPercentage)),
                   stock: stock?.Amount || 100,
+                  moq: moq,
+                  multiples: multiples,
                   status: "active" as const,
                   weight: String(Number(product.Weight) || 10),
                   imageUrl: product.Photo ? (product.Photo.startsWith('//') ? `https:${product.Photo}` : product.Photo) : null,
@@ -1400,6 +1406,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   };
                 }
 
+                // Get MOQ (minimum order quantity) and multiples from TME product
+                const moq = product.MinAmount || 1;
+                const multiples = product.Multiples || 1;
+
                 // Prepare product data
                 const productData = {
                   name: product.Description,
@@ -1413,6 +1423,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   marginTier: pricingResult.marginTier,
                   marginPercentage: String(Number(pricingResult.marginPercentage)),
                   stock: stock?.Amount || 100,
+                  moq: moq,
+                  multiples: multiples,
                   status: "active" as const,
                   weight: String(Number(product.Weight) || 10),
                   imageUrl: product.Photo ? (product.Photo.startsWith('//') ? `https:${product.Photo}` : product.Photo) : null,

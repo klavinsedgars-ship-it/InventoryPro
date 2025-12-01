@@ -26,6 +26,8 @@ export const products = pgTable("products", {
   priceUpdatedAt: timestamp("price_updated_at"), // last price calculation
   useCalculatedPrice: boolean("use_calculated_price").default(true), // use dynamic vs manual pricing
   stock: integer("stock").notNull().default(0), // Real TME stock
+  moq: integer("moq").notNull().default(1), // Minimum order quantity from TME
+  multiples: integer("multiples").notNull().default(1), // Order multiples from TME
   ebayStockLimit: integer("ebay_stock_limit").notNull().default(3), // Max stock to show on eBay
   useStockLimit: boolean("use_stock_limit").default(true), // Whether to apply eBay stock limits
   weight: decimal("weight", { precision: 8, scale: 2 }), // in grams
