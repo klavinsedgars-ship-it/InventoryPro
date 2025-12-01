@@ -1712,6 +1712,84 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Update MOQ (minimum order quantity) for existing products from TME API
+  app.post("/api/sync/update-moq", requireAuth, async (req, res) => {
+    try {
+      console.log('🔄 Starting MOQ update for existing products...');
+      
+      const products = await storage.getProducts();
+      const tmeProducts = products.filter(p => (p.supplier?.toLowerCase() === 'tme') && p.sku);
+      
+      if (tmeProducts.length === 0) {
+        return res.json({
+          success: true,
+          message: 'No TME products to update',
+          result: { total: 0, updated: 0 }
+        });
+      }
+      
+      console.log(`📦 Updating MOQ for ${tmeProducts.length} TME products`);
+      
+      let updatedCount = 0;
+      const batchSize = 50;
+      
+      for (let i = 0; i < tmeProducts.length; i += batchSize) {
+        const batch = tmeProducts.slice(i, i + batchSize);
+        const symbols = batch.map(p => p.sku);
+        
+        try {
+          // Fetch product details from TME to get MinAmount/Multiples
+          const tmeProductDetails = await tmeApi.getEnhancedProductInfo(symbols);
+          
+          for (const enhanced of tmeProductDetails) {
+            const { product: tmeProduct } = enhanced;
+            const localProduct = batch.find(p => p.sku === tmeProduct.Symbol);
+            
+            if (localProduct && tmeProduct) {
+              const moq = tmeProduct.MinAmount || 1;
+              const multiples = tmeProduct.Multiples || 1;
+              
+              // Only update if different
+              if (localProduct.moq !== moq || localProduct.multiples !== multiples) {
+                await storage.updateProduct(localProduct.id, {
+                  moq,
+                  multiples
+                });
+                updatedCount++;
+                console.log(`✅ Updated ${tmeProduct.Symbol}: MOQ=${moq}, Multiples=${multiples}`);
+              }
+            }
+          }
+          
+          // Rate limiting
+          if (i + batchSize < tmeProducts.length) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        } catch (error) {
+          console.error(`❌ Batch MOQ update failed:`, error);
+        }
+      }
+      
+      console.log(`🎉 MOQ update complete: ${updatedCount}/${tmeProducts.length} products updated`);
+      
+      res.json({
+        success: true,
+        message: `MOQ update completed`,
+        result: {
+          total: tmeProducts.length,
+          updated: updatedCount
+        }
+      });
+    } catch (error) {
+      console.error('MOQ update failed:', error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to update MOQ",
+        error: (error as Error).message
+      });
+    }
+  });
+
   // Image processing endpoints
   app.post('/api/images/process-watermark', async (req, res) => {
     try {
