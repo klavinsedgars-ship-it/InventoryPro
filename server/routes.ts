@@ -42,14 +42,19 @@ interface AuthenticatedRequest extends Request {
 
 export async function registerRoutes(app: Express): Promise<Server> {
 
-  // Auth middleware - temporarily disabled for development
+  // Auth middleware - production-ready with optional dev bypass
   const requireAuth = (req: any, res: any, next: any) => {
-    // Temporarily bypass authentication
+    // Allow bypass only in development with explicit environment variable
+    if (process.env.NODE_ENV === 'development' && process.env.BYPASS_AUTH === 'true') {
+      console.warn('⚠️ Auth bypassed - development mode');
+      return next();
+    }
+    
+    // Production authentication check
+    if (!req.session?.userId) {
+      return res.status(401).json({ message: "Authentication required" });
+    }
     next();
-    // if (!req.session?.userId) {
-    //   return res.status(401).json({ message: "Authentication required" });
-    // }
-    // next();
   };
 
   // Auth routes
@@ -479,7 +484,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             "User-Agent": "TME-API-Client/1.0"
           },
           body: new URLSearchParams({
-            Token: process.env.TME_TOKEN || "05bb5ef39f7b451aad7892c53e39db484ca8dd25693a599f96",
+            Token: process.env.TME_TOKEN || '',
             Language: "EN"
           }).toString()
         });
@@ -1229,7 +1234,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             "User-Agent": "TME-API-Client/1.0"
           },
           body: new URLSearchParams({
-            Token: process.env.TME_TOKEN || "05bb5ef39f7b451aad7892c53e39db484ca8dd25693a599f96",
+            Token: process.env.TME_TOKEN || '',
             Language: "EN"
           }).toString()
         });

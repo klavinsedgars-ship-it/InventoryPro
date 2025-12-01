@@ -83,6 +83,7 @@ interface TMEApiResponse<T> {
 
 export class TMEApiService {
   private credentials: TMECredentials;
+  private static credentialsValidated = false;
   private baseUrl = "https://api.tme.eu";
   private callCount = 0;
   private dailyLimit = 10000;
@@ -93,16 +94,26 @@ export class TMEApiService {
   private isProcessingQueue = false;
 
   constructor() {
+    // Validate required environment variables at startup
+    const requiredEnvVars = ['TME_TOKEN', 'TME_CUSTOMER_NUMBER', 'TME_CONTACT_NUMBER', 'TME_APPLICATION_SECRET'];
+    const missingVars = requiredEnvVars.filter(v => !process.env[v]);
+    
+    if (missingVars.length > 0) {
+      console.error(`❌ Missing required TME environment variables: ${missingVars.join(', ')}`);
+      console.error('Please set these in your environment secrets.');
+    }
+
     this.credentials = {
-      token: process.env.TME_TOKEN || "05bb5ef39f7b451aad7892c53e39db484ca8dd25693a599f96",
-      customerNumber: process.env.TME_CUSTOMER_NUMBER || "40071812",
-      contactNumber: process.env.TME_CONTACT_NUMBER || "676772",
-      applicationSecret: process.env.TME_APPLICATION_SECRET || "670056035f042574c976"
+      token: process.env.TME_TOKEN || '',
+      customerNumber: process.env.TME_CUSTOMER_NUMBER || '',
+      contactNumber: process.env.TME_CONTACT_NUMBER || '',
+      applicationSecret: process.env.TME_APPLICATION_SECRET || ''
     };
 
+    // Only log non-sensitive information
     console.log('✅ TME API Service initialized');
     console.log('- Token length:', this.credentials.token.length);
-    console.log('- Customer Number:', this.credentials.customerNumber);
+    console.log('- Credentials loaded from environment');
   }
 
   private generateApiSignature(method: string, url: string, params: Record<string, any>): string {

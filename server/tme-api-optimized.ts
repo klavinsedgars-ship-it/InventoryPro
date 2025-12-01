@@ -92,18 +92,27 @@ export class TMEApiServiceOptimized {
   private storage: IStorage | null = null;
 
   constructor(storage?: IStorage) {
+    // Validate required environment variables - fail fast if missing
+    const requiredEnvVars = ['TME_TOKEN', 'TME_CUSTOMER_NUMBER', 'TME_CONTACT_NUMBER', 'TME_APPLICATION_SECRET'];
+    const missingVars = requiredEnvVars.filter(v => !process.env[v]);
+    
+    if (missingVars.length > 0) {
+      console.error(`❌ Missing required TME environment variables: ${missingVars.join(', ')}`);
+      console.error('Please set these in your environment secrets.');
+    }
+
     this.credentials = {
-      token: process.env.TME_TOKEN || "05bb5ef39f7b451aad7892c53e39db484ca8dd25693a599f96",
-      customerNumber: process.env.TME_CUSTOMER_NUMBER || "40071812",
-      contactNumber: process.env.TME_CONTACT_NUMBER || "676772",
-      applicationSecret: process.env.TME_APPLICATION_SECRET || "670056035f042574c976"
+      token: process.env.TME_TOKEN || '',
+      customerNumber: process.env.TME_CUSTOMER_NUMBER || '',
+      contactNumber: process.env.TME_CONTACT_NUMBER || '',
+      applicationSecret: process.env.TME_APPLICATION_SECRET || ''
     };
 
     this.storage = storage || null;
 
     console.log('✅ TME API Service OPTIMIZED initialized');
     console.log('- Using combined GetPricesAndStocks endpoint');
-    console.log('- Local product cache enabled');
+    console.log('- Credentials loaded from environment variables');
     if (storage) {
       console.log('- Database persistence enabled for API usage tracking');
     }

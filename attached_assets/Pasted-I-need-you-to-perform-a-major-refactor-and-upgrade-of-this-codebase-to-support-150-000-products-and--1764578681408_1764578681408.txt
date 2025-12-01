@@ -1,0 +1,33 @@
+I need you to perform a major refactor and upgrade of this codebase to support 150,000 products and production-level security. We are building a TME -> eBay/Amazon syncing tool.
+
+Please execute the following "Refactor Plan" in strict order. Do not move to the next phase until the previous one is confirmed working.
+
+### Phase 1: Critical Security Hardening (Priority High)
+1.  **Secret Rotation:** Scan `server/tme-api-optimized.ts`, `server/routes.ts`, and any test files. Identify all hardcoded API tokens, Client IDs, and Secrets. Move them strictly to `process.env` variables.
+2.  **Auth Fix:** In `server/routes.ts`, the `requireAuth` middleware is currently bypassed (`next()`). Restore functional authentication logic to protect the admin routes.
+3.  **Sanitization:** Ensure no API keys are logged to the console during `console.log` debugging sessions.
+
+### Phase 2: TME Browser & Data Scalability
+1.  **Pagination Logic:** Analyze `sync_random_products.js`. Currently, it fetches a single batch. Refactor this into a function that respects TME's `PageNumber` and `TotalPages`. It must loop until all available products for a category/search are fetched.
+2.  **Persistent Caching:** In `server/tme-api-optimized.ts`, remove the `private productCache = new Map();`. This is a memory leak risk.
+    * **Action:** Modify the code to check the PostgreSQL database first. If a product exists and was updated < 24 hours ago, return DB data. Only call TME API if data is stale or missing.
+3.  **Batching:** Update the TME fetcher to accept an array of SKUs (Symbol) and use the TME `GetPricesAndStocks` endpoint with a batch of 50 items per call, rather than 1 call per item.
+
+### Phase 3: The Daily Sync Engine (Cron & Queue)
+1.  **Sync Trigger:** Create a new file `server/cron-jobs.ts`. Implement a scheduler (using `node-cron` or `setInterval`) that runs at 02:00 AM daily.
+2.  **Diff Logic:** The cron job should:
+    * Fetch all local SKUs from the DB.
+    * Batch fetch their live Price/Stock from TME (using the new batch logic).
+    * Compare Live vs. DB.
+    * **Only** if Price or Stock differs, push the item to the `sync_queue` table.
+3.  **Queue Worker Upgrade:** Ensure `server/sync-queue-worker.ts` is robust. It should mark items as 'processing' when it starts and 'completed' or 'failed' when done. Add error handling so one failed item does not crash the worker.
+
+### Phase 4: eBay API Upgrade (For High Volume)
+1.  **Inventory API:** We are hitting rate limits. Check `server/ebay-api.ts`.
+2.  **Refactor:** Add a function `bulkUpdateInventory` that utilizes the **eBay Inventory API** (REST) specifically for `bulkUpdatePriceQuantity`.
+3.  **Integration:** Connect this new bulk function to the `sync-queue-worker`. If the queue has > 20 items waiting, it should aggregate them and send a single bulk update request to eBay, rather than 20 individual requests.
+
+**Constraints:**
+* Use TypeScript for all new code.
+* Do not break the existing Drizzle ORM schema; extend it if necessary (e.g., add `last_synced_at` column).
+* Add comments explaining complex logic.
