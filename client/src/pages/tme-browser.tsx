@@ -376,22 +376,20 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                 <p className="text-gray-600">Browse and sync products from TME catalog</p>
               </div>
               <div className="flex items-center gap-4">
-                {/* API Usage Display */}
-                {apiUsage?.usage && (
-                  <Card className="p-3">
-                    <div className="flex items-center gap-2">
-                      <Clock className="h-4 w-4 text-gray-500" />
-                      <div className="text-sm">
-                        <div className={`font-medium ${getApiUsageColor()}`}>
-                          API: {apiUsage.usage.callsToday}/{apiUsage.usage.dailyLimit}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          {apiUsage.usage.remainingDaily} remaining
-                        </div>
+                {/* API Usage Display - Always visible */}
+                <Card className="p-3" data-testid="api-usage-card">
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-gray-500" />
+                    <div className="text-sm">
+                      <div className={`font-medium ${getApiUsageColor()}`}>
+                        API: {apiUsage?.usage?.callsToday ?? 0}/{apiUsage?.usage?.dailyLimit ?? 10000}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {apiUsage?.usage?.remainingDaily ?? 10000} remaining
                       </div>
                     </div>
-                  </Card>
-                )}
+                  </div>
+                </Card>
 
                 <Button
                   onClick={() => setShowSyncDialog(true)}

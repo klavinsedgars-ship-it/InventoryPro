@@ -8,6 +8,7 @@
 
 import crypto from 'crypto';
 import type { IStorage } from './storage';
+import { storage } from './storage';
 
 interface TMECredentials {
   token: string;
@@ -575,4 +576,5 @@ export class TMEApiServiceOptimized {
   }
 }
 
-export const tmeApiOptimized = new TMEApiServiceOptimized();
+// Export with storage for API call tracking persistence
+export const tmeApiOptimized = new TMEApiServiceOptimized(storage);

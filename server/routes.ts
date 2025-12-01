@@ -720,29 +720,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Get TME API usage statistics
     app.get("/api/tme/usage", async (req, res) => {
       try {
-        // Get usage from database
+        // Get usage from database - persistent across page reloads
         const apiUsage = await storage.getApiUsage("tme");
         const callsToday = apiUsage?.callsToday || 0;
         const dailyLimit = apiUsage?.dailyLimit || 10000;
-        const usage = (callsToday / dailyLimit) * 100;
+        const usagePercentage = Math.round((callsToday / dailyLimit) * 100);
+        const remainingDaily = dailyLimit - callsToday;
         const rateLimitPerMinute = 60;
 
-        const status = callsToday >= dailyLimit ? 'LIMIT_EXCEEDED' : usage >= 80 ? 'WARNING' : 'NORMAL';
+        const status = callsToday >= dailyLimit ? 'LIMIT_EXCEEDED' : usagePercentage >= 80 ? 'WARNING' : 'NORMAL';
 
         res.json({
           success: true,
           usage: {
             callsToday,
             dailyLimit,
+            remainingDaily,
+            usagePercentage,
             rateLimitPerMinute,
-            status
+            status,
+            lastUpdated: apiUsage?.updatedAt || null,
+            lastResetAt: apiUsage?.lastResetAt || null
           },
           limits: {
             daily: dailyLimit,
             perMinute: rateLimitPerMinute
           },
           recommendations: status === 'WARNING' ? [
-            `You've used ${Math.round(usage)}% of your daily limit (${callsToday}/${dailyLimit} calls)`,
+            `You've used ${usagePercentage}% of your daily limit (${callsToday}/${dailyLimit} calls)`,
             "Consider reducing API calls or upgrading your TME plan"
           ] : status === 'LIMIT_EXCEEDED' ? [
             "Daily limit exceeded - API calls will fail until tomorrow",
