@@ -676,24 +676,6 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                               Select Page ({products.length})
                             </Button>
                             <Button
-                              onClick={() => bulkSelectPages(5)}
-                              variant="outline"
-                              size="sm"
-                              disabled={bulkLoading || totalPages < 2}
-                              data-testid="btn-select-5-pages"
-                            >
-                              {bulkLoading ? `Loading ${bulkProgress}%...` : "Select 5 Pages (100)"}
-                            </Button>
-                            <Button
-                              onClick={() => bulkSelectPages(Math.min(25, totalPages))}
-                              variant="outline"
-                              size="sm"
-                              disabled={bulkLoading || totalPages < 5}
-                              data-testid="btn-select-25-pages"
-                            >
-                              {bulkLoading ? `Loading ${bulkProgress}%...` : `Select ${Math.min(25, totalPages)} Pages (${Math.min(25, totalPages) * 20})`}
-                            </Button>
-                            <Button
                               onClick={() => bulkSelectPages(totalPages)}
                               variant="default"
                               size="sm"
