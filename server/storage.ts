@@ -435,6 +435,57 @@ export class DatabaseStorage implements IStorage {
     const result = await db.delete(shippingPolicies).where(eq(shippingPolicies.id, id));
     return (result.rowCount ?? 0) > 0;
   }
+
+  // API Usage Tracking methods
+  async getApiUsage(provider: string = "tme"): Promise<ApiUsageTracking | undefined> {
+    const result = await db.select().from(apiUsageTracking).where(eq(apiUsageTracking.provider, provider)).limit(1);
+    return result[0];
+  }
+
+  async trackApiCall(provider: string): Promise<void> {
+    const existing = await this.getApiUsage(provider);
+    
+    if (existing) {
+      // Check if we need to reset (new day)
+      const lastReset = new Date(existing.lastResetAt);
+      const now = new Date();
+      const isNewDay = lastReset.toDateString() !== now.toDateString();
+      
+      if (isNewDay) {
+        // Reset for new day
+        await db.update(apiUsageTracking)
+          .set({ callsToday: 1, lastResetAt: now, updatedAt: now })
+          .where(eq(apiUsageTracking.provider, provider));
+      } else {
+        // Increment
+        await db.update(apiUsageTracking)
+          .set({ callsToday: existing.callsToday + 1, updatedAt: now })
+          .where(eq(apiUsageTracking.provider, provider));
+      }
+    } else {
+      // Create new tracking record
+      await db.insert(apiUsageTracking).values({
+        provider,
+        callsToday: 1,
+        dailyLimit: 10000,
+        lastResetAt: new Date(),
+        updatedAt: new Date()
+      });
+    }
+  }
+
+  async resetApiUsageIfNewDay(provider: string): Promise<void> {
+    const existing = await this.getApiUsage(provider);
+    if (existing) {
+      const lastReset = new Date(existing.lastResetAt);
+      const now = new Date();
+      if (lastReset.toDateString() !== now.toDateString()) {
+        await db.update(apiUsageTracking)
+          .set({ callsToday: 0, lastResetAt: now, updatedAt: now })
+          .where(eq(apiUsageTracking.provider, provider));
+      }
+    }
+  }
 }
 
 export const storage = new DatabaseStorage();

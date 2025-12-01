@@ -7,6 +7,7 @@
  */
 
 import crypto from 'crypto';
+import type { IStorage } from './storage';
 
 interface TMECredentials {
   token: string;
@@ -88,8 +89,9 @@ export class TMEApiServiceOptimized {
   private productCache = new Map<string, any>(); // Local cache to reduce API calls
   private cacheExpiry = 3600000; // 1 hour
   private cacheTimes = new Map<string, number>();
+  private storage: IStorage | null = null;
 
-  constructor() {
+  constructor(storage?: IStorage) {
     this.credentials = {
       token: process.env.TME_TOKEN || "05bb5ef39f7b451aad7892c53e39db484ca8dd25693a599f96",
       customerNumber: process.env.TME_CUSTOMER_NUMBER || "40071812",
@@ -97,9 +99,14 @@ export class TMEApiServiceOptimized {
       applicationSecret: process.env.TME_APPLICATION_SECRET || "670056035f042574c976"
     };
 
+    this.storage = storage || null;
+
     console.log('✅ TME API Service OPTIMIZED initialized');
     console.log('- Using combined GetPricesAndStocks endpoint');
     console.log('- Local product cache enabled');
+    if (storage) {
+      console.log('- Database persistence enabled for API usage tracking');
+    }
   }
 
   private generateApiSignature(method: string, url: string, params: Record<string, any>): string {
@@ -197,6 +204,15 @@ export class TMEApiServiceOptimized {
     this.callCount++;
     this.callsThisMinute++;
     this.lastCallTimestamp = Date.now();
+    
+    // Track API call in database
+    if (this.storage) {
+      try {
+        await this.storage.trackApiCall('tme');
+      } catch (error) {
+        console.error('Failed to track API call:', error);
+      }
+    }
     
     console.log(`📊 TME API Call #${this.callCount}: ${endpoint} (${this.callsThisMinute}/25 this minute)`);
 
