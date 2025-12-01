@@ -1465,6 +1465,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           totalProducts: result.totalProducts,
           changedProducts: result.changedProducts,
           queuedItems: result.queuedItems,
+          ebaySync: result.ebaySync,
           duration: result.duration
         }
       });
@@ -1473,6 +1474,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ 
         success: false,
         message: "Failed to trigger daily sync",
+        error: (error as Error).message
+      });
+    }
+  });
+
+  app.post("/api/sync/trigger-ebay", requireAuth, async (req, res) => {
+    try {
+      console.log('🔧 Manual eBay sync triggered via API');
+      
+      const products = await storage.getProducts();
+      const ebayProducts = products.filter(p => p.ebayItemId && p.listedOnEbay);
+      
+      if (ebayProducts.length === 0) {
+        return res.json({
+          success: true,
+          message: 'No eBay-listed products to sync',
+          result: { attempted: 0, succeeded: 0, failed: 0, skipped: 0 }
+        });
+      }
+      
+      const updates = ebayProducts.map(product => ({
+        productId: product.id,
+        ebayItemId: product.ebayItemId!,
+        quantity: product.stock || 0,
+        price: parseFloat(product.salePrice?.toString() || '0'),
+        sku: product.sku
+      }));
+      
+      const result = await ebayApi.bulkUpdateInventory(updates);
+      
+      res.json({
+        success: true,
+        message: 'eBay sync completed',
+        result: {
+          attempted: updates.length,
+          succeeded: result.succeeded,
+          failed: result.failed,
+          skipped: 0
+        }
+      });
+    } catch (error) {
+      console.error('Manual eBay sync failed:', error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to trigger eBay sync",
         error: (error as Error).message
       });
     }

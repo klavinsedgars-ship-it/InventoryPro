@@ -8,6 +8,9 @@
 
 import { storage } from "./storage";
 import { TMEApiServiceOptimized } from "./tme-api-optimized";
+import { ebayApi } from "./ebay-api";
+import { calculateDynamicPrice } from "./dynamic-pricing";
+import { calculateEbayStock } from "./stock-manager";
 
 // Initialize TME API with storage for PostgreSQL caching
 const tmeApi = new TMEApiServiceOptimized(storage);
@@ -233,13 +236,130 @@ async function pushToSyncQueue(diffs: DiffResult[]): Promise<number> {
 }
 
 /**
+ * Sync product changes to eBay in batches
+ * Uses ReviseInventoryStatus API for efficient bulk updates
+ */
+async function syncToEbay(diffs: DiffResult[]): Promise<{
+  attempted: number;
+  succeeded: number;
+  failed: number;
+  skipped: number;
+}> {
+  console.log('');
+  console.log('🏪 EBAY SYNC PHASE');
+  console.log('==================');
+  
+  const result = { attempted: 0, succeeded: 0, failed: 0, skipped: 0 };
+  
+  if (diffs.length === 0) {
+    console.log('⚠️ No changes to sync to eBay');
+    return result;
+  }
+  
+  try {
+    // Collect products with eBay listings that have changes
+    const ebayUpdates: Array<{
+      productId: number;
+      ebayItemId: string;
+      quantity?: number;
+      price?: number;
+      sku?: string;
+    }> = [];
+    
+    for (const diff of diffs) {
+      const product = await storage.getProductBySku(diff.symbol);
+      if (!product) continue;
+      
+      // Skip products not listed on eBay
+      if (!product.ebayItemId || !product.listedOnEbay) {
+        result.skipped++;
+        continue;
+      }
+      
+      // Calculate eBay price with dynamic pricing
+      const supplierPrice = diff.changes.newPrice || parseFloat(product.supplierPrice?.toString() || '0');
+      const pricingResult = supplierPrice > 0 
+        ? calculateDynamicPrice(supplierPrice) 
+        : { finalPrice: parseFloat(product.salePrice?.toString() || '0') };
+      
+      // Calculate eBay stock (with limit) - use product stock info
+      const tmeStock = diff.changes.newStock ?? product.stock ?? 0;
+      const stockInfo = calculateEbayStock({ ...product, stock: tmeStock });
+      const ebayStock = stockInfo.ebayStock;
+      
+      ebayUpdates.push({
+        productId: product.id,
+        ebayItemId: product.ebayItemId,
+        quantity: ebayStock,
+        price: pricingResult.finalPrice,
+        sku: product.sku
+      });
+    }
+    
+    if (ebayUpdates.length === 0) {
+      console.log('⚠️ No eBay-listed products with changes');
+      return result;
+    }
+    
+    console.log(`📦 Syncing ${ebayUpdates.length} products to eBay in batches of 4`);
+    result.attempted = ebayUpdates.length;
+    
+    // Use the existing bulk update function which batches in groups of 4
+    const bulkResult = await ebayApi.bulkUpdateInventory(ebayUpdates);
+    
+    result.succeeded = bulkResult.succeeded;
+    result.failed = bulkResult.failed;
+    
+    // Log individual failures for debugging
+    const failures = bulkResult.results.filter(r => !r.success);
+    if (failures.length > 0) {
+      console.log(`⚠️ Failed eBay updates:`);
+      failures.slice(0, 5).forEach(f => console.log(`   - ${f.ebayItemId}: ${f.message}`));
+      if (failures.length > 5) {
+        console.log(`   ... and ${failures.length - 5} more`);
+      }
+    }
+    
+    // Log to sync logs
+    await storage.createSyncLog({
+      source: 'cron',
+      operation: 'ebay_bulk_sync',
+      status: result.failed === 0 ? 'success' : 'partial',
+      message: `eBay sync: ${result.succeeded} succeeded, ${result.failed} failed, ${result.skipped} skipped`,
+      details: JSON.stringify({
+        attempted: result.attempted,
+        succeeded: result.succeeded,
+        failed: result.failed,
+        skipped: result.skipped
+      })
+    });
+    
+    console.log(`✅ eBay sync complete: ${result.succeeded} updated, ${result.failed} failed, ${result.skipped} skipped`);
+    return result;
+    
+  } catch (error) {
+    console.error('❌ eBay sync failed:', error);
+    
+    await storage.createSyncLog({
+      source: 'cron',
+      operation: 'ebay_bulk_sync',
+      status: 'error',
+      message: `eBay sync failed: ${(error as Error).message}`
+    });
+    
+    return result;
+  }
+}
+
+/**
  * Main daily sync function
- * Fetches local SKUs, compares with TME, queues only changed items
+ * Fetches local SKUs, compares with TME, queues only changed items, syncs to eBay
  */
 export async function runDailySync(): Promise<{
   totalProducts: number;
   changedProducts: number;
   queuedItems: number;
+  ebaySync: { attempted: number; succeeded: number; failed: number; skipped: number };
   duration: number;
 }> {
   const startTime = Date.now();
@@ -247,6 +367,14 @@ export async function runDailySync(): Promise<{
   console.log('====================================');
   console.log('🌙 DAILY SYNC STARTED at ' + new Date().toISOString());
   console.log('====================================');
+  
+  const emptyResult = { 
+    totalProducts: 0, 
+    changedProducts: 0, 
+    queuedItems: 0, 
+    ebaySync: { attempted: 0, succeeded: 0, failed: 0, skipped: 0 },
+    duration: 0 
+  };
   
   try {
     // Log sync start
@@ -261,7 +389,7 @@ export async function runDailySync(): Promise<{
     const localSkus = await getLocalProductSkus();
     if (localSkus.length === 0) {
       console.log('⚠️ No TME products found in database');
-      return { totalProducts: 0, changedProducts: 0, queuedItems: 0, duration: 0 };
+      return emptyResult;
     }
     
     // Step 2: Batch fetch live TME data
@@ -270,8 +398,11 @@ export async function runDailySync(): Promise<{
     // Step 3: Calculate diffs (only changed products)
     const diffs = await calculateDiff(localSkus, liveData);
     
-    // Step 4: Push changed items to sync queue
+    // Step 4: Push changed items to sync queue and update local DB
     const queuedItems = await pushToSyncQueue(diffs);
+    
+    // Step 5: Sync changes to eBay in batches
+    const ebayResult = await syncToEbay(diffs);
     
     const duration = Math.round((Date.now() - startTime) / 1000);
     
@@ -280,11 +411,12 @@ export async function runDailySync(): Promise<{
       source: 'cron',
       operation: 'daily_sync_complete',
       status: 'success',
-      message: `Daily sync completed: ${diffs.length} changes detected, ${queuedItems} items queued`,
+      message: `Daily sync completed: ${diffs.length} changes, ${ebayResult.succeeded} eBay updates`,
       details: JSON.stringify({
         totalProducts: localSkus.length,
         changedProducts: diffs.length,
         queuedItems,
+        ebaySync: ebayResult,
         duration
       })
     });
@@ -295,6 +427,7 @@ export async function runDailySync(): Promise<{
     console.log(`   Total products: ${localSkus.length}`);
     console.log(`   Changes detected: ${diffs.length}`);
     console.log(`   Items queued: ${queuedItems}`);
+    console.log(`   eBay updates: ${ebayResult.succeeded}/${ebayResult.attempted} (${ebayResult.skipped} skipped)`);
     console.log(`   Duration: ${duration}s`);
     console.log('====================================');
     console.log('');
@@ -303,6 +436,7 @@ export async function runDailySync(): Promise<{
       totalProducts: localSkus.length,
       changedProducts: diffs.length,
       queuedItems,
+      ebaySync: ebayResult,
       duration
     };
     
@@ -316,7 +450,7 @@ export async function runDailySync(): Promise<{
       message: `Daily sync failed: ${(error as Error).message}`
     });
     
-    return { totalProducts: 0, changedProducts: 0, queuedItems: 0, duration: 0 };
+    return emptyResult;
   }
 }
 
@@ -351,6 +485,7 @@ export async function triggerManualSync(): Promise<{
   totalProducts: number;
   changedProducts: number;
   queuedItems: number;
+  ebaySync: { attempted: number; succeeded: number; failed: number; skipped: number };
   duration: number;
 }> {
   console.log('🔧 Manual sync triggered');
