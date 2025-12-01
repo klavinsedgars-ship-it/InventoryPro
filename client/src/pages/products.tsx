@@ -770,20 +770,40 @@ export function Products({ user }: ProductsProps) {
                         </td>
                         <td className="px-1 py-2">
                           <div className="flex items-center justify-center gap-1">
-                            <span title="eBay">
-                              {product.listedOnEbay ? (
-                                <CheckCircle className="h-3 w-3 text-green-500" />
-                              ) : (
-                                <XCircle className="h-3 w-3 text-gray-300" />
-                              )}
-                            </span>
-                            <span title="Amazon">
-                              {product.listedOnAmazon ? (
-                                <CheckCircle className="h-3 w-3 text-orange-500" />
-                              ) : (
-                                <XCircle className="h-3 w-3 text-gray-300" />
-                              )}
-                            </span>
+                            {product.listedOnEbay && product.ebayItemId ? (
+                              <a 
+                                href={`https://www.ebay.co.uk/itm/${product.ebayItemId}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={`View on eBay (${product.ebayItemId})`}
+                                className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold bg-green-500 text-white hover:bg-green-600 cursor-pointer"
+                                data-testid={`link-ebay-${product.id}`}
+                              >
+                                E
+                              </a>
+                            ) : (
+                              <span 
+                                title="Not listed on eBay"
+                                className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold bg-gray-200 text-gray-400"
+                              >
+                                E
+                              </span>
+                            )}
+                            {product.listedOnAmazon ? (
+                              <span 
+                                title="Listed on Amazon"
+                                className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold bg-orange-500 text-white"
+                              >
+                                A
+                              </span>
+                            ) : (
+                              <span 
+                                title="Not listed on Amazon"
+                                className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold bg-gray-200 text-gray-400"
+                              >
+                                A
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td className="px-1 py-2">
