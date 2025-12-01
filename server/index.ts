@@ -55,8 +55,9 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  // Import sync queue worker
+  // Import sync queue worker and daily sync scheduler
   const { syncQueueWorker } = await import("./sync-queue-worker");
+  const { startDailySyncScheduler } = await import("./cron-jobs");
 
   const server = await registerRoutes(app);
 
@@ -91,5 +92,9 @@ app.use((req, res, next) => {
     // Start the sync queue worker for background product processing
     syncQueueWorker.start();
     log(`🚀 Sync Queue Worker started`);
+    
+    // Start the daily sync scheduler (runs at 2 AM)
+    startDailySyncScheduler();
+    log(`⏰ Daily Sync Scheduler started (runs at 2:00 AM)`);
   });
 })();
