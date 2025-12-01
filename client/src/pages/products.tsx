@@ -244,6 +244,49 @@ export function Products({ user }: ProductsProps) {
     },
   });
 
+  const bulkUnlistFromEbayMutation = useMutation({
+    mutationFn: async (productIds: number[]) => {
+      const results = await Promise.all(
+        productIds.map(async (id) => {
+          try {
+            const response = await apiRequest("POST", "/api/ebay/unlist", { productId: id });
+            return { id, success: true, data: await response.json() };
+          } catch (error) {
+            return { id, success: false, error };
+          }
+        })
+      );
+      const successCount = results.filter(r => r.success && r.data?.success).length;
+      const failCount = results.length - successCount;
+      return { successCount, failCount, total: results.length };
+    },
+    onSuccess: (data: any) => {
+      if (data.successCount > 0) {
+        toast({
+          title: "Bulk Unlist Completed",
+          description: `${data.successCount} of ${data.total} products unlisted from eBay.`,
+        });
+      }
+      if (data.failCount > 0) {
+        toast({
+          title: "Some Unlists Failed",
+          description: `${data.failCount} products failed to unlist.`,
+          variant: "destructive",
+        });
+      }
+      setSelectedProducts(new Set());
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Bulk Unlist Failed",
+        description: error.message || "Failed to unlist products from eBay.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const updateEbayListingMutation = useMutation({
     mutationFn: async (productId: number) => {
       const response = await apiRequest("POST", "/api/ebay/update", { productId });
@@ -524,7 +567,18 @@ export function Products({ user }: ProductsProps) {
                         data-testid="btn-bulk-ebay"
                       >
                         <Upload className="w-3 h-3 mr-1" />
-                        eBay
+                        List eBay
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => bulkUnlistFromEbayMutation.mutate(Array.from(selectedProducts))}
+                        disabled={bulkUnlistFromEbayMutation.isPending}
+                        className="text-orange-600 border-orange-300 hover:bg-orange-50"
+                        data-testid="btn-bulk-unlist-ebay"
+                      >
+                        <Download className="w-3 h-3 mr-1" />
+                        Unlist eBay
                       </Button>
                       <Button
                         variant="outline"
