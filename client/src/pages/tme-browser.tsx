@@ -198,14 +198,16 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
       const params = new URLSearchParams({
         categoryId: selectedCategory,
         page: currentPage.toString(),
-        limit: productsPerPage.toString(),
-        search: filters.search,
-        priceMin: filters.priceMin,
-        priceMax: filters.priceMax,
-        stockMin: filters.stockMin || "1",
-        producer: filters.producer,
-        inStockOnly: filters.inStockOnly.toString()
+        limit: productsPerPage.toString()
       });
+
+      // Only add filter params if they have values
+      if (filters.search) params.append('search', filters.search);
+      if (filters.priceMin) params.append('priceMin', filters.priceMin);
+      if (filters.priceMax) params.append('priceMax', filters.priceMax);
+      if (filters.stockMin) params.append('stockMin', filters.stockMin);
+      if (filters.producer) params.append('producer', filters.producer);
+      params.append('inStockOnly', filters.inStockOnly.toString());
 
       const response = await fetch(`/api/tme/products?${params}`);
       if (!response.ok) {
@@ -216,6 +218,13 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     enabled: !!selectedCategory,
     staleTime: 2 * 60 * 1000
   });
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    if (selectedCategory) {
+      setCurrentPage(1);
+    }
+  }, [filters.search, filters.priceMin, filters.priceMax, filters.producer, filters.inStockOnly]);
 
   // Fetch existing products to check sync status
   const { data: existingProducts } = useQuery({
@@ -513,42 +522,51 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     <div className="min-h-screen bg-gray-50">
       <Sidebar user={user} />
       <div className="ml-64">
-        <Header title="TME Browser" subtitle="Browse and sync products from TME catalog" />
+        <div className="border-b bg-white">
+          <div className="p-6 pb-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">TME Browser</h1>
+                <p className="text-sm text-gray-600 mt-1">Browse and sync products from TME catalog</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <Card className="p-2.5" data-testid="api-usage-card">
+                  <div className="flex items-center gap-3">
+                    <div className="text-xs border-r pr-3">
+                      <div className="text-[10px] text-gray-500 uppercase font-medium">Per Minute</div>
+                      <div className={`font-semibold ${
+                        (apiUsage?.usage?.callsThisMinute ?? 0) >= (apiUsage?.usage?.safeRateLimit ?? 30) 
+                          ? "text-red-600" 
+                          : "text-green-600"
+                      }`}>
+                        {apiUsage?.usage?.callsThisMinute ?? 0}/{apiUsage?.usage?.safeRateLimit ?? 30}
+                      </div>
+                    </div>
+                    <div className="text-xs">
+                      <div className="text-[10px] text-gray-500 uppercase font-medium">Daily</div>
+                      <div className={`font-semibold ${getApiUsageColor()}`}>
+                        {apiUsage?.usage?.callsToday ?? 0}/{apiUsage?.usage?.dailyLimit ?? 10000}
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+
+                <Button
+                  onClick={() => setShowSyncDialog(true)}
+                  disabled={selectedProducts.size === 0}
+                  className="bg-blue-600 hover:bg-blue-700"
+                  size="sm"
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  Sync Selected ({selectedProducts.size})
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
         <main className="p-6">
           <div className="space-y-6">
-            {/* API Status and Sync Button */}
-            <div className="flex items-center justify-end gap-4">
-              {/* API Usage Display - Always visible */}
-              <Card className="p-3" data-testid="api-usage-card">
-                <div className="flex items-center gap-3">
-                  <div className="text-sm border-r pr-3">
-                    <div className="text-xs text-gray-500 uppercase">Per Minute</div>
-                    <div className={`font-medium ${
-                      (apiUsage?.usage?.callsThisMinute ?? 0) >= (apiUsage?.usage?.safeRateLimit ?? 30) 
-                        ? "text-red-600" 
-                        : "text-green-600"
-                    }`}>
-                      {apiUsage?.usage?.callsThisMinute ?? 0}/{apiUsage?.usage?.safeRateLimit ?? 30}
-                    </div>
-                  </div>
-                  <div className="text-sm">
-                    <div className="text-xs text-gray-500 uppercase">Daily</div>
-                    <div className={`font-medium ${getApiUsageColor()}`}>
-                      {apiUsage?.usage?.callsToday ?? 0}/{apiUsage?.usage?.dailyLimit ?? 10000}
-                    </div>
-                  </div>
-                </div>
-              </Card>
-
-              <Button
-                onClick={() => setShowSyncDialog(true)}
-                disabled={selectedProducts.size === 0}
-                className="bg-blue-600 hover:bg-blue-700"
-              >
-                <Download className="mr-2 h-4 w-4" />
-                Sync Selected ({selectedProducts.size})
-              </Button>
-            </div>
+            {/* API Status and Sync Button - Moved to Header */}
 
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
               {/* Category Tree */}
@@ -605,103 +623,111 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                      <Input
-                        placeholder="Search products..."
-                        value={filters.search}
-                        onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
-                      />
-                      <Input
-                        placeholder="Min price €"
-                        type="number"
-                        value={filters.priceMin}
-                        onChange={(e) => setFilters(prev => ({ ...prev, priceMin: e.target.value }))}
-                      />
-                      <Input
-                        placeholder="Max price €"
-                        type="number"
-                        value={filters.priceMax}
-                        onChange={(e) => setFilters(prev => ({ ...prev, priceMax: e.target.value }))}
-                      />
-                      <Input
-                        placeholder="Producer"
-                        value={filters.producer}
-                        onChange={(e) => setFilters(prev => ({ ...prev, producer: e.target.value }))}
-                      />
-                    </div>
-                    <div className="flex items-center justify-between mt-4">
-                      <div className="flex items-center space-x-2">
-                        <Checkbox
-                          id="inStockOnly"
-                          checked={filters.inStockOnly}
-                          onCheckedChange={(checked) => 
-                            setFilters(prev => ({ ...prev, inStockOnly: !!checked }))
-                          }
+                    <div className="space-y-3">
+                      {/* Search and Price Filters */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                        <Input
+                          placeholder="Search products..."
+                          value={filters.search}
+                          onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
+                          className="h-9"
                         />
-                        <label htmlFor="inStockOnly" className="text-sm">In stock only</label>
+                        <Input
+                          placeholder="Min price €"
+                          type="number"
+                          value={filters.priceMin}
+                          onChange={(e) => setFilters(prev => ({ ...prev, priceMin: e.target.value }))}
+                          className="h-9"
+                        />
+                        <Input
+                          placeholder="Max price €"
+                          type="number"
+                          value={filters.priceMax}
+                          onChange={(e) => setFilters(prev => ({ ...prev, priceMax: e.target.value }))}
+                          className="h-9"
+                        />
+                        <Input
+                          placeholder="Producer"
+                          value={filters.producer}
+                          onChange={(e) => setFilters(prev => ({ ...prev, producer: e.target.value }))}
+                          className="h-9"
+                        />
                       </div>
-                      <div className="flex gap-2">
-                        <Button
-                          onClick={selectAllSuitable}
-                          variant="outline"
-                          size="sm"
-                          disabled={!selectedCategory}
-                        >
-                          Select Suitable
-                        </Button>
-                        <Button
-                          onClick={clearSelection}
-                          variant="outline"
-                          size="sm"
-                          disabled={selectedProducts.size === 0}
-                        >
-                          Clear ({selectedProducts.size})
-                        </Button>
-                      </div>
-                    </div>
-                    
-                    {/* Bulk Selection Options */}
-                    {selectedCategory && (
-                      <div className="mt-4 pt-4 border-t">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium text-gray-700">Bulk Selection:</span>
-                          <div className="flex gap-2 flex-wrap">
-                            <Button
-                              onClick={selectAllOnPage}
-                              variant="outline"
-                              size="sm"
-                              disabled={products.length === 0}
-                              data-testid="btn-select-page"
-                            >
-                              Select Page ({products.length})
-                            </Button>
-                            <Button
-                              onClick={() => bulkSelectPages(totalPages)}
-                              variant="default"
-                              size="sm"
-                              disabled={bulkLoading || totalPages < 1}
-                              className="bg-blue-600 hover:bg-blue-700"
-                              data-testid="btn-select-all-category"
-                            >
-                              {bulkLoading ? `Loading ${bulkProgress}%...` : `Select All (${totalProducts})`}
-                            </Button>
+
+                      {/* Selection Controls - All in one row */}
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id="inStockOnly"
+                              checked={filters.inStockOnly}
+                              onCheckedChange={(checked) => 
+                                setFilters(prev => ({ ...prev, inStockOnly: !!checked }))
+                              }
+                            />
+                            <label htmlFor="inStockOnly" className="text-sm">In stock only</label>
                           </div>
+
+                          {/* Bulk Selection in same row */}
+                          {selectedCategory && (
+                            <div className="flex items-center gap-2 border-l pl-3">
+                              <Button
+                                onClick={selectAllOnPage}
+                                variant="outline"
+                                size="sm"
+                                disabled={products.length === 0}
+                                data-testid="btn-select-page"
+                              >
+                                Select Page ({products.length})
+                              </Button>
+                              <Button
+                                onClick={() => bulkSelectPages(totalPages)}
+                                variant="outline"
+                                size="sm"
+                                disabled={bulkLoading || totalPages < 1}
+                                data-testid="btn-select-all-category"
+                              >
+                                {bulkLoading ? `Loading ${bulkProgress}%...` : `Select All (${totalProducts})`}
+                              </Button>
+                            </div>
+                          )}
                         </div>
-                        {bulkLoading && (
-                          <div className="mt-2 flex items-center gap-2">
-                            <Progress value={bulkProgress} className="flex-1 h-2" />
-                            <Button
-                              onClick={cancelBulkSelection}
-                              variant="destructive"
-                              size="sm"
-                              data-testid="btn-cancel-bulk"
-                            >
-                              Cancel
-                            </Button>
-                          </div>
-                        )}
+
+                        <div className="flex gap-2">
+                          <Button
+                            onClick={selectAllSuitable}
+                            variant="outline"
+                            size="sm"
+                            disabled={!selectedCategory}
+                          >
+                            Select Suitable
+                          </Button>
+                          <Button
+                            onClick={clearSelection}
+                            variant="outline"
+                            size="sm"
+                            disabled={selectedProducts.size === 0}
+                          >
+                            Clear ({selectedProducts.size})
+                          </Button>
+                        </div>
                       </div>
-                    )}
+
+                      {/* Bulk Loading Progress */}
+                      {bulkLoading && (
+                        <div className="flex items-center gap-2 pt-2">
+                          <Progress value={bulkProgress} className="flex-1 h-2" />
+                          <Button
+                            onClick={cancelBulkSelection}
+                            variant="destructive"
+                            size="sm"
+                            data-testid="btn-cancel-bulk"
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      )}
+                    </div>
                   </CardContent>
                 </Card>
 
