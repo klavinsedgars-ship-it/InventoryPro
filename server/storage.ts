@@ -7,6 +7,7 @@ import {
   syncQueue,
   pricingTiers,
   shippingPolicies,
+  apiUsageTracking,
   type User, 
   type InsertUser, 
   type Product, 
@@ -22,7 +23,9 @@ import {
   type ShippingPolicy,
   type InsertShippingPolicy,
   type PricingTier,
-  type InsertPricingTier
+  type InsertPricingTier,
+  type ApiUsageTracking,
+  type InsertApiUsageTracking
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, gte, lte, desc, asc, count } from "drizzle-orm";
@@ -98,6 +101,11 @@ export interface IStorage {
   createShippingPolicy(policy: InsertShippingPolicy): Promise<ShippingPolicy>;
   updateShippingPolicy(id: string, policy: Partial<InsertShippingPolicy>): Promise<ShippingPolicy | undefined>;
   deleteShippingPolicy(id: string): Promise<boolean>;
+
+  // API Usage Tracking
+  getApiUsage(provider?: string): Promise<ApiUsageTracking | undefined>;
+  trackApiCall(provider: string): Promise<void>;
+  resetApiUsageIfNewDay(provider: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {

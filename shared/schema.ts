@@ -158,6 +158,12 @@ export const insertShippingPolicySchema = createInsertSchema(shippingPolicies).o
   updatedAt: true,
 });
 
+export const insertApiUsageTrackingSchema = createInsertSchema(apiUsageTracking).omit({
+  id: true,
+  lastResetAt: true,
+  updatedAt: true,
+});
+
 // Login schema
 export const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -181,4 +187,6 @@ export type PricingTier = typeof pricingTiers.$inferSelect;
 export type InsertPricingTier = z.infer<typeof insertPricingTierSchema>;
 export type ShippingPolicy = typeof shippingPolicies.$inferSelect;
 export type InsertShippingPolicy = z.infer<typeof insertShippingPolicySchema>;
+export type ApiUsageTracking = typeof apiUsageTracking.$inferSelect;
+export type InsertApiUsageTracking = z.infer<typeof insertApiUsageTrackingSchema>;
 export type LoginData = z.infer<typeof loginSchema>;
