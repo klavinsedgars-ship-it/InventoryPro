@@ -104,12 +104,37 @@ interface TMEBrowserProps {
   user: any;
 }
 
+// Build hierarchical category tree from flat list
+function buildCategoryTree(categories: TMECategory[]): TMECategory[] {
+  const categoryMap = new Map<string, TMECategory>();
+  const rootCategories: TMECategory[] = [];
+  
+  // First pass: create map of all categories
+  categories.forEach(cat => {
+    categoryMap.set(cat.CategoryId, { ...cat, children: [] });
+  });
+  
+  // Second pass: build tree structure
+  categories.forEach(cat => {
+    const category = categoryMap.get(cat.CategoryId)!;
+    if (cat.ParentId && categoryMap.has(cat.ParentId)) {
+      const parent = categoryMap.get(cat.ParentId)!;
+      parent.children = parent.children || [];
+      parent.children.push(category);
+    } else {
+      rootCategories.push(category);
+    }
+  });
+  
+  return rootCategories;
+}
+
 export default function TMEBrowser({ user }: TMEBrowserProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>("");
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
-  const [productsPerPage] = useState(50);
+  const [productsPerPage] = useState(20); // TME API returns 20 products per page
   const [showSyncDialog, setShowSyncDialog] = useState(false);
   const [syncProgress, setSyncProgress] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -216,7 +241,18 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     }
   });
 
-  const categories = (categoriesData as any)?.categories || [];
+  const rawCategories = (categoriesData as any)?.categories || [];
+  
+  // Filter to only show leaf categories (categories that don't have children)
+  // A category is a leaf if its CategoryId never appears as any other category's ParentId
+  const parentIds = new Set(rawCategories.map((c: TMECategory) => c.ParentId).filter(Boolean));
+  const leafCategories = rawCategories.filter((c: TMECategory) => !parentIds.has(c.CategoryId));
+  
+  // Build hierarchical tree for display - group by parent categories
+  const categoryTree = buildCategoryTree(rawCategories);
+  
+  // Use leaf categories for product browsing
+  const categories = leafCategories;
   const products = (productsData as any)?.products || [];
   const totalProducts = (productsData as any)?.total || 0;
   const totalPages = Math.ceil(totalProducts / productsPerPage);
