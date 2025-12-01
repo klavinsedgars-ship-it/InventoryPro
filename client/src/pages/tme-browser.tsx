@@ -100,6 +100,29 @@ interface SyncSettings {
   autoSelectCategory: boolean;
 }
 
+interface ApiUsageResponse {
+  success: boolean;
+  usage: {
+    callsToday: number;
+    dailyLimit: number;
+    remainingDaily: number;
+    usagePercentage: number;
+    rateLimitPerMinute: number;
+    callsThisMinute: number;
+    remainingThisMinute: number;
+    safeRateLimit: number;
+    status: string;
+    lastUpdated: string | null;
+    lastResetAt: string | null;
+  };
+  limits: {
+    daily: number;
+    perMinute: number;
+    safePerMinute: number;
+  };
+  recommendations: string[];
+}
+
 interface TMEBrowserProps {
   user: any;
 }
@@ -145,6 +168,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     search: "",
     priceMin: "",
     priceMax: "",
+    stockMin: "1",
     producer: "",
     inStockOnly: true
   });
@@ -199,11 +223,11 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     staleTime: 1 * 60 * 1000
   });
 
-  // TME API usage query
-  const { data: apiUsage } = useQuery({
+  // TME API usage query - faster refetch during sync
+  const { data: apiUsage } = useQuery<ApiUsageResponse>({
     queryKey: ["/api/tme/usage"],
-    refetchInterval: 30000,
-    staleTime: 30000
+    refetchInterval: isSyncing ? 5000 : 30000,
+    staleTime: isSyncing ? 2000 : 30000
   });
 
   // Sync selected products mutation
@@ -489,40 +513,41 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     <div className="min-h-screen bg-gray-50">
       <Sidebar user={user} />
       <div className="ml-64">
-        <Header user={user} />
+        <Header title="TME Browser" subtitle="Browse and sync products from TME catalog" />
         <main className="p-6">
           <div className="space-y-6">
-            {/* Header with API Status */}
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-3xl font-bold">TME Product Browser</h1>
-                <p className="text-gray-600">Browse and sync products from TME catalog</p>
-              </div>
-              <div className="flex items-center gap-4">
-                {/* API Usage Display - Always visible */}
-                <Card className="p-3" data-testid="api-usage-card">
-                  <div className="flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-gray-500" />
-                    <div className="text-sm">
-                      <div className={`font-medium ${getApiUsageColor()}`}>
-                        API: {apiUsage?.usage?.callsToday ?? 0}/{apiUsage?.usage?.dailyLimit ?? 10000}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {apiUsage?.usage?.remainingDaily ?? 10000} remaining
-                      </div>
+            {/* API Status and Sync Button */}
+            <div className="flex items-center justify-end gap-4">
+              {/* API Usage Display - Always visible */}
+              <Card className="p-3" data-testid="api-usage-card">
+                <div className="flex items-center gap-3">
+                  <div className="text-sm border-r pr-3">
+                    <div className="text-xs text-gray-500 uppercase">Per Minute</div>
+                    <div className={`font-medium ${
+                      (apiUsage?.usage?.callsThisMinute ?? 0) >= (apiUsage?.usage?.safeRateLimit ?? 30) 
+                        ? "text-red-600" 
+                        : "text-green-600"
+                    }`}>
+                      {apiUsage?.usage?.callsThisMinute ?? 0}/{apiUsage?.usage?.safeRateLimit ?? 30}
                     </div>
                   </div>
-                </Card>
+                  <div className="text-sm">
+                    <div className="text-xs text-gray-500 uppercase">Daily</div>
+                    <div className={`font-medium ${getApiUsageColor()}`}>
+                      {apiUsage?.usage?.callsToday ?? 0}/{apiUsage?.usage?.dailyLimit ?? 10000}
+                    </div>
+                  </div>
+                </div>
+              </Card>
 
-                <Button
-                  onClick={() => setShowSyncDialog(true)}
-                  disabled={selectedProducts.size === 0}
-                  className="bg-blue-600 hover:bg-blue-700"
-                >
-                  <Download className="mr-2 h-4 w-4" />
-                  Sync Selected ({selectedProducts.size})
-                </Button>
-              </div>
+              <Button
+                onClick={() => setShowSyncDialog(true)}
+                disabled={selectedProducts.size === 0}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                <Download className="mr-2 h-4 w-4" />
+                Sync Selected ({selectedProducts.size})
+              </Button>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -1029,11 +1054,28 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                 </div>
 
                 {isSyncing && (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <Progress value={syncProgress} className="w-full" />
                     <p className="text-sm text-center text-gray-600">
                       Syncing products... {syncProgress}%
                     </p>
+                    <div className="flex justify-center gap-4 text-xs">
+                      <div className={`px-2 py-1 rounded ${
+                        (apiUsage?.usage?.callsThisMinute ?? 0) >= (apiUsage?.usage?.safeRateLimit ?? 30)
+                          ? "bg-red-100 text-red-700"
+                          : "bg-green-100 text-green-700"
+                      }`}>
+                        Rate: {apiUsage?.usage?.callsThisMinute ?? 0}/{apiUsage?.usage?.safeRateLimit ?? 30} calls/min
+                      </div>
+                      <div className="px-2 py-1 rounded bg-gray-100 text-gray-700">
+                        Daily: {apiUsage?.usage?.callsToday ?? 0}/{apiUsage?.usage?.dailyLimit ?? 10000}
+                      </div>
+                    </div>
+                    {(apiUsage?.usage?.callsThisMinute ?? 0) >= (apiUsage?.usage?.safeRateLimit ?? 30) && (
+                      <p className="text-xs text-center text-amber-600 bg-amber-50 p-2 rounded">
+                        Rate limit reached - waiting for next minute to continue...
+                      </p>
+                    )}
                   </div>
                 )}
               </DialogContent>

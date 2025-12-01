@@ -745,9 +745,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const dailyLimit = apiUsage?.dailyLimit || 10000;
         const usagePercentage = Math.round((callsToday / dailyLimit) * 100);
         const remainingDaily = dailyLimit - callsToday;
+        
+        // Get real-time minute-based usage from TME API instance
+        const minuteUsage = tmeApi.getApiUsage();
         const rateLimitPerMinute = 60;
+        const safeRateLimit = 30; // We use 30 to be conservative
+        const callsThisMinute = minuteUsage.callsThisMinute || 0;
+        const remainingThisMinute = Math.max(0, safeRateLimit - callsThisMinute);
 
-        const status = callsToday >= dailyLimit ? 'LIMIT_EXCEEDED' : usagePercentage >= 80 ? 'WARNING' : 'NORMAL';
+        const status = callsToday >= dailyLimit ? 'LIMIT_EXCEEDED' : 
+                       callsThisMinute >= safeRateLimit ? 'RATE_LIMITED' :
+                       usagePercentage >= 80 ? 'WARNING' : 'NORMAL';
 
         res.json({
           success: true,
@@ -757,15 +765,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
             remainingDaily,
             usagePercentage,
             rateLimitPerMinute,
+            callsThisMinute,
+            remainingThisMinute,
+            safeRateLimit,
             status,
             lastUpdated: apiUsage?.updatedAt || null,
             lastResetAt: apiUsage?.lastResetAt || null
           },
           limits: {
             daily: dailyLimit,
-            perMinute: rateLimitPerMinute
+            perMinute: rateLimitPerMinute,
+            safePerMinute: safeRateLimit
           },
-          recommendations: status === 'WARNING' ? [
+          recommendations: status === 'RATE_LIMITED' ? [
+            `Rate limit reached (${callsThisMinute}/${safeRateLimit} calls/min) - waiting for next minute`,
+            "Sync will automatically resume when rate limit resets"
+          ] : status === 'WARNING' ? [
             `You've used ${usagePercentage}% of your daily limit (${callsToday}/${dailyLimit} calls)`,
             "Consider reducing API calls or upgrading your TME plan"
           ] : status === 'LIMIT_EXCEEDED' ? [
