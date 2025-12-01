@@ -291,16 +291,20 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     }
   };
 
-  // Load enhanced info when products change
-  useEffect(() => {
+  // Enhanced info is now loaded on-demand to avoid hitting API rate limits
+  // Auto-loading disabled - users can click "Load Prices" button to fetch prices
+  const manualLoadEnhanced = () => {
     const productList = (productsData as any)?.products || [];
     if (productList.length > 0) {
-      const symbols = productList.map((p: TMEProduct) => p.Symbol); // Get all visible products
+      const symbols = productList.map((p: TMEProduct) => p.Symbol);
       loadEnhancedProductInfo(symbols);
-    } else {
-      setEnhancedProducts([]);
     }
-  }, [productsData, currentPage]);
+  };
+  
+  // Clear enhanced products when category changes
+  useEffect(() => {
+    setEnhancedProducts([]);
+  }, [selectedCategory]);
 
   const selectCategory = (categoryId: string) => {
     setSelectedCategory(categoryId);
@@ -559,6 +563,25 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                           Products ({totalProducts.toLocaleString()} total)
                         </CardTitle>
                         <div className="flex items-center gap-2">
+                          <Button
+                            onClick={manualLoadEnhanced}
+                            disabled={loadingEnhanced || products.length === 0}
+                            variant="outline"
+                            size="sm"
+                            data-testid="btn-load-prices"
+                          >
+                            {loadingEnhanced ? (
+                              <>
+                                <RefreshCw className="mr-1 h-3 w-3 animate-spin" />
+                                Loading...
+                              </>
+                            ) : (
+                              <>
+                                <TrendingUp className="mr-1 h-3 w-3" />
+                                Load Prices
+                              </>
+                            )}
+                          </Button>
                           <span className="text-sm text-gray-600">
                             Page {currentPage} of {totalPages}
                           </span>
