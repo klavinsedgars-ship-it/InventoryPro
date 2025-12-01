@@ -50,6 +50,7 @@ export function Products({ user }: ProductsProps) {
   const [stockFilter, setStockFilter] = useState<string>("all");
   const [marketplaceFilter, setMarketplaceFilter] = useState<string>("all");
   const [moqFilter, setMoqFilter] = useState<string>("all");
+  const [itemsPerPage, setItemsPerPage] = useState<number>(250);
 
   const { data: products = [], isLoading } = useQuery<Product[]>({
     queryKey: ["/api/products", { 
@@ -150,10 +151,10 @@ export function Products({ user }: ProductsProps) {
 
   // Bulk operations
   const handleSelectAll = () => {
-    if (selectedProducts.size === filteredProducts.length) {
+    if (selectedProducts.size === displayedProducts.length) {
       setSelectedProducts(new Set());
     } else {
-      setSelectedProducts(new Set(filteredProducts.map(p => p.id)));
+      setSelectedProducts(new Set(displayedProducts.map(p => p.id)));
     }
   };
 
@@ -349,6 +350,9 @@ export function Products({ user }: ProductsProps) {
            matchesPrice && matchesStock && matchesMarketplace && matchesMoq;
   });
 
+  // Paginate products based on itemsPerPage
+  const displayedProducts = filteredProducts.slice(0, itemsPerPage);
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Sidebar user={user} />
@@ -440,6 +444,17 @@ export function Products({ user }: ProductsProps) {
                   <SelectItem value="all">All MOQ</SelectItem>
                   <SelectItem value="single">Single (1x)</SelectItem>
                   <SelectItem value="multipack">Multipacks</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={String(itemsPerPage)} onValueChange={(val) => setItemsPerPage(Number(val))}>
+                <SelectTrigger className="w-24 h-9" data-testid="select-items-per-page">
+                  <SelectValue placeholder="Show" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="250">250</SelectItem>
+                  <SelectItem value="500">500</SelectItem>
+                  <SelectItem value="1000">1000</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -629,12 +644,19 @@ export function Products({ user }: ProductsProps) {
               </div>
             ) : (
               <div className="overflow-x-auto">
+                {/* Products count indicator */}
+                <div className="px-4 py-2 bg-gray-50 border-b text-xs text-gray-600">
+                  Showing {displayedProducts.length} of {filteredProducts.length} products
+                  {filteredProducts.length > displayedProducts.length && (
+                    <span className="text-gray-400 ml-1">(increase limit to see more)</span>
+                  )}
+                </div>
                 <table className="w-full divide-y divide-gray-200 table-fixed">
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-1 py-2 text-left text-xs font-medium text-gray-500 uppercase w-8">
                         <Checkbox
-                          checked={selectedProducts.size === filteredProducts.length && filteredProducts.length > 0}
+                          checked={selectedProducts.size === displayedProducts.length && displayedProducts.length > 0}
                           onCheckedChange={handleSelectAll}
                         />
                       </th>
@@ -671,7 +693,7 @@ export function Products({ user }: ProductsProps) {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {filteredProducts.map((product) => (
+                    {displayedProducts.map((product) => (
                       <tr key={product.id} className="hover:bg-gray-50">
                         <td className="px-1 py-2">
                           <Checkbox
