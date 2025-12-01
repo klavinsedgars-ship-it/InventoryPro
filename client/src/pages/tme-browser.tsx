@@ -323,6 +323,16 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     setSelectedProducts(newSelected);
   };
 
+  const selectAllOnPage = () => {
+    const newSelected = new Set(selectedProducts);
+    products.forEach((p: TMEProduct) => newSelected.add(p.Symbol));
+    setSelectedProducts(newSelected);
+    toast({
+      title: "Selected all on page",
+      description: `Added ${products.length} products to selection`
+    });
+  };
+
   const selectAllSuitable = () => {
     const suitableProducts = products.filter((p: TMEProduct) => isSuitableProduct(p));
     const newSelected = new Set(selectedProducts);
@@ -332,6 +342,55 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
 
   const clearSelection = () => {
     setSelectedProducts(new Set());
+  };
+
+  // Bulk load multiple pages and select all products
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState(0);
+  
+  const bulkSelectPages = async (numPages: number) => {
+    if (!selectedCategory) return;
+    
+    setBulkLoading(true);
+    setBulkProgress(0);
+    const newSelected = new Set(selectedProducts);
+    
+    try {
+      for (let page = 1; page <= numPages; page++) {
+        setBulkProgress(Math.round((page / numPages) * 100));
+        
+        const response = await fetch(
+          `/api/tme/products?categoryId=${selectedCategory}&page=${page}&limit=20`
+        );
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.products) {
+            data.products.forEach((p: TMEProduct) => newSelected.add(p.Symbol));
+          }
+        }
+        
+        // Small delay to avoid rate limiting
+        if (page < numPages) {
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+      }
+      
+      setSelectedProducts(newSelected);
+      toast({
+        title: "Bulk selection complete",
+        description: `Selected ${newSelected.size} products from ${numPages} pages`
+      });
+    } catch (error) {
+      toast({
+        title: "Bulk selection failed",
+        description: "Some pages could not be loaded",
+        variant: "destructive"
+      });
+    } finally {
+      setBulkLoading(false);
+      setBulkProgress(0);
+    }
   };
 
   const isSuitableProduct = (product: TMEProduct): boolean => {
@@ -551,6 +610,57 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                         </Button>
                       </div>
                     </div>
+                    
+                    {/* Bulk Selection Options */}
+                    {selectedCategory && (
+                      <div className="mt-4 pt-4 border-t">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium text-gray-700">Bulk Selection:</span>
+                          <div className="flex gap-2 flex-wrap">
+                            <Button
+                              onClick={selectAllOnPage}
+                              variant="outline"
+                              size="sm"
+                              disabled={products.length === 0}
+                              data-testid="btn-select-page"
+                            >
+                              Select Page ({products.length})
+                            </Button>
+                            <Button
+                              onClick={() => bulkSelectPages(5)}
+                              variant="outline"
+                              size="sm"
+                              disabled={bulkLoading || totalPages < 2}
+                              data-testid="btn-select-5-pages"
+                            >
+                              {bulkLoading ? `Loading ${bulkProgress}%...` : "Select 5 Pages (100)"}
+                            </Button>
+                            <Button
+                              onClick={() => bulkSelectPages(Math.min(25, totalPages))}
+                              variant="outline"
+                              size="sm"
+                              disabled={bulkLoading || totalPages < 5}
+                              data-testid="btn-select-25-pages"
+                            >
+                              {bulkLoading ? `Loading ${bulkProgress}%...` : `Select ${Math.min(25, totalPages)} Pages (${Math.min(25, totalPages) * 20})`}
+                            </Button>
+                            <Button
+                              onClick={() => bulkSelectPages(totalPages)}
+                              variant="default"
+                              size="sm"
+                              disabled={bulkLoading || totalPages < 1}
+                              className="bg-blue-600 hover:bg-blue-700"
+                              data-testid="btn-select-all-category"
+                            >
+                              {bulkLoading ? `Loading ${bulkProgress}%...` : `Select All (${totalProducts})`}
+                            </Button>
+                          </div>
+                        </div>
+                        {bulkLoading && (
+                          <Progress value={bulkProgress} className="mt-2 h-2" />
+                        )}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
 
