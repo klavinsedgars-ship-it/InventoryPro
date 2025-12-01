@@ -307,13 +307,45 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
       .map(p => String(p.tmeCategoryId))
   );
   
-  // Check if a category or any of its children are synced
-  const isCategorySynced = (category: TMECategory): boolean => {
+  // Check if a category itself is directly synced (has products synced from it)
+  const isCategoryDirectlySynced = (category: TMECategory): boolean => {
+    return syncedCategoryIds.has(category.CategoryId);
+  };
+  
+  // Check if a category or any of its children have synced products (for showing green checkmark)
+  const hasSyncedDescendants = (category: TMECategory): boolean => {
     if (syncedCategoryIds.has(category.CategoryId)) return true;
     if (category.children && category.children.length > 0) {
-      return category.children.some(child => isCategorySynced(child));
+      return category.children.some(child => hasSyncedDescendants(child));
     }
     return false;
+  };
+  
+  // Check if category is a leaf (no children)
+  const isLeafCategory = (category: TMECategory): boolean => {
+    return !category.children || category.children.length === 0;
+  };
+  
+  // Filter tree to hide only synced leaf categories (not parents)
+  const filterSyncedLeaves = (categories: TMECategory[]): TMECategory[] => {
+    return categories
+      .filter(cat => {
+        // Only hide if it's a leaf AND directly synced
+        if (isLeafCategory(cat) && isCategoryDirectlySynced(cat)) {
+          return false; // Hide this synced leaf
+        }
+        return true; // Keep parents and non-synced leaves
+      })
+      .map(cat => {
+        // Recursively filter children
+        if (cat.children && cat.children.length > 0) {
+          return {
+            ...cat,
+            children: filterSyncedLeaves(cat.children)
+          };
+        }
+        return cat;
+      });
   };
   
   // Toggle category expansion
@@ -668,13 +700,12 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                       </div>
                     ) : (
                       <div className="space-y-0.5">
-                        {categoryTree
-                          .filter(cat => !hideSyncedCategories || !isCategorySynced(cat))
+                        {(hideSyncedCategories ? filterSyncedLeaves(categoryTree) : categoryTree)
                           .map((mainCategory: TMECategory) => {
                             const isExpanded = expandedCategories.has(mainCategory.CategoryId);
                             const hasChildren = mainCategory.children && mainCategory.children.length > 0;
                             const isLeaf = !hasChildren;
-                            const isSynced = isCategorySynced(mainCategory);
+                            const isSynced = hasSyncedDescendants(mainCategory);
                             
                             return (
                               <div key={mainCategory.CategoryId}>
@@ -729,11 +760,10 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                 {isExpanded && hasChildren && (
                                   <div className="ml-3 border-l border-gray-200 pl-2 mt-0.5 space-y-0.5">
                                     {mainCategory.children!
-                                      .filter(sub => !hideSyncedCategories || !isCategorySynced(sub))
                                       .map((subCategory: TMECategory) => {
                                         const subHasChildren = subCategory.children && subCategory.children.length > 0;
                                         const subIsExpanded = expandedCategories.has(subCategory.CategoryId);
-                                        const subIsSynced = isCategorySynced(subCategory);
+                                        const subIsSynced = hasSyncedDescendants(subCategory);
                                         const subIsLeaf = !subHasChildren;
                                         
                                         return (
@@ -788,9 +818,8 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                             {subIsExpanded && subHasChildren && (
                                               <div className="ml-3 border-l border-gray-100 pl-2 mt-0.5 space-y-0.5">
                                                 {subCategory.children!
-                                                  .filter(deep => !hideSyncedCategories || !isCategorySynced(deep))
                                                   .map((deepCategory: TMECategory) => {
-                                                    const deepIsSynced = syncedCategoryIds.has(deepCategory.CategoryId);
+                                                    const deepIsSynced = isCategoryDirectlySynced(deepCategory);
                                                     
                                                     return (
                                                       <div
