@@ -107,6 +107,15 @@ export const shippingPolicies = pgTable("shipping_policies", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const apiUsageTracking = pgTable("api_usage_tracking", {
+  id: serial("id").primaryKey(),
+  provider: text("provider").notNull().default("tme"), // tme, ebay, amazon
+  callsToday: integer("calls_today").notNull().default(0),
+  dailyLimit: integer("daily_limit").notNull().default(10000),
+  lastResetAt: timestamp("last_reset_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
