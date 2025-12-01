@@ -204,9 +204,14 @@ export class EbayApiService {
       // Process images to remove TME watermarks
       let processedImageUrls: string[] = [];
       if (product.imageUrl) {
+        // Fix protocol-relative URLs (starting with //)
+        const fixedImageUrl = product.imageUrl.startsWith('//') 
+          ? 'https:' + product.imageUrl 
+          : product.imageUrl;
+        
         try {
-          console.log(`🖼️ Processing image for eBay listing: ${product.imageUrl}`);
-          const imageResult = await imageProcessingService.removeWatermark(product.imageUrl);
+          console.log(`🖼️ Processing image for eBay listing: ${fixedImageUrl}`);
+          const imageResult = await imageProcessingService.removeWatermark(fixedImageUrl);
           
           if (imageResult.success && imageResult.processedImageUrl) {
             // Convert relative URL to absolute URL for eBay
@@ -219,11 +224,11 @@ export class EbayApiService {
             console.log(`✅ Watermark removed, using processed image: ${absoluteImageUrl}`);
           } else {
             console.log(`⚠️ Watermark removal failed, using original image: ${imageResult.error}`);
-            processedImageUrls = [product.imageUrl];
+            processedImageUrls = [fixedImageUrl];
           }
         } catch (error) {
           console.warn(`⚠️ Image processing failed, using original: ${error}`);
-          processedImageUrls = [product.imageUrl];
+          processedImageUrls = [fixedImageUrl];
         }
       }
 
@@ -993,6 +998,11 @@ export class EbayApiService {
       
       const finalDescription = updateData?.description || templateWithForceRefresh;
       
+      // Fix protocol-relative URLs for images
+      const fixedImageUrl = product.imageUrl && product.imageUrl.startsWith('//') 
+        ? 'https:' + product.imageUrl 
+        : product.imageUrl;
+      
       const listingData = {
         itemId: product.ebayItemId,
         title: updateData?.title || listingTemplate.title,
@@ -1001,7 +1011,7 @@ export class EbayApiService {
         quantity: updateData?.quantity || ebayQuantity,
         categoryId: updateData?.categoryId || categoryMapping.categoryId, // Use automatically mapped category
         condition: updateData?.condition || "New",
-        pictureURLs: product.imageUrl ? [product.imageUrl] : undefined,
+        pictureURLs: fixedImageUrl ? [fixedImageUrl] : undefined,
         ...updateData
       };
 

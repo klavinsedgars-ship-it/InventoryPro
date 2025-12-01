@@ -90,7 +90,14 @@ export class ImageProcessingService {
 
   private async downloadImage(url: string): Promise<Buffer | null> {
     try {
-      const response = await fetch(url, {
+      // Fix protocol-relative URLs (starting with //)
+      let fixedUrl = url;
+      if (url.startsWith('//')) {
+        fixedUrl = 'https:' + url;
+        console.log(`🔗 Fixed protocol-relative URL: ${fixedUrl}`);
+      }
+      
+      const response = await fetch(fixedUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
