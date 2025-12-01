@@ -61,6 +61,21 @@ interface TMEStock {
   Unit: string;
 }
 
+// Combined price and stock from GetPricesAndStocks endpoint
+interface TMEPriceAndStock {
+  Symbol: string;
+  Amount: number;
+  Unit: string;
+  PriceList: Array<{
+    Amount: number;
+    PriceValue: number;
+    PriceBase: number;
+    Special: boolean;
+  }>;
+  VatRate: number;
+  VatType: string;
+}
+
 interface TMECategory {
   CategoryId: string;
   Name: string;
@@ -610,7 +625,25 @@ export class TMEApiService {
     }
   }
 
-  // Get enhanced product info (details + prices + stock)
+  // OPTIMIZED: Get prices AND stocks in a SINGLE API call (50% fewer calls!)
+  async getPricesAndStocks(symbols: string[]): Promise<TMEPriceAndStock[]> {
+    if (symbols.length === 0) return [];
+
+    try {
+      const response = await this.makeRequest<TMEPriceAndStock>("/Products/GetPricesAndStocks.json", {
+        SymbolList: symbols,
+      });
+
+      return response.Data.ProductList || [];
+    } catch (error) {
+      console.error('Failed to get prices and stocks:', error);
+      return [];
+    }
+  }
+
+  // OPTIMIZED: Get enhanced product info using combined GetPricesAndStocks endpoint
+  // Uses batch size of 50 (vs old 10) and 2 API calls per batch (vs old 3)
+  // For 163 products: Old = 51 calls, New = ~7 calls (85% reduction!)
   async getEnhancedProductInfo(symbols: string[]): Promise<Array<{
     product: TMEProduct;
     price: TMEPrice | null;
@@ -618,42 +651,68 @@ export class TMEApiService {
   }>> {
     if (symbols.length === 0) return [];
 
-    const batchSize = 10; // Process in smaller batches
+    // OPTIMIZED: Increased batch size from 10 to 50 for fewer API calls
+    const batchSize = 50;
     const results: Array<{
       product: TMEProduct;
       price: TMEPrice | null;
       stock: TMEStock | null;
     }> = [];
 
+    console.log(`🚀 Optimized sync: ${symbols.length} products in ${Math.ceil(symbols.length / batchSize)} batches of ${batchSize}`);
+    console.log(`📊 API calls needed: ~${Math.ceil(symbols.length / batchSize) * 2} (using GetPricesAndStocks)`);
+
     for (let i = 0; i < symbols.length; i += batchSize) {
       const batch = symbols.slice(i, i + batchSize);
+      const batchNum = Math.floor(i / batchSize) + 1;
+      const totalBatches = Math.ceil(symbols.length / batchSize);
+      
+      console.log(`⚡ Processing batch ${batchNum}/${totalBatches} (${batch.length} products)`);
       
       try {
-        const [products, prices, stocks] = await Promise.all([
+        // OPTIMIZED: Only 2 API calls per batch instead of 3
+        // GetProducts + GetPricesAndStocks (combined prices & stocks)
+        const [products, pricesAndStocks] = await Promise.all([
           this.getProductDetails(batch),
-          this.getProductPrices(batch),
-          this.getProductStock(batch)
+          this.getPricesAndStocks(batch)
         ]);
 
         batch.forEach(symbol => {
           const product = products.find(p => p.Symbol === symbol);
-          const price = prices.find(p => p.Symbol === symbol);
-          const stock = stocks.find(s => s.Symbol === symbol);
+          const priceAndStock = pricesAndStocks.find(p => p.Symbol === symbol);
 
           if (product) {
-            results.push({ product, price: price || null, stock: stock || null });
+            // Convert TMEPriceAndStock to separate price and stock objects
+            const price: TMEPrice | null = priceAndStock ? {
+              Symbol: priceAndStock.Symbol,
+              PriceList: priceAndStock.PriceList,
+              Unit: priceAndStock.Unit,
+              VatRate: priceAndStock.VatRate,
+              VatType: priceAndStock.VatType,
+            } : null;
+
+            const stock: TMEStock | null = priceAndStock ? {
+              Symbol: priceAndStock.Symbol,
+              Amount: priceAndStock.Amount,
+              Unit: priceAndStock.Unit,
+            } : null;
+
+            results.push({ product, price, stock });
           }
         });
 
-        // Rate limiting between batches
+        console.log(`✅ Batch ${batchNum} complete: ${results.length}/${symbols.length} products processed`);
+
+        // Rate limiting between batches - only if more batches remain
         if (i + batchSize < symbols.length) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
       } catch (error) {
-        console.error(`Failed to get enhanced info for batch:`, error);
+        console.error(`Failed to get enhanced info for batch ${batchNum}:`, error);
       }
     }
 
+    console.log(`🎉 Sync complete: ${results.length} products fetched`);
     return results;
   }
 
