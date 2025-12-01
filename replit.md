@@ -46,7 +46,7 @@ Preferred communication style: Simple, everyday language.
 - **eBay Stock Limitation System**: Manages eBay listing quantities based on account limits.
 - **Automatic TME to eBay Category Mapping**: Intelligent mapping system for correct eBay categorization across 180+ categories.
 - **PostgreSQL-Backed TME Product Cache**: Replaces in-memory Map with 24-hour TTL database cache for 150k+ product scalability.
-- **Daily Sync Engine**: Cron-based 2 AM daily synchronization comparing local SKUs vs TME live data with diff-based updates.
+- **Daily Sync Engine**: Automatic 2 AM daily synchronization comparing local SKUs vs TME live data with diff-based updates. Includes manual trigger endpoint (POST /api/sync/trigger-daily) for on-demand sync. Scheduler starts automatically with server.
 - **eBay Bulk Inventory Updates**: ReviseInventoryStatus API integration processing 4 items per call with automatic batching and rate limiting.
 
 ## External Dependencies
