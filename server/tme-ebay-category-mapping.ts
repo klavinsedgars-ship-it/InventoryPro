@@ -85,15 +85,22 @@ export const TME_EBAY_CATEGORY_MAPPINGS: CategoryMapping[] = [
   {
     tmeCategory: "THT universal diodes",
     tmeCategoryKeywords: ["diode", "rectifying", "tht", "through hole", "universal", "silicon"],
-    ebayCategory: "175673",
-    ebayCategoryName: "Electronics Components - Semiconductors & Actives - Diodes", 
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other", 
     confidence: 10
   },
   {
     tmeCategory: "SMD diodes",
     tmeCategoryKeywords: ["diode", "smd", "surface mount", "rectifying", "switching"],
-    ebayCategory: "175673",
-    ebayCategoryName: "Electronics Components - Semiconductors & Actives - Diodes",
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
+    confidence: 10
+  },
+  {
+    tmeCategory: "Diacs",
+    tmeCategoryKeywords: ["diac", "trigger", "bidirectional", "thyristor trigger"],
+    ebayCategory: "58277",
+    ebayCategoryName: "Electronic Components - Other",
     confidence: 10
   },
   {
