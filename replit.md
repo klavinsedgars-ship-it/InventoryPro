@@ -48,6 +48,13 @@ Preferred communication style: Simple, everyday language.
 - **PostgreSQL-Backed TME Product Cache**: Replaces in-memory Map with 24-hour TTL database cache for 150k+ product scalability.
 - **Daily Sync Engine**: Automatic 2 AM daily synchronization comparing local SKUs vs TME live data with diff-based updates. Includes manual trigger endpoints: POST /api/sync/trigger-daily for full sync, POST /api/sync/trigger-ebay for eBay-only sync. Scheduler starts automatically with server.
 - **eBay Bulk Inventory Updates**: ReviseInventoryStatus API integration processing 4 items per call with automatic batching and rate limiting. Integrated into daily sync flow for automatic eBay inventory updates after TME changes are detected.
+- **MOQ (Minimum Order Quantity) System**: Handles products sold in multiples from TME. Stores `moq` and `multiples` fields per product. Key behaviors:
+  - TME sync extracts MinAmount/Multiples from API response
+  - Database stores per-unit prices; eBay listings multiply by MOQ for package pricing
+  - TME Browser shows purple MOQ badges (e.g., "Min: 10 pcs")
+  - Products page shows MOQ column with quantity badges (e.g., "10x")
+  - eBay templates prefix titles with quantity (e.g., "10x Resistor 1K...") and include pack notice in descriptions
+  - Package pricing: Unit Sale Price × MOQ = eBay Listing Price
 
 ## External Dependencies
 
