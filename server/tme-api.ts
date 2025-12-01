@@ -181,8 +181,8 @@ export class TMEApiService {
       this.callsThisMinute = 0;
     }
     
-    // More conservative rate limiting - 30 calls per minute instead of 60
-    const safeRateLimit = 30;
+    // More conservative rate limiting - 55 calls per minute instead of 60
+    const safeRateLimit = 55;
     
     // Check rate limits
     if (this.callsThisMinute >= safeRateLimit) {

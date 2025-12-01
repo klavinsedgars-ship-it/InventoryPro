@@ -191,7 +191,7 @@ export class TMEApiServiceOptimized {
       this.callsThisMinute = 0;
     }
     
-    const safeRateLimit = 25; // Conservative: 25 calls per minute
+    const safeRateLimit = 55; // Conservative: 55 calls per minute
     
     if (this.callsThisMinute >= safeRateLimit) {
       const waitTime = 60000 - (now - this.lastCallTimestamp);
@@ -261,7 +261,7 @@ export class TMEApiServiceOptimized {
       }
     }
     
-    console.log(`📊 TME API Call #${this.callCount}: ${endpoint} (${this.callsThisMinute}/25 this minute)`);
+    console.log(`📊 TME API Call #${this.callCount}: ${endpoint} (${this.callsThisMinute}/55 this minute)`);
 
     try {
       const response = await fetch(url, {

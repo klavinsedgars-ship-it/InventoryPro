@@ -749,7 +749,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Get real-time minute-based usage from TME API instance
         const minuteUsage = tmeApi.getApiUsage();
         const rateLimitPerMinute = 60;
-        const safeRateLimit = 30; // We use 30 to be conservative
+        const safeRateLimit = 55; // We use 55 to be conservative
         const callsThisMinute = minuteUsage.callsThisMinute || 0;
         const remainingThisMinute = Math.max(0, safeRateLimit - callsThisMinute);
 

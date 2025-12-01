@@ -533,11 +533,11 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                   <div className="border-r pr-2">
                     <span className="text-gray-500">Min: </span>
                     <span className={`font-semibold ${
-                      (apiUsage?.usage?.callsThisMinute ?? 0) >= (apiUsage?.usage?.safeRateLimit ?? 30) 
+                      (apiUsage?.usage?.callsThisMinute ?? 0) >= (apiUsage?.usage?.safeRateLimit ?? 55) 
                         ? "text-red-600" 
                         : "text-green-600"
                     }`}>
-                      {apiUsage?.usage?.callsThisMinute ?? 0}/{apiUsage?.usage?.safeRateLimit ?? 30}
+                      {apiUsage?.usage?.callsThisMinute ?? 0}/{apiUsage?.usage?.safeRateLimit ?? 55}
                     </span>
                   </div>
                   <div>
