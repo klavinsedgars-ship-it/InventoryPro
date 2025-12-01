@@ -39,6 +39,7 @@ export const products = pgTable("products", {
   ebayItemId: text("ebay_item_id"),
   amazonAsin: text("amazon_asin"),
   tmeProductId: text("tme_product_id"),
+  tmeCategoryId: text("tme_category_id"), // TME category ID for synced products
   supplier: text("supplier").default("manual"), // manual, TME, etc.
   supplierProductId: text("supplier_product_id"),
   imageUrl: text("image_url"),

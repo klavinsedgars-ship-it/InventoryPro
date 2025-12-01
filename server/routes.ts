@@ -868,6 +868,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 ean: product.EAN || null,
                 weight: product.Weight?.toString() || null,
                 tmeCategory: product.Category || null,
+                tmeCategoryId: product.CategoryId ? String(product.CategoryId) : null,
                 tmeSymbol: product.Symbol
               };
 
@@ -1707,6 +1708,76 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ 
         success: false,
         message: "Failed to trigger eBay sync",
+        error: (error as Error).message
+      });
+    }
+  });
+
+  // Backfill tmeCategoryId for existing products from TME API
+  app.post("/api/sync/backfill-category-ids", requireAuth, async (req, res) => {
+    try {
+      console.log('🔄 Starting category ID backfill for existing products...');
+      
+      const products = await storage.getProducts();
+      const tmeProducts = products.filter(p => 
+        (p.supplier?.toLowerCase() === 'tme') && p.sku && !p.tmeCategoryId
+      );
+      
+      if (tmeProducts.length === 0) {
+        return res.json({
+          success: true,
+          message: 'No products need category ID backfill',
+          result: { total: 0, updated: 0 }
+        });
+      }
+      
+      console.log(`📦 Backfilling category IDs for ${tmeProducts.length} TME products`);
+      
+      let updatedCount = 0;
+      const batchSize = 50;
+      
+      for (let i = 0; i < tmeProducts.length; i += batchSize) {
+        const batch = tmeProducts.slice(i, i + batchSize);
+        const symbols = batch.map(p => p.sku);
+        
+        try {
+          const tmeProductDetails = await tmeApi.getEnhancedProductInfo(symbols);
+          
+          for (const enhanced of tmeProductDetails) {
+            const { product: tmeProduct } = enhanced;
+            const localProduct = batch.find(p => p.sku === tmeProduct.Symbol);
+            
+            if (localProduct && tmeProduct.CategoryId) {
+              await storage.updateProduct(localProduct.id, {
+                tmeCategoryId: String(tmeProduct.CategoryId)
+              });
+              updatedCount++;
+            }
+          }
+          
+          if (i + batchSize < tmeProducts.length) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        } catch (error) {
+          console.error(`❌ Batch category backfill failed:`, error);
+        }
+      }
+      
+      console.log(`🎉 Category ID backfill complete: ${updatedCount}/${tmeProducts.length} products updated`);
+      
+      res.json({
+        success: true,
+        message: `Category ID backfill completed`,
+        result: {
+          total: tmeProducts.length,
+          updated: updatedCount
+        }
+      });
+    } catch (error) {
+      console.error('Category ID backfill failed:', error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to backfill category IDs",
         error: (error as Error).message
       });
     }

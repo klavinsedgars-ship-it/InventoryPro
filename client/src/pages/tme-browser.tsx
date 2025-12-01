@@ -27,7 +27,10 @@ import {
   Settings,
   TrendingUp,
   Clock,
-  AlertTriangle
+  AlertTriangle,
+  Folder,
+  FolderOpen,
+  EyeOff
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Sidebar } from "@/components/layout/sidebar";
@@ -131,10 +134,14 @@ interface TMEBrowserProps {
 function buildCategoryTree(categories: TMECategory[]): TMECategory[] {
   const categoryMap = new Map<string, TMECategory>();
   const rootCategories: TMECategory[] = [];
+  const addedToRoot = new Set<string>();
+  const addedToParent = new Set<string>();
   
-  // First pass: create map of all categories
+  // First pass: create map of all categories (skip duplicates)
   categories.forEach(cat => {
-    categoryMap.set(cat.CategoryId, { ...cat, children: [] });
+    if (!categoryMap.has(cat.CategoryId)) {
+      categoryMap.set(cat.CategoryId, { ...cat, children: [] });
+    }
   });
   
   // Second pass: build tree structure
@@ -143,9 +150,17 @@ function buildCategoryTree(categories: TMECategory[]): TMECategory[] {
     if (cat.ParentId && categoryMap.has(cat.ParentId)) {
       const parent = categoryMap.get(cat.ParentId)!;
       parent.children = parent.children || [];
-      parent.children.push(category);
+      // Avoid adding same child twice
+      if (!addedToParent.has(cat.CategoryId)) {
+        parent.children.push(category);
+        addedToParent.add(cat.CategoryId);
+      }
     } else {
-      rootCategories.push(category);
+      // Root category - avoid duplicates
+      if (!addedToRoot.has(cat.CategoryId)) {
+        rootCategories.push(category);
+        addedToRoot.add(cat.CategoryId);
+      }
     }
   });
   
@@ -163,6 +178,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   const [isSyncing, setIsSyncing] = useState(false);
   const [enhancedProducts, setEnhancedProducts] = useState<EnhancedProduct[]>([]);
   const [loadingEnhanced, setLoadingEnhanced] = useState(false);
+  const [hideSyncedCategories, setHideSyncedCategories] = useState(false);
 
   const [filters, setFilters] = useState<ProductFilters>({
     search: "",
@@ -281,8 +297,37 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   const parentIds = new Set(rawCategories.map((c: TMECategory) => c.ParentId).filter(Boolean));
   const leafCategories = rawCategories.filter((c: TMECategory) => !parentIds.has(c.CategoryId));
   
-  // Build hierarchical tree for display - group by parent categories
+  // Build hierarchical tree for display - group by parent categories  
   const categoryTree = buildCategoryTree(rawCategories);
+  
+  // Get synced category IDs from existing products (normalize to strings for comparison)
+  const syncedCategoryIds = new Set(
+    ((existingProducts as any[]) || [])
+      .filter(p => p.tmeCategoryId)
+      .map(p => String(p.tmeCategoryId))
+  );
+  
+  // Check if a category or any of its children are synced
+  const isCategorySynced = (category: TMECategory): boolean => {
+    if (syncedCategoryIds.has(category.CategoryId)) return true;
+    if (category.children && category.children.length > 0) {
+      return category.children.some(child => isCategorySynced(child));
+    }
+    return false;
+  };
+  
+  // Toggle category expansion
+  const toggleCategoryExpand = (categoryId: string) => {
+    setExpandedCategories(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(categoryId)) {
+        newSet.delete(categoryId);
+      } else {
+        newSet.add(categoryId);
+      }
+      return newSet;
+    });
+  };
   
   // Use leaf categories for product browsing
   const categories = leafCategories;
@@ -590,16 +635,31 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
               {/* Category Tree */}
               <Card className="lg:col-span-1">
                 <CardHeader className="py-3 px-4">
-                  <CardTitle className="text-sm flex items-center">
-                    <Package className="mr-1.5 h-4 w-4" />
-                    Categories
+                  <CardTitle className="text-sm flex items-center justify-between">
+                    <div className="flex items-center">
+                      <Package className="mr-1.5 h-4 w-4" />
+                      Categories
+                    </div>
                   </CardTitle>
-                  <CardDescription className="text-xs">
-                    {categories.length} available
-                  </CardDescription>
+                  <div className="flex items-center justify-between mt-2">
+                    <CardDescription className="text-xs">
+                      {categoryTree.length} main categories
+                    </CardDescription>
+                    <div className="flex items-center gap-1.5">
+                      <Checkbox
+                        id="hideSynced"
+                        checked={hideSyncedCategories}
+                        onCheckedChange={(checked) => setHideSyncedCategories(!!checked)}
+                        className="h-3.5 w-3.5"
+                      />
+                      <label htmlFor="hideSynced" className="text-[10px] text-gray-500 cursor-pointer">
+                        Hide synced
+                      </label>
+                    </div>
+                  </div>
                 </CardHeader>
                 <CardContent className="px-4 pb-4">
-                  <ScrollArea className="h-[calc(100vh-200px)]">
+                  <ScrollArea className="h-[calc(100vh-220px)]">
                     {categoriesLoading ? (
                       <div className="space-y-2">
                         {[...Array(10)].map((_, i) => (
@@ -607,23 +667,166 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                         ))}
                       </div>
                     ) : (
-                      <div className="space-y-1">
-                        {categories.map((category: TMECategory) => (
-                          <div
-                            key={category.CategoryId}
-                            className={`flex items-center justify-between py-2 px-3 rounded cursor-pointer hover:bg-gray-100 ${
-                              selectedCategory === category.CategoryId ? "bg-blue-100 border-l-4 border-blue-500" : ""
-                            }`}
-                            onClick={() => selectCategory(category.CategoryId)}
-                          >
-                            <span className="flex-1 text-sm">{category.Name}</span>
-                            {category.ProductCount && (
-                              <Badge variant="secondary" className="ml-2 text-xs">
-                                {category.ProductCount.toLocaleString()}
-                              </Badge>
-                            )}
-                          </div>
-                        ))}
+                      <div className="space-y-0.5">
+                        {categoryTree
+                          .filter(cat => !hideSyncedCategories || !isCategorySynced(cat))
+                          .map((mainCategory: TMECategory) => {
+                            const isExpanded = expandedCategories.has(mainCategory.CategoryId);
+                            const hasChildren = mainCategory.children && mainCategory.children.length > 0;
+                            const isLeaf = !hasChildren;
+                            const isSynced = isCategorySynced(mainCategory);
+                            
+                            return (
+                              <div key={mainCategory.CategoryId}>
+                                {/* Main Category */}
+                                <div
+                                  className={`flex items-center justify-between py-2 px-2 rounded cursor-pointer transition-colors ${
+                                    selectedCategory === mainCategory.CategoryId 
+                                      ? "bg-blue-100 border-l-3 border-blue-500" 
+                                      : "hover:bg-gray-100"
+                                  } ${isSynced ? "opacity-60" : ""}`}
+                                  onClick={() => {
+                                    if (isLeaf) {
+                                      selectCategory(mainCategory.CategoryId);
+                                    } else {
+                                      toggleCategoryExpand(mainCategory.CategoryId);
+                                    }
+                                  }}
+                                  data-testid={`category-${mainCategory.CategoryId}`}
+                                >
+                                  <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                                    {hasChildren ? (
+                                      isExpanded ? (
+                                        <FolderOpen className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                                      ) : (
+                                        <Folder className="h-4 w-4 text-gray-500 flex-shrink-0" />
+                                      )
+                                    ) : (
+                                      <div className="w-4" />
+                                    )}
+                                    <span className="text-sm font-medium truncate">{mainCategory.Name}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1 flex-shrink-0">
+                                    {isSynced && (
+                                      <CheckCircle2 className="h-3 w-3 text-green-500" />
+                                    )}
+                                    {mainCategory.ProductCount && mainCategory.ProductCount > 0 && (
+                                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                                        {mainCategory.ProductCount.toLocaleString()}
+                                      </Badge>
+                                    )}
+                                    {hasChildren && (
+                                      isExpanded ? (
+                                        <ChevronDown className="h-4 w-4 text-gray-400" />
+                                      ) : (
+                                        <ChevronRight className="h-4 w-4 text-gray-400" />
+                                      )
+                                    )}
+                                  </div>
+                                </div>
+                                
+                                {/* Subcategories */}
+                                {isExpanded && hasChildren && (
+                                  <div className="ml-3 border-l border-gray-200 pl-2 mt-0.5 space-y-0.5">
+                                    {mainCategory.children!
+                                      .filter(sub => !hideSyncedCategories || !isCategorySynced(sub))
+                                      .map((subCategory: TMECategory) => {
+                                        const subHasChildren = subCategory.children && subCategory.children.length > 0;
+                                        const subIsExpanded = expandedCategories.has(subCategory.CategoryId);
+                                        const subIsSynced = isCategorySynced(subCategory);
+                                        const subIsLeaf = !subHasChildren;
+                                        
+                                        return (
+                                          <div key={subCategory.CategoryId}>
+                                            <div
+                                              className={`flex items-center justify-between py-1.5 px-2 rounded cursor-pointer transition-colors ${
+                                                selectedCategory === subCategory.CategoryId 
+                                                  ? "bg-blue-100 border-l-2 border-blue-500" 
+                                                  : "hover:bg-gray-50"
+                                              } ${subIsSynced ? "opacity-60" : ""}`}
+                                              onClick={() => {
+                                                if (subIsLeaf) {
+                                                  selectCategory(subCategory.CategoryId);
+                                                } else {
+                                                  toggleCategoryExpand(subCategory.CategoryId);
+                                                }
+                                              }}
+                                              data-testid={`subcategory-${subCategory.CategoryId}`}
+                                            >
+                                              <div className="flex items-center gap-1 flex-1 min-w-0">
+                                                {subHasChildren ? (
+                                                  subIsExpanded ? (
+                                                    <FolderOpen className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
+                                                  ) : (
+                                                    <Folder className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
+                                                  )
+                                                ) : (
+                                                  <div className="w-3.5" />
+                                                )}
+                                                <span className="text-xs truncate">{subCategory.Name}</span>
+                                              </div>
+                                              <div className="flex items-center gap-1 flex-shrink-0">
+                                                {subIsSynced && (
+                                                  <CheckCircle2 className="h-2.5 w-2.5 text-green-500" />
+                                                )}
+                                                {subCategory.ProductCount && subCategory.ProductCount > 0 && (
+                                                  <Badge variant="outline" className="text-[9px] px-1 py-0 h-4">
+                                                    {subCategory.ProductCount.toLocaleString()}
+                                                  </Badge>
+                                                )}
+                                                {subHasChildren && (
+                                                  subIsExpanded ? (
+                                                    <ChevronDown className="h-3 w-3 text-gray-400" />
+                                                  ) : (
+                                                    <ChevronRight className="h-3 w-3 text-gray-400" />
+                                                  )
+                                                )}
+                                              </div>
+                                            </div>
+                                            
+                                            {/* Level 3 - Deepest subcategories */}
+                                            {subIsExpanded && subHasChildren && (
+                                              <div className="ml-3 border-l border-gray-100 pl-2 mt-0.5 space-y-0.5">
+                                                {subCategory.children!
+                                                  .filter(deep => !hideSyncedCategories || !isCategorySynced(deep))
+                                                  .map((deepCategory: TMECategory) => {
+                                                    const deepIsSynced = syncedCategoryIds.has(deepCategory.CategoryId);
+                                                    
+                                                    return (
+                                                      <div
+                                                        key={deepCategory.CategoryId}
+                                                        className={`flex items-center justify-between py-1 px-2 rounded cursor-pointer transition-colors ${
+                                                          selectedCategory === deepCategory.CategoryId 
+                                                            ? "bg-blue-100 border-l-2 border-blue-500" 
+                                                            : "hover:bg-gray-50"
+                                                        } ${deepIsSynced ? "opacity-60" : ""}`}
+                                                        onClick={() => selectCategory(deepCategory.CategoryId)}
+                                                        data-testid={`deep-category-${deepCategory.CategoryId}`}
+                                                      >
+                                                        <span className="text-[11px] truncate flex-1">{deepCategory.Name}</span>
+                                                        <div className="flex items-center gap-1 flex-shrink-0">
+                                                          {deepIsSynced && (
+                                                            <CheckCircle2 className="h-2.5 w-2.5 text-green-500" />
+                                                          )}
+                                                          {deepCategory.ProductCount && deepCategory.ProductCount > 0 && (
+                                                            <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5">
+                                                              {deepCategory.ProductCount.toLocaleString()}
+                                                            </Badge>
+                                                          )}
+                                                        </div>
+                                                      </div>
+                                                    );
+                                                  })}
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                       </div>
                     )}
                   </ScrollArea>
