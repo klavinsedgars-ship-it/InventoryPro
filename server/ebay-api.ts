@@ -227,12 +227,27 @@ export class EbayApiService {
         }
       }
 
+      // Calculate package price for MOQ products
+      // IMPORTANT: product.salePrice is stored as PER-UNIT price from dynamic pricing
+      // For eBay listings of multi-pack products, we multiply by MOQ to get package price
+      // Example: 10x resistors @ €0.50/unit = €5.00 listing price for the pack
+      const moq = product.moq || 1;
+      let listingPrice = listingDetails.startPrice || parseFloat(product.salePrice) || 0;
+      
+      if (moq > 1 && !listingDetails.startPrice) {
+        // Calculate package price: unit sale price × MOQ
+        // product.salePrice is per-unit, so we multiply to get package price
+        const unitPrice = parseFloat(product.salePrice) || 0;
+        listingPrice = Math.round(unitPrice * moq * 100) / 100;
+        console.log(`📦 MOQ pricing applied: ${moq}x @ €${unitPrice.toFixed(2)}/unit = €${listingPrice.toFixed(2)} package`);
+      }
+
       // Prepare listing data for eBay Trading API
       const listingData = {
         title: listingDetails.title || templateData?.title || product.name,
         description: listingDetails.description || templateData?.htmlDescription || templateData?.description || product.description || `${product.name} - High quality electronics component`,
         categoryId: listingDetails.categoryId || categoryMapping.categoryId, // Use automatically mapped category
-        startPrice: listingDetails.startPrice || parseFloat(product.salePrice) || 0,
+        startPrice: listingPrice,
         quantity: listingDetails.quantity || ebayQuantity, // Use calculated eBay stock
         listingDuration: listingDetails.listingDuration || "Days_7",
         condition: listingDetails.condition || "New",

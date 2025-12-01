@@ -26,18 +26,30 @@ export function generateUnifiedEbayTemplate(product: Product): UnifiedTemplate {
 }
 
 /**
- * Generate consistent title format: Product Name - SKU | Brand | Fast UK Shipping
+ * Generate consistent title format: [MOQ]x Product Name - SKU | Brand | Fast UK Shipping
+ * For products sold in multiples, prefix with quantity (e.g., "10x Resistor 1K")
  */
 function generateUnifiedTitle(product: Product, specs: any): string {
   const name = product.name || 'Electronic Component';
   const sku = product.sku ? ` - ${product.sku}` : '';
   const brand = specs.brand ? ` | ${specs.brand}` : '';
   
-  let title = `${name}${sku}${brand} | Fast UK Shipping`;
+  // Add MOQ prefix for products sold in multiples
+  const moq = product.moq || 1;
+  const moqPrefix = moq > 1 ? `${moq}x ` : '';
+  
+  let title = `${moqPrefix}${name}${sku}${brand} | Fast UK Shipping`;
   
   // Ensure eBay 80 character limit
   if (title.length > 80) {
-    title = `${name}${sku} | UK Stock`.slice(0, 80);
+    // Try shorter version without brand
+    title = `${moqPrefix}${name}${sku} | UK Stock`;
+    if (title.length > 80) {
+      // Further shorten by truncating name
+      const maxNameLen = 80 - moqPrefix.length - sku.length - ' | UK Stock'.length;
+      const truncatedName = name.slice(0, Math.max(20, maxNameLen));
+      title = `${moqPrefix}${truncatedName}${sku} | UK Stock`.slice(0, 80);
+    }
   }
   
   return title;
@@ -48,10 +60,19 @@ function generateUnifiedTitle(product: Product, specs: any): string {
  */
 function generateUnifiedDescription(product: Product, specs: any, category: string): string {
   const sections = [];
+  const moq = product.moq || 1;
   
-  // Header with product name
-  sections.push(`🔧 PROFESSIONAL ${(product.name || 'ELECTRONIC COMPONENT').toUpperCase()}`);
+  // Header with product name and quantity
+  const quantityInfo = moq > 1 ? ` (${moq} PCS PACK)` : '';
+  sections.push(`🔧 PROFESSIONAL ${(product.name || 'ELECTRONIC COMPONENT').toUpperCase()}${quantityInfo}`);
   sections.push('');
+  
+  // Package quantity notice for MOQ products
+  if (moq > 1) {
+    sections.push(`📦 PACK QUANTITY: ${moq} PIECES`);
+    sections.push(`💰 THIS LISTING IS FOR A PACK OF ${moq} UNITS`);
+    sections.push('');
+  }
   
   // Key features (always the same structure)
   sections.push('✅ HIGH QUALITY ELECTRONIC COMPONENT');
@@ -122,6 +143,8 @@ function generateUnifiedDescription(product: Product, specs: any, category: stri
  */
 function generateUnifiedHtmlDescription(product: Product, specs: any, category: string): string {
   const applications = getCategoryApplications(category);
+  const moq = product.moq || 1;
+  const quantityInfo = moq > 1 ? ` (${moq} PCS PACK)` : '';
   
   // Build eBay-compatible HTML with simpler styling (no CSS grid, gradients, etc.)
   const html = `
@@ -129,8 +152,16 @@ function generateUnifiedHtmlDescription(product: Product, specs: any, category: 
   
   <!-- Header -->
   <div style="background-color: #0066cc; color: white; padding: 15px; text-align: center; margin-bottom: 15px;">
-    <h2 style="font-size: 20px; margin: 0;">🔧 PROFESSIONAL ${(product.name || 'ELECTRONIC COMPONENT').toUpperCase()}</h2>
+    <h2 style="font-size: 20px; margin: 0;">🔧 PROFESSIONAL ${(product.name || 'ELECTRONIC COMPONENT').toUpperCase()}${quantityInfo}</h2>
   </div>
+  
+  ${moq > 1 ? `
+  <!-- Pack Quantity Notice -->
+  <div style="background-color: #fff3cd; border: 2px solid #ffc107; padding: 15px; margin-bottom: 15px; text-align: center;">
+    <h3 style="color: #856404; margin: 0 0 5px 0; font-size: 18px;">📦 PACK OF ${moq} PIECES</h3>
+    <p style="margin: 0; color: #856404; font-weight: bold;">This listing is for a pack of ${moq} units at the displayed price</p>
+  </div>
+  ` : ''}
   
   <!-- Quality Features -->
   <div style="background-color: #f0f8ff; border: 2px solid #0066cc; padding: 15px; margin-bottom: 15px;">
