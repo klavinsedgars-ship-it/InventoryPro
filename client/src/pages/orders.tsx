@@ -272,13 +272,13 @@ export function Orders({ user }: OrdersProps) {
   };
 
   return (
-    <div className="flex h-screen bg-gray-50" data-testid="page-orders">
+    <div className="min-h-screen bg-gray-50" data-testid="page-orders">
       <Sidebar user={user} />
       
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="ml-64">
         <Header title="Orders" subtitle="Manage your marketplace orders" />
         
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="p-6">
           <div className="mb-6 flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold text-gray-900" data-testid="heading-orders">Orders</h1>
