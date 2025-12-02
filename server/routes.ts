@@ -1821,6 +1821,139 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Sync Status Dashboard - Aggregated stats for all sync jobs
+  app.get("/api/sync/status", requireAuth, async (req, res) => {
+    try {
+      const logs = await storage.getSyncLogs(500); // Get more logs to calculate stats
+      
+      // Helper to get latest log by operation type
+      const getLatestByOperation = (source: string, operation: string) => {
+        return logs.find(log => log.source === source && log.operation === operation);
+      };
+      
+      // Helper to count logs by source and status in last 24 hours
+      const countRecentBySourceAndStatus = (source: string, status: string, hours: number = 24) => {
+        const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000);
+        return logs.filter(log => 
+          log.source === source && 
+          log.status === status && 
+          log.syncedAt && new Date(log.syncedAt) > cutoff
+        ).length;
+      };
+      
+      // Daily Sync Stats - find latest cron log regardless of operation type
+      const cronLogs = logs.filter(log => log.source === 'cron' && log.syncedAt);
+      const latestCronLog = cronLogs[0]; // Already sorted by syncedAt desc
+      
+      // Determine daily sync status based on the MOST RECENT cron log
+      let dailySyncStatus = 'unknown';
+      let dailySyncLastRun: Date | string | null = null;
+      let dailySyncMessage = 'No sync runs recorded';
+      
+      if (latestCronLog?.syncedAt) {
+        dailySyncLastRun = latestCronLog.syncedAt;
+        
+        if (latestCronLog.operation === 'daily_sync_complete') {
+          dailySyncStatus = 'success';
+          dailySyncMessage = latestCronLog.message || 'Sync completed successfully';
+        } else if (latestCronLog.operation === 'daily_sync_error') {
+          dailySyncStatus = 'error';
+          dailySyncMessage = latestCronLog.message || 'Sync failed';
+        } else if (latestCronLog.operation === 'daily_sync_start') {
+          // Check if there's a completion or error after this start
+          const startTime = new Date(latestCronLog.syncedAt).getTime();
+          const laterComplete = cronLogs.find(log => 
+            log.operation === 'daily_sync_complete' && 
+            log.syncedAt && new Date(log.syncedAt).getTime() > startTime
+          );
+          const laterError = cronLogs.find(log => 
+            log.operation === 'daily_sync_error' && 
+            log.syncedAt && new Date(log.syncedAt).getTime() > startTime
+          );
+          
+          if (laterComplete) {
+            dailySyncStatus = 'success';
+            dailySyncLastRun = laterComplete.syncedAt;
+            dailySyncMessage = laterComplete.message || 'Sync completed successfully';
+          } else if (laterError) {
+            dailySyncStatus = 'error';
+            dailySyncLastRun = laterError.syncedAt;
+            dailySyncMessage = laterError.message || 'Sync failed';
+          } else {
+            // Still running or stalled
+            dailySyncStatus = 'running';
+            dailySyncMessage = latestCronLog.message || 'Sync in progress...';
+          }
+        }
+      }
+      
+      // Get the last complete for details
+      const lastDailyComplete = cronLogs.find(log => log.operation === 'daily_sync_complete');
+      
+      // eBay Sync Stats (last 24 hours)
+      const ebayListingSuccess = countRecentBySourceAndStatus('ebay', 'success');
+      const ebayListingError = countRecentBySourceAndStatus('ebay', 'error');
+      const lastEbayLog = logs.find(log => log.source === 'ebay');
+      
+      // TME Sync Stats (last 24 hours)
+      const tmeSuccess = countRecentBySourceAndStatus('tme', 'success');
+      const tmeError = countRecentBySourceAndStatus('tme', 'error');
+      const lastTmeLog = logs.find(log => log.source === 'tme');
+      
+      // Parse details from last daily complete to get actual numbers
+      let dailySyncDetails = { changedProducts: 0, ebayUpdates: 0, totalProducts: 0 };
+      if (lastDailyComplete?.details) {
+        try {
+          const parsed = JSON.parse(lastDailyComplete.details);
+          dailySyncDetails = {
+            changedProducts: parsed.changedProducts || parsed.changes || 0,
+            ebayUpdates: parsed.ebayUpdates || parsed.ebaySync?.succeeded || 0,
+            totalProducts: parsed.totalProducts || 0
+          };
+        } catch (e) {
+          // Ignore parse errors
+        }
+      }
+      
+      res.json({
+        success: true,
+        syncStatus: {
+          dailySync: {
+            status: dailySyncStatus,
+            lastRun: dailySyncLastRun,
+            message: dailySyncMessage,
+            nextScheduled: '02:00 AM',
+            details: dailySyncDetails
+          },
+          ebaySync: {
+            status: ebayListingError > 0 && ebayListingSuccess === 0 ? 'error' : 
+                   ebayListingSuccess > 0 ? 'success' : 'idle',
+            lastRun: lastEbayLog?.syncedAt || null,
+            successCount24h: ebayListingSuccess,
+            errorCount24h: ebayListingError,
+            lastMessage: lastEbayLog?.message || 'No recent eBay operations'
+          },
+          tmeSync: {
+            status: tmeError > 0 && tmeSuccess === 0 ? 'error' :
+                   tmeSuccess > 0 ? 'success' : 'idle',
+            lastRun: lastTmeLog?.syncedAt || null,
+            successCount24h: tmeSuccess,
+            errorCount24h: tmeError,
+            lastMessage: lastTmeLog?.message || 'No recent TME operations'
+          }
+        },
+        recentLogs: logs.slice(0, 20) // Include recent logs for detail view
+      });
+    } catch (error) {
+      console.error('Failed to get sync status:', error);
+      res.status(500).json({ 
+        success: false,
+        message: "Failed to fetch sync status",
+        error: (error as Error).message
+      });
+    }
+  });
+
   app.post("/api/sync/trigger-daily", requireAuth, async (req, res) => {
     try {
       console.log('🔧 Manual daily sync triggered via API');

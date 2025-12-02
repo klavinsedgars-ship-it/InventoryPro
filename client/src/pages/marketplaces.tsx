@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { 
@@ -16,16 +17,49 @@ import {
   Clock,
   Package,
   DollarSign,
-  Activity
+  Activity,
+  RefreshCw,
+  Loader2,
+  XCircle,
+  Calendar,
+  Zap
 } from "lucide-react";
 import { formatCurrency, formatNumber } from "@/lib/utils";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import type { Product, Category } from "@shared/schema";
 
 interface MarketplacesProps {
   user: any;
 }
 
+interface SyncStatus {
+  dailySync: {
+    status: string;
+    lastRun: string | null;
+    message: string;
+    nextScheduled: string;
+    details: { changedProducts: number; ebayUpdates: number; totalProducts: number };
+  };
+  ebaySync: {
+    status: string;
+    lastRun: string | null;
+    successCount24h: number;
+    errorCount24h: number;
+    lastMessage: string;
+  };
+  tmeSync: {
+    status: string;
+    lastRun: string | null;
+    successCount24h: number;
+    errorCount24h: number;
+    lastMessage: string;
+  };
+}
+
 export function Marketplaces({ user }: MarketplacesProps) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [timeRange, setTimeRange] = useState<string>("7d");
 
   const { data: products = [] } = useQuery<Product[]>({
@@ -39,6 +73,95 @@ export function Marketplaces({ user }: MarketplacesProps) {
   const { data: metrics } = useQuery({
     queryKey: ["/api/dashboard/metrics"],
   });
+
+  // Sync status query
+  const { data: syncStatusData, isLoading: syncStatusLoading } = useQuery<{
+    success: boolean;
+    syncStatus: SyncStatus;
+    recentLogs: any[];
+  }>({
+    queryKey: ["/api/sync/status"],
+    refetchInterval: 30000, // Refresh every 30 seconds
+  });
+
+  const syncStatus = syncStatusData?.syncStatus;
+
+  // Manual sync trigger mutations
+  const triggerDailySyncMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/sync/trigger-daily");
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Daily Sync Completed",
+        description: data.message || "Sync completed successfully",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/sync/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Sync Failed",
+        description: error.message || "Failed to run daily sync",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const triggerEbaySyncMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/sync/trigger-ebay");
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "eBay Sync Completed",
+        description: data.message || `Updated ${data.result?.succeeded || 0} listings`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/sync/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "eBay Sync Failed",
+        description: error.message || "Failed to sync eBay listings",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Helper to format relative time
+  const formatRelativeTime = (dateStr: string | null) => {
+    if (!dateStr) return "Never";
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return "Just now";
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return `${diffDays}d ago`;
+  };
+
+  // Helper to get status icon and color
+  const getStatusDisplay = (status: string) => {
+    switch (status) {
+      case "success":
+        return { icon: CheckCircle, color: "text-green-600", bg: "bg-green-50", label: "Healthy" };
+      case "error":
+        return { icon: XCircle, color: "text-red-600", bg: "bg-red-50", label: "Error" };
+      case "running":
+        return { icon: Loader2, color: "text-blue-600", bg: "bg-blue-50", label: "Running" };
+      case "idle":
+        return { icon: Clock, color: "text-gray-500", bg: "bg-gray-50", label: "Idle" };
+      default:
+        return { icon: AlertCircle, color: "text-yellow-600", bg: "bg-yellow-50", label: "Unknown" };
+    }
+  };
 
   // Calculate analytics
   const totalProducts = products.length;
@@ -94,8 +217,205 @@ export function Marketplaces({ user }: MarketplacesProps) {
         />
 
         <div className="p-6 space-y-6">
+          {/* Sync Jobs Status Section */}
+          <div className="mb-2">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <RefreshCw className="w-5 h-5" />
+              Sync Jobs Status
+            </h2>
+            
+            {syncStatusLoading ? (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {[1, 2, 3].map((i) => (
+                  <Card key={i} className="animate-pulse">
+                    <CardContent className="p-6">
+                      <div className="h-24 bg-gray-200 rounded"></div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : !syncStatus ? (
+              <Card className="border-yellow-200 bg-yellow-50">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-2 text-yellow-700">
+                    <AlertCircle className="w-4 h-4" />
+                    <span className="text-sm">Unable to load sync status. The sync jobs are still running in the background.</span>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Daily Sync Card */}
+                <Card className="border-l-4 border-l-blue-500">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm font-medium flex items-center gap-2">
+                        <Calendar className="w-4 h-4 text-blue-600" />
+                        Daily Sync (TME → eBay)
+                      </CardTitle>
+                      {syncStatus?.dailySync && (() => {
+                        const display = getStatusDisplay(syncStatus.dailySync.status);
+                        return (
+                          <Badge className={`${display.bg} ${display.color} border-0`}>
+                            <display.icon className={`w-3 h-3 mr-1 ${syncStatus.dailySync.status === 'running' ? 'animate-spin' : ''}`} />
+                            {display.label}
+                          </Badge>
+                        );
+                      })()}
+                    </div>
+                    <CardDescription className="text-xs">
+                      Scheduled: {syncStatus?.dailySync?.nextScheduled || '02:00 AM'}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-2">
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">Last Run:</span>
+                        <span className="font-medium">{formatRelativeTime(syncStatus?.dailySync?.lastRun || null)}</span>
+                      </div>
+                      {syncStatus?.dailySync?.details && (
+                        <>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-500">Products Changed:</span>
+                            <span className="font-medium text-blue-600">{syncStatus.dailySync.details.changedProducts}</span>
+                          </div>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-500">eBay Updates:</span>
+                            <span className="font-medium text-green-600">{syncStatus.dailySync.details.ebayUpdates}</span>
+                          </div>
+                        </>
+                      )}
+                      <p className="text-xs text-gray-500 truncate mt-2" title={syncStatus?.dailySync?.message}>
+                        {syncStatus?.dailySync?.message || 'No sync runs recorded'}
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="w-full mt-2"
+                        onClick={() => triggerDailySyncMutation.mutate()}
+                        disabled={triggerDailySyncMutation.isPending}
+                        data-testid="btn-trigger-daily-sync"
+                      >
+                        {triggerDailySyncMutation.isPending ? (
+                          <><Loader2 className="w-3 h-3 mr-2 animate-spin" />Running...</>
+                        ) : (
+                          <><Zap className="w-3 h-3 mr-2" />Run Now</>
+                        )}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* eBay Sync Card */}
+                <Card className="border-l-4 border-l-green-500">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm font-medium flex items-center gap-2">
+                        <ShoppingCart className="w-4 h-4 text-green-600" />
+                        eBay Sync
+                      </CardTitle>
+                      {syncStatus?.ebaySync && (() => {
+                        const display = getStatusDisplay(syncStatus.ebaySync.status);
+                        return (
+                          <Badge className={`${display.bg} ${display.color} border-0`}>
+                            <display.icon className="w-3 h-3 mr-1" />
+                            {display.label}
+                          </Badge>
+                        );
+                      })()}
+                    </div>
+                    <CardDescription className="text-xs">
+                      Listing & inventory updates
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-2">
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">Last Activity:</span>
+                        <span className="font-medium">{formatRelativeTime(syncStatus?.ebaySync?.lastRun || null)}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">Success (24h):</span>
+                        <span className="font-medium text-green-600">{syncStatus?.ebaySync?.successCount24h || 0}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">Errors (24h):</span>
+                        <span className={`font-medium ${(syncStatus?.ebaySync?.errorCount24h || 0) > 0 ? 'text-red-600' : 'text-gray-600'}`}>
+                          {syncStatus?.ebaySync?.errorCount24h || 0}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-500 truncate mt-2" title={syncStatus?.ebaySync?.lastMessage}>
+                        {syncStatus?.ebaySync?.lastMessage || 'No recent eBay operations'}
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="w-full mt-2"
+                        onClick={() => triggerEbaySyncMutation.mutate()}
+                        disabled={triggerEbaySyncMutation.isPending}
+                        data-testid="btn-trigger-ebay-sync"
+                      >
+                        {triggerEbaySyncMutation.isPending ? (
+                          <><Loader2 className="w-3 h-3 mr-2 animate-spin" />Syncing...</>
+                        ) : (
+                          <><RefreshCw className="w-3 h-3 mr-2" />Sync eBay</>
+                        )}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* TME Sync Card */}
+                <Card className="border-l-4 border-l-purple-500">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm font-medium flex items-center gap-2">
+                        <Package className="w-4 h-4 text-purple-600" />
+                        TME Sync
+                      </CardTitle>
+                      {syncStatus?.tmeSync && (() => {
+                        const display = getStatusDisplay(syncStatus.tmeSync.status);
+                        return (
+                          <Badge className={`${display.bg} ${display.color} border-0`}>
+                            <display.icon className="w-3 h-3 mr-1" />
+                            {display.label}
+                          </Badge>
+                        );
+                      })()}
+                    </div>
+                    <CardDescription className="text-xs">
+                      Product data from TME supplier
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-2">
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">Last Activity:</span>
+                        <span className="font-medium">{formatRelativeTime(syncStatus?.tmeSync?.lastRun || null)}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">Success (24h):</span>
+                        <span className="font-medium text-green-600">{syncStatus?.tmeSync?.successCount24h || 0}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">Errors (24h):</span>
+                        <span className={`font-medium ${(syncStatus?.tmeSync?.errorCount24h || 0) > 0 ? 'text-red-600' : 'text-gray-600'}`}>
+                          {syncStatus?.tmeSync?.errorCount24h || 0}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-500 truncate mt-2" title={syncStatus?.tmeSync?.lastMessage}>
+                        {syncStatus?.tmeSync?.lastMessage || 'No recent TME operations'}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+          </div>
+
           {/* Time Range Selector */}
-          <div className="flex justify-end">
+          <div className="flex justify-between items-center">
+            <h2 className="text-lg font-semibold text-gray-900">Marketplace Performance</h2>
             <Select value={timeRange} onValueChange={setTimeRange}>
               <SelectTrigger className="w-40">
                 <SelectValue />
