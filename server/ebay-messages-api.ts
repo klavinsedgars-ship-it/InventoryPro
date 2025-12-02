@@ -120,9 +120,10 @@ export async function getMyMessages(
     const startTimeStr = startTime ? startTime.toISOString() : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const endTimeStr = endTime ? endTime.toISOString() : new Date().toISOString();
 
-    const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
+    // Step 1: Get message headers (IDs) first
+    const headersRequest = `<?xml version="1.0" encoding="utf-8"?>
 <GetMyMessagesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <DetailLevel>ReturnMessages</DetailLevel>
+  <DetailLevel>ReturnHeaders</DetailLevel>
   <StartTime>${startTimeStr}</StartTime>
   <EndTime>${endTimeStr}</EndTime>
   <Pagination>
@@ -131,17 +132,54 @@ export async function getMyMessages(
   </Pagination>
 </GetMyMessagesRequest>`;
 
-    const response = await makeXmlRequest('GetMyMessages', xmlRequest);
+    const headersResponse = await makeXmlRequest('GetMyMessages', headersRequest);
     
-    const ack = parseXmlValue(response, 'Ack');
+    let ack = parseXmlValue(headersResponse, 'Ack');
     if (ack !== 'Success' && ack !== 'Warning') {
-      const errorMessage = parseXmlValue(response, 'LongMessage') || parseXmlValue(response, 'ShortMessage') || 'Unknown error';
-      console.error('GetMyMessages failed:', errorMessage);
+      const errorMessage = parseXmlValue(headersResponse, 'LongMessage') || parseXmlValue(headersResponse, 'ShortMessage') || 'Unknown error';
+      console.error('GetMyMessages (headers) failed:', errorMessage);
+      return { success: false, messages: [], hasMoreMessages: false, error: errorMessage };
+    }
+
+    // Extract message IDs from headers
+    const headerBlocks = parseXmlArray(headersResponse, 'Message', 'Message');
+    const messageIds: string[] = [];
+    
+    for (const block of headerBlocks) {
+      const messageId = parseXmlValue(block, 'MessageID');
+      if (messageId) {
+        messageIds.push(messageId);
+      }
+    }
+
+    if (messageIds.length === 0) {
+      console.log('No messages found in the specified time range');
+      return { success: true, messages: [], hasMoreMessages: false, totalCount: 0 };
+    }
+
+    console.log(`Found ${messageIds.length} message IDs, fetching full messages...`);
+
+    // Step 2: Get full message content using the IDs
+    const messageIdsXml = messageIds.map(id => `<MessageID>${id}</MessageID>`).join('\n    ');
+    const messagesRequest = `<?xml version="1.0" encoding="utf-8"?>
+<GetMyMessagesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <DetailLevel>ReturnMessages</DetailLevel>
+  <MessageIDs>
+    ${messageIdsXml}
+  </MessageIDs>
+</GetMyMessagesRequest>`;
+
+    const messagesResponse = await makeXmlRequest('GetMyMessages', messagesRequest);
+    
+    ack = parseXmlValue(messagesResponse, 'Ack');
+    if (ack !== 'Success' && ack !== 'Warning') {
+      const errorMessage = parseXmlValue(messagesResponse, 'LongMessage') || parseXmlValue(messagesResponse, 'ShortMessage') || 'Unknown error';
+      console.error('GetMyMessages (messages) failed:', errorMessage);
       return { success: false, messages: [], hasMoreMessages: false, error: errorMessage };
     }
 
     const messages: EbayMessage[] = [];
-    const messageBlocks = parseXmlArray(response, 'Message', 'Message');
+    const messageBlocks = parseXmlArray(messagesResponse, 'Message', 'Message');
     
     for (const block of messageBlocks) {
       const message: EbayMessage = {
@@ -163,10 +201,10 @@ export async function getMyMessages(
       messages.push(message);
     }
 
-    const hasMore = parseXmlValue(response, 'HasMoreMessages') === 'true';
-    const totalCount = parseInt(parseXmlValue(response, 'TotalNumberOfMessages') || '0', 10);
+    const hasMore = parseXmlValue(headersResponse, 'HasMoreMessages') === 'true';
+    const totalCount = parseInt(parseXmlValue(headersResponse, 'TotalNumberOfMessages') || '0', 10);
 
-    console.log(`Retrieved ${messages.length} messages from eBay`);
+    console.log(`Retrieved ${messages.length} full messages from eBay`);
     return { success: true, messages, hasMoreMessages: hasMore, totalCount };
   } catch (error) {
     console.error('Error fetching eBay messages:', error);
