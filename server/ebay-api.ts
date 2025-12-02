@@ -702,6 +702,13 @@ export class EbayApiService {
       'X-EBAY-API-CERT-NAME': this.credentials.certId ? 'SET' : 'MISSING'
     });
     
+    // Track eBay API call in database
+    try {
+      await storage.trackApiCall('ebay');
+    } catch (error) {
+      console.error('Failed to track eBay API call:', error);
+    }
+    
     const response = await fetch(tradingUrl, {
       method: 'POST',
       headers: {

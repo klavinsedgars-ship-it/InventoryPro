@@ -86,6 +86,38 @@ export function Marketplaces({ user }: MarketplacesProps) {
 
   const syncStatus = syncStatusData?.syncStatus;
 
+  // API Usage queries
+  const { data: tmeUsageData } = useQuery<{
+    success: boolean;
+    usage: {
+      callsToday: number;
+      dailyLimit: number;
+      remainingDaily: number;
+      usagePercentage: number;
+      status: string;
+    };
+  }>({
+    queryKey: ["/api/tme/usage"],
+    refetchInterval: 30000,
+  });
+
+  const { data: ebayUsageData } = useQuery<{
+    success: boolean;
+    usage: {
+      callsToday: number;
+      dailyLimit: number;
+      remainingDaily: number;
+      usagePercentage: number;
+      status: string;
+    };
+  }>({
+    queryKey: ["/api/ebay/usage"],
+    refetchInterval: 30000,
+  });
+
+  const tmeUsage = tmeUsageData?.usage;
+  const ebayUsage = ebayUsageData?.usage;
+
   // Manual sync trigger mutations
   const triggerDailySyncMutation = useMutation({
     mutationFn: async () => {
@@ -411,6 +443,81 @@ export function Marketplaces({ user }: MarketplacesProps) {
                 </Card>
               </div>
             )}
+
+            {/* API Usage Section */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+              {/* TME API Usage */}
+              <Card className="border-l-4 border-l-purple-500">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-medium flex items-center gap-2">
+                      <Zap className="w-4 h-4 text-purple-600" />
+                      TME API Usage
+                    </CardTitle>
+                    <Badge className={`border-0 ${
+                      tmeUsage?.status === 'LIMIT_EXCEEDED' ? 'bg-red-50 text-red-600' :
+                      tmeUsage?.status === 'WARNING' ? 'bg-yellow-50 text-yellow-600' :
+                      'bg-green-50 text-green-600'
+                    }`}>
+                      {tmeUsage?.status === 'LIMIT_EXCEEDED' ? 'Exceeded' :
+                       tmeUsage?.status === 'WARNING' ? 'Warning' : 'Normal'}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="pt-2">
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500">Calls Today:</span>
+                      <span className="font-medium">{tmeUsage?.callsToday?.toLocaleString() || 0} / {tmeUsage?.dailyLimit?.toLocaleString() || '10,000'}</span>
+                    </div>
+                    <Progress 
+                      value={tmeUsage?.usagePercentage || 0} 
+                      className="h-2"
+                    />
+                    <div className="flex justify-between text-xs text-gray-500">
+                      <span>{tmeUsage?.usagePercentage || 0}% used</span>
+                      <span>{tmeUsage?.remainingDaily?.toLocaleString() || 0} remaining</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* eBay API Usage */}
+              <Card className="border-l-4 border-l-green-500">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-medium flex items-center gap-2">
+                      <Zap className="w-4 h-4 text-green-600" />
+                      eBay API Usage
+                    </CardTitle>
+                    <Badge className={`border-0 ${
+                      ebayUsage?.status === 'LIMIT_EXCEEDED' ? 'bg-red-50 text-red-600' :
+                      ebayUsage?.status === 'WARNING' ? 'bg-yellow-50 text-yellow-600' :
+                      'bg-green-50 text-green-600'
+                    }`}>
+                      {ebayUsage?.status === 'LIMIT_EXCEEDED' ? 'Exceeded' :
+                       ebayUsage?.status === 'WARNING' ? 'Warning' : 'Normal'}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="pt-2">
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500">Calls Today:</span>
+                      <span className="font-medium">{ebayUsage?.callsToday?.toLocaleString() || 0} / {ebayUsage?.dailyLimit?.toLocaleString() || '5,000'}</span>
+                    </div>
+                    <Progress 
+                      value={ebayUsage?.usagePercentage || 0} 
+                      className="h-2"
+                    />
+                    <div className="flex justify-between text-xs text-gray-500">
+                      <span>{ebayUsage?.usagePercentage || 0}% used</span>
+                      <span>{ebayUsage?.remainingDaily?.toLocaleString() || 0} remaining</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </div>
 
           {/* Time Range Selector */}

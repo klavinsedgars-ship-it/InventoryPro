@@ -960,6 +960,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     });
 
+    // Get eBay API usage statistics
+    app.get("/api/ebay/usage", async (req, res) => {
+      try {
+        // Get usage from database - persistent across page reloads
+        const apiUsage = await storage.getApiUsage("ebay");
+        const callsToday = apiUsage?.callsToday || 0;
+        const dailyLimit = apiUsage?.dailyLimit || 5000; // eBay typically allows 5000 calls/day
+        const usagePercentage = Math.round((callsToday / dailyLimit) * 100);
+        const remainingDaily = dailyLimit - callsToday;
+        
+        // eBay has different rate limits - typically 5000/day for Trading API
+        const rateLimitPerMinute = 50;
+        const safeRateLimit = 40; // Conservative limit
+
+        const status = callsToday >= dailyLimit ? 'LIMIT_EXCEEDED' : 
+                       usagePercentage >= 80 ? 'WARNING' : 'NORMAL';
+
+        res.json({
+          success: true,
+          usage: {
+            callsToday,
+            dailyLimit,
+            remainingDaily,
+            usagePercentage,
+            rateLimitPerMinute,
+            safeRateLimit,
+            status,
+            lastUpdated: apiUsage?.updatedAt || null,
+            lastResetAt: apiUsage?.lastResetAt || null
+          },
+          limits: {
+            daily: dailyLimit,
+            perMinute: rateLimitPerMinute,
+            safePerMinute: safeRateLimit
+          }
+        });
+      } catch (error) {
+        console.error("Failed to get eBay usage:", error);
+        res.status(500).json({
+          success: false,
+          error: "Failed to get eBay usage statistics"
+        });
+      }
+    });
+
     // Sync selected TME products - alias to optimized endpoint
     app.post("/api/tme/sync-selected", async (req, res) => {
       try {
