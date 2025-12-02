@@ -123,6 +123,53 @@ function parseXmlValue(xml: string, tagName: string): string | null {
   return match ? match[1].trim() : null;
 }
 
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, num) => String.fromCharCode(parseInt(num, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+}
+
+function stripHtmlTags(html: string): string {
+  // Decode HTML entities first
+  let text = decodeHtmlEntities(html);
+  
+  // Replace common block elements with newlines
+  text = text.replace(/<br\s*\/?>/gi, '\n');
+  text = text.replace(/<\/p>/gi, '\n\n');
+  text = text.replace(/<\/div>/gi, '\n');
+  text = text.replace(/<\/tr>/gi, '\n');
+  text = text.replace(/<\/li>/gi, '\n');
+  
+  // Remove all remaining HTML tags
+  text = text.replace(/<[^>]+>/g, '');
+  
+  // Decode entities again (in case tags contained entities)
+  text = decodeHtmlEntities(text);
+  
+  // Clean up whitespace
+  text = text.replace(/\n\s*\n\s*\n/g, '\n\n'); // Max 2 newlines
+  text = text.replace(/[ \t]+/g, ' '); // Collapse spaces
+  text = text.trim();
+  
+  return text;
+}
+
+function cleanMessageBody(rawBody: string): string {
+  if (!rawBody) return '';
+  
+  // Check if it looks like HTML
+  if (rawBody.includes('<') || rawBody.includes('&lt;')) {
+    return stripHtmlTags(rawBody);
+  }
+  
+  return rawBody.trim();
+}
+
 function parseXmlArray(xml: string, containerTag: string, itemTag: string): string[] {
   const containerRegex = new RegExp(`<${containerTag}>(.*?)</${containerTag}>`, 'gs');
   const results: string[] = [];
@@ -212,10 +259,11 @@ export async function getMyMessages(
       const messageBlocks = parseXmlArray(messagesResponse, 'Message', 'Message');
       
       for (const block of messageBlocks) {
+        const rawBody = parseXmlValue(block, 'Text') || parseXmlValue(block, 'Content') || '';
         const message: EbayMessage = {
           messageId: parseXmlValue(block, 'MessageID') || '',
-          subject: parseXmlValue(block, 'Subject') || '(No Subject)',
-          body: parseXmlValue(block, 'Text') || parseXmlValue(block, 'Content') || '',
+          subject: cleanMessageBody(parseXmlValue(block, 'Subject') || '(No Subject)'),
+          body: cleanMessageBody(rawBody),
           sender: parseXmlValue(block, 'Sender') || '',
           senderEmail: parseXmlValue(block, 'SenderEmail') || undefined,
           recipientUserId: parseXmlValue(block, 'RecipientUserID') || '',
