@@ -2041,19 +2041,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      const updates = ebayProducts.map(product => ({
-        productId: product.id,
-        ebayItemId: product.ebayItemId!,
-        quantity: product.stock || 0,
-        price: parseFloat(product.salePrice?.toString() || '0'),
-        sku: product.sku
-      }));
+      // Use calculateEbayStock to apply stock limits (default 3) instead of raw TME stock
+      const updates = ebayProducts.map(product => {
+        const stockInfo = calculateEbayStock(product);
+        console.log(`📊 Product ${product.sku}: TME stock ${stockInfo.tmeStock} → eBay stock ${stockInfo.ebayStock} (${stockInfo.limitReason})`);
+        return {
+          productId: product.id,
+          ebayItemId: product.ebayItemId!,
+          quantity: stockInfo.ebayStock, // Use limited eBay stock, not raw TME stock
+          price: parseFloat(product.salePrice?.toString() || '0'),
+          sku: product.sku
+        };
+      });
       
       const result = await ebayApi.bulkUpdateInventory(updates);
       
       res.json({
         success: true,
-        message: 'eBay sync completed',
+        message: 'eBay sync completed with stock limits applied',
         result: {
           attempted: updates.length,
           succeeded: result.succeeded,
