@@ -55,6 +55,19 @@ Preferred communication style: Simple, everyday language.
   - Products page shows MOQ column with quantity badges (e.g., "10x")
   - eBay templates prefix titles with quantity (e.g., "10x Resistor 1K...") and include pack notice in descriptions
   - Package pricing: Unit Sale Price × MOQ = eBay Listing Price
+- **eBay Business Policies Management**: Full CRUD for eBay business policies via Account API (OAuth 2.0). Three policy types:
+  - Payment Policies: Payment methods, immediate pay settings
+  - Fulfillment (Shipping) Policies: Handling time, shipping options, global shipping
+  - Return Policies: Return period, refund method, shipping cost payer
+  - Sync from eBay: POST /api/ebay/business-policies/sync
+  - Check OAuth status: GET /api/ebay/business-policies/status
+  - Frontend: /ebay-policies page with tabs for each policy type
+  - **OAuth Environment Variables** (separate from Trading API):
+    - `EBAY_OAUTH_CLIENT_ID`: eBay App Client ID from Developer Portal
+    - `EBAY_OAUTH_CLIENT_SECRET`: eBay App Client Secret from Developer Portal
+    - `EBAY_OAUTH_REFRESH_TOKEN`: OAuth Refresh Token with `sell.account` scope
+  - The system automatically refreshes access tokens and caches them for efficiency
+  - Frontend displays OAuth configuration status and disables sync when not configured
 
 ## External Dependencies
 

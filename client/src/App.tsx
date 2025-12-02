@@ -19,6 +19,7 @@ import Configuration from "@/pages/configuration";
 import { Login } from "@/pages/login";
 import NotFound from "@/pages/not-found";
 import ImageProcessingPage from './pages/image-processing';
+import { EbayPolicies } from "@/pages/ebay-policies";
 
 function AppContent() {
   // Temporary bypass for authentication - using mock user
@@ -97,6 +98,7 @@ function AppContent() {
       <Route path="/reports" component={() => <Reports user={user} />} />
       <Route path="/settings" component={() => <Settings user={user} />} />
       <Route path="/image-processing" component={() => <ImageProcessingPage />} />
+      <Route path="/ebay-policies" component={() => <EbayPolicies user={user} />} />
       <Route component={NotFound} />
     </Switch>
   );

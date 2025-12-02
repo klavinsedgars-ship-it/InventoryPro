@@ -147,6 +147,61 @@ export const tmeProductCache = pgTable("tme_product_cache", {
   expiresAt: timestamp("expires_at").notNull(), // When cache should be refreshed (24 hours)
 });
 
+// eBay Business Policies - Payment Policies
+export const ebayPaymentPolicies = pgTable("ebay_payment_policies", {
+  id: serial("id").primaryKey(),
+  policyId: text("policy_id").notNull().unique(), // eBay's policy ID
+  name: text("name").notNull(),
+  description: text("description"),
+  marketplaceId: text("marketplace_id").notNull().default("EBAY_GB"), // EBAY_US, EBAY_GB, etc.
+  categoryTypes: text("category_types"), // JSON array of category types
+  paymentMethods: text("payment_methods"), // JSON array of payment methods
+  immediatePay: boolean("immediate_pay").default(true),
+  isDefault: boolean("is_default").default(false),
+  syncedFromEbay: boolean("synced_from_ebay").default(false), // true if fetched from eBay
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// eBay Business Policies - Fulfillment (Shipping) Policies
+export const ebayFulfillmentPolicies = pgTable("ebay_fulfillment_policies", {
+  id: serial("id").primaryKey(),
+  policyId: text("policy_id").notNull().unique(), // eBay's policy ID
+  name: text("name").notNull(),
+  description: text("description"),
+  marketplaceId: text("marketplace_id").notNull().default("EBAY_GB"),
+  categoryTypes: text("category_types"), // JSON array
+  handlingTime: integer("handling_time").notNull().default(1), // Days to dispatch
+  shippingOptions: text("shipping_options"), // JSON array of shipping options
+  shipToLocations: text("ship_to_locations"), // JSON - regions included/excluded
+  globalShipping: boolean("global_shipping").default(false),
+  pickupDropOff: boolean("pickup_drop_off").default(false),
+  freightShipping: boolean("freight_shipping").default(false),
+  isDefault: boolean("is_default").default(false),
+  syncedFromEbay: boolean("synced_from_ebay").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// eBay Business Policies - Return Policies
+export const ebayReturnPolicies = pgTable("ebay_return_policies", {
+  id: serial("id").primaryKey(),
+  policyId: text("policy_id").notNull().unique(), // eBay's policy ID
+  name: text("name").notNull(),
+  description: text("description"),
+  marketplaceId: text("marketplace_id").notNull().default("EBAY_GB"),
+  categoryTypes: text("category_types"), // JSON array
+  returnsAccepted: boolean("returns_accepted").notNull().default(true),
+  returnPeriod: integer("return_period").default(30), // Days
+  refundMethod: text("refund_method").default("MONEY_BACK"), // MONEY_BACK, EXCHANGE
+  returnShippingCostPayer: text("return_shipping_cost_payer").default("BUYER"), // BUYER, SELLER
+  restockingFeePercentage: text("restocking_fee_percentage"), // Optional restocking fee
+  isDefault: boolean("is_default").default(false),
+  syncedFromEbay: boolean("synced_from_ebay").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
@@ -205,6 +260,24 @@ export const insertBulkListingJobSchema = createInsertSchema(bulkListingJobs).om
   completedAt: true,
 });
 
+export const insertEbayPaymentPolicySchema = createInsertSchema(ebayPaymentPolicies).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertEbayFulfillmentPolicySchema = createInsertSchema(ebayFulfillmentPolicies).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertEbayReturnPolicySchema = createInsertSchema(ebayReturnPolicies).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 // Login schema
 export const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -234,4 +307,10 @@ export type TmeProductCache = typeof tmeProductCache.$inferSelect;
 export type InsertTmeProductCache = z.infer<typeof insertTmeProductCacheSchema>;
 export type BulkListingJob = typeof bulkListingJobs.$inferSelect;
 export type InsertBulkListingJob = z.infer<typeof insertBulkListingJobSchema>;
+export type EbayPaymentPolicy = typeof ebayPaymentPolicies.$inferSelect;
+export type InsertEbayPaymentPolicy = z.infer<typeof insertEbayPaymentPolicySchema>;
+export type EbayFulfillmentPolicy = typeof ebayFulfillmentPolicies.$inferSelect;
+export type InsertEbayFulfillmentPolicy = z.infer<typeof insertEbayFulfillmentPolicySchema>;
+export type EbayReturnPolicy = typeof ebayReturnPolicies.$inferSelect;
+export type InsertEbayReturnPolicy = z.infer<typeof insertEbayReturnPolicySchema>;
 export type LoginData = z.infer<typeof loginSchema>;

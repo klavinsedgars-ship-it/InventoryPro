@@ -12,7 +12,8 @@ import {
   FileText,
   Cog,
   Search,
-  Image as ImageIcon
+  Image as ImageIcon,
+  FileStack
 } from "lucide-react";
 
 const navigation = [
@@ -22,6 +23,7 @@ const navigation = [
   { name: 'TME Sync', href: '/sync', icon: RefreshCw },
   { name: 'TME Browser', href: '/tme-browser', icon: Search },
   { name: 'Configuration', href: '/configuration', icon: Cog },
+  { name: 'eBay Policies', href: '/ebay-policies', icon: FileStack },
   { name: 'Queue Manager', href: '/queue', icon: Database },
   { name: 'Templates', href: '/templates', icon: FileText },
   { name: 'Reports', href: '/reports', icon: BarChart3 },

@@ -10,6 +10,9 @@ import {
   apiUsageTracking,
   tmeProductCache,
   bulkListingJobs,
+  ebayPaymentPolicies,
+  ebayFulfillmentPolicies,
+  ebayReturnPolicies,
   type User, 
   type InsertUser, 
   type Product, 
@@ -31,7 +34,13 @@ import {
   type TmeProductCache,
   type InsertTmeProductCache,
   type BulkListingJob,
-  type InsertBulkListingJob
+  type InsertBulkListingJob,
+  type EbayPaymentPolicy,
+  type InsertEbayPaymentPolicy,
+  type EbayFulfillmentPolicy,
+  type InsertEbayFulfillmentPolicy,
+  type EbayReturnPolicy,
+  type InsertEbayReturnPolicy
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, gte, lte, desc, asc, count } from "drizzle-orm";
@@ -127,6 +136,27 @@ export interface IStorage {
   getBulkListingJob(id: string): Promise<BulkListingJob | undefined>;
   updateBulkListingJob(id: string, updates: Partial<InsertBulkListingJob>): Promise<BulkListingJob | undefined>;
   cleanOldBulkListingJobs(olderThanHours?: number): Promise<number>;
+
+  // eBay Payment Policies
+  getEbayPaymentPolicies(): Promise<EbayPaymentPolicy[]>;
+  getEbayPaymentPolicy(policyId: string): Promise<EbayPaymentPolicy | undefined>;
+  createEbayPaymentPolicy(policy: InsertEbayPaymentPolicy): Promise<EbayPaymentPolicy>;
+  updateEbayPaymentPolicy(policyId: string, policy: Partial<InsertEbayPaymentPolicy>): Promise<EbayPaymentPolicy | undefined>;
+  deleteEbayPaymentPolicy(policyId: string): Promise<boolean>;
+
+  // eBay Fulfillment (Shipping) Policies
+  getEbayFulfillmentPolicies(): Promise<EbayFulfillmentPolicy[]>;
+  getEbayFulfillmentPolicy(policyId: string): Promise<EbayFulfillmentPolicy | undefined>;
+  createEbayFulfillmentPolicy(policy: InsertEbayFulfillmentPolicy): Promise<EbayFulfillmentPolicy>;
+  updateEbayFulfillmentPolicy(policyId: string, policy: Partial<InsertEbayFulfillmentPolicy>): Promise<EbayFulfillmentPolicy | undefined>;
+  deleteEbayFulfillmentPolicy(policyId: string): Promise<boolean>;
+
+  // eBay Return Policies
+  getEbayReturnPolicies(): Promise<EbayReturnPolicy[]>;
+  getEbayReturnPolicy(policyId: string): Promise<EbayReturnPolicy | undefined>;
+  createEbayReturnPolicy(policy: InsertEbayReturnPolicy): Promise<EbayReturnPolicy>;
+  updateEbayReturnPolicy(policyId: string, policy: Partial<InsertEbayReturnPolicy>): Promise<EbayReturnPolicy | undefined>;
+  deleteEbayReturnPolicy(policyId: string): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -616,6 +646,90 @@ export class DatabaseStorage implements IStorage {
     const result = await db.delete(bulkListingJobs)
       .where(lte(bulkListingJobs.createdAt, cutoffTime));
     return result.rowCount ?? 0;
+  }
+
+  // eBay Payment Policies
+  async getEbayPaymentPolicies(): Promise<EbayPaymentPolicy[]> {
+    return await db.select().from(ebayPaymentPolicies).orderBy(desc(ebayPaymentPolicies.createdAt));
+  }
+
+  async getEbayPaymentPolicy(policyId: string): Promise<EbayPaymentPolicy | undefined> {
+    const result = await db.select().from(ebayPaymentPolicies).where(eq(ebayPaymentPolicies.policyId, policyId));
+    return result[0] || undefined;
+  }
+
+  async createEbayPaymentPolicy(policy: InsertEbayPaymentPolicy): Promise<EbayPaymentPolicy> {
+    const result = await db.insert(ebayPaymentPolicies).values(policy).returning();
+    return result[0];
+  }
+
+  async updateEbayPaymentPolicy(policyId: string, policy: Partial<InsertEbayPaymentPolicy>): Promise<EbayPaymentPolicy | undefined> {
+    const result = await db.update(ebayPaymentPolicies)
+      .set({ ...policy, updatedAt: new Date() })
+      .where(eq(ebayPaymentPolicies.policyId, policyId))
+      .returning();
+    return result[0] || undefined;
+  }
+
+  async deleteEbayPaymentPolicy(policyId: string): Promise<boolean> {
+    const result = await db.delete(ebayPaymentPolicies).where(eq(ebayPaymentPolicies.policyId, policyId));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // eBay Fulfillment (Shipping) Policies
+  async getEbayFulfillmentPolicies(): Promise<EbayFulfillmentPolicy[]> {
+    return await db.select().from(ebayFulfillmentPolicies).orderBy(desc(ebayFulfillmentPolicies.createdAt));
+  }
+
+  async getEbayFulfillmentPolicy(policyId: string): Promise<EbayFulfillmentPolicy | undefined> {
+    const result = await db.select().from(ebayFulfillmentPolicies).where(eq(ebayFulfillmentPolicies.policyId, policyId));
+    return result[0] || undefined;
+  }
+
+  async createEbayFulfillmentPolicy(policy: InsertEbayFulfillmentPolicy): Promise<EbayFulfillmentPolicy> {
+    const result = await db.insert(ebayFulfillmentPolicies).values(policy).returning();
+    return result[0];
+  }
+
+  async updateEbayFulfillmentPolicy(policyId: string, policy: Partial<InsertEbayFulfillmentPolicy>): Promise<EbayFulfillmentPolicy | undefined> {
+    const result = await db.update(ebayFulfillmentPolicies)
+      .set({ ...policy, updatedAt: new Date() })
+      .where(eq(ebayFulfillmentPolicies.policyId, policyId))
+      .returning();
+    return result[0] || undefined;
+  }
+
+  async deleteEbayFulfillmentPolicy(policyId: string): Promise<boolean> {
+    const result = await db.delete(ebayFulfillmentPolicies).where(eq(ebayFulfillmentPolicies.policyId, policyId));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // eBay Return Policies
+  async getEbayReturnPolicies(): Promise<EbayReturnPolicy[]> {
+    return await db.select().from(ebayReturnPolicies).orderBy(desc(ebayReturnPolicies.createdAt));
+  }
+
+  async getEbayReturnPolicy(policyId: string): Promise<EbayReturnPolicy | undefined> {
+    const result = await db.select().from(ebayReturnPolicies).where(eq(ebayReturnPolicies.policyId, policyId));
+    return result[0] || undefined;
+  }
+
+  async createEbayReturnPolicy(policy: InsertEbayReturnPolicy): Promise<EbayReturnPolicy> {
+    const result = await db.insert(ebayReturnPolicies).values(policy).returning();
+    return result[0];
+  }
+
+  async updateEbayReturnPolicy(policyId: string, policy: Partial<InsertEbayReturnPolicy>): Promise<EbayReturnPolicy | undefined> {
+    const result = await db.update(ebayReturnPolicies)
+      .set({ ...policy, updatedAt: new Date() })
+      .where(eq(ebayReturnPolicies.policyId, policyId))
+      .returning();
+    return result[0] || undefined;
+  }
+
+  async deleteEbayReturnPolicy(policyId: string): Promise<boolean> {
+    const result = await db.delete(ebayReturnPolicies).where(eq(ebayReturnPolicies.policyId, policyId));
+    return (result.rowCount ?? 0) > 0;
   }
 }
 
