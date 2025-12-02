@@ -1,11 +1,8 @@
 // eBay Account API Service - Manages Business Policies via REST API
-// Uses OAuth 2.0 for authentication with sell.account scope
-// IMPORTANT: Requires separate OAuth credentials from Trading API
-// - EBAY_OAUTH_CLIENT_ID: OAuth App Client ID
-// - EBAY_OAUTH_CLIENT_SECRET: OAuth App Client Secret
-// - EBAY_OAUTH_REFRESH_TOKEN: OAuth Refresh Token with sell.account scope
+// Uses unified OAuth service for authentication (same as Trading API)
 
 import { storage } from "./storage";
+import { ebayOAuth } from "./ebay-oauth";
 import type { 
   InsertEbayPaymentPolicy, 
   InsertEbayFulfillmentPolicy, 
@@ -28,13 +25,6 @@ interface EbayApiError {
     message: string;
     longMessage?: string;
   }>;
-}
-
-interface OAuthTokenResponse {
-  access_token: string;
-  token_type: string;
-  expires_in: number;
-  refresh_token?: string;
 }
 
 // eBay Account API Response Types
@@ -93,32 +83,14 @@ export class EbayAccountApiService {
   private sandboxUrl = "https://api.sandbox.ebay.com";
   private isProduction = true;
   private defaultMarketplaceId = "EBAY_GB"; // UK marketplace
-  
-  // OAuth token cache
-  private cachedAccessToken: string | null = null;
-  private tokenExpiresAt: number = 0;
-  private oauthConfigured = false;
 
   constructor() {
-    // Check if OAuth credentials are configured
-    const clientId = process.env.EBAY_OAUTH_CLIENT_ID;
-    const clientSecret = process.env.EBAY_OAUTH_CLIENT_SECRET;
-    const refreshToken = process.env.EBAY_OAUTH_REFRESH_TOKEN;
-    
-    this.oauthConfigured = !!(clientId && clientSecret && refreshToken);
-    
-    if (this.oauthConfigured) {
-      console.log("✅ eBay Account API Service initialized");
-      console.log("   OAuth credentials configured for Account API");
-    } else {
-      console.log("⚠️ eBay Account API Service initialized (OAuth not configured)");
-      console.log("   Set EBAY_OAUTH_CLIENT_ID, EBAY_OAUTH_CLIENT_SECRET, EBAY_OAUTH_REFRESH_TOKEN");
-      console.log("   to enable business policy management");
-    }
+    console.log("✅ eBay Account API Service initialized");
+    console.log("   Using unified OAuth service");
   }
 
   public isConfigured(): boolean {
-    return this.oauthConfigured;
+    return ebayOAuth.isOAuthConfigured();
   }
 
   private getApiUrl(): string {
@@ -126,65 +98,8 @@ export class EbayAccountApiService {
   }
 
   private async getAccessToken(): Promise<string> {
-    // Check if OAuth is configured
-    if (!this.oauthConfigured) {
-      throw new Error(
-        "eBay OAuth not configured. Set EBAY_OAUTH_CLIENT_ID, EBAY_OAUTH_CLIENT_SECRET, and EBAY_OAUTH_REFRESH_TOKEN environment variables."
-      );
-    }
-
-    // Return cached token if still valid (with 5 minute buffer)
-    if (this.cachedAccessToken && Date.now() < this.tokenExpiresAt - 300000) {
-      return this.cachedAccessToken;
-    }
-
-    // Refresh the access token
-    const clientId = process.env.EBAY_OAUTH_CLIENT_ID!;
-    const clientSecret = process.env.EBAY_OAUTH_CLIENT_SECRET!;
-    const refreshToken = process.env.EBAY_OAUTH_REFRESH_TOKEN!;
-
-    const authUrl = this.isProduction 
-      ? "https://api.ebay.com/identity/v1/oauth2/token"
-      : "https://api.sandbox.ebay.com/identity/v1/oauth2/token";
-
-    const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
-
-    try {
-      console.log("🔄 Refreshing eBay OAuth access token...");
-      
-      const response = await fetch(authUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "Authorization": `Basic ${credentials}`
-        },
-        body: new URLSearchParams({
-          grant_type: "refresh_token",
-          refresh_token: refreshToken,
-          scope: "https://api.ebay.com/oauth/api_scope/sell.account"
-        }).toString()
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("❌ OAuth token refresh failed:", errorText);
-        throw new Error(`OAuth token refresh failed: ${response.status} ${errorText}`);
-      }
-
-      const tokenData: OAuthTokenResponse = await response.json();
-      
-      // Cache the token
-      this.cachedAccessToken = tokenData.access_token;
-      this.tokenExpiresAt = Date.now() + (tokenData.expires_in * 1000);
-      
-      console.log("✅ OAuth access token refreshed successfully");
-      console.log(`   Token expires in: ${tokenData.expires_in} seconds`);
-      
-      return this.cachedAccessToken;
-    } catch (error) {
-      console.error("❌ Failed to refresh OAuth token:", error);
-      throw error;
-    }
+    // Use the unified OAuth service
+    return ebayOAuth.getValidAccessToken();
   }
 
   private async makeRequest<T>(

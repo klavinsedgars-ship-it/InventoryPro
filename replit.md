@@ -55,6 +55,15 @@ Preferred communication style: Simple, everyday language.
   - Products page shows MOQ column with quantity badges (e.g., "10x")
   - eBay templates prefix titles with quantity (e.g., "10x Resistor 1K...") and include pack notice in descriptions
   - Package pricing: Unit Sale Price × MOQ = eBay Listing Price
+- **Unified OAuth 2.0 Authentication**: All eBay APIs (Trading + REST) now use a single OAuth 2.0 token:
+  - **Required Environment Variables**:
+    - `EBAY_OAUTH_CLIENT_ID`: eBay App Client ID from Developer Portal
+    - `EBAY_OAUTH_CLIENT_SECRET`: eBay App Client Secret from Developer Portal
+    - `EBAY_OAUTH_REFRESH_TOKEN`: OAuth Refresh Token with full scopes
+  - **Required Scopes**: `api_scope`, `sell.account`, `sell.inventory`, `sell.marketing`, `sell.fulfillment`, `sell.analytics.readonly`
+  - Trading API: OAuth via `X-EBAY-API-IAF-TOKEN` header
+  - REST APIs: OAuth via `Authorization: Bearer` header
+  - Automatic token refresh with 5-minute expiry buffer
 - **eBay Business Policies Management**: Full CRUD for eBay business policies via Account API (OAuth 2.0). Three policy types:
   - Payment Policies: Payment methods, immediate pay settings
   - Fulfillment (Shipping) Policies: Handling time, shipping options, global shipping
@@ -62,12 +71,6 @@ Preferred communication style: Simple, everyday language.
   - Sync from eBay: POST /api/ebay/business-policies/sync
   - Check OAuth status: GET /api/ebay/business-policies/status
   - Frontend: /ebay-policies page with tabs for each policy type
-  - **OAuth Environment Variables** (separate from Trading API):
-    - `EBAY_OAUTH_CLIENT_ID`: eBay App Client ID from Developer Portal
-    - `EBAY_OAUTH_CLIENT_SECRET`: eBay App Client Secret from Developer Portal
-    - `EBAY_OAUTH_REFRESH_TOKEN`: OAuth Refresh Token with `sell.account` scope
-  - The system automatically refreshes access tokens and caches them for efficiency
-  - Frontend displays OAuth configuration status and disables sync when not configured
 
 ## External Dependencies
 

@@ -1,99 +1,174 @@
-// eBay OAuth 2.0 Token Management
-// Handles access tokens, refresh tokens, and automatic token refresh
+// eBay OAuth 2.0 Unified Token Manager
+// Handles all eBay API authentication (REST APIs + Trading API)
+// Uses OAuth 2.0 with automatic token refresh
 
 interface EbayOAuthToken {
   access_token: string;
   refresh_token: string;
   expires_in: number;
   token_type: string;
-  expires_at: number; // Calculated timestamp when token expires
+  expires_at: number; // Calculated timestamp when token expires (milliseconds)
 }
 
+// All required scopes for complete eBay API access
+const EBAY_OAUTH_SCOPES = [
+  'https://api.ebay.com/oauth/api_scope',                    // Base scope for Trading API
+  'https://api.ebay.com/oauth/api_scope/sell.account',       // Business policies
+  'https://api.ebay.com/oauth/api_scope/sell.account.readonly',
+  'https://api.ebay.com/oauth/api_scope/sell.inventory',     // Inventory management
+  'https://api.ebay.com/oauth/api_scope/sell.inventory.readonly',
+  'https://api.ebay.com/oauth/api_scope/sell.marketing',     // Promotions
+  'https://api.ebay.com/oauth/api_scope/sell.marketing.readonly',
+  'https://api.ebay.com/oauth/api_scope/sell.fulfillment',   // Order fulfillment
+  'https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly',
+  'https://api.ebay.com/oauth/api_scope/sell.analytics.readonly'
+].join(' ');
+
 export class EbayOAuthService {
-  private currentToken?: EbayOAuthToken;
+  private cachedToken: EbayOAuthToken | null = null;
   private baseUrl = "https://api.ebay.com";
   private sandboxUrl = "https://api.sandbox.ebay.com";
   private isProduction = true;
+  private isConfigured = false;
 
   constructor() {
-    // Load existing token from environment if available
-    this.loadTokenFromEnvironment();
+    this.checkConfiguration();
   }
 
-  private loadTokenFromEnvironment() {
-    const accessToken = process.env.EBAY_ACCESS_TOKEN;
-    const refreshToken = process.env.EBAY_REFRESH_TOKEN;
-    const expiresAt = process.env.EBAY_TOKEN_EXPIRES_AT;
+  private checkConfiguration(): void {
+    const clientId = process.env.EBAY_OAUTH_CLIENT_ID || process.env.EBAY_APP_ID;
+    const clientSecret = process.env.EBAY_OAUTH_CLIENT_SECRET || process.env.EBAY_CERT_ID;
+    const refreshToken = process.env.EBAY_OAUTH_REFRESH_TOKEN || process.env.EBAY_REFRESH_TOKEN;
 
-    if (accessToken && refreshToken && expiresAt) {
-      this.currentToken = {
-        access_token: accessToken,
-        refresh_token: refreshToken,
-        expires_in: 7200, // Default 2 hours
-        token_type: "Bearer",
-        expires_at: parseInt(expiresAt)
-      };
+    this.isConfigured = !!(clientId && clientSecret && refreshToken);
+
+    if (this.isConfigured) {
+      console.log("✅ eBay OAuth Service initialized");
+      console.log("   Unified OAuth for all eBay APIs (REST + Trading)");
     } else {
-      // Use the fresh OAuth token from eBay Developer Console  
-      const ebayUserToken = process.env.EBAY_USER_TOKEN || '';
-      this.currentToken = {
-        access_token: ebayUserToken,
-        refresh_token: '', // OAuth tokens don't have separate refresh tokens
-        expires_in: 7200, // 2 hours typical for OAuth tokens
-        token_type: 'Bearer',
-        expires_at: Date.now() + (7200 * 1000)
-      };
+      console.log("⚠️ eBay OAuth not fully configured");
+      console.log("   Required: EBAY_OAUTH_CLIENT_ID, EBAY_OAUTH_CLIENT_SECRET, EBAY_OAUTH_REFRESH_TOKEN");
     }
+  }
+
+  /**
+   * Check if OAuth is properly configured
+   */
+  public isOAuthConfigured(): boolean {
+    return this.isConfigured;
   }
 
   private getApiUrl(): string {
     return this.isProduction ? this.baseUrl : this.sandboxUrl;
   }
 
-  private isTokenValid(): boolean {
-    if (!this.currentToken) return false;
-    
-    // Check if token expires in the next 5 minutes (300 seconds buffer)
-    const now = Math.floor(Date.now() / 1000);
-    return this.currentToken.expires_at > (now + 300);
+  private getClientCredentials(): { clientId: string; clientSecret: string; refreshToken: string } {
+    const clientId = process.env.EBAY_OAUTH_CLIENT_ID || process.env.EBAY_APP_ID || '';
+    const clientSecret = process.env.EBAY_OAUTH_CLIENT_SECRET || process.env.EBAY_CERT_ID || '';
+    const refreshToken = process.env.EBAY_OAUTH_REFRESH_TOKEN || process.env.EBAY_REFRESH_TOKEN || '';
+    return { clientId, clientSecret, refreshToken };
   }
 
   /**
-   * Force reload token from environment (for when token is updated)
+   * Check if cached token is still valid (with 5 minute buffer)
    */
-  reloadTokenFromEnvironment(): void {
-    this.loadTokenFromEnvironment();
+  private isTokenValid(): boolean {
+    if (!this.cachedToken) return false;
+    // 5 minute buffer before expiry
+    return Date.now() < this.cachedToken.expires_at - 300000;
   }
 
   /**
-   * Get a valid access token, refreshing if necessary
+   * Get a valid OAuth access token for REST API calls
+   * Automatically refreshes if expired
    */
   async getValidAccessToken(): Promise<string> {
-    // Force reload from environment to get fresh token
-    this.reloadTokenFromEnvironment();
-    
-    // Debug: Log what token we're actually returning
-    console.log("OAuth getValidAccessToken - Token prefix:", this.currentToken?.access_token.substring(0, 50));
-    console.log("OAuth getValidAccessToken - Token length:", this.currentToken?.access_token.length);
-    
-    if (this.currentToken && this.isTokenValid()) {
-      return this.currentToken.access_token;
+    if (!this.isConfigured) {
+      throw new Error(
+        "eBay OAuth not configured. Set EBAY_OAUTH_CLIENT_ID, EBAY_OAUTH_CLIENT_SECRET, and EBAY_OAUTH_REFRESH_TOKEN."
+      );
     }
 
-    if (this.currentToken?.refresh_token) {
-      await this.refreshAccessToken();
-      return this.currentToken!.access_token;
+    // Return cached token if still valid
+    if (this.cachedToken && this.isTokenValid()) {
+      return this.cachedToken.access_token;
     }
 
-    throw new Error("No valid refresh token available. Please re-authorize the application.");
+    // Refresh the token
+    await this.refreshAccessToken();
+    return this.cachedToken!.access_token;
   }
 
   /**
-   * Exchange authorization code for initial tokens (first-time setup)
+   * Get a valid OAuth token for Trading API calls (XML-based)
+   * Uses the same OAuth token - Trading API accepts OAuth via X-EBAY-API-IAF-TOKEN header
    */
-  async exchangeCodeForTokens(authorizationCode: string): Promise<EbayOAuthToken> {
-    const credentials = Buffer.from(`${process.env.EBAY_APP_ID}:${process.env.EBAY_CERT_ID}`).toString('base64');
-    
+  async getTradingApiToken(): Promise<string> {
+    return this.getValidAccessToken();
+  }
+
+  /**
+   * Refresh access token using refresh token
+   */
+  private async refreshAccessToken(): Promise<void> {
+    const { clientId, clientSecret, refreshToken } = this.getClientCredentials();
+
+    if (!refreshToken) {
+      throw new Error("No refresh token available. Please re-authorize the application.");
+    }
+
+    const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+    const tokenUrl = `${this.getApiUrl()}/identity/v1/oauth2/token`;
+
+    console.log("🔄 Refreshing eBay OAuth access token...");
+
+    try {
+      const response = await fetch(tokenUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': `Basic ${credentials}`,
+        },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          refresh_token: refreshToken,
+          scope: EBAY_OAUTH_SCOPES
+        }).toString()
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("❌ OAuth token refresh failed:", response.status, errorText);
+        throw new Error(`eBay OAuth refresh failed: ${response.status} - ${errorText}`);
+      }
+
+      const tokenData = await response.json();
+
+      // Cache the token with expiration
+      this.cachedToken = {
+        access_token: tokenData.access_token,
+        refresh_token: tokenData.refresh_token || refreshToken,
+        expires_in: tokenData.expires_in,
+        token_type: tokenData.token_type || 'Bearer',
+        expires_at: Date.now() + (tokenData.expires_in * 1000)
+      };
+
+      console.log("✅ eBay OAuth token refreshed successfully");
+      console.log(`   Token expires in: ${tokenData.expires_in} seconds`);
+
+    } catch (error) {
+      console.error("❌ Failed to refresh eBay OAuth token:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Exchange authorization code for initial tokens (OAuth consent flow)
+   */
+  async exchangeCodeForTokens(authorizationCode: string, redirectUri: string): Promise<EbayOAuthToken> {
+    const { clientId, clientSecret } = this.getClientCredentials();
+    const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+
     const response = await fetch(`${this.getApiUrl()}/identity/v1/oauth2/token`, {
       method: 'POST',
       headers: {
@@ -103,106 +178,44 @@ export class EbayOAuthService {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: authorizationCode,
-        redirect_uri: 'http://localhost:5000/auth/ebay/callback'
-      })
+        redirect_uri: redirectUri
+      }).toString()
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`eBay OAuth failed: ${response.status} ${response.statusText} - ${errorText}`);
+      throw new Error(`eBay OAuth exchange failed: ${response.status} - ${errorText}`);
     }
 
     const tokenData = await response.json();
-    
-    // Calculate expiration timestamp
-    const expiresAt = Math.floor(Date.now() / 1000) + tokenData.expires_in;
-    
-    this.currentToken = {
-      ...tokenData,
-      expires_at: expiresAt
-    };
 
-    // Store tokens in environment variables for persistence
-    // Note: In production, these should be stored in a secure database
-    process.env.EBAY_ACCESS_TOKEN = this.currentToken.access_token;
-    process.env.EBAY_REFRESH_TOKEN = this.currentToken.refresh_token;
-    process.env.EBAY_TOKEN_EXPIRES_AT = expiresAt.toString();
-
-    return this.currentToken;
-  }
-
-  /**
-   * Refresh access token using refresh token
-   */
-  async refreshAccessToken(): Promise<void> {
-    if (!this.currentToken?.refresh_token) {
-      throw new Error("No refresh token available");
-    }
-
-    const credentials = Buffer.from(`${process.env.EBAY_APP_ID}:${process.env.EBAY_CERT_ID}`).toString('base64');
-    
-    const response = await fetch(`${this.getApiUrl()}/identity/v1/oauth2/token`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Authorization': `Basic ${credentials}`,
-      },
-      body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        refresh_token: this.currentToken.refresh_token,
-        scope: 'https://api.ebay.com/oauth/api_scope/sell.marketing.readonly https://api.ebay.com/oauth/api_scope/sell.marketing https://api.ebay.com/oauth/api_scope/sell.inventory.readonly https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account.readonly https://api.ebay.com/oauth/api_scope/sell.account https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly https://api.ebay.com/oauth/api_scope/sell.fulfillment https://api.ebay.com/oauth/api_scope/sell.analytics.readonly'
-      })
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`eBay token refresh failed: ${response.status} ${response.statusText} - ${errorText}`);
-    }
-
-    const tokenData = await response.json();
-    
-    // Calculate expiration timestamp
-    const expiresAt = Math.floor(Date.now() / 1000) + tokenData.expires_in;
-    
-    // Update current token, keeping refresh token if not provided
-    this.currentToken = {
+    this.cachedToken = {
       access_token: tokenData.access_token,
-      refresh_token: tokenData.refresh_token || this.currentToken.refresh_token,
+      refresh_token: tokenData.refresh_token,
       expires_in: tokenData.expires_in,
-      token_type: tokenData.token_type,
-      expires_at: expiresAt
+      token_type: tokenData.token_type || 'Bearer',
+      expires_at: Date.now() + (tokenData.expires_in * 1000)
     };
 
-    // Update environment variables
-    process.env.EBAY_ACCESS_TOKEN = this.currentToken.access_token;
-    if (tokenData.refresh_token) {
-      process.env.EBAY_REFRESH_TOKEN = this.currentToken.refresh_token;
-    }
-    process.env.EBAY_TOKEN_EXPIRES_AT = expiresAt.toString();
+    console.log("✅ eBay OAuth tokens obtained successfully");
+    console.log("   IMPORTANT: Save the refresh token to EBAY_OAUTH_REFRESH_TOKEN");
+    console.log(`   Refresh Token: ${tokenData.refresh_token}`);
 
-    console.log("✅ eBay access token refreshed successfully");
+    return this.cachedToken;
   }
 
   /**
    * Generate OAuth authorization URL for user consent
    */
-  generateAuthUrl(state?: string): string {
-    const clientId = process.env.EBAY_APP_ID;
-    // Use localhost redirect URI for development
-    const redirectUri = 'http://localhost:5000/auth/ebay/callback'; 
-    
-    const scopes = [
-      'https://api.ebay.com/oauth/api_scope/sell.inventory',
-      'https://api.ebay.com/oauth/api_scope/sell.fulfillment', 
-      'https://api.ebay.com/oauth/api_scope/sell.account'
-    ].join(' ');
+  generateAuthUrl(redirectUri: string, state?: string): string {
+    const { clientId } = this.getClientCredentials();
 
     const params = new URLSearchParams({
-      client_id: clientId!,
+      client_id: clientId,
       redirect_uri: redirectUri,
       response_type: 'code',
-      scope: scopes,
-      state: state || 'auth_state'
+      scope: EBAY_OAUTH_SCOPES,
+      state: state || 'ebay_auth_state'
     });
 
     return `https://auth.ebay.com/oauth2/authorize?${params.toString()}`;
@@ -211,19 +224,30 @@ export class EbayOAuthService {
   /**
    * Get current token info for debugging
    */
-  getTokenInfo(): any {
-    if (!this.currentToken) {
-      return { status: 'No token available' };
-    }
-
+  getTokenInfo(): {
+    configured: boolean;
+    hasToken: boolean;
+    isValid: boolean;
+    expiresAt?: string;
+    expiresIn?: number;
+  } {
     return {
-      hasAccessToken: !!this.currentToken.access_token,
-      hasRefreshToken: !!this.currentToken.refresh_token,
-      expiresAt: new Date(this.currentToken.expires_at * 1000).toISOString(),
+      configured: this.isConfigured,
+      hasToken: !!this.cachedToken,
       isValid: this.isTokenValid(),
-      timeUntilExpiry: this.currentToken.expires_at - Math.floor(Date.now() / 1000)
+      expiresAt: this.cachedToken ? new Date(this.cachedToken.expires_at).toISOString() : undefined,
+      expiresIn: this.cachedToken ? Math.floor((this.cachedToken.expires_at - Date.now()) / 1000) : undefined
     };
+  }
+
+  /**
+   * Force reload configuration (useful after env var changes)
+   */
+  reloadConfiguration(): void {
+    this.cachedToken = null;
+    this.checkConfiguration();
   }
 }
 
+// Singleton instance
 export const ebayOAuth = new EbayOAuthService();

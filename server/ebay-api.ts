@@ -135,13 +135,15 @@ export class EbayApiService {
     }
 
     console.log("✅ eBay API Service initialized");
-    console.log("   Using working Auth'n'Auth token for listings");
+    console.log("   Using unified OAuth for all eBay APIs");
   }
 
-  private getAuthToken(): string {
-    // Use the working eBay Auth token (Auth'n'Auth format)
-    // This token was confirmed working for eBay listings
-    return "v^1.1#i^1#f^0#p^3#I^3#r^1#t^Ul4xMF83OjFCN0M0NTkxQkNFNTUyRUE0MjE4REMyMjcyODdDOTg5XzFfMSNFXjI2MA==";
+  /**
+   * Get OAuth token for Trading API calls
+   * Trading API accepts OAuth tokens via X-EBAY-API-IAF-TOKEN header
+   */
+  private async getOAuthToken(): Promise<string> {
+    return await ebayOAuth.getTradingApiToken();
   }
 
   private getApiUrl(): string {
@@ -506,14 +508,10 @@ export class EbayApiService {
 
 
   private createVerifyItemXML(listingData: any): string {
-    const userToken = this.getAuthToken();
-    console.log("createVerifyItemXML - Using eBay auth token");
+    console.log("createVerifyItemXML - Using OAuth via header");
     
     return `<?xml version="1.0" encoding="utf-8"?>
 <VerifyAddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${userToken}</eBayAuthToken>
-  </RequesterCredentials>
   <Item>
     <Title>${this.escapeXml(listingData.title)}</Title>
     <Description><![CDATA[${listingData.description}]]></Description>
@@ -567,14 +565,10 @@ export class EbayApiService {
   }
 
   private createAddItemXML(listingData: any): string {
-    const userToken = this.getAuthToken();
-    console.log("createAddItemXML - Using eBay auth token");
+    console.log("createAddItemXML - Using OAuth via header");
     
     return `<?xml version="1.0" encoding="utf-8"?>
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${userToken}</eBayAuthToken>
-  </RequesterCredentials>
   <Item>
     <Title>${this.escapeXml(listingData.title)}</Title>
     <Description><![CDATA[${listingData.description}]]></Description>
@@ -637,11 +631,7 @@ export class EbayApiService {
       .replace(/'/g, '&#39;');
   }
 
-  private createReviseItemXML(listingData: any, authToken: string): string {
-    const userToken = this.getAuthToken();
-    
-    const escapedTitle = this.escapeXml(listingData.title);
-    const escapedDescription = this.escapeXml(listingData.description);
+  private createReviseItemXML(listingData: any): string {
     const pictureURLs = listingData.pictureURLs || [];
     
     const pictureXML = pictureURLs.length > 0 ? `
@@ -650,13 +640,10 @@ export class EbayApiService {
       </PictureDetails>
     ` : '';
 
-    console.log("createReviseItemXML - Using eBay auth token");
+    console.log("createReviseItemXML - Using OAuth via header");
 
     return `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${userToken}</eBayAuthToken>
-  </RequesterCredentials>
   <Item>
     <ItemID>${listingData.itemId}</ItemID>
     <Title>${this.escapeXml(listingData.title)}</Title>
@@ -686,12 +673,10 @@ export class EbayApiService {
 </ReviseFixedPriceItemRequest>`;
   }
 
-  private createEndItemXML(itemId: string, authToken: string): string {
+  private createEndItemXML(itemId: string): string {
+    console.log("createEndItemXML - Using OAuth via header");
     return `<?xml version="1.0" encoding="utf-8"?>
 <EndItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${authToken}</eBayAuthToken>
-  </RequesterCredentials>
   <ItemID>${itemId}</ItemID>
   <EndingReason>NotAvailable</EndingReason>
 </EndItemRequest>`;
@@ -701,13 +686,18 @@ export class EbayApiService {
     const tradingUrl = this.isProduction ? this.tradingApiUrl : this.sandboxTradingApiUrl;
     console.log("Using eBay environment:", this.isProduction ? "PRODUCTION" : "SANDBOX");
     
+    // Get OAuth token for Trading API (uses X-EBAY-API-IAF-TOKEN header)
+    let oauthToken: string;
+    try {
+      oauthToken = await this.getOAuthToken();
+    } catch (error) {
+      console.error("Failed to get OAuth token for Trading API:", error);
+      throw new Error(`OAuth authentication failed: ${(error as Error).message}`);
+    }
+    
     console.log("Making eBay API request to:", tradingUrl);
     console.log("API Call Name:", callName);
-    console.log("Request headers:", {
-      'X-EBAY-API-DEV-NAME': this.credentials.devId ? 'SET' : 'MISSING',
-      'X-EBAY-API-APP-NAME': this.credentials.appId ? 'SET' : 'MISSING',
-      'X-EBAY-API-CERT-NAME': this.credentials.certId ? 'SET' : 'MISSING'
-    });
+    console.log("Using OAuth token via X-EBAY-API-IAF-TOKEN header");
     
     // Track eBay API call in database
     try {
@@ -725,7 +715,8 @@ export class EbayApiService {
         'X-EBAY-API-APP-NAME': this.credentials.appId,
         'X-EBAY-API-CERT-NAME': this.credentials.certId,
         'X-EBAY-API-CALL-NAME': callName,
-        'X-EBAY-API-SITEID': this.siteId
+        'X-EBAY-API-SITEID': this.siteId,
+        'X-EBAY-API-IAF-TOKEN': oauthToken  // OAuth token for Trading API
       },
       body: xmlBody
     });
@@ -800,12 +791,9 @@ export class EbayApiService {
 
   async getEbayCategories(): Promise<any[]> {
     try {
-      console.log('Fetching eBay categories...');
+      console.log('Fetching eBay categories... (using OAuth via header)');
       const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
 <GetCategoriesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${process.env.EBAY_USER_TOKEN}</eBayAuthToken>
-  </RequesterCredentials>
   <CategorySiteID>0</CategorySiteID>
   <DetailLevel>ReturnAll</DetailLevel>
   <LevelLimit>4</LevelLimit>
@@ -931,22 +919,14 @@ export class EbayApiService {
 
   async getBusinessPolicies(): Promise<any> {
     try {
-      const userToken = process.env.EBAY_USER_TOKEN;
-      if (!userToken) {
-        throw new Error("eBay User Token is required");
-      }
-
       // Get seller information to understand business policies setup
       const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
 <GetUserRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${userToken}</eBayAuthToken>
-  </RequesterCredentials>
   <UserID></UserID>
   <IncludeSelector>BusinessSellerDetails</IncludeSelector>
 </GetUserRequest>`;
 
-      console.log("Fetching eBay business policies...");
+      console.log("Fetching eBay business policies... (using OAuth via header)");
       const response = await this.makeTradingApiRequestForPolicies(xmlRequest);
       
       // Parse the response to extract policy information
@@ -976,6 +956,15 @@ export class EbayApiService {
   private async makeTradingApiRequestForPolicies(xmlBody: string): Promise<string> {
     const tradingUrl = this.isProduction ? this.tradingApiUrl : this.sandboxTradingApiUrl;
     
+    // Get OAuth token for Trading API
+    let oauthToken: string;
+    try {
+      oauthToken = await this.getOAuthToken();
+    } catch (error) {
+      console.error("Failed to get OAuth token for Trading API:", error);
+      throw new Error(`OAuth authentication failed: ${(error as Error).message}`);
+    }
+    
     // Track eBay API call in database
     try {
       await storage.trackApiCall('ebay');
@@ -992,7 +981,8 @@ export class EbayApiService {
         'X-EBAY-API-APP-NAME': this.credentials.appId,
         'X-EBAY-API-CERT-NAME': this.credentials.certId,
         'X-EBAY-API-CALL-NAME': 'GetUser',
-        'X-EBAY-API-SITEID': '3'
+        'X-EBAY-API-SITEID': '3',
+        'X-EBAY-API-IAF-TOKEN': oauthToken
       },
       body: xmlBody
     });
@@ -1057,8 +1047,7 @@ export class EbayApiService {
         reason: stockInfo.limitReason
       });
       
-      const authToken = this.getAuthToken();
-      console.log("Update function - Using eBay auth token");
+      console.log("Update function - Using OAuth via header");
       console.log("Generated listing template description length:", listingTemplate.htmlDescription.length);
       console.log("Generated template description preview:", listingTemplate.htmlDescription.substring(0, 200));
       
@@ -1107,7 +1096,7 @@ export class EbayApiService {
       });
 
       // Create ReviseFixedPriceItem XML request
-      const xmlRequest = this.createReviseItemXML(listingData, authToken);
+      const xmlRequest = this.createReviseItemXML(listingData);
       console.log("Making eBay ReviseFixedPriceItem API call");
       
       const response = await this.makeTradingApiRequest(xmlRequest, 'ReviseFixedPriceItem');
@@ -1183,12 +1172,10 @@ export class EbayApiService {
       }
 
       console.log(`Unlisting product ${product.name} (Item ID: ${product.ebayItemId}) from eBay...`);
+      console.log("Using OAuth via header for unlisting");
 
-      const authToken = this.getAuthToken();
-      console.log("Using eBay auth token for unlisting");
-
-      // Create EndItem XML request with fresh token
-      const endItemXml = this.createEndItemXML(product.ebayItemId, authToken!);
+      // Create EndItem XML request
+      const endItemXml = this.createEndItemXML(product.ebayItemId);
       
       // Make EndItem API call
       const responseText = await this.makeTradingApiRequest(endItemXml, 'EndItem');
@@ -1373,7 +1360,7 @@ export class EbayApiService {
     price?: number;
     sku?: string;
   }>): Promise<Array<{ productId: number; ebayItemId: string; success: boolean; message: string }>> {
-    const authToken = this.getAuthToken();
+    console.log("processBulkInventoryBatch - Using OAuth via header");
     
     const inventoryStatusXml = items.map(item => {
       let fields = `<ItemID>${item.ebayItemId}</ItemID>`;
@@ -1383,15 +1370,11 @@ export class EbayApiService {
       if (item.price !== undefined) {
         fields += `\n        <StartPrice currencyID="GBP">${item.price.toFixed(2)}</StartPrice>`;
       }
-      // Note: SKU is not included as items were not created with ManageBySKU mode
       return `<InventoryStatus>\n        ${fields}\n      </InventoryStatus>`;
     }).join('\n      ');
 
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <RequesterCredentials>
-    <eBayAuthToken>${authToken}</eBayAuthToken>
-  </RequesterCredentials>
   ${inventoryStatusXml}
 </ReviseInventoryStatusRequest>`;
 
