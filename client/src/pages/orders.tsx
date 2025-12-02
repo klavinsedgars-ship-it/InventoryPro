@@ -110,6 +110,8 @@ export function Orders({ user }: OrdersProps) {
   const [statusNote, setStatusNote] = useState("");
   const [trackingNumber, setTrackingNumber] = useState("");
   const [trackingCarrier, setTrackingCarrier] = useState("");
+  const [printLabelOrder, setPrintLabelOrder] = useState<any>(null);
+  const [printLabelOpen, setPrintLabelOpen] = useState(false);
 
   const { data: ordersData, isLoading, refetch } = useQuery<{
     success: boolean;
@@ -428,17 +430,18 @@ export function Orders({ user }: OrdersProps) {
             ) : (
               <div className="divide-y divide-gray-200">
                 {filteredOrders.map((order: any) => {
-                  const itemCount = order.items?.length || 0;
                   const totalQty = order.items?.reduce((sum: number, item: any) => sum + (item.quantity || 1), 0) || 0;
+                  const canMarkPacked = order.status === 'new';
+                  const canMarkShipped = order.status === 'packed';
                   
                   return (
                     <div 
                       key={order.id}
-                      className="p-4 hover:bg-gray-50 cursor-pointer"
+                      className="p-3 hover:bg-gray-50 cursor-pointer"
                       onClick={() => handleViewOrder(order)}
                       data-testid={`row-order-${order.id}`}
                     >
-                      <div className="flex items-start justify-between gap-4">
+                      <div className="flex items-start justify-between gap-3">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-2">
                             <StatusBadge status={order.status} />
@@ -451,15 +454,22 @@ export function Orders({ user }: OrdersProps) {
                             </span>
                             {order.marketplace === 'ebay' && <SiEbay className="w-4 h-4 text-[#e53238]" />}
                             {order.marketplace === 'amazon' && <SiAmazon className="w-4 h-4 text-[#ff9900]" />}
+                            <span className="text-xs text-gray-400">•</span>
+                            <span className="text-xs text-gray-500">{order.buyerUsername}</span>
+                            {order.buyerNote && (
+                              <span className="text-yellow-600" title="Has buyer note">
+                                <StickyNote className="w-3 h-3" />
+                              </span>
+                            )}
                           </div>
                           
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             <div>
                               <p className="text-xs text-gray-500 mb-1">Items ({totalQty} pcs)</p>
-                              <div className="space-y-1">
+                              <div className="space-y-0.5">
                                 {order.items?.slice(0, 3).map((item: any, idx: number) => (
                                   <div key={idx} className="flex items-center gap-2 text-sm">
-                                    <span className="text-gray-900 truncate max-w-[200px]" title={item.title}>
+                                    <span className="text-gray-900 truncate max-w-[250px]" title={item.title}>
                                       {item.quantity}x {item.sku || 'N/A'}
                                     </span>
                                     {item.tmeProductId && (
@@ -488,21 +498,10 @@ export function Orders({ user }: OrdersProps) {
                             <div>
                               <p className="text-xs text-gray-500 mb-1">Ship to</p>
                               <p className="text-sm font-medium text-gray-900">{order.shippingName}</p>
-                              <p className="text-xs text-gray-600 truncate" title={order.shippingAddressLine1}>
-                                {order.shippingCity}, {order.shippingPostalCode}
+                              <p className="text-xs text-gray-600">{order.shippingAddressLine1}</p>
+                              <p className="text-xs text-gray-600">
+                                {order.shippingCity}, {order.shippingPostalCode}, {order.shippingCountry}
                               </p>
-                              <p className="text-xs text-gray-500">{order.shippingCountry}</p>
-                            </div>
-                            
-                            <div>
-                              <p className="text-xs text-gray-500 mb-1">Buyer</p>
-                              <p className="text-sm font-medium text-gray-900">{order.buyerUsername}</p>
-                              {order.buyerNote && (
-                                <p className="text-xs text-yellow-600 flex items-center gap-1 mt-1">
-                                  <StickyNote className="w-3 h-3" />
-                                  Has note
-                                </p>
-                              )}
                             </div>
                           </div>
                         </div>
@@ -517,24 +516,57 @@ export function Orders({ user }: OrdersProps) {
                               -{formatCurrency(parseFloat(order.marketplaceFee))} fees
                             </p>
                           )}
-                          <div className="flex items-center gap-1 mt-2 justify-end" onClick={e => e.stopPropagation()}>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleViewOrder(order)}
-                              data-testid={`btn-view-order-${order.id}`}
-                            >
-                              <Eye className="w-4 h-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => printLabelMutation.mutate(order.id)}
-                              disabled={printLabelMutation.isPending}
-                              data-testid={`btn-print-label-${order.id}`}
-                            >
-                              <Printer className="w-4 h-4" />
-                            </Button>
+                          <div className="flex flex-col items-end gap-1 mt-2" onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center gap-1">
+                              {canMarkPacked && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 text-xs bg-yellow-50 border-yellow-300 hover:bg-yellow-100"
+                                  onClick={() => {
+                                    updateStatusMutation.mutate({
+                                      id: order.id,
+                                      status: 'packed'
+                                    });
+                                  }}
+                                  disabled={updateStatusMutation.isPending}
+                                  data-testid={`btn-mark-packed-${order.id}`}
+                                >
+                                  <Package className="w-3 h-3 mr-1" />
+                                  Packed
+                                </Button>
+                              )}
+                              {canMarkShipped && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 text-xs bg-purple-50 border-purple-300 hover:bg-purple-100"
+                                  onClick={() => {
+                                    updateStatusMutation.mutate({
+                                      id: order.id,
+                                      status: 'shipped'
+                                    });
+                                  }}
+                                  disabled={updateStatusMutation.isPending}
+                                  data-testid={`btn-mark-shipped-${order.id}`}
+                                >
+                                  <Truck className="w-3 h-3 mr-1" />
+                                  Shipped
+                                </Button>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7"
+                                onClick={() => {
+                                  setPrintLabelOrder(order);
+                                  setPrintLabelOpen(true);
+                                }}
+                                data-testid={`btn-print-label-${order.id}`}
+                              >
+                                <Printer className="w-4 h-4" />
+                              </Button>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -831,6 +863,82 @@ export function Orders({ user }: OrdersProps) {
                 </TabsContent>
               </Tabs>
             </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={printLabelOpen} onOpenChange={setPrintLabelOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Printer className="w-5 h-5" />
+              Print Shipping Label
+            </DialogTitle>
+            <DialogDescription>
+              Shipping label for order #{printLabelOrder?.marketplaceOrderId?.slice(-8)}
+            </DialogDescription>
+          </DialogHeader>
+
+          {printLabelOrder && (
+            <div className="space-y-4 mt-4">
+              <div className="p-4 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
+                <p className="text-xs text-gray-500 mb-2">SHIP TO:</p>
+                <p className="font-bold text-lg">{printLabelOrder.shippingName}</p>
+                <p className="text-sm">{printLabelOrder.shippingAddressLine1}</p>
+                {printLabelOrder.shippingAddressLine2 && (
+                  <p className="text-sm">{printLabelOrder.shippingAddressLine2}</p>
+                )}
+                <p className="text-sm">
+                  {printLabelOrder.shippingCity}
+                  {printLabelOrder.shippingStateOrProvince && `, ${printLabelOrder.shippingStateOrProvince}`}
+                </p>
+                <p className="text-sm font-medium">{printLabelOrder.shippingPostalCode}</p>
+                <p className="text-sm font-medium">{printLabelOrder.shippingCountry}</p>
+                {printLabelOrder.shippingPhone && (
+                  <p className="text-xs text-gray-500 mt-2">Tel: {printLabelOrder.shippingPhone}</p>
+                )}
+              </div>
+
+              <div className="text-xs text-gray-500 space-y-1">
+                <p>Order ID: {printLabelOrder.marketplaceOrderId}</p>
+                <p>Items: {printLabelOrder.items?.length || 0} product(s)</p>
+                {printLabelOrder.shippingService && (
+                  <p>Service: {printLabelOrder.shippingService}</p>
+                )}
+              </div>
+
+              <div className="flex gap-2">
+                <Button
+                  className="flex-1"
+                  onClick={() => {
+                    window.print();
+                  }}
+                >
+                  <Printer className="w-4 h-4 mr-2" />
+                  Print Address
+                </Button>
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => {
+                    const text = `${printLabelOrder.shippingName}\n${printLabelOrder.shippingAddressLine1}\n${printLabelOrder.shippingAddressLine2 || ''}\n${printLabelOrder.shippingCity}, ${printLabelOrder.shippingPostalCode}\n${printLabelOrder.shippingCountry}`;
+                    navigator.clipboard.writeText(text);
+                    toast({
+                      title: "Copied",
+                      description: "Address copied to clipboard"
+                    });
+                  }}
+                >
+                  Copy Address
+                </Button>
+              </div>
+
+              <div className="pt-2 border-t">
+                <p className="text-xs text-gray-500 text-center">
+                  Latvian Post API integration coming soon
+                </p>
+              </div>
+            </div>
           )}
         </DialogContent>
       </Dialog>
