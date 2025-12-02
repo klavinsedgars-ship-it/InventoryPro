@@ -1,3 +1,4 @@
+import { useState, createContext, useContext } from "react";
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 import {
@@ -14,8 +15,12 @@ import {
   Search,
   Image as ImageIcon,
   FileStack,
-  ClipboardList
+  ClipboardList,
+  ChevronLeft,
+  ChevronRight,
+  Menu
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -37,26 +42,44 @@ interface SidebarProps {
     email: string;
     role: string;
   };
+  collapsed?: boolean;
+  onToggle?: () => void;
 }
 
-export function Sidebar({ user }: SidebarProps) {
+export function Sidebar({ user, collapsed = false, onToggle }: SidebarProps) {
   const [location] = useLocation();
 
   return (
-    <div className="fixed inset-y-0 left-0 w-64 bg-white border-r border-gray-200 z-40">
+    <div className={cn(
+      "fixed inset-y-0 left-0 bg-white border-r border-gray-200 z-40 transition-all duration-200",
+      collapsed ? "w-16" : "w-64"
+    )}>
       <div className="flex flex-col h-full">
         {/* Logo */}
-        <div className="flex items-center px-6 py-4 border-b border-gray-200">
-          <div className="flex items-center">
-            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
+        <div className="flex items-center justify-between px-3 py-4 border-b border-gray-200">
+          <div className="flex items-center overflow-hidden">
+            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center flex-shrink-0">
               <Box className="w-5 h-5 text-primary-foreground" />
             </div>
-            <span className="ml-3 text-lg font-semibold text-gray-900">InventorySync</span>
+            {!collapsed && (
+              <span className="ml-3 text-lg font-semibold text-gray-900 whitespace-nowrap">InventorySync</span>
+            )}
           </div>
+          {onToggle && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onToggle}
+              className="p-1 h-8 w-8"
+              data-testid="btn-toggle-sidebar"
+            >
+              {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+            </Button>
+          )}
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-4 py-4 space-y-1">
+        <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
           {navigation.map((item) => {
             const isActive = location === item.href;
             return (
@@ -67,15 +90,18 @@ export function Sidebar({ user }: SidebarProps) {
                   "group flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors",
                   isActive
                     ? "bg-primary/10 text-primary"
-                    : "text-gray-700 hover:bg-gray-50"
+                    : "text-gray-700 hover:bg-gray-50",
+                  collapsed && "justify-center px-2"
                 )}
                 data-testid={`nav-${item.name.toLowerCase().replace(/\s+/g, '-')}`}
+                title={collapsed ? item.name : undefined}
               >
                 <item.icon className={cn(
-                  "mr-3 h-5 w-5",
-                  isActive ? "text-primary" : "text-gray-400"
+                  "h-5 w-5 flex-shrink-0",
+                  isActive ? "text-primary" : "text-gray-400",
+                  !collapsed && "mr-3"
                 )} />
-                {item.name}
+                {!collapsed && item.name}
               </Link>
             );
           })}
@@ -83,26 +109,30 @@ export function Sidebar({ user }: SidebarProps) {
 
         {/* User Profile */}
         {user && (
-          <div className="p-4 border-t border-gray-200">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                <div className="h-8 w-8 rounded-full bg-primary flex items-center justify-center">
+          <div className={cn("p-3 border-t border-gray-200", collapsed && "px-2")}>
+            <div className={cn("flex items-center", collapsed ? "justify-center" : "justify-between")}>
+              <div className="flex items-center overflow-hidden">
+                <div className="h-8 w-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
                   <span className="text-sm font-medium text-primary-foreground">
                     {user.username.charAt(0).toUpperCase()}
                   </span>
                 </div>
-                <div className="ml-3">
-                  <p className="text-sm font-medium text-gray-700">{user.username}</p>
-                  <p className="text-xs text-gray-500 capitalize">{user.role}</p>
-                </div>
+                {!collapsed && (
+                  <div className="ml-3 overflow-hidden">
+                    <p className="text-sm font-medium text-gray-700 truncate">{user.username}</p>
+                    <p className="text-xs text-gray-500 capitalize truncate">{user.role}</p>
+                  </div>
+                )}
               </div>
-              <Link
-                href="/settings"
-                className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
-                data-testid="nav-settings"
-              >
-                <Settings className="h-4 w-4 text-gray-500 hover:text-gray-700" />
-              </Link>
+              {!collapsed && (
+                <Link
+                  href="/settings"
+                  className="p-2 rounded-lg hover:bg-gray-100 transition-colors flex-shrink-0"
+                  data-testid="nav-settings"
+                >
+                  <Settings className="h-4 w-4 text-gray-500 hover:text-gray-700" />
+                </Link>
+              )}
             </div>
           </div>
         )}

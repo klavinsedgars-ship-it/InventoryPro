@@ -77,15 +77,20 @@ export function Orders({ user }: OrdersProps) {
   const [showHistory, setShowHistory] = useState(false);
   const [showFinancials, setShowFinancials] = useState(false);
   const [printLabelOpen, setPrintLabelOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
 
   const statusFilter = activeTab === "to-pack" ? "new" : activeTab === "to-ship" ? "packed" : undefined;
+
+  // Build the API URL with status filter
+  const ordersUrl = statusFilter ? `/api/orders?status=${statusFilter}` : '/api/orders';
 
   const { data: ordersData, isLoading, refetch } = useQuery<{
     success: boolean;
     orders: OrderWithDetails[];
     total: number;
   }>({
-    queryKey: ["/api/orders", { status: statusFilter }],
+    queryKey: ["/api/orders", statusFilter],
+    queryFn: () => fetch(ordersUrl, { credentials: 'include' }).then(res => res.json()),
   });
 
   const { data: statsData } = useQuery<{
@@ -163,12 +168,12 @@ export function Orders({ user }: OrdersProps) {
   useEffect(() => {
     if (selectedOrder) {
       setTrackingNumber(selectedOrder.trackingNumber || "");
-      setTrackingCarrier(selectedOrder.trackingCarrier || "");
+      setTrackingCarrier(selectedOrder.shippingCarrier || "");
     } else {
       setTrackingNumber("");
       setTrackingCarrier("");
     }
-  }, [selectedOrderId, selectedOrder?.trackingNumber, selectedOrder?.trackingCarrier]);
+  }, [selectedOrderId, selectedOrder?.trackingNumber, selectedOrder?.shippingCarrier]);
 
   // Filter orders by search term
   const filteredOrders = orders.filter(order => {
@@ -220,13 +225,17 @@ export function Orders({ user }: OrdersProps) {
 
   return (
     <div className="min-h-screen bg-gray-100" data-testid="page-orders">
-      <Sidebar user={user} />
+      <Sidebar 
+        user={user} 
+        collapsed={sidebarCollapsed} 
+        onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} 
+      />
       
-      <div className="ml-64">
+      <div className={`transition-all duration-200 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
         <Header title="Orders" subtitle="Fulfillment Workspace" />
         
-        <main className="p-4">
-          <div className="flex items-center justify-between mb-4">
+        <main className="p-3">
+          <div className="flex items-center justify-between mb-3">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-auto" data-testid="tabs-orders">
               <TabsList>
                 <TabsTrigger value="to-pack" className="gap-2" data-testid="tab-to-pack">
@@ -270,10 +279,10 @@ export function Orders({ user }: OrdersProps) {
             </Button>
           </div>
 
-          <div className="flex gap-4 h-[calc(100vh-180px)]">
+          <div className="flex gap-3 h-[calc(100vh-130px)]">
             {/* Left Panel - Order Queue */}
-            <div className="w-80 flex-shrink-0 bg-white rounded-lg shadow-sm border overflow-hidden flex flex-col">
-              <div className="p-3 border-b bg-gray-50 space-y-2">
+            <div className="w-72 flex-shrink-0 bg-white rounded-lg shadow-sm border overflow-hidden flex flex-col">
+              <div className="p-2 border-b bg-gray-50 space-y-2">
                 <p className="text-sm font-medium text-gray-700">
                   {activeTab === "to-pack" ? "Orders to Pack" : activeTab === "to-ship" ? "Orders to Ship" : "All Orders"}
                   <span className="text-gray-400 ml-2">({filteredOrders.length})</span>
@@ -284,7 +293,7 @@ export function Orders({ user }: OrdersProps) {
                     placeholder="Search orders..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-8 h-8 text-sm"
+                    className="pl-8 h-7 text-sm"
                     data-testid="input-search-orders"
                   />
                 </div>
@@ -312,36 +321,27 @@ export function Orders({ user }: OrdersProps) {
                         <div
                           key={order.id}
                           onClick={() => setSelectedOrderId(order.id)}
-                          className={`p-3 cursor-pointer transition-colors ${
+                          className={`p-2 cursor-pointer transition-colors ${
                             isSelected ? 'bg-blue-50 border-l-4 border-l-blue-500' : 'hover:bg-gray-50'
                           }`}
                           data-testid={`queue-order-${order.id}`}
                         >
-                          <div className="flex items-center justify-between mb-1">
-                            <StatusBadge status={order.status} />
-                            <span className="text-xs text-gray-400">
-                              {order.orderDate ? format(new Date(order.orderDate), 'MMM d') : '-'}
-                            </span>
-                          </div>
-                          
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="font-mono text-sm font-medium">
-                              #{order.marketplaceOrderId.slice(-6)}
-                            </span>
-                            {order.marketplace === 'ebay' && <SiEbay className="w-4 h-4 text-[#e53238]" />}
-                            {order.marketplace === 'amazon' && <SiAmazon className="w-4 h-4 text-[#ff9900]" />}
-                          </div>
-                          
-                          <div className="flex items-center justify-between text-xs text-gray-500">
-                            <span>{itemCount} item{itemCount !== 1 ? 's' : ''}</span>
-                            <span className="font-medium text-gray-700">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <StatusBadge status={order.status} />
+                              <span className="font-mono text-xs font-medium">
+                                #{order.marketplaceOrderId.slice(-6)}
+                              </span>
+                              {order.marketplace === 'ebay' && <SiEbay className="w-3 h-3 text-[#e53238]" />}
+                            </div>
+                            <span className="font-medium text-sm">
                               {formatCurrency(parseFloat(order.totalPrice))}
                             </span>
                           </div>
-                          
-                          <p className="text-xs text-gray-500 truncate mt-1">
-                            → {order.shippingCity}, {order.shippingCountry}
-                          </p>
+                          <div className="flex items-center justify-between text-xs text-gray-500 mt-1">
+                            <span>{itemCount} item{itemCount !== 1 ? 's' : ''} → {order.shippingCountry}</span>
+                            <span>{order.orderDate ? format(new Date(order.orderDate), 'MMM d') : '-'}</span>
+                          </div>
                         </div>
                       );
                     })}
@@ -361,12 +361,12 @@ export function Orders({ user }: OrdersProps) {
                 </div>
               ) : (
                 <>
-                  {/* Header */}
-                  <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
+                  {/* Header - Compact */}
+                  <div className="p-3 border-b bg-gray-50 flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <StatusBadge status={selectedOrder.status} size="lg" />
                       <div>
-                        <p className="font-mono font-bold">
+                        <p className="font-mono font-bold text-sm">
                           #{selectedOrder.marketplaceOrderId.slice(-8)}
                         </p>
                         <p className="text-xs text-gray-500">
@@ -375,33 +375,30 @@ export function Orders({ user }: OrdersProps) {
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className="text-xl font-bold">
+                      <p className="text-lg font-bold">
                         {formatCurrency(parseFloat(selectedOrder.totalPrice))}
                       </p>
                       <p className="text-xs text-gray-500">{selectedOrder.currency}</p>
                     </div>
                   </div>
 
-                  {/* Content */}
-                  <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                    {/* Items to Pack */}
-                    <Card>
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-sm flex items-center gap-2">
-                          <Box className="w-4 h-4" />
-                          Items to Pack
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
+                  {/* Content - Two Column Layout for Compact View */}
+                  <div className="flex-1 p-3 space-y-3 overflow-y-auto">
+                    <div className="grid grid-cols-2 gap-3">
+                      {/* Items to Pack - Left Column */}
+                      <div className="border rounded-lg p-2">
+                        <p className="text-xs font-medium text-gray-600 mb-2 flex items-center gap-1">
+                          <Box className="w-3 h-3" /> Items to Pack ({selectedOrder.items?.length || 0})
+                        </p>
                         {selectedOrder.items?.length ? (
-                          <div className="space-y-2">
+                          <div className="space-y-1">
                             {selectedOrder.items.map((item: any) => (
-                              <div key={item.id} className="flex items-center gap-3 p-2 bg-gray-50 rounded">
-                                <div className="w-8 h-8 bg-gray-200 rounded flex items-center justify-center text-xs font-bold">
+                              <div key={item.id} className="flex items-center gap-2 text-sm bg-gray-50 rounded p-1.5">
+                                <span className="w-6 h-6 bg-gray-200 rounded flex items-center justify-center text-xs font-bold flex-shrink-0">
                                   {item.quantity}x
-                                </div>
+                                </span>
                                 <div className="flex-1 min-w-0">
-                                  <p className="font-medium text-sm truncate">{item.title || item.sku}</p>
+                                  <p className="font-medium text-xs truncate">{item.title || item.sku}</p>
                                   <div className="flex items-center gap-2 text-xs text-gray-500">
                                     <span className="font-mono">{item.sku}</span>
                                     {item.tmeProductId && (
@@ -409,50 +406,44 @@ export function Orders({ user }: OrdersProps) {
                                         href={`https://www.tme.eu/en/details/${item.tmeProductId}/`}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="text-blue-600 hover:underline flex items-center gap-1"
+                                        className="text-blue-600 hover:underline"
+                                        data-testid={`link-tme-${item.id}`}
                                       >
-                                        TME <ExternalLink className="w-3 h-3" />
+                                        TME
                                       </a>
                                     )}
                                   </div>
                                 </div>
-                                <p className="text-sm font-medium">
+                                <span className="text-xs font-medium">
                                   {formatCurrency(parseFloat(item.totalPrice))}
-                                </p>
+                                </span>
                               </div>
                             ))}
                           </div>
                         ) : (
-                          <p className="text-sm text-gray-500">No items</p>
+                          <p className="text-xs text-gray-500">No items</p>
                         )}
-                      </CardContent>
-                    </Card>
+                      </div>
 
-                    {/* Shipping Address */}
-                    <Card>
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-sm flex items-center justify-between">
-                          <span className="flex items-center gap-2">
-                            <MapPin className="w-4 h-4" />
-                            Ship To
-                          </span>
-                          <div className="flex gap-1">
-                            <Button variant="ghost" size="sm" onClick={copyAddress} data-testid="btn-copy-address">
-                              <Copy className="w-4 h-4" />
+                      {/* Shipping Address - Right Column */}
+                      <div className="border rounded-lg p-2">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-xs font-medium text-gray-600 flex items-center gap-1">
+                            <MapPin className="w-3 h-3" /> Ship To
+                          </p>
+                          <div className="flex gap-0.5">
+                            <Button variant="ghost" size="sm" onClick={copyAddress} className="h-6 w-6 p-0" data-testid="btn-copy-address">
+                              <Copy className="w-3 h-3" />
                             </Button>
-                            <Button variant="ghost" size="sm" onClick={() => setPrintLabelOpen(true)} data-testid="btn-print-label">
-                              <Printer className="w-4 h-4" />
+                            <Button variant="ghost" size="sm" onClick={() => setPrintLabelOpen(true)} className="h-6 w-6 p-0" data-testid="btn-print-label">
+                              <Printer className="w-3 h-3" />
                             </Button>
                           </div>
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="p-3 bg-gray-50 rounded border-2 border-dashed border-gray-300 font-mono text-sm">
+                        </div>
+                        <div className="p-2 bg-gray-50 rounded border-2 border-dashed border-gray-300 font-mono text-xs">
                           <p className="font-bold">{selectedOrder.shippingName}</p>
                           <p>{selectedOrder.shippingAddressLine1}</p>
-                          {selectedOrder.shippingAddressLine2 && (
-                            <p>{selectedOrder.shippingAddressLine2}</p>
-                          )}
+                          {selectedOrder.shippingAddressLine2 && <p>{selectedOrder.shippingAddressLine2}</p>}
                           <p>{selectedOrder.shippingCity}, {selectedOrder.shippingPostalCode}</p>
                           <p className="font-bold">{selectedOrder.shippingCountry}</p>
                           {selectedOrder.shippingPhone && (
@@ -460,38 +451,36 @@ export function Orders({ user }: OrdersProps) {
                           )}
                         </div>
                         {selectedOrder.shippingService && (
-                          <p className="text-xs text-gray-500 mt-2">
+                          <p className="text-xs text-gray-500 mt-1">
                             Service: {selectedOrder.shippingService}
                           </p>
                         )}
-                      </CardContent>
-                    </Card>
+                      </div>
+                    </div>
 
-                    {/* Buyer Note */}
+                    {/* Buyer Note - Full Width */}
                     {selectedOrder.buyerNote && (
-                      <Card className="border-yellow-300 bg-yellow-50">
-                        <CardContent className="pt-4">
-                          <div className="flex items-start gap-2">
-                            <StickyNote className="w-4 h-4 text-yellow-600 flex-shrink-0 mt-0.5" />
-                            <div>
-                              <p className="text-xs font-medium text-yellow-700 mb-1">Buyer Note</p>
-                              <p className="text-sm">{selectedOrder.buyerNote}</p>
-                            </div>
+                      <div className="border border-yellow-300 bg-yellow-50 rounded-lg p-2">
+                        <div className="flex items-start gap-2">
+                          <StickyNote className="w-4 h-4 text-yellow-600 flex-shrink-0" />
+                          <div>
+                            <p className="text-xs font-medium text-yellow-700">Buyer Note</p>
+                            <p className="text-xs">{selectedOrder.buyerNote}</p>
                           </div>
-                        </CardContent>
-                      </Card>
+                        </div>
+                      </div>
                     )}
 
-                    {/* Collapsible: Financials */}
-                    <Collapsible open={showFinancials} onOpenChange={setShowFinancials}>
-                      <CollapsibleTrigger className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900" data-testid="trigger-financials">
-                        {showFinancials ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                        <DollarSign className="w-4 h-4" />
-                        Financial Details
-                      </CollapsibleTrigger>
-                      <CollapsibleContent className="mt-2">
-                        <Card>
-                          <CardContent className="pt-4 text-sm space-y-1">
+                    {/* Collapsible sections in a row */}
+                    <div className="flex gap-3 text-xs">
+                      <Collapsible open={showFinancials} onOpenChange={setShowFinancials} className="flex-1">
+                        <CollapsibleTrigger className="flex items-center gap-1 text-gray-600 hover:text-gray-900" data-testid="trigger-financials">
+                          {showFinancials ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                          <DollarSign className="w-3 h-3" />
+                          Financials
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="mt-1">
+                          <div className="border rounded p-2 text-xs space-y-0.5">
                             <div className="flex justify-between">
                               <span>Subtotal</span>
                               <span>{formatCurrency(parseFloat(selectedOrder.subtotal))}</span>
@@ -502,78 +491,63 @@ export function Orders({ user }: OrdersProps) {
                             </div>
                             {selectedOrder.marketplaceFee && (
                               <div className="flex justify-between text-red-600">
-                                <span>Marketplace Fee</span>
+                                <span>Fee</span>
                                 <span>-{formatCurrency(parseFloat(selectedOrder.marketplaceFee))}</span>
                               </div>
                             )}
-                            <Separator />
-                            <div className="flex justify-between font-bold">
-                              <span>Total</span>
-                              <span>{formatCurrency(parseFloat(selectedOrder.totalPrice))}</span>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      </CollapsibleContent>
-                    </Collapsible>
+                          </div>
+                        </CollapsibleContent>
+                      </Collapsible>
 
-                    {/* Collapsible: History */}
-                    <Collapsible open={showHistory} onOpenChange={setShowHistory}>
-                      <CollapsibleTrigger className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900" data-testid="trigger-history">
-                        {showHistory ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                        <History className="w-4 h-4" />
-                        Order History
-                      </CollapsibleTrigger>
-                      <CollapsibleContent className="mt-2">
-                        <Card>
-                          <CardContent className="pt-4">
+                      <Collapsible open={showHistory} onOpenChange={setShowHistory} className="flex-1">
+                        <CollapsibleTrigger className="flex items-center gap-1 text-gray-600 hover:text-gray-900" data-testid="trigger-history">
+                          {showHistory ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                          <History className="w-3 h-3" />
+                          History
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="mt-1">
+                          <div className="border rounded p-2 text-xs max-h-20 overflow-y-auto">
                             {selectedOrder.events?.length ? (
-                              <div className="space-y-2">
+                              <div className="space-y-1">
                                 {selectedOrder.events.map((event: any) => (
-                                  <div key={event.id} className="flex items-start gap-2 text-sm">
-                                    <div className="w-2 h-2 rounded-full bg-gray-400 mt-1.5" />
-                                    <div className="flex-1">
-                                      <p className="capitalize">{event.eventType.replace(/_/g, ' ')}</p>
-                                      {event.fromStatus && event.toStatus && (
-                                        <p className="text-xs text-gray-500">
-                                          {event.fromStatus} → {event.toStatus}
-                                        </p>
-                                      )}
-                                    </div>
-                                    <span className="text-xs text-gray-400">
-                                      {event.createdAt ? format(new Date(event.createdAt), 'MMM d, HH:mm') : ''}
+                                  <div key={event.id} className="flex items-center gap-1">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-gray-400" />
+                                    <span className="capitalize flex-1">{event.eventType.replace(/_/g, ' ')}</span>
+                                    <span className="text-gray-400">
+                                      {event.createdAt ? format(new Date(event.createdAt), 'MMM d') : ''}
                                     </span>
                                   </div>
                                 ))}
                               </div>
                             ) : (
-                              <p className="text-sm text-gray-500">No history</p>
+                              <p className="text-gray-500">No history</p>
                             )}
-                          </CardContent>
-                        </Card>
-                      </CollapsibleContent>
-                    </Collapsible>
+                          </div>
+                        </CollapsibleContent>
+                      </Collapsible>
+                    </div>
                   </div>
 
-                  {/* Action Footer */}
-                  <div className="p-4 border-t bg-gray-50">
+                  {/* Action Footer - Compact */}
+                  <div className="p-3 border-t bg-gray-50">
                     {selectedOrder.status === 'new' && (
                       <Button
-                        className="w-full h-12 text-lg bg-yellow-500 hover:bg-yellow-600"
+                        className="w-full h-10 bg-yellow-500 hover:bg-yellow-600"
                         onClick={() => handleMarkPacked(selectedOrder.id)}
                         disabled={updateStatusMutation.isPending}
                         data-testid="btn-mark-packed"
                       >
                         {updateStatusMutation.isPending ? (
-                          <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                         ) : (
-                          <Package className="w-5 h-5 mr-2" />
+                          <Package className="w-4 h-4 mr-2" />
                         )}
                         Mark as Packed
                       </Button>
                     )}
 
                     {selectedOrder.status === 'packed' && (
-                      <div className="space-y-3">
+                      <div className="space-y-2">
                         <div className="flex gap-2">
                           <Input
                             placeholder="Tracking number *"
