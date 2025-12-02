@@ -184,11 +184,14 @@ export async function getMyMessages(
   startTime?: Date,
   endTime?: Date,
   folderType: 'Inbox' | 'Sent' | 'All' = 'Inbox',
-  limit: number = 100
+  limit: number = 100,
+  pageNumber: number = 1
 ): Promise<GetMessagesResponse> {
   try {
     const startTimeStr = startTime ? startTime.toISOString() : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const endTimeStr = endTime ? endTime.toISOString() : new Date().toISOString();
+
+    console.log(`📬 Fetching eBay messages page ${pageNumber} (limit: ${limit})...`);
 
     // Step 1: Get message headers (IDs) first
     const headersRequest = `<?xml version="1.0" encoding="utf-8"?>
@@ -198,7 +201,7 @@ export async function getMyMessages(
   <EndTime>${endTimeStr}</EndTime>
   <Pagination>
     <EntriesPerPage>${limit}</EntriesPerPage>
-    <PageNumber>1</PageNumber>
+    <PageNumber>${pageNumber}</PageNumber>
   </Pagination>
 </GetMyMessagesRequest>`;
 

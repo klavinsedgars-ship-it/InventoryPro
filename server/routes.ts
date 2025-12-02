@@ -3494,14 +3494,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
             });
             synced++;
           } else {
+            // Update thread subject with cleaned content if needed
+            const cleanedSubject = cleanMessageBodyForStorage(msg.subject);
+            if (thread.subject !== cleanedSubject) {
+              await storage.updateMessageThread(thread.id, {
+                subject: cleanedSubject,
+                lastMessageAt: new Date(msg.creationDate)
+              });
+            }
             updated++;
           }
 
           // Check if message already exists
           const existingMessages = await storage.getMessages(thread.id);
-          const exists = existingMessages.some(m => m.marketplaceMessageId === msg.messageId);
+          const existingMsg = existingMessages.find(m => m.marketplaceMessageId === msg.messageId);
 
-          if (!exists) {
+          if (!existingMsg) {
             await storage.createMessage({
               threadId: thread.id,
               direction: 'inbound',
@@ -3512,6 +3520,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
               senderEmail: msg.senderEmail,
               status: 'delivered'
             });
+          } else {
+            // Update existing message with cleaned HTML content
+            const cleanedBody = cleanMessageBodyForStorage(msg.body);
+            const cleanedSubject = cleanMessageBodyForStorage(msg.subject);
+            if (existingMsg.body !== cleanedBody || existingMsg.subject !== cleanedSubject) {
+              await storage.updateMessage(existingMsg.id, {
+                body: cleanedBody,
+                subject: cleanedSubject
+              });
+            }
           }
         }
 
