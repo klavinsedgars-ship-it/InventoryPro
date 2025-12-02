@@ -2816,9 +2816,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: filters.status
       });
 
+      // Include items for each order
+      const ordersWithItems = await Promise.all(
+        orders.map(async (order) => {
+          const items = await storage.getOrderItems(order.id);
+          return { ...order, items };
+        })
+      );
+
       res.json({
         success: true,
-        orders,
+        orders: ordersWithItems,
         total,
         limit: filters.limit,
         offset: filters.offset

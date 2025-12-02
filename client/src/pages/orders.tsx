@@ -426,66 +426,98 @@ export function Orders({ user }: OrdersProps) {
                 </p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Order</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Buyer</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Items</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {filteredOrders.map((order) => (
-                      <tr 
-                        key={order.id} 
-                        className="hover:bg-gray-50 cursor-pointer"
-                        onClick={() => handleViewOrder(order)}
-                        data-testid={`row-order-${order.id}`}
-                      >
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <MarketplaceBadge marketplace={order.marketplace} />
+              <div className="divide-y divide-gray-200">
+                {filteredOrders.map((order: any) => {
+                  const itemCount = order.items?.length || 0;
+                  const totalQty = order.items?.reduce((sum: number, item: any) => sum + (item.quantity || 1), 0) || 0;
+                  
+                  return (
+                    <div 
+                      key={order.id}
+                      className="p-4 hover:bg-gray-50 cursor-pointer"
+                      onClick={() => handleViewOrder(order)}
+                      data-testid={`row-order-${order.id}`}
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-2">
+                            <StatusBadge status={order.status} />
+                            <span className="text-xs text-gray-500">
+                              {order.orderDate ? format(new Date(order.orderDate), 'MMM d, HH:mm') : '-'}
+                            </span>
+                            <span className="text-xs text-gray-400">•</span>
+                            <span className="text-xs font-mono text-gray-600">
+                              #{order.marketplaceOrderId.slice(-8)}
+                            </span>
+                            {order.marketplace === 'ebay' && <SiEbay className="w-4 h-4 text-[#e53238]" />}
+                            {order.marketplace === 'amazon' && <SiAmazon className="w-4 h-4 text-[#ff9900]" />}
+                          </div>
+                          
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                             <div>
-                              <p className="font-medium text-gray-900 text-sm">
-                                #{order.marketplaceOrderId.slice(-8)}
+                              <p className="text-xs text-gray-500 mb-1">Items ({totalQty} pcs)</p>
+                              <div className="space-y-1">
+                                {order.items?.slice(0, 3).map((item: any, idx: number) => (
+                                  <div key={idx} className="flex items-center gap-2 text-sm">
+                                    <span className="text-gray-900 truncate max-w-[200px]" title={item.title}>
+                                      {item.quantity}x {item.sku || 'N/A'}
+                                    </span>
+                                    {item.tmeProductId && (
+                                      <a
+                                        href={`https://www.tme.eu/en/details/${item.tmeProductId}/`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-blue-600 hover:text-blue-800"
+                                        onClick={e => e.stopPropagation()}
+                                        title="View on TME"
+                                      >
+                                        <ExternalLink className="w-3 h-3" />
+                                      </a>
+                                    )}
+                                  </div>
+                                ))}
+                                {order.items?.length > 3 && (
+                                  <p className="text-xs text-gray-400">+{order.items.length - 3} more</p>
+                                )}
+                                {!order.items?.length && (
+                                  <p className="text-xs text-gray-400">No items</p>
+                                )}
+                              </div>
+                            </div>
+                            
+                            <div>
+                              <p className="text-xs text-gray-500 mb-1">Ship to</p>
+                              <p className="text-sm font-medium text-gray-900">{order.shippingName}</p>
+                              <p className="text-xs text-gray-600 truncate" title={order.shippingAddressLine1}>
+                                {order.shippingCity}, {order.shippingPostalCode}
                               </p>
-                              <p className="text-xs text-gray-500">{order.marketplace.toUpperCase()}</p>
+                              <p className="text-xs text-gray-500">{order.shippingCountry}</p>
+                            </div>
+                            
+                            <div>
+                              <p className="text-xs text-gray-500 mb-1">Buyer</p>
+                              <p className="text-sm font-medium text-gray-900">{order.buyerUsername}</p>
+                              {order.buyerNote && (
+                                <p className="text-xs text-yellow-600 flex items-center gap-1 mt-1">
+                                  <StickyNote className="w-3 h-3" />
+                                  Has note
+                                </p>
+                              )}
                             </div>
                           </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div>
-                            <p className="font-medium text-gray-900 text-sm">{order.buyerUsername}</p>
-                            <p className="text-xs text-gray-500">{order.shippingName}</p>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <Badge variant="secondary">Items</Badge>
-                        </td>
-                        <td className="px-4 py-3">
-                          <p className="font-medium text-gray-900">
+                        </div>
+                        
+                        <div className="text-right flex-shrink-0">
+                          <p className="text-lg font-bold text-gray-900">
                             {formatCurrency(parseFloat(order.totalPrice))}
                           </p>
                           <p className="text-xs text-gray-500">{order.currency}</p>
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusBadge status={order.status} />
-                        </td>
-                        <td className="px-4 py-3">
-                          <p className="text-sm text-gray-900">
-                            {order.orderDate ? format(new Date(order.orderDate), 'MMM d, yyyy') : '-'}
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            {order.orderDate ? format(new Date(order.orderDate), 'HH:mm') : ''}
-                          </p>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                          {order.marketplaceFee && (
+                            <p className="text-xs text-red-500">
+                              -{formatCurrency(parseFloat(order.marketplaceFee))} fees
+                            </p>
+                          )}
+                          <div className="flex items-center gap-1 mt-2 justify-end" onClick={e => e.stopPropagation()}>
                             <Button
                               variant="ghost"
                               size="sm"
@@ -504,11 +536,11 @@ export function Orders({ user }: OrdersProps) {
                               <Printer className="w-4 h-4" />
                             </Button>
                           </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
