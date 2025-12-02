@@ -5,6 +5,67 @@ import { calculateEbayStock } from "./stock-manager";
 import { findEbayCategoryForTMEProduct } from "./tme-ebay-category-mapping";
 import { imageProcessingService } from "./image-processing";
 
+/**
+ * Filter function to remove bundle-related words from eBay listings.
+ * These words might incorrectly imply the product comes in bundles/rolls/packs.
+ */
+const BUNDLE_WORDS = [
+  'bundle', 'bundles', 'bundled',
+  'package', 'packages', 'packaged', 'packaging',
+  'bulk', 'bulks',
+  'multiple', 'multiples',
+  'lot', 'lots',
+  'set', 'sets',
+  'kit', 'kits',
+  'pack', 'packs', 'packed',
+  'roll', 'rolls',
+  'batch', 'batches',
+  'assortment', 'assortments',
+  'collection', 'collections',
+  'combo', 'combos',
+  'group', 'grouped',
+  'wholesale',
+  'multi-pack', 'multipack',
+  'value pack', 'value-pack',
+  'mixed', 'mix',
+  'variety', 'varieties'
+];
+
+function filterBundleWords(text: string): string {
+  if (!text) return text;
+  
+  let filtered = text;
+  
+  // Create regex patterns for each bundle word (case insensitive, word boundaries)
+  for (const word of BUNDLE_WORDS) {
+    // Match the word with word boundaries, case insensitive
+    const regex = new RegExp(`\\b${word}\\b`, 'gi');
+    filtered = filtered.replace(regex, '');
+  }
+  
+  // Clean up multiple spaces and trim
+  filtered = filtered.replace(/\s+/g, ' ').trim();
+  
+  // Remove orphaned punctuation (e.g., " - " becoming " -  - ")
+  filtered = filtered.replace(/\s*-\s*-\s*/g, ' - ');
+  filtered = filtered.replace(/\s*,\s*,\s*/g, ', ');
+  filtered = filtered.replace(/^\s*[-,]\s*/, '');
+  filtered = filtered.replace(/\s*[-,]\s*$/, '');
+  
+  return filtered;
+}
+
+function filterBundleWordsFromHtml(html: string): string {
+  if (!html) return html;
+  
+  // For HTML, we need to be careful not to break tags
+  // Process text content between tags
+  return html.replace(/>([^<]+)</g, (match, textContent) => {
+    const filtered = filterBundleWords(textContent);
+    return `>${filtered}<`;
+  });
+}
+
 interface EbayCredentials {
   appId: string;
   devId: string;
@@ -247,10 +308,24 @@ export class EbayApiService {
         console.log(`📦 MOQ product: ${moq}x package, listing price €${listingPrice.toFixed(2)} (package price from dynamic pricing)`);
       }
 
+      // Get raw title and description
+      const rawTitle = listingDetails.title || templateData?.title || product.name;
+      const rawDescription = listingDetails.description || templateData?.htmlDescription || templateData?.description || product.description || `${product.name} - High quality electronics component`;
+      
+      // Filter bundle-related words from title and description before sending to eBay
+      const filteredTitle = filterBundleWords(rawTitle);
+      const filteredDescription = rawDescription.includes('<') 
+        ? filterBundleWordsFromHtml(rawDescription) 
+        : filterBundleWords(rawDescription);
+      
+      console.log(`📝 Bundle word filter applied:`);
+      console.log(`   Original title: "${rawTitle}"`);
+      console.log(`   Filtered title: "${filteredTitle}"`);
+      
       // Prepare listing data for eBay Trading API
       const listingData = {
-        title: listingDetails.title || templateData?.title || product.name,
-        description: listingDetails.description || templateData?.htmlDescription || templateData?.description || product.description || `${product.name} - High quality electronics component`,
+        title: filteredTitle,
+        description: filteredDescription,
         categoryId: listingDetails.categoryId || categoryMapping.categoryId, // Use automatically mapped category
         startPrice: listingPrice,
         quantity: listingDetails.quantity || ebayQuantity, // Use calculated eBay stock
