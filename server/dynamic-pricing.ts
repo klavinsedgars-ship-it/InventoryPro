@@ -294,3 +294,58 @@ export function formatQuantityLabel(quantity: number): string {
   if (quantity <= 1) return "";
   return `${quantity}x`;
 }
+
+/**
+ * TME PriceList entry structure
+ */
+interface TMEPriceEntry {
+  Amount: number;      // Minimum quantity threshold for this price tier
+  PriceValue: number;  // Price per unit at this tier
+  PriceBase?: number;
+  Special?: boolean;
+}
+
+/**
+ * Get the correct supplier price for a given MOQ from TME's PriceList
+ * 
+ * TME PriceList structure example:
+ * [
+ *   { Amount: 1, PriceValue: 0.20 },    // Base price for 1-4 units
+ *   { Amount: 5, PriceValue: 0.164 },   // Discount for 5-24 units
+ *   { Amount: 25, PriceValue: 0.098 },  // Bigger discount for 25-99 units
+ *   { Amount: 100, PriceValue: 0.087 }, // etc.
+ * ]
+ * 
+ * For MOQ=5, we should use PriceValue=0.164 (the tier where Amount <= 5)
+ * This ensures package price = 5 × 0.164 = 0.82 EUR (matches TME's total)
+ * 
+ * @param priceList - TME's PriceList array
+ * @param moq - Minimum Order Quantity
+ * @returns The per-unit price for the given MOQ quantity tier
+ */
+export function getSupplierPriceForMoq(
+  priceList: TMEPriceEntry[] | undefined | null,
+  moq: number = 1
+): number {
+  if (!priceList || priceList.length === 0) {
+    return 0;
+  }
+
+  // Sort price list by Amount ascending to find the correct tier
+  const sortedPrices = [...priceList].sort((a, b) => a.Amount - b.Amount);
+  
+  // Find the price tier that applies to our MOQ
+  // We want the highest Amount that is <= moq
+  let applicablePrice = sortedPrices[0]?.PriceValue || 0;
+  
+  for (const tier of sortedPrices) {
+    if (tier.Amount <= moq) {
+      applicablePrice = tier.PriceValue;
+    } else {
+      // Once we exceed the MOQ, stop looking
+      break;
+    }
+  }
+  
+  return applicablePrice;
+}

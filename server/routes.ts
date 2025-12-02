@@ -832,8 +832,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             try {
               const { product, price, stock } = enhanced;
 
-              // Calculate pricing
-              const supplierPrice = price?.PriceList?.[0]?.PriceValue || 0;
+              // Get MOQ (minimum order quantity) and multiples from TME product
+              const moq = product.MinAmount || 1;
+              const multiples = product.Multiples || 1;
+
+              // Calculate pricing - use correct price tier for MOQ quantity
+              const { getSupplierPriceForMoq, calculateDynamicPrice } = await import("./dynamic-pricing");
+              const supplierPrice = getSupplierPriceForMoq(price?.PriceList, moq);
+              
               let pricingResult = {
                 finalPrice: supplierPrice,
                 calculatedPrice: supplierPrice,
@@ -842,7 +848,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
               };
 
               if (settings?.applyDynamicPricing && supplierPrice > 0) {
-                const { calculateDynamicPrice } = await import("./dynamic-pricing");
                 const result = calculateDynamicPrice(supplierPrice);
                 pricingResult = {
                   finalPrice: result.finalPrice,
@@ -869,7 +874,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 weight: product.Weight?.toString() || null,
                 tmeCategory: product.Category || null,
                 tmeCategoryId: product.CategoryId ? String(product.CategoryId) : null,
-                tmeSymbol: product.Symbol
+                tmeSymbol: product.Symbol,
+                moq: moq,
+                multiples: multiples
               };
 
               // Check if product already exists by SKU
@@ -956,8 +963,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
               try {
                 const { product, price, stock } = enhanced;
 
-                // Calculate pricing
-                const supplierPrice = price?.PriceList?.[0]?.PriceValue || 0;
+                // Get MOQ (minimum order quantity) and multiples from TME product
+                const moq = product.MinAmount || 1;
+                const multiples = product.Multiples || 1;
+
+                // Calculate pricing - use correct price tier for MOQ quantity
+                const { getSupplierPriceForMoq, calculateDynamicPrice } = await import("./dynamic-pricing");
+                const supplierPrice = getSupplierPriceForMoq(price?.PriceList, moq);
+                
                 let pricingResult = {
                   finalPrice: supplierPrice,
                   calculatedPrice: supplierPrice,
@@ -966,7 +979,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 };
 
                 if (settings.applyDynamicPricing && supplierPrice > 0) {
-                  const { calculateDynamicPrice } = await import("./dynamic-pricing");
                   const result = calculateDynamicPrice(supplierPrice);
                   pricingResult = {
                     finalPrice: result.finalPrice,
@@ -975,10 +987,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
                     marginPercentage: result.marginPercentage
                   };
                 }
-
-                // Get MOQ (minimum order quantity) and multiples from TME product
-                const moq = product.MinAmount || 1;
-                const multiples = product.Multiples || 1;
 
                 // Prepare product data
                 const productData = {
@@ -1387,8 +1395,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
               try {
                 const { product, price, stock } = enhanced;
 
-                // Calculate pricing
-                const supplierPrice = price?.PriceList?.[0]?.PriceValue || 0;
+                // Get MOQ (minimum order quantity) and multiples from TME product
+                const moq = product.MinAmount || 1;
+                const multiples = product.Multiples || 1;
+
+                // Calculate pricing - use correct price tier for MOQ quantity
+                const { getSupplierPriceForMoq, calculateDynamicPrice } = await import("./dynamic-pricing");
+                const supplierPrice = getSupplierPriceForMoq(price?.PriceList, moq);
+                
                 let pricingResult = {
                   finalPrice: supplierPrice,
                   calculatedPrice: supplierPrice,
@@ -1397,7 +1411,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 };
 
                 if (settings.applyDynamicPricing && supplierPrice > 0) {
-                  const { calculateDynamicPrice } = await import("./dynamic-pricing");
                   const result = calculateDynamicPrice(supplierPrice);
                   pricingResult = {
                     finalPrice: result.finalPrice,
@@ -1406,10 +1419,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
                     marginPercentage: result.marginPercentage
                   };
                 }
-
-                // Get MOQ (minimum order quantity) and multiples from TME product
-                const moq = product.MinAmount || 1;
-                const multiples = product.Multiples || 1;
 
                 // Prepare product data
                 const productData = {

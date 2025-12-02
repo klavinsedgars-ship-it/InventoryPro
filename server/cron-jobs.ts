@@ -9,8 +9,16 @@
 import { storage } from "./storage";
 import { TMEApiServiceOptimized } from "./tme-api-optimized";
 import { ebayApi } from "./ebay-api";
-import { calculateDynamicPrice } from "./dynamic-pricing";
+import { calculateDynamicPrice, getSupplierPriceForMoq } from "./dynamic-pricing";
 import { calculateEbayStock } from "./stock-manager";
+
+// TME PriceList entry structure
+interface TMEPriceEntry {
+  Amount: number;
+  PriceValue: number;
+  PriceBase?: number;
+  Special?: boolean;
+}
 
 // Initialize TME API with storage for PostgreSQL caching
 const tmeApi = new TMEApiServiceOptimized(storage);
@@ -76,9 +84,10 @@ async function getLocalProductSkus(): Promise<string[]> {
 
 /**
  * Batch fetch live price/stock data from TME API
+ * Returns full PriceList for MOQ-aware pricing calculations
  */
-async function fetchLiveTMEData(symbols: string[]): Promise<Map<string, { price: number; stock: number }>> {
-  const liveData = new Map<string, { price: number; stock: number }>();
+async function fetchLiveTMEData(symbols: string[]): Promise<Map<string, { priceList: TMEPriceEntry[]; stock: number }>> {
+  const liveData = new Map<string, { priceList: TMEPriceEntry[]; stock: number }>();
   
   console.log(`🔄 Fetching live TME data for ${symbols.length} products...`);
   
@@ -92,16 +101,13 @@ async function fetchLiveTMEData(symbols: string[]): Promise<Map<string, { price:
       const pricesAndStocks = await tmeApi.getProductsPricesAndStocks(batch);
       
       for (const item of pricesAndStocks) {
-        // Extract price from PriceList (first/best price)
-        let price = 0;
-        if (item.PriceList && item.PriceList.length > 0) {
-          price = item.PriceList[0].PriceValue || item.PriceList[0].PriceBase || 0;
-        }
+        // Store full PriceList for MOQ-aware pricing
+        const priceList = item.PriceList || [];
         
         // Extract stock amount
         const stock = item.Amount || 0;
         
-        liveData.set(item.Symbol, { price, stock });
+        liveData.set(item.Symbol, { priceList, stock });
       }
       
       // Respect rate limits between batches
@@ -122,10 +128,11 @@ async function fetchLiveTMEData(symbols: string[]): Promise<Map<string, { price:
 /**
  * Compare local database with live TME data
  * Returns only products where price or stock has changed
+ * Uses MOQ-aware pricing to get the correct price tier
  */
 async function calculateDiff(
   localSkus: string[],
-  liveData: Map<string, { price: number; stock: number }>
+  liveData: Map<string, { priceList: TMEPriceEntry[]; stock: number }>
 ): Promise<DiffResult[]> {
   const diffs: DiffResult[] = [];
   
@@ -139,10 +146,14 @@ async function calculateDiff(
       const live = liveData.get(sku);
       if (!live) continue;
       
+      // Use product's MOQ to get the correct price tier from TME's PriceList
+      const moq = product.moq || 1;
+      const livePrice = getSupplierPriceForMoq(live.priceList, moq);
+      
       const localPrice = parseFloat(product.supplierPrice?.toString() || '0');
       const localStock = product.stock || 0;
       
-      const priceChanged = Math.abs(localPrice - live.price) > 0.01; // Allow 1 cent tolerance
+      const priceChanged = Math.abs(localPrice - livePrice) > 0.01; // Allow 1 cent tolerance
       const stockChanged = localStock !== live.stock;
       
       if (priceChanged || stockChanged) {
@@ -152,7 +163,7 @@ async function calculateDiff(
             priceChanged,
             stockChanged,
             oldPrice: localPrice,
-            newPrice: live.price,
+            newPrice: livePrice,
             oldStock: localStock,
             newStock: live.stock
           }
