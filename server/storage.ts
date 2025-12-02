@@ -17,6 +17,11 @@ import {
   orderItems,
   orderFees,
   orderEvents,
+  messageThreads,
+  messages,
+  messageTemplates,
+  autoMessageRules,
+  scheduledMessages,
   type User, 
   type InsertUser, 
   type Product, 
@@ -52,7 +57,17 @@ import {
   type OrderFee,
   type InsertOrderFee,
   type OrderEvent,
-  type InsertOrderEvent
+  type InsertOrderEvent,
+  type MessageThread,
+  type InsertMessageThread,
+  type Message,
+  type InsertMessage,
+  type MessageTemplate,
+  type InsertMessageTemplate,
+  type AutoMessageRule,
+  type InsertAutoMessageRule,
+  type ScheduledMessage,
+  type InsertScheduledMessage
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, gte, lte, desc, asc, count, or, ilike } from "drizzle-orm";
@@ -200,6 +215,52 @@ export interface IStorage {
   // Order Events
   getOrderEvents(orderId: number): Promise<OrderEvent[]>;
   createOrderEvent(event: InsertOrderEvent): Promise<OrderEvent>;
+
+  // Message Threads
+  getMessageThreads(filters?: {
+    marketplace?: string;
+    status?: string;
+    isRead?: boolean;
+    orderId?: number;
+    buyerUsername?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<MessageThread[]>;
+  getMessageThread(id: number): Promise<MessageThread | undefined>;
+  getMessageThreadByBuyer(buyerUsername: string, itemId?: string): Promise<MessageThread | undefined>;
+  createMessageThread(thread: InsertMessageThread): Promise<MessageThread>;
+  updateMessageThread(id: number, thread: Partial<InsertMessageThread>): Promise<MessageThread | undefined>;
+  getUnreadThreadCount(): Promise<number>;
+
+  // Messages
+  getMessages(threadId: number): Promise<Message[]>;
+  getMessage(id: number): Promise<Message | undefined>;
+  createMessage(message: InsertMessage): Promise<Message>;
+  updateMessage(id: number, message: Partial<InsertMessage>): Promise<Message | undefined>;
+
+  // Message Templates
+  getMessageTemplates(category?: string): Promise<MessageTemplate[]>;
+  getMessageTemplate(id: number): Promise<MessageTemplate | undefined>;
+  createMessageTemplate(template: InsertMessageTemplate): Promise<MessageTemplate>;
+  updateMessageTemplate(id: number, template: Partial<InsertMessageTemplate>): Promise<MessageTemplate | undefined>;
+  deleteMessageTemplate(id: number): Promise<boolean>;
+  incrementTemplateUsage(id: number): Promise<void>;
+
+  // Auto Message Rules
+  getAutoMessageRules(triggerType?: string): Promise<AutoMessageRule[]>;
+  getAutoMessageRule(id: number): Promise<AutoMessageRule | undefined>;
+  getActiveAutoMessageRules(triggerType: string): Promise<AutoMessageRule[]>;
+  createAutoMessageRule(rule: InsertAutoMessageRule): Promise<AutoMessageRule>;
+  updateAutoMessageRule(id: number, rule: Partial<InsertAutoMessageRule>): Promise<AutoMessageRule | undefined>;
+  deleteAutoMessageRule(id: number): Promise<boolean>;
+  incrementRuleSentCount(id: number): Promise<void>;
+
+  // Scheduled Messages
+  getScheduledMessages(status?: string): Promise<ScheduledMessage[]>;
+  getPendingScheduledMessages(): Promise<ScheduledMessage[]>;
+  createScheduledMessage(message: InsertScheduledMessage): Promise<ScheduledMessage>;
+  updateScheduledMessage(id: number, message: Partial<InsertScheduledMessage>): Promise<ScheduledMessage | undefined>;
+  cancelScheduledMessage(id: number): Promise<boolean>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -928,6 +989,267 @@ export class DatabaseStorage implements IStorage {
   async createOrderEvent(event: InsertOrderEvent): Promise<OrderEvent> {
     const result = await db.insert(orderEvents).values(event).returning();
     return result[0];
+  }
+
+  // ============================================
+  // MESSAGING SYSTEM
+  // ============================================
+
+  // Message Threads
+  async getMessageThreads(filters?: {
+    marketplace?: string;
+    status?: string;
+    isRead?: boolean;
+    orderId?: number;
+    buyerUsername?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<MessageThread[]> {
+    const conditions = [];
+    
+    if (filters?.marketplace) {
+      conditions.push(eq(messageThreads.marketplace, filters.marketplace));
+    }
+    if (filters?.status) {
+      conditions.push(eq(messageThreads.status, filters.status));
+    }
+    if (filters?.isRead !== undefined) {
+      conditions.push(eq(messageThreads.isRead, filters.isRead));
+    }
+    if (filters?.orderId) {
+      conditions.push(eq(messageThreads.orderId, filters.orderId));
+    }
+    if (filters?.buyerUsername) {
+      conditions.push(ilike(messageThreads.buyerUsername, `%${filters.buyerUsername}%`));
+    }
+
+    let query = db.select().from(messageThreads)
+      .orderBy(desc(messageThreads.lastMessageAt), desc(messageThreads.createdAt));
+
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions)) as any;
+    }
+    if (filters?.limit) {
+      query = query.limit(filters.limit) as any;
+    }
+    if (filters?.offset) {
+      query = query.offset(filters.offset) as any;
+    }
+
+    return await query;
+  }
+
+  async getMessageThread(id: number): Promise<MessageThread | undefined> {
+    const result = await db.select().from(messageThreads).where(eq(messageThreads.id, id));
+    return result[0] || undefined;
+  }
+
+  async getMessageThreadByBuyer(buyerUsername: string, itemId?: string): Promise<MessageThread | undefined> {
+    const conditions = [eq(messageThreads.buyerUsername, buyerUsername)];
+    if (itemId) {
+      conditions.push(eq(messageThreads.itemId, itemId));
+    }
+    const result = await db.select().from(messageThreads)
+      .where(and(...conditions))
+      .orderBy(desc(messageThreads.createdAt))
+      .limit(1);
+    return result[0] || undefined;
+  }
+
+  async createMessageThread(thread: InsertMessageThread): Promise<MessageThread> {
+    const result = await db.insert(messageThreads).values(thread).returning();
+    return result[0];
+  }
+
+  async updateMessageThread(id: number, thread: Partial<InsertMessageThread>): Promise<MessageThread | undefined> {
+    const result = await db.update(messageThreads)
+      .set({ ...thread, updatedAt: new Date() })
+      .where(eq(messageThreads.id, id))
+      .returning();
+    return result[0] || undefined;
+  }
+
+  async getUnreadThreadCount(): Promise<number> {
+    const result = await db.select({ count: count() }).from(messageThreads)
+      .where(eq(messageThreads.isRead, false));
+    return result[0]?.count || 0;
+  }
+
+  // Messages
+  async getMessages(threadId: number): Promise<Message[]> {
+    return await db.select().from(messages)
+      .where(eq(messages.threadId, threadId))
+      .orderBy(asc(messages.createdAt));
+  }
+
+  async getMessage(id: number): Promise<Message | undefined> {
+    const result = await db.select().from(messages).where(eq(messages.id, id));
+    return result[0] || undefined;
+  }
+
+  async createMessage(message: InsertMessage): Promise<Message> {
+    const result = await db.insert(messages).values(message).returning();
+    
+    // Update thread's message count and last message time
+    if (result[0]) {
+      await db.update(messageThreads)
+        .set({
+          messageCount: db.select({ count: count() }).from(messages).where(eq(messages.threadId, message.threadId)),
+          lastMessageAt: new Date(),
+          updatedAt: new Date()
+        })
+        .where(eq(messageThreads.id, message.threadId));
+    }
+    
+    return result[0];
+  }
+
+  async updateMessage(id: number, message: Partial<InsertMessage>): Promise<Message | undefined> {
+    const result = await db.update(messages)
+      .set(message)
+      .where(eq(messages.id, id))
+      .returning();
+    return result[0] || undefined;
+  }
+
+  // Message Templates
+  async getMessageTemplates(category?: string): Promise<MessageTemplate[]> {
+    if (category) {
+      return await db.select().from(messageTemplates)
+        .where(eq(messageTemplates.category, category))
+        .orderBy(desc(messageTemplates.usageCount));
+    }
+    return await db.select().from(messageTemplates)
+      .orderBy(desc(messageTemplates.usageCount));
+  }
+
+  async getMessageTemplate(id: number): Promise<MessageTemplate | undefined> {
+    const result = await db.select().from(messageTemplates).where(eq(messageTemplates.id, id));
+    return result[0] || undefined;
+  }
+
+  async createMessageTemplate(template: InsertMessageTemplate): Promise<MessageTemplate> {
+    const result = await db.insert(messageTemplates).values(template).returning();
+    return result[0];
+  }
+
+  async updateMessageTemplate(id: number, template: Partial<InsertMessageTemplate>): Promise<MessageTemplate | undefined> {
+    const result = await db.update(messageTemplates)
+      .set({ ...template, updatedAt: new Date() })
+      .where(eq(messageTemplates.id, id))
+      .returning();
+    return result[0] || undefined;
+  }
+
+  async deleteMessageTemplate(id: number): Promise<boolean> {
+    const result = await db.delete(messageTemplates).where(eq(messageTemplates.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async incrementTemplateUsage(id: number): Promise<void> {
+    const template = await this.getMessageTemplate(id);
+    if (template) {
+      await db.update(messageTemplates)
+        .set({
+          usageCount: template.usageCount + 1,
+          lastUsedAt: new Date()
+        })
+        .where(eq(messageTemplates.id, id));
+    }
+  }
+
+  // Auto Message Rules
+  async getAutoMessageRules(triggerType?: string): Promise<AutoMessageRule[]> {
+    if (triggerType) {
+      return await db.select().from(autoMessageRules)
+        .where(eq(autoMessageRules.triggerType, triggerType))
+        .orderBy(desc(autoMessageRules.createdAt));
+    }
+    return await db.select().from(autoMessageRules)
+      .orderBy(desc(autoMessageRules.createdAt));
+  }
+
+  async getAutoMessageRule(id: number): Promise<AutoMessageRule | undefined> {
+    const result = await db.select().from(autoMessageRules).where(eq(autoMessageRules.id, id));
+    return result[0] || undefined;
+  }
+
+  async getActiveAutoMessageRules(triggerType: string): Promise<AutoMessageRule[]> {
+    return await db.select().from(autoMessageRules)
+      .where(and(
+        eq(autoMessageRules.triggerType, triggerType),
+        eq(autoMessageRules.isActive, true)
+      ));
+  }
+
+  async createAutoMessageRule(rule: InsertAutoMessageRule): Promise<AutoMessageRule> {
+    const result = await db.insert(autoMessageRules).values(rule).returning();
+    return result[0];
+  }
+
+  async updateAutoMessageRule(id: number, rule: Partial<InsertAutoMessageRule>): Promise<AutoMessageRule | undefined> {
+    const result = await db.update(autoMessageRules)
+      .set({ ...rule, updatedAt: new Date() })
+      .where(eq(autoMessageRules.id, id))
+      .returning();
+    return result[0] || undefined;
+  }
+
+  async deleteAutoMessageRule(id: number): Promise<boolean> {
+    const result = await db.delete(autoMessageRules).where(eq(autoMessageRules.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async incrementRuleSentCount(id: number): Promise<void> {
+    const rule = await this.getAutoMessageRule(id);
+    if (rule) {
+      await db.update(autoMessageRules)
+        .set({
+          sentCount: rule.sentCount + 1,
+          lastTriggeredAt: new Date()
+        })
+        .where(eq(autoMessageRules.id, id));
+    }
+  }
+
+  // Scheduled Messages
+  async getScheduledMessages(status?: string): Promise<ScheduledMessage[]> {
+    if (status) {
+      return await db.select().from(scheduledMessages)
+        .where(eq(scheduledMessages.status, status))
+        .orderBy(asc(scheduledMessages.scheduledFor));
+    }
+    return await db.select().from(scheduledMessages)
+      .orderBy(asc(scheduledMessages.scheduledFor));
+  }
+
+  async getPendingScheduledMessages(): Promise<ScheduledMessage[]> {
+    return await db.select().from(scheduledMessages)
+      .where(and(
+        eq(scheduledMessages.status, 'pending'),
+        lte(scheduledMessages.scheduledFor, new Date())
+      ))
+      .orderBy(asc(scheduledMessages.scheduledFor));
+  }
+
+  async createScheduledMessage(message: InsertScheduledMessage): Promise<ScheduledMessage> {
+    const result = await db.insert(scheduledMessages).values(message).returning();
+    return result[0];
+  }
+
+  async updateScheduledMessage(id: number, message: Partial<InsertScheduledMessage>): Promise<ScheduledMessage | undefined> {
+    const result = await db.update(scheduledMessages)
+      .set(message)
+      .where(eq(scheduledMessages.id, id))
+      .returning();
+    return result[0] || undefined;
+  }
+
+  async cancelScheduledMessage(id: number): Promise<boolean> {
+    const result = await db.update(scheduledMessages)
+      .set({ status: 'cancelled' })
+      .where(eq(scheduledMessages.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 }
 
