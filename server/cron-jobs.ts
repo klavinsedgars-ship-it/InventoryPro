@@ -255,12 +255,13 @@ async function syncToEbay(diffs: DiffResult[]): Promise<{
   succeeded: number;
   failed: number;
   skipped: number;
+  ended: number;
 }> {
   console.log('');
   console.log('🏪 EBAY SYNC PHASE');
   console.log('==================');
   
-  const result = { attempted: 0, succeeded: 0, failed: 0, skipped: 0 };
+  const result = { attempted: 0, succeeded: 0, failed: 0, skipped: 0, ended: 0 };
   
   if (diffs.length === 0) {
     console.log('⚠️ No changes to sync to eBay');
@@ -268,12 +269,19 @@ async function syncToEbay(diffs: DiffResult[]): Promise<{
   }
   
   try {
-    // Collect products with eBay listings that have changes
+    // Separate products into: updates (has stock) and endings (out of stock)
     const ebayUpdates: Array<{
       productId: number;
       ebayItemId: string;
       quantity?: number;
       price?: number;
+      sku?: string;
+    }> = [];
+    
+    const productsToEnd: Array<{
+      productId: number;
+      ebayItemId: string;
+      productName: string;
       sku?: string;
     }> = [];
     
@@ -287,16 +295,28 @@ async function syncToEbay(diffs: DiffResult[]): Promise<{
         continue;
       }
       
-      // Calculate eBay price with dynamic pricing
-      const supplierPrice = diff.changes.newPrice || parseFloat(product.supplierPrice?.toString() || '0');
-      const pricingResult = supplierPrice > 0 
-        ? calculateDynamicPrice(supplierPrice) 
-        : { finalPrice: parseFloat(product.salePrice?.toString() || '0') };
-      
       // Calculate eBay stock (with limit) - use product stock info
       const tmeStock = diff.changes.newStock ?? product.stock ?? 0;
       const stockInfo = calculateEbayStock({ ...product, stock: tmeStock });
       const ebayStock = stockInfo.ebayStock;
+      
+      // If out of stock, END the listing instead of setting quantity to 0
+      // This prevents negative eBay algorithm impact from having many out-of-stock listings
+      if (ebayStock === 0) {
+        productsToEnd.push({
+          productId: product.id,
+          ebayItemId: product.ebayItemId,
+          productName: product.name,
+          sku: product.sku
+        });
+        continue;
+      }
+      
+      // Calculate eBay price with dynamic pricing for in-stock products
+      const supplierPrice = diff.changes.newPrice || parseFloat(product.supplierPrice?.toString() || '0');
+      const pricingResult = supplierPrice > 0 
+        ? calculateDynamicPrice(supplierPrice) 
+        : { finalPrice: parseFloat(product.salePrice?.toString() || '0') };
       
       ebayUpdates.push({
         productId: product.id,
@@ -307,28 +327,53 @@ async function syncToEbay(diffs: DiffResult[]): Promise<{
       });
     }
     
-    if (ebayUpdates.length === 0) {
-      console.log('⚠️ No eBay-listed products with changes');
-      return result;
+    // PHASE 1: End listings for out-of-stock products
+    if (productsToEnd.length > 0) {
+      console.log(`🛑 Ending ${productsToEnd.length} out-of-stock listings (better for eBay algorithm)`);
+      
+      for (const item of productsToEnd) {
+        try {
+          const endResult = await ebayApi.unlistProduct(item.productId);
+          if (endResult.success) {
+            result.ended++;
+            console.log(`   ✅ Ended listing for "${item.productName}" (${item.sku})`);
+          } else {
+            result.failed++;
+            console.log(`   ❌ Failed to end "${item.productName}": ${endResult.message}`);
+          }
+        } catch (error) {
+          result.failed++;
+          console.log(`   ❌ Error ending "${item.productName}": ${(error as Error).message}`);
+        }
+        
+        // Small delay between EndItem calls to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
     }
     
-    console.log(`📦 Syncing ${ebayUpdates.length} products to eBay in batches of 4`);
-    result.attempted = ebayUpdates.length;
-    
-    // Use the existing bulk update function which batches in groups of 4
-    const bulkResult = await ebayApi.bulkUpdateInventory(ebayUpdates);
-    
-    result.succeeded = bulkResult.succeeded;
-    result.failed = bulkResult.failed;
-    
-    // Log individual failures for debugging
-    const failures = bulkResult.results.filter(r => !r.success);
-    if (failures.length > 0) {
-      console.log(`⚠️ Failed eBay updates:`);
-      failures.slice(0, 5).forEach(f => console.log(`   - ${f.ebayItemId}: ${f.message}`));
-      if (failures.length > 5) {
-        console.log(`   ... and ${failures.length - 5} more`);
+    // PHASE 2: Update inventory for in-stock products
+    if (ebayUpdates.length > 0) {
+      console.log(`📦 Syncing ${ebayUpdates.length} in-stock products to eBay in batches of 4`);
+      result.attempted = ebayUpdates.length;
+      
+      // Use the existing bulk update function which batches in groups of 4
+      const bulkResult = await ebayApi.bulkUpdateInventory(ebayUpdates);
+      
+      result.succeeded = bulkResult.succeeded;
+      result.failed += bulkResult.failed;
+      
+      // Log individual failures for debugging
+      const failures = bulkResult.results.filter(r => !r.success);
+      if (failures.length > 0) {
+        console.log(`⚠️ Failed eBay updates:`);
+        failures.slice(0, 5).forEach(f => console.log(`   - ${f.ebayItemId}: ${f.message}`));
+        if (failures.length > 5) {
+          console.log(`   ... and ${failures.length - 5} more`);
+        }
       }
+    } else if (productsToEnd.length === 0) {
+      console.log('⚠️ No eBay-listed products with changes');
+      return result;
     }
     
     // Log to sync logs
@@ -336,16 +381,17 @@ async function syncToEbay(diffs: DiffResult[]): Promise<{
       source: 'cron',
       operation: 'ebay_bulk_sync',
       status: result.failed === 0 ? 'success' : 'partial',
-      message: `eBay sync: ${result.succeeded} succeeded, ${result.failed} failed, ${result.skipped} skipped`,
+      message: `eBay sync: ${result.succeeded} updated, ${result.ended} ended (out of stock), ${result.failed} failed, ${result.skipped} skipped`,
       details: JSON.stringify({
         attempted: result.attempted,
         succeeded: result.succeeded,
+        ended: result.ended,
         failed: result.failed,
         skipped: result.skipped
       })
     });
     
-    console.log(`✅ eBay sync complete: ${result.succeeded} updated, ${result.failed} failed, ${result.skipped} skipped`);
+    console.log(`✅ eBay sync complete: ${result.succeeded} updated, ${result.ended} ended, ${result.failed} failed, ${result.skipped} skipped`);
     return result;
     
   } catch (error) {
@@ -370,7 +416,7 @@ export async function runDailySync(): Promise<{
   totalProducts: number;
   changedProducts: number;
   queuedItems: number;
-  ebaySync: { attempted: number; succeeded: number; failed: number; skipped: number };
+  ebaySync: { attempted: number; succeeded: number; failed: number; skipped: number; ended: number };
   duration: number;
 }> {
   const startTime = Date.now();
@@ -383,7 +429,7 @@ export async function runDailySync(): Promise<{
     totalProducts: 0, 
     changedProducts: 0, 
     queuedItems: 0, 
-    ebaySync: { attempted: 0, succeeded: 0, failed: 0, skipped: 0 },
+    ebaySync: { attempted: 0, succeeded: 0, failed: 0, skipped: 0, ended: 0 },
     duration: 0 
   };
   
@@ -439,6 +485,7 @@ export async function runDailySync(): Promise<{
     console.log(`   Changes detected: ${diffs.length}`);
     console.log(`   Items queued: ${queuedItems}`);
     console.log(`   eBay updates: ${ebayResult.succeeded}/${ebayResult.attempted} (${ebayResult.skipped} skipped)`);
+    console.log(`   eBay listings ended (out of stock): ${ebayResult.ended}`);
     console.log(`   Duration: ${duration}s`);
     console.log('====================================');
     console.log('');
