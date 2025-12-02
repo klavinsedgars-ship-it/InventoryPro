@@ -38,6 +38,7 @@ import { imageProcessingService } from "./image-processing";
 import { triggerManualSync } from "./cron-jobs";
 import { ebayOrdersApi } from "./ebay-orders-api";
 import { ebayMessagesApi } from "./ebay-messages-api";
+import { autoMessageScheduler } from "./auto-message-scheduler";
 import { 
   insertMessageTemplateSchema, 
   insertAutoMessageRuleSchema 
@@ -2959,6 +2960,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (trackingNumber) updateData.trackingNumber = trackingNumber;
       if (trackingCarrier) updateData.shippingCarrier = trackingCarrier;
       if (status === 'shipped' && !updateData.shippedAt) updateData.shippedAt = new Date();
+      if (status === 'delivered' && !updateData.deliveredAt) updateData.deliveredAt = new Date();
 
       const updatedOrder = await storage.updateOrder(id, updateData);
 
@@ -2970,6 +2972,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         toStatus: status,
         note: notes || null
       });
+
+      // Trigger auto-message rules for this status change
+      const triggerMap: Record<string, 'order_packed' | 'order_shipped' | 'order_delivered' | null> = {
+        'packed': 'order_packed',
+        'shipped': 'order_shipped',
+        'delivered': 'order_delivered'
+      };
+      const triggerType = triggerMap[status];
+      if (triggerType) {
+        const items = await storage.getOrderItems(id);
+        autoMessageScheduler.processAutoMessageTrigger(triggerType, {
+          order: updatedOrder!,
+          items: items.map(i => ({ marketplaceItemId: i.marketplaceItemId || undefined, title: i.title })),
+          trackingNumber: updatedOrder?.trackingNumber || undefined
+        }).catch(err => console.error('Auto-message trigger failed:', err));
+      }
 
       res.json({
         success: true,

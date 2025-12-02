@@ -58,6 +58,7 @@ app.use((req, res, next) => {
   // Import sync queue worker and daily sync scheduler
   const { syncQueueWorker } = await import("./sync-queue-worker");
   const { startDailySyncScheduler } = await import("./cron-jobs");
+  const { autoMessageScheduler } = await import("./auto-message-scheduler");
 
   const server = await registerRoutes(app);
 
@@ -96,5 +97,9 @@ app.use((req, res, next) => {
     // Start the daily sync scheduler (runs at 2 AM)
     startDailySyncScheduler();
     log(`⏰ Daily Sync Scheduler started (runs at 2:00 AM)`);
+    
+    // Start the auto-message scheduler for delayed message rules
+    autoMessageScheduler.startAutoMessageScheduler();
+    log(`📧 Auto-Message Scheduler started (checks hourly)`);
   });
 })();
