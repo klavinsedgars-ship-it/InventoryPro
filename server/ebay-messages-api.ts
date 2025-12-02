@@ -71,7 +71,7 @@ interface SendMessageResponse {
 
 const TRADING_API_URL = 'https://api.ebay.com/ws/api.dll';
 
-async function makeXmlRequest(callName: string, xmlBody: string): Promise<string> {
+async function makeXmlRequest(callName: string, xmlBody: string, retries: number = 3): Promise<string> {
   // Acquire rate limit slot before making request
   await tradingApiRateLimiter.acquire();
   
@@ -85,13 +85,36 @@ async function makeXmlRequest(callName: string, xmlBody: string): Promise<string
     'X-EBAY-API-IAF-TOKEN': token,
   };
 
-  const response = await fetch(TRADING_API_URL, {
-    method: 'POST',
-    headers,
-    body: xmlBody,
-  });
-
-  return response.text();
+  let lastError: Error | null = null;
+  
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      
+      const response = await fetch(TRADING_API_URL, {
+        method: 'POST',
+        headers,
+        body: xmlBody,
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      return response.text();
+    } catch (error) {
+      lastError = error as Error;
+      console.warn(`eBay API request attempt ${attempt}/${retries} failed:`, (error as Error).message);
+      
+      if (attempt < retries) {
+        // Wait before retry (exponential backoff)
+        const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+        console.log(`Retrying in ${waitTime}ms...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    }
+  }
+  
+  throw lastError || new Error('Request failed after all retries');
 }
 
 function parseXmlValue(xml: string, tagName: string): string | null {
