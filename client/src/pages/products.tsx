@@ -254,7 +254,8 @@ export function Products({ user }: ProductsProps) {
 
   const bulkListToEbayMutation = useMutation({
     mutationFn: async (productIds: number[]) => {
-      return apiRequest("POST", "/api/ebay/bulk-list", { productIds });
+      const response = await apiRequest("POST", "/api/ebay/bulk-list", { productIds });
+      return response.json();
     },
     onSuccess: (data: any) => {
       console.log("Bulk listing response:", data);
