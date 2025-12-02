@@ -37,6 +37,9 @@ import type {
   EbayFulfillmentPolicy, 
   EbayReturnPolicy 
 } from "@shared/schema";
+import { cn } from "@/lib/utils";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+
 
 interface EbayPoliciesProps {
   user: any;
@@ -184,7 +187,7 @@ export function EbayPolicies({ user }: EbayPoliciesProps) {
       <Sidebar user={user} />
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header user={user} title="eBay Business Policies" />
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 overflow-y-auto p-8">
           <div className="max-w-7xl mx-auto space-y-6">
             {/* Header */}
             <div className="flex items-center justify-between">
@@ -231,174 +234,195 @@ export function EbayPolicies({ user }: EbayPoliciesProps) {
               </Alert>
             )}
 
-            {/* Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Stats Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
               <Card>
-                <CardContent className="pt-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-500">Payment Policies</p>
-                      <p className="text-2xl font-bold">{paymentPolicies.length}</p>
-                    </div>
-                    <div className="h-12 w-12 rounded-full bg-green-100 dark:bg-green-900/20 flex items-center justify-center">
-                      <CreditCard className="h-6 w-6 text-green-600" />
-                    </div>
-                  </div>
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium">Payment Policies</CardTitle>
+                  <CreditCard className="h-5 w-5 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{paymentPolicies.length}</div>
                 </CardContent>
               </Card>
               <Card>
-                <CardContent className="pt-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-500">Shipping Policies</p>
-                      <p className="text-2xl font-bold">{fulfillmentPolicies.length}</p>
-                    </div>
-                    <div className="h-12 w-12 rounded-full bg-blue-100 dark:bg-blue-900/20 flex items-center justify-center">
-                      <Truck className="h-6 w-6 text-blue-600" />
-                    </div>
-                  </div>
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium">Shipping Policies</CardTitle>
+                  <Truck className="h-5 w-5 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{fulfillmentPolicies.length}</div>
                 </CardContent>
               </Card>
               <Card>
-                <CardContent className="pt-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-500">Return Policies</p>
-                      <p className="text-2xl font-bold">{returnPolicies.length}</p>
-                    </div>
-                    <div className="h-12 w-12 rounded-full bg-orange-100 dark:bg-orange-900/20 flex items-center justify-center">
-                      <RotateCcw className="h-6 w-6 text-orange-600" />
-                    </div>
-                  </div>
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium">Return Policies</CardTitle>
+                  <RotateCcw className="h-5 w-5 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{returnPolicies.length}</div>
                 </CardContent>
               </Card>
             </div>
 
-            {/* Tabs */}
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="payment" className="flex items-center gap-2" data-testid="tab-payment">
-                  <CreditCard className="h-4 w-4" />
-                  Payment
-                </TabsTrigger>
-                <TabsTrigger value="shipping" className="flex items-center gap-2" data-testid="tab-shipping">
-                  <Truck className="h-4 w-4" />
-                  Shipping
-                </TabsTrigger>
-                <TabsTrigger value="return" className="flex items-center gap-2" data-testid="tab-return">
-                  <RotateCcw className="h-4 w-4" />
-                  Returns
-                </TabsTrigger>
-              </TabsList>
+            {/* Policy Management Tabs */}
+            <Card className="shadow-sm">
+              <Tabs value={activeTab} onValueChange={setActiveTab}>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <TabsList className="grid grid-cols-3 w-auto">
+                      <TabsTrigger value="payment" className="flex items-center gap-2" data-testid="tab-payment">
+                        <CreditCard className="h-4 w-4" />
+                        Payment
+                      </TabsTrigger>
+                      <TabsTrigger value="shipping" className="flex items-center gap-2" data-testid="tab-shipping">
+                        <Truck className="h-4 w-4" />
+                        Shipping
+                      </TabsTrigger>
+                      <TabsTrigger value="return" className="flex items-center gap-2" data-testid="tab-return">
+                        <RotateCcw className="h-4 w-4" />
+                        Returns
+                      </TabsTrigger>
+                    </TabsList>
 
-              {/* Payment Policies Tab */}
-              <TabsContent value="payment" className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-lg font-semibold">Payment Policies</h3>
-                  <CreatePaymentPolicyDialog 
-                    onSubmit={(data) => createPaymentPolicyMutation.mutate(data)}
-                    isPending={createPaymentPolicyMutation.isPending}
-                  />
-                </div>
-                
-                {loadingPayment ? (
-                  <div className="flex justify-center p-8">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    <Button
+                      onClick={() => setIsCreateDialogOpen(true)}
+                      size="sm"
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      New {activeTab === 'payment' ? 'Payment' : activeTab === 'shipping' ? 'Shipping' : 'Return'} Policy
+                    </Button>
                   </div>
-                ) : paymentPolicies.length === 0 ? (
-                  <Card>
-                    <CardContent className="flex flex-col items-center justify-center py-12">
-                      <CreditCard className="h-12 w-12 text-gray-400 mb-4" />
+                </CardHeader>
+
+                {/* Payment Policies Tab */}
+                <TabsContent value="payment" className="mt-0">
+                  {loadingPayment ? (
+                    <div className="flex justify-center p-8">
+                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    </div>
+                  ) : paymentPolicies.length === 0 ? (
+                    <CardContent className="text-center py-16">
+                      <CreditCard className="h-16 w-16 mx-auto text-gray-400 mb-4" />
                       <h3 className="text-lg font-medium text-gray-900 dark:text-white">No Payment Policies</h3>
                       <p className="text-gray-500 mt-1">Click "Sync from eBay" to import your existing policies</p>
                     </CardContent>
-                  </Card>
-                ) : (
-                  <div className="grid gap-4">
-                    {paymentPolicies.map((policy) => (
-                      <PaymentPolicyCard
-                        key={policy.policyId}
-                        policy={policy}
-                        onDelete={() => deletePaymentPolicyMutation.mutate(policy.policyId)}
-                        isDeleting={deletePaymentPolicyMutation.isPending}
-                      />
-                    ))}
-                  </div>
-                )}
-              </TabsContent>
+                  ) : (
+                    <CardContent className="pt-0">
+                      <div className="rounded-md border">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="font-semibold">Policy Name</TableHead>
+                              <TableHead className="font-semibold">Description</TableHead>
+                              <TableHead className="font-semibold">Marketplace</TableHead>
+                              <TableHead className="font-semibold">Immediate Pay</TableHead>
+                              <TableHead className="font-semibold">Status</TableHead>
+                              <TableHead className="text-right font-semibold">Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {paymentPolicies.map((policy) => (
+                              <PaymentPolicyCard
+                                key={policy.policyId}
+                                policy={policy}
+                                onDelete={() => deletePaymentPolicyMutation.mutate(policy.policyId)}
+                                isDeleting={deletePaymentPolicyMutation.isPending}
+                              />
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </CardContent>
+                  )}
+                </TabsContent>
 
-              {/* Shipping Policies Tab */}
-              <TabsContent value="shipping" className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-lg font-semibold">Shipping (Fulfillment) Policies</h3>
-                  <CreateFulfillmentPolicyDialog
-                    onSubmit={(data) => createFulfillmentPolicyMutation.mutate(data)}
-                    isPending={createFulfillmentPolicyMutation.isPending}
-                  />
-                </div>
-                
-                {loadingFulfillment ? (
-                  <div className="flex justify-center p-8">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                  </div>
-                ) : fulfillmentPolicies.length === 0 ? (
-                  <Card>
-                    <CardContent className="flex flex-col items-center justify-center py-12">
-                      <Truck className="h-12 w-12 text-gray-400 mb-4" />
+                {/* Shipping Policies Tab */}
+                <TabsContent value="shipping" className="mt-0">
+                  {loadingFulfillment ? (
+                    <div className="flex justify-center p-8">
+                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    </div>
+                  ) : fulfillmentPolicies.length === 0 ? (
+                    <CardContent className="text-center py-16">
+                      <Truck className="h-16 w-16 mx-auto text-gray-400 mb-4" />
                       <h3 className="text-lg font-medium text-gray-900 dark:text-white">No Shipping Policies</h3>
                       <p className="text-gray-500 mt-1">Click "Sync from eBay" to import your existing policies</p>
                     </CardContent>
-                  </Card>
-                ) : (
-                  <div className="grid gap-4">
-                    {fulfillmentPolicies.map((policy) => (
-                      <FulfillmentPolicyCard
-                        key={policy.policyId}
-                        policy={policy}
-                        onDelete={() => deleteFulfillmentPolicyMutation.mutate(policy.policyId)}
-                        isDeleting={deleteFulfillmentPolicyMutation.isPending}
-                      />
-                    ))}
-                  </div>
-                )}
-              </TabsContent>
+                  ) : (
+                    <CardContent className="pt-0">
+                      <div className="rounded-md border">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="font-semibold">Policy Name</TableHead>
+                              <TableHead className="font-semibold">Description</TableHead>
+                              <TableHead className="font-semibold">Marketplace</TableHead>
+                              <TableHead className="font-semibold">Handling Time</TableHead>
+                              <TableHead className="font-semibold">Global Shipping</TableHead>
+                              <TableHead className="text-right font-semibold">Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {fulfillmentPolicies.map((policy) => (
+                              <FulfillmentPolicyCard
+                                key={policy.policyId}
+                                policy={policy}
+                                onDelete={() => deleteFulfillmentPolicyMutation.mutate(policy.policyId)}
+                                isDeleting={deleteFulfillmentPolicyMutation.isPending}
+                              />
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </CardContent>
+                  )}
+                </TabsContent>
 
-              {/* Return Policies Tab */}
-              <TabsContent value="return" className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-lg font-semibold">Return Policies</h3>
-                  <CreateReturnPolicyDialog
-                    onSubmit={(data) => createReturnPolicyMutation.mutate(data)}
-                    isPending={createReturnPolicyMutation.isPending}
-                  />
-                </div>
-                
-                {loadingReturn ? (
-                  <div className="flex justify-center p-8">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                  </div>
-                ) : returnPolicies.length === 0 ? (
-                  <Card>
-                    <CardContent className="flex flex-col items-center justify-center py-12">
-                      <RotateCcw className="h-12 w-12 text-gray-400 mb-4" />
+                {/* Return Policies Tab */}
+                <TabsContent value="return" className="mt-0">
+                  {loadingReturn ? (
+                    <div className="flex justify-center p-8">
+                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    </div>
+                  ) : returnPolicies.length === 0 ? (
+                    <CardContent className="text-center py-16">
+                      <RotateCcw className="h-16 w-16 mx-auto text-gray-400 mb-4" />
                       <h3 className="text-lg font-medium text-gray-900 dark:text-white">No Return Policies</h3>
                       <p className="text-gray-500 mt-1">Click "Sync from eBay" to import your existing policies</p>
                     </CardContent>
-                  </Card>
-                ) : (
-                  <div className="grid gap-4">
-                    {returnPolicies.map((policy) => (
-                      <ReturnPolicyCard
-                        key={policy.policyId}
-                        policy={policy}
-                        onDelete={() => deleteReturnPolicyMutation.mutate(policy.policyId)}
-                        isDeleting={deleteReturnPolicyMutation.isPending}
-                      />
-                    ))}
-                  </div>
-                )}
-              </TabsContent>
-            </Tabs>
+                  ) : (
+                    <CardContent className="pt-0">
+                      <div className="rounded-md border">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="font-semibold">Policy Name</TableHead>
+                              <TableHead className="font-semibold">Description</TableHead>
+                              <TableHead className="font-semibold">Marketplace</TableHead>
+                              <TableHead className="font-semibold">Return Period</TableHead>
+                              <TableHead className="font-semibold">Refund Method</TableHead>
+                              <TableHead className="font-semibold">Shipping Paid By</TableHead>
+                              <TableHead className="text-right font-semibold">Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {returnPolicies.map((policy) => (
+                              <ReturnPolicyCard
+                                key={policy.policyId}
+                                policy={policy}
+                                onDelete={() => deleteReturnPolicyMutation.mutate(policy.policyId)}
+                                isDeleting={deleteReturnPolicyMutation.isPending}
+                              />
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </CardContent>
+                  )}
+                </TabsContent>
+              </Tabs>
+            </Card>
           </div>
         </main>
       </div>
@@ -417,7 +441,7 @@ function PaymentPolicyCard({
   isDeleting: boolean;
 }) {
   const paymentMethods = policy.paymentMethods ? JSON.parse(policy.paymentMethods) : [];
-  
+
   return (
     <Card data-testid={`card-payment-policy-${policy.policyId}`}>
       <CardContent className="pt-6">
@@ -506,7 +530,7 @@ function FulfillmentPolicyCard({
   isDeleting: boolean;
 }) {
   const shippingOptions = policy.shippingOptions ? JSON.parse(policy.shippingOptions) : [];
-  
+
   return (
     <Card data-testid={`card-fulfillment-policy-${policy.policyId}`}>
       <CardContent className="pt-6">
@@ -792,20 +816,20 @@ function CreateFulfillmentPolicyDialog({
   const [handlingTime, setHandlingTime] = useState(3);
   const [globalShipping, setGlobalShipping] = useState(false);
   const [createOnEbay, setCreateOnEbay] = useState(true);
-  
+
   const [costType, setCostType] = useState("FLAT_RATE");
   const [shippingCarrier, setShippingCarrier] = useState("Royal Mail");
   const [shippingService, setShippingService] = useState("UK_RoyalMailSecondClassStandard");
   const [firstItemCost, setFirstItemCost] = useState("0.00");
   const [additionalItemCost, setAdditionalItemCost] = useState("0.00");
   const [freeShipping, setFreeShipping] = useState(true);
-  
+
   const [internationalShipping, setInternationalShipping] = useState(false);
   const [intlShippingCarrier, setIntlShippingCarrier] = useState("Royal Mail");
   const [intlShippingService, setIntlShippingService] = useState("UK_RoyalMailAirmailInternational");
   const [intlFirstItemCost, setIntlFirstItemCost] = useState("3.99");
   const [intlAdditionalItemCost, setIntlAdditionalItemCost] = useState("1.00");
-  
+
   const [pickupDropOff, setPickupDropOff] = useState(false);
 
   const handleSubmit = () => {
@@ -825,7 +849,7 @@ function CreateFulfillmentPolicyDialog({
         ]
       }
     ];
-    
+
     if (internationalShipping) {
       shippingOptions.push({
         optionType: "INTERNATIONAL",
@@ -842,7 +866,7 @@ function CreateFulfillmentPolicyDialog({
         ]
       });
     }
-    
+
     onSubmit({
       name,
       description,
@@ -893,7 +917,7 @@ function CreateFulfillmentPolicyDialog({
               data-testid="input-fulfillment-policy-description"
             />
           </div>
-          
+
           <div className="border-t pt-4">
             <h4 className="font-semibold mb-3">Domestic Postage</h4>
             <div className="space-y-4">
@@ -910,7 +934,7 @@ function CreateFulfillmentPolicyDialog({
                   </SelectContent>
                 </Select>
               </div>
-              
+
               {costType !== "NOT_SPECIFIED" && (
                 <>
                   <div className="grid grid-cols-2 gap-4">
@@ -955,7 +979,7 @@ function CreateFulfillmentPolicyDialog({
                       </Select>
                     </div>
                   </div>
-                  
+
                   <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
                     <div>
                       <Label>Offer Free Postage</Label>
@@ -967,7 +991,7 @@ function CreateFulfillmentPolicyDialog({
                       data-testid="switch-free-shipping"
                     />
                   </div>
-                  
+
                   {!freeShipping && (
                     <div className="grid grid-cols-2 gap-4">
                       <div>
@@ -1000,7 +1024,7 @@ function CreateFulfillmentPolicyDialog({
               )}
             </div>
           </div>
-          
+
           <div className="border-t pt-4">
             <div className="flex items-center justify-between mb-3">
               <div>
@@ -1013,7 +1037,7 @@ function CreateFulfillmentPolicyDialog({
                 data-testid="switch-international-shipping"
               />
             </div>
-            
+
             {internationalShipping && (
               <div className="space-y-4 pl-4 border-l-2 border-primary">
                 <div className="grid grid-cols-2 gap-4">
@@ -1079,7 +1103,7 @@ function CreateFulfillmentPolicyDialog({
               </div>
             )}
           </div>
-          
+
           <div className="border-t pt-4">
             <div className="flex items-center justify-between">
               <div>
@@ -1093,7 +1117,7 @@ function CreateFulfillmentPolicyDialog({
               />
             </div>
           </div>
-          
+
           <div className="border-t pt-4">
             <h4 className="font-semibold mb-3">Preferences</h4>
             <div className="space-y-4">
@@ -1116,7 +1140,7 @@ function CreateFulfillmentPolicyDialog({
                   </SelectContent>
                 </Select>
               </div>
-              
+
               <div className="flex items-center justify-between">
                 <div>
                   <Label>Global Shipping Program</Label>
@@ -1130,7 +1154,7 @@ function CreateFulfillmentPolicyDialog({
               </div>
             </div>
           </div>
-          
+
           <div className="border-t pt-4">
             <div className="flex items-center justify-between">
               <div>
