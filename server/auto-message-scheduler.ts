@@ -66,22 +66,40 @@ async function processRule(
     return;
   }
 
-  const eligibility = ebayMessagesApi.checkOrderMessageEligibility(
-    new Date(order.orderDate || order.createdAt!)
-  );
-  if (!eligibility.eligible) {
-    console.log(`Order ${order.id} is past 90-day messaging limit`);
+  // Validate order date exists before checking eligibility
+  const orderDate = order.orderDate || order.createdAt;
+  if (!orderDate) {
+    console.log(`Order ${order.id} has no valid date for eligibility check, skipping`);
+    results.errors.push(`Order ${order.id} missing order date`);
     return;
   }
 
+  const eligibility = ebayMessagesApi.checkOrderMessageEligibility(new Date(orderDate));
+  if (!eligibility.eligible) {
+    console.log(`Order ${order.id} is past 90-day messaging limit (${eligibility.daysRemaining} days)`);
+    return;
+  }
+
+  // Build template variables with validated fallbacks
   const itemTitle = items[0]?.title || 'Your item';
-  const body = ebayMessagesApi.renderTemplate(template.body, {
-    buyer_name: order.buyerUsername,
-    order_id: order.marketplaceOrderId,
+  const templateVars = {
+    buyer_name: order.buyerUsername || 'Customer',
+    order_id: order.marketplaceOrderId || `#${order.id}`,
     item_title: itemTitle,
-    tracking_number: trackingNumber || 'N/A',
+    tracking_number: trackingNumber || 'Not yet available',
     shop_name: 'Our Store',
-  });
+  };
+  
+  const body = ebayMessagesApi.renderTemplate(template.body, templateVars);
+  
+  // Validate all placeholders were replaced
+  if (body.includes('{{') && body.includes('}}')) {
+    const unreplacedMatch = body.match(/\{\{(\w+)\}\}/);
+    if (unreplacedMatch) {
+      results.errors.push(`Template has unreplaced placeholder: {{${unreplacedMatch[1]}}}`);
+      console.warn(`Template "${template.name}" has unreplaced placeholder: {{${unreplacedMatch[1]}}}`);
+    }
+  }
 
   let thread = await storage.getMessageThreadByBuyer(order.buyerUsername, order.marketplaceOrderId);
   if (!thread) {

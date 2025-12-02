@@ -1,5 +1,43 @@
 import { ebayOAuth } from './ebay-oauth';
 
+// Rate limiter for eBay Trading API (75 calls per 60 seconds)
+class RateLimiter {
+  private callTimestamps: number[] = [];
+  private readonly maxCalls: number;
+  private readonly windowMs: number;
+
+  constructor(maxCalls: number = 75, windowMs: number = 60000) {
+    this.maxCalls = maxCalls;
+    this.windowMs = windowMs;
+  }
+
+  async acquire(): Promise<void> {
+    const now = Date.now();
+    
+    // Remove timestamps outside the window
+    this.callTimestamps = this.callTimestamps.filter(ts => now - ts < this.windowMs);
+    
+    if (this.callTimestamps.length >= this.maxCalls) {
+      // Wait until the oldest call expires
+      const oldestCall = this.callTimestamps[0];
+      const waitTime = this.windowMs - (now - oldestCall) + 100; // +100ms buffer
+      console.log(`Rate limit reached, waiting ${waitTime}ms before next API call`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      return this.acquire(); // Retry after waiting
+    }
+    
+    this.callTimestamps.push(now);
+  }
+
+  getRemaining(): number {
+    const now = Date.now();
+    this.callTimestamps = this.callTimestamps.filter(ts => now - ts < this.windowMs);
+    return this.maxCalls - this.callTimestamps.length;
+  }
+}
+
+const tradingApiRateLimiter = new RateLimiter(75, 60000);
+
 interface EbayMessage {
   messageId: string;
   subject: string;
@@ -34,6 +72,9 @@ interface SendMessageResponse {
 const TRADING_API_URL = 'https://api.ebay.com/ws/api.dll';
 
 async function makeXmlRequest(callName: string, xmlBody: string): Promise<string> {
+  // Acquire rate limit slot before making request
+  await tradingApiRateLimiter.acquire();
+  
   const token = await ebayOAuth.getAccessToken();
   
   const headers = {
@@ -314,6 +355,13 @@ export function checkOrderMessageEligibility(orderDate: Date): { eligible: boole
   };
 }
 
+export function getRateLimitStatus(): { remaining: number; maxCalls: number } {
+  return {
+    remaining: tradingApiRateLimiter.getRemaining(),
+    maxCalls: 75
+  };
+}
+
 export const ebayMessagesApi = {
   getMyMessages,
   getMemberMessages,
@@ -321,4 +369,5 @@ export const ebayMessagesApi = {
   replyToQuestion,
   renderTemplate,
   checkOrderMessageEligibility,
+  getRateLimitStatus,
 };
