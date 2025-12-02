@@ -502,6 +502,46 @@ export function Products({ user }: ProductsProps) {
         <Header 
           title="Products" 
           subtitle="Manage your inventory and product listings (sorted by latest synced)"
+          actions={
+            <div className="flex items-center gap-2">
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button 
+                    variant="destructive" 
+                    size="sm"
+                    disabled={products.length === 0 || deleteAllMutation.isPending}
+                    data-testid="button-delete-all"
+                  >
+                    <Trash2 className="w-4 h-4 mr-1" />
+                    {deleteAllMutation.isPending ? "..." : "Delete All"}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete All Products?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will permanently delete all {products.length} products from your inventory. 
+                      This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel data-testid="button-cancel-delete">Cancel</AlertDialogCancel>
+                    <AlertDialogAction 
+                      onClick={() => deleteAllMutation.mutate()}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      data-testid="button-confirm-delete"
+                    >
+                      Yes, Delete All
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+              <Button size="sm" onClick={handleAddProduct} data-testid="button-add-product">
+                <Plus className="w-4 h-4 mr-1" />
+                Add
+              </Button>
+            </div>
+          }
         />
         
         <div className="p-6">
@@ -607,45 +647,6 @@ export function Products({ user }: ProductsProps) {
                 data-testid="btn-price-filter"
               >
                 <Filter className="w-4 h-4" />
-              </Button>
-
-              <div className="flex-1" />
-
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button 
-                    variant="destructive" 
-                    size="sm"
-                    disabled={products.length === 0 || deleteAllMutation.isPending}
-                    data-testid="button-delete-all"
-                  >
-                    <Trash2 className="w-4 h-4 mr-1" />
-                    {deleteAllMutation.isPending ? "..." : "Delete All"}
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Delete All Products?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This will permanently delete all {products.length} products from your inventory. 
-                      This action cannot be undone.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel data-testid="button-cancel-delete">Cancel</AlertDialogCancel>
-                    <AlertDialogAction 
-                      onClick={() => deleteAllMutation.mutate()}
-                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                      data-testid="button-confirm-delete"
-                    >
-                      Yes, Delete All
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-              <Button size="sm" onClick={handleAddProduct} data-testid="button-add-product">
-                <Plus className="w-4 h-4 mr-1" />
-                Add
               </Button>
             </div>
 

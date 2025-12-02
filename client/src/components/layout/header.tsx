@@ -8,9 +8,10 @@ import { cn } from "@/lib/utils";
 interface HeaderProps {
   title: string;
   subtitle?: string;
+  actions?: React.ReactNode;
 }
 
-export function Header({ title, subtitle }: HeaderProps) {
+export function Header({ title, subtitle, actions }: HeaderProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -43,7 +44,8 @@ export function Header({ title, subtitle }: HeaderProps) {
           )}
         </div>
         
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center space-x-3">
+          {actions}
           <Button 
             onClick={() => syncMutation.mutate()}
             disabled={syncMutation.isPending}
