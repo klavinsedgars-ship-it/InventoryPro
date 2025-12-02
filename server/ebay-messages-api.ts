@@ -75,7 +75,7 @@ async function makeXmlRequest(callName: string, xmlBody: string): Promise<string
   // Acquire rate limit slot before making request
   await tradingApiRateLimiter.acquire();
   
-  const token = await ebayOAuth.getAccessToken();
+  const token = await ebayOAuth.getValidAccessToken();
   
   const headers = {
     'Content-Type': 'text/xml',
