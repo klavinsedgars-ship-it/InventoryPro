@@ -202,6 +202,121 @@ export const ebayReturnPolicies = pgTable("ebay_return_policies", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// ==========================================
+// ORDERS MANAGEMENT SYSTEM
+// ==========================================
+
+// Main Orders Table - supports eBay and Amazon
+export const orders = pgTable("orders", {
+  id: serial("id").primaryKey(),
+  marketplace: text("marketplace").notNull(), // ebay, amazon
+  marketplaceOrderId: text("marketplace_order_id").notNull(), // eBay order ID, Amazon order ID
+  status: text("status").notNull().default("new"), // new, packed, shipped, delivered, return_requested, returned, completed, cancelled, on_hold
+  
+  // Buyer Information
+  buyerUsername: text("buyer_username").notNull(), // eBay nickname or Amazon customer name
+  buyerEmail: text("buyer_email"),
+  
+  // Shipping Address (JSON for flexibility across marketplaces)
+  shippingName: text("shipping_name").notNull(),
+  shippingAddressLine1: text("shipping_address_line1").notNull(),
+  shippingAddressLine2: text("shipping_address_line2"),
+  shippingCity: text("shipping_city").notNull(),
+  shippingStateOrProvince: text("shipping_state_or_province"),
+  shippingPostalCode: text("shipping_postal_code").notNull(),
+  shippingCountry: text("shipping_country").notNull(),
+  shippingPhone: text("shipping_phone"),
+  
+  // Order Totals
+  subtotal: decimal("subtotal", { precision: 10, scale: 2 }).notNull(),
+  shippingCost: decimal("shipping_cost", { precision: 10, scale: 2 }).notNull().default("0.00"),
+  totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
+  currency: text("currency").notNull().default("GBP"),
+  
+  // Marketplace Fees
+  marketplaceFee: decimal("marketplace_fee", { precision: 10, scale: 2 }), // eBay/Amazon fee
+  paymentProcessingFee: decimal("payment_processing_fee", { precision: 10, scale: 2 }),
+  
+  // Shipping Details
+  shippingService: text("shipping_service"), // e.g., "Royal Mail 2nd Class"
+  shippingCarrier: text("shipping_carrier"), // e.g., "Royal Mail"
+  trackingNumber: text("tracking_number"),
+  trackingUrl: text("tracking_url"),
+  
+  // Fulfillment
+  paidAt: timestamp("paid_at"),
+  shippedAt: timestamp("shipped_at"),
+  deliveredAt: timestamp("delivered_at"),
+  expectedDeliveryStart: timestamp("expected_delivery_start"),
+  expectedDeliveryEnd: timestamp("expected_delivery_end"),
+  
+  // Logistics Integration (for Latvian Post, etc.)
+  logisticsCarrier: text("logistics_carrier"), // pasts_lv, dhl, ups, etc.
+  logisticsLabelUrl: text("logistics_label_url"),
+  logisticsLabelData: text("logistics_label_data"), // JSON for carrier-specific data
+  
+  // Notes and Metadata
+  buyerNote: text("buyer_note"), // Message from buyer
+  sellerNote: text("seller_note"), // Internal seller notes
+  rawOrderData: text("raw_order_data"), // Full marketplace response JSON
+  
+  // Timestamps
+  orderDate: timestamp("order_date").notNull(), // When order was placed
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  lastSyncedAt: timestamp("last_synced_at"),
+});
+
+// Order Items (Line Items)
+export const orderItems = pgTable("order_items", {
+  id: serial("id").primaryKey(),
+  orderId: integer("order_id").references(() => orders.id).notNull(),
+  
+  // Product Reference
+  productId: integer("product_id").references(() => products.id), // Can be null for unmapped products
+  sku: text("sku").notNull(),
+  tmeProductId: text("tme_product_id"), // TME SKU for direct link
+  
+  // Item Details
+  title: text("title").notNull(), // Product title as shown on marketplace
+  quantity: integer("quantity").notNull().default(1),
+  unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
+  totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
+  
+  // Marketplace-specific
+  marketplaceItemId: text("marketplace_item_id"), // eBay listing ID, Amazon ASIN
+  imageUrl: text("image_url"),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Order Fees (for detailed fee tracking)
+export const orderFees = pgTable("order_fees", {
+  id: serial("id").primaryKey(),
+  orderId: integer("order_id").references(() => orders.id).notNull(),
+  
+  feeType: text("fee_type").notNull(), // ebay_final_value, ebay_international, shipping, payment_processing, promoted_listing, refund
+  description: text("description"),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  currency: text("currency").notNull().default("GBP"),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Order Events (for status tracking and audit trail)
+export const orderEvents = pgTable("order_events", {
+  id: serial("id").primaryKey(),
+  orderId: integer("order_id").references(() => orders.id).notNull(),
+  
+  eventType: text("event_type").notNull(), // status_change, note_added, tracking_added, label_printed, synced, refund_initiated
+  fromStatus: text("from_status"), // Previous status (for status_change events)
+  toStatus: text("to_status"), // New status (for status_change events)
+  note: text("note"),
+  userId: integer("user_id").references(() => users.id), // Who performed the action
+  
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
@@ -278,6 +393,28 @@ export const insertEbayReturnPolicySchema = createInsertSchema(ebayReturnPolicie
   updatedAt: true,
 });
 
+export const insertOrderSchema = createInsertSchema(orders).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  lastSyncedAt: true,
+});
+
+export const insertOrderItemSchema = createInsertSchema(orderItems).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertOrderFeeSchema = createInsertSchema(orderFees).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertOrderEventSchema = createInsertSchema(orderEvents).omit({
+  id: true,
+  createdAt: true,
+});
+
 // Login schema
 export const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -313,4 +450,35 @@ export type EbayFulfillmentPolicy = typeof ebayFulfillmentPolicies.$inferSelect;
 export type InsertEbayFulfillmentPolicy = z.infer<typeof insertEbayFulfillmentPolicySchema>;
 export type EbayReturnPolicy = typeof ebayReturnPolicies.$inferSelect;
 export type InsertEbayReturnPolicy = z.infer<typeof insertEbayReturnPolicySchema>;
+export type Order = typeof orders.$inferSelect;
+export type InsertOrder = z.infer<typeof insertOrderSchema>;
+export type OrderItem = typeof orderItems.$inferSelect;
+export type InsertOrderItem = z.infer<typeof insertOrderItemSchema>;
+export type OrderFee = typeof orderFees.$inferSelect;
+export type InsertOrderFee = z.infer<typeof insertOrderFeeSchema>;
+export type OrderEvent = typeof orderEvents.$inferSelect;
+export type InsertOrderEvent = z.infer<typeof insertOrderEventSchema>;
 export type LoginData = z.infer<typeof loginSchema>;
+
+// Order Status Enum for type safety
+export const OrderStatus = {
+  NEW: 'new',
+  PACKED: 'packed',
+  SHIPPED: 'shipped',
+  DELIVERED: 'delivered',
+  RETURN_REQUESTED: 'return_requested',
+  RETURNED: 'returned',
+  COMPLETED: 'completed',
+  CANCELLED: 'cancelled',
+  ON_HOLD: 'on_hold',
+} as const;
+
+export type OrderStatusType = typeof OrderStatus[keyof typeof OrderStatus];
+
+// Marketplace Enum
+export const Marketplace = {
+  EBAY: 'ebay',
+  AMAZON: 'amazon',
+} as const;
+
+export type MarketplaceType = typeof Marketplace[keyof typeof Marketplace];
