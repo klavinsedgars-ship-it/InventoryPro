@@ -17,7 +17,7 @@ export interface StockInfo {
  */
 export function calculateEbayStock(product: Product): StockInfo {
   const tmeStock = product.stock;
-  const ebayLimit = product.ebayStockLimit || 3;
+  const ebayLimit = product.ebayStockLimit || 2;
   const useLimit = product.useStockLimit !== false; // default to true
   
   if (!useLimit) {

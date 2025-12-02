@@ -28,7 +28,7 @@ export const products = pgTable("products", {
   stock: integer("stock").notNull().default(0), // Real TME stock
   moq: integer("moq").notNull().default(1), // Minimum order quantity from TME
   multiples: integer("multiples").notNull().default(1), // Order multiples from TME
-  ebayStockLimit: integer("ebay_stock_limit").notNull().default(3), // Max stock to show on eBay
+  ebayStockLimit: integer("ebay_stock_limit").notNull().default(2), // Max stock to show on eBay
   useStockLimit: boolean("use_stock_limit").default(true), // Whether to apply eBay stock limits
   weight: decimal("weight", { precision: 8, scale: 2 }), // in grams
   margin: decimal("margin", { precision: 5, scale: 2 }), // percentage (legacy field)
