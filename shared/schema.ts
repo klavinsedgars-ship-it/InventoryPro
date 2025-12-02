@@ -120,6 +120,21 @@ export const apiUsageTracking = pgTable("api_usage_tracking", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Bulk Listing Jobs - tracks progress of bulk listing operations
+export const bulkListingJobs = pgTable("bulk_listing_jobs", {
+  id: text("id").primaryKey(), // UUID for job tracking
+  status: text("status").notNull().default("pending"), // pending, processing, completed, failed
+  total: integer("total").notNull().default(0),
+  processed: integer("processed").notNull().default(0),
+  succeeded: integer("succeeded").notNull().default(0),
+  failed: integer("failed").notNull().default(0),
+  currentProduct: text("current_product"), // Name of product currently being processed
+  lastMessage: text("last_message"),
+  errorDetails: text("error_details"), // JSON array of failed items with reasons
+  createdAt: timestamp("created_at").defaultNow(),
+  completedAt: timestamp("completed_at"),
+});
+
 // TME Product Cache - replaces in-memory Map for production scalability
 export const tmeProductCache = pgTable("tme_product_cache", {
   id: serial("id").primaryKey(),
@@ -185,6 +200,11 @@ export const insertTmeProductCacheSchema = createInsertSchema(tmeProductCache).o
   fetchedAt: true,
 });
 
+export const insertBulkListingJobSchema = createInsertSchema(bulkListingJobs).omit({
+  createdAt: true,
+  completedAt: true,
+});
+
 // Login schema
 export const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -212,4 +232,6 @@ export type ApiUsageTracking = typeof apiUsageTracking.$inferSelect;
 export type InsertApiUsageTracking = z.infer<typeof insertApiUsageTrackingSchema>;
 export type TmeProductCache = typeof tmeProductCache.$inferSelect;
 export type InsertTmeProductCache = z.infer<typeof insertTmeProductCacheSchema>;
+export type BulkListingJob = typeof bulkListingJobs.$inferSelect;
+export type InsertBulkListingJob = z.infer<typeof insertBulkListingJobSchema>;
 export type LoginData = z.infer<typeof loginSchema>;

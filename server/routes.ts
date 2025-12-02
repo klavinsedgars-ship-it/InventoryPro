@@ -416,8 +416,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/ebay/bulk-list", requireAuth, async (req, res) => {
     try {
       const { productIds, categoryId } = req.body;
-      const result = await ebayApi.bulkListProducts(productIds, categoryId);
-      res.json(result);
+      
+      if (!Array.isArray(productIds) || productIds.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "productIds array is required and must not be empty"
+        });
+      }
+
+      // Create a unique job ID
+      const jobId = `bulk-list-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+      
+      // Create the job record
+      await storage.createBulkListingJob({
+        id: jobId,
+        status: "processing",
+        total: productIds.length,
+        processed: 0,
+        succeeded: 0,
+        failed: 0,
+        currentProduct: null,
+        lastMessage: "Starting bulk listing...",
+        errorDetails: null
+      });
+
+      // Start async processing - don't await
+      processAsyncBulkListing(jobId, productIds, categoryId);
+
+      // Return immediately with job ID
+      res.json({
+        success: true,
+        jobId,
+        message: `Bulk listing job started for ${productIds.length} products`,
+        total: productIds.length
+      });
     } catch (error) {
       console.error("eBay bulk listing failed:", error);
       res.status(500).json({ 
@@ -427,6 +459,135 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     }
   });
+
+  // Job status endpoint for polling
+  app.get("/api/ebay/bulk-list/:jobId/status", requireAuth, async (req, res) => {
+    try {
+      const { jobId } = req.params;
+      const job = await storage.getBulkListingJob(jobId);
+      
+      if (!job) {
+        return res.status(404).json({
+          success: false,
+          message: "Job not found"
+        });
+      }
+
+      res.json({
+        success: true,
+        job: {
+          id: job.id,
+          status: job.status,
+          total: job.total,
+          processed: job.processed,
+          succeeded: job.succeeded,
+          failed: job.failed,
+          currentProduct: job.currentProduct,
+          lastMessage: job.lastMessage,
+          errorDetails: job.errorDetails ? JSON.parse(job.errorDetails) : null,
+          createdAt: job.createdAt,
+          completedAt: job.completedAt
+        }
+      });
+    } catch (error) {
+      console.error("Error getting job status:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to get job status"
+      });
+    }
+  });
+
+  // Helper function for async bulk listing processing
+  async function processAsyncBulkListing(jobId: string, productIds: number[], categoryId?: string) {
+    const errorDetails: Array<{ productId: number; error: string }> = [];
+    let succeeded = 0;
+    let failed = 0;
+
+    try {
+      for (let i = 0; i < productIds.length; i++) {
+        const productId = productIds[i];
+        
+        // Get product name for progress display
+        const product = await storage.getProduct(productId);
+        const productName = product?.name || `Product ${productId}`;
+        
+        // Update job with current product
+        await storage.updateBulkListingJob(jobId, {
+          currentProduct: productName,
+          lastMessage: `Listing product ${i + 1} of ${productIds.length}: ${productName}`
+        });
+
+        try {
+          const result = await ebayApi.listProduct(productId, { categoryId });
+          
+          if (result.success) {
+            succeeded++;
+          } else {
+            failed++;
+            errorDetails.push({
+              productId,
+              error: result.message || "Unknown error"
+            });
+          }
+        } catch (error) {
+          failed++;
+          errorDetails.push({
+            productId,
+            error: (error as Error).message
+          });
+        }
+
+        // Update job progress
+        await storage.updateBulkListingJob(jobId, {
+          processed: i + 1,
+          succeeded,
+          failed,
+          errorDetails: errorDetails.length > 0 ? JSON.stringify(errorDetails) : null
+        });
+
+        // Add delay between listings to avoid rate limits
+        if (i < productIds.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+
+      // Mark job as completed
+      await storage.updateBulkListingJob(jobId, {
+        status: "completed",
+        currentProduct: null,
+        lastMessage: `Completed: ${succeeded} listed, ${failed} failed`,
+        completedAt: new Date()
+      });
+
+      // Create sync log
+      await storage.createSyncLog({
+        source: "ebay",
+        operation: "bulk_listing",
+        status: succeeded > 0 ? "success" : "error",
+        message: `Bulk listing completed: ${succeeded} listed, ${failed} failed`,
+        details: JSON.stringify({
+          jobId,
+          totalProducts: productIds.length,
+          listedCount: succeeded,
+          failedCount: failed
+        })
+      });
+
+      console.log(`✅ Bulk listing job ${jobId} completed: ${succeeded} succeeded, ${failed} failed`);
+
+    } catch (error) {
+      // Mark job as failed
+      await storage.updateBulkListingJob(jobId, {
+        status: "failed",
+        currentProduct: null,
+        lastMessage: `Job failed: ${(error as Error).message}`,
+        completedAt: new Date()
+      });
+      
+      console.error(`❌ Bulk listing job ${jobId} failed:`, error);
+    }
+  }
 
   // Bulk inventory update - aggregates multiple updates into single eBay API calls
   app.post("/api/ebay/bulk-update-inventory", requireAuth, async (req, res) => {

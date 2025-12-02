@@ -80,6 +80,14 @@ export class EbayApiService {
     }
   }
 
+  private getAuthToken(): string {
+    const token = process.env.EBAY_USER_TOKEN;
+    if (!token) {
+      throw new Error("EBAY_USER_TOKEN not configured. Please set your eBay Auth'n'Auth token in secrets.");
+    }
+    return token;
+  }
+
   private getApiUrl(): string {
     return this.isProduction ? this.baseUrl : this.sandboxUrl;
   }
@@ -421,9 +429,7 @@ export class EbayApiService {
 
 
   private createVerifyItemXML(listingData: any): string {
-    // Use the working eBay Auth token (Auth'n'Auth format)
-    const userToken = "v^1.1#i^1#f^0#p^3#I^3#r^1#t^Ul4xMF83OjFCN0M0NTkxQkNFNTUyRUE0MjE4REMyMjcyODdDOTg5XzFfMSNFXjI2MA==";
-    
+    const userToken = this.getAuthToken();
     console.log("createVerifyItemXML - Using eBay auth token");
     
     return `<?xml version="1.0" encoding="utf-8"?>
@@ -484,9 +490,7 @@ export class EbayApiService {
   }
 
   private createAddItemXML(listingData: any): string {
-    // Use the working eBay Auth token (Auth'n'Auth format)
-    const userToken = "v^1.1#i^1#f^0#p^3#I^3#r^1#t^Ul4xMF83OjFCN0M0NTkxQkNFNTUyRUE0MjE4REMyMjcyODdDOTg5XzFfMSNFXjI2MA==";
-    
+    const userToken = this.getAuthToken();
     console.log("createAddItemXML - Using eBay auth token");
     
     return `<?xml version="1.0" encoding="utf-8"?>
@@ -557,8 +561,7 @@ export class EbayApiService {
   }
 
   private createReviseItemXML(listingData: any, authToken: string): string {
-    // Use the working eBay Auth token (Auth'n'Auth format)
-    const userToken = "v^1.1#i^1#f^0#p^3#I^3#r^1#t^Ul4xMF83OjFCN0M0NTkxQkNFNTUyRUE0MjE4REMyMjcyODdDOTg5XzFfMSNFXjI2MA==";
+    const userToken = this.getAuthToken();
     
     const escapedTitle = this.escapeXml(listingData.title);
     const escapedDescription = this.escapeXml(listingData.description);
@@ -963,9 +966,7 @@ export class EbayApiService {
         reason: stockInfo.limitReason
       });
       
-      // Use the working eBay Auth token (Auth'n'Auth format)
-      const authToken = "v^1.1#i^1#f^0#p^3#I^3#r^1#t^Ul4xMF83OjFCN0M0NTkxQkNFNTUyRUE0MjE4REMyMjcyODdDOTg5XzFfMSNFXjI2MA==";
-      
+      const authToken = this.getAuthToken();
       console.log("Update function - Using eBay auth token");
       console.log("Generated listing template description length:", listingTemplate.htmlDescription.length);
       console.log("Generated template description preview:", listingTemplate.htmlDescription.substring(0, 200));
@@ -1092,8 +1093,7 @@ export class EbayApiService {
 
       console.log(`Unlisting product ${product.name} (Item ID: ${product.ebayItemId}) from eBay...`);
 
-      // Use the working eBay Auth token (Auth'n'Auth format)
-      const authToken = "v^1.1#i^1#f^0#p^3#I^3#r^1#t^Ul4xMF83OjFCN0M0NTkxQkNFNTUyRUE0MjE4REMyMjcyODdDOTg5XzFfMSNFXjI2MA==";
+      const authToken = this.getAuthToken();
       console.log("Using eBay auth token for unlisting");
 
       // Create EndItem XML request with fresh token
@@ -1282,9 +1282,7 @@ export class EbayApiService {
     price?: number;
     sku?: string;
   }>): Promise<Array<{ productId: number; ebayItemId: string; success: boolean; message: string }>> {
-    // Build ReviseInventoryStatus XML
-    // Use the working eBay Auth token (Auth'n'Auth format)
-    const authToken = "v^1.1#i^1#f^0#p^3#I^3#r^1#t^Ul4xMF83OjFCN0M0NTkxQkNFNTUyRUE0MjE4REMyMjcyODdDOTg5XzFfMSNFXjI2MA==";
+    const authToken = this.getAuthToken();
     
     const inventoryStatusXml = items.map(item => {
       let fields = `<ItemID>${item.ebayItemId}</ItemID>`;

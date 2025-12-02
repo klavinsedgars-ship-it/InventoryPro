@@ -9,6 +9,7 @@ import {
   shippingPolicies,
   apiUsageTracking,
   tmeProductCache,
+  bulkListingJobs,
   type User, 
   type InsertUser, 
   type Product, 
@@ -28,7 +29,9 @@ import {
   type ApiUsageTracking,
   type InsertApiUsageTracking,
   type TmeProductCache,
-  type InsertTmeProductCache
+  type InsertTmeProductCache,
+  type BulkListingJob,
+  type InsertBulkListingJob
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, gte, lte, desc, asc, count } from "drizzle-orm";
@@ -118,6 +121,12 @@ export interface IStorage {
   setTmeCachedProducts(caches: InsertTmeProductCache[]): Promise<void>;
   getStaleProductSymbols(olderThan24Hours?: boolean): Promise<string[]>;
   cleanExpiredCache(): Promise<number>;
+
+  // Bulk Listing Jobs - track progress of bulk listing operations
+  createBulkListingJob(job: InsertBulkListingJob): Promise<BulkListingJob>;
+  getBulkListingJob(id: string): Promise<BulkListingJob | undefined>;
+  updateBulkListingJob(id: string, updates: Partial<InsertBulkListingJob>): Promise<BulkListingJob | undefined>;
+  cleanOldBulkListingJobs(olderThanHours?: number): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -580,6 +589,32 @@ export class DatabaseStorage implements IStorage {
     const now = new Date();
     const result = await db.delete(tmeProductCache)
       .where(lte(tmeProductCache.expiresAt, now));
+    return result.rowCount ?? 0;
+  }
+
+  // Bulk Listing Jobs - track progress of bulk listing operations
+  async createBulkListingJob(job: InsertBulkListingJob): Promise<BulkListingJob> {
+    const result = await db.insert(bulkListingJobs).values(job).returning();
+    return result[0];
+  }
+
+  async getBulkListingJob(id: string): Promise<BulkListingJob | undefined> {
+    const result = await db.select().from(bulkListingJobs).where(eq(bulkListingJobs.id, id));
+    return result[0] || undefined;
+  }
+
+  async updateBulkListingJob(id: string, updates: Partial<InsertBulkListingJob>): Promise<BulkListingJob | undefined> {
+    const result = await db.update(bulkListingJobs)
+      .set(updates)
+      .where(eq(bulkListingJobs.id, id))
+      .returning();
+    return result[0] || undefined;
+  }
+
+  async cleanOldBulkListingJobs(olderThanHours: number = 24): Promise<number> {
+    const cutoffTime = new Date(Date.now() - (olderThanHours * 60 * 60 * 1000));
+    const result = await db.delete(bulkListingJobs)
+      .where(lte(bulkListingJobs.createdAt, cutoffTime));
     return result.rowCount ?? 0;
   }
 }

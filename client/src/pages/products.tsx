@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
@@ -11,6 +11,14 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,12 +33,26 @@ import {
 import { 
   Plus, Search, Filter, Edit2, Trash2, Upload, Download, MoreHorizontal, 
   Eye, X, Package, ShoppingCart, AlertTriangle, CheckCircle, XCircle,
-  ExternalLink, Settings, RefreshCw
+  ExternalLink, Settings, RefreshCw, Loader2
 } from "lucide-react";
 import { getStatusColor, formatCurrency } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Product, Category } from "@shared/schema";
+
+interface BulkListingJob {
+  id: string;
+  status: string;
+  total: number;
+  processed: number;
+  succeeded: number;
+  failed: number;
+  currentProduct: string | null;
+  lastMessage: string | null;
+  errorDetails: Array<{ productId: number; error: string }> | null;
+  createdAt: string;
+  completedAt: string | null;
+}
 
 interface ProductsProps {
   user: any;
@@ -51,6 +73,12 @@ export function Products({ user }: ProductsProps) {
   const [marketplaceFilter, setMarketplaceFilter] = useState<string>("all");
   const [moqFilter, setMoqFilter] = useState<string>("all");
   const [itemsPerPage, setItemsPerPage] = useState<number>(250);
+  
+  // Bulk listing progress state
+  const [bulkListingModalOpen, setBulkListingModalOpen] = useState(false);
+  const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+  const [bulkListingProgress, setBulkListingProgress] = useState<BulkListingJob | null>(null);
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const { data: products = [], isLoading } = useQuery<Product[]>({
     queryKey: ["/api/products", { 
@@ -68,6 +96,62 @@ export function Products({ user }: ProductsProps) {
   });
   
   const stockInfo = (stockInfoResponse as any)?.stockInfo || [];
+
+  // Polling for bulk listing job progress
+  useEffect(() => {
+    const pollJobStatus = async () => {
+      if (!currentJobId) return;
+      
+      try {
+        const response = await fetch(`/api/ebay/bulk-list/${currentJobId}/status`);
+        const data = await response.json();
+        
+        if (data.success && data.job) {
+          setBulkListingProgress(data.job);
+          
+          // If job is completed or failed, stop polling
+          if (data.job.status === "completed" || data.job.status === "failed") {
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current);
+              pollingIntervalRef.current = null;
+            }
+            
+            // Show final toast
+            if (data.job.status === "completed") {
+              toast({
+                title: "Bulk Listing Completed",
+                description: `${data.job.succeeded} of ${data.job.total} products listed successfully.`,
+              });
+              queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+              queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
+            } else {
+              toast({
+                title: "Bulk Listing Failed",
+                description: data.job.lastMessage || "An error occurred during bulk listing.",
+                variant: "destructive",
+              });
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error polling job status:", error);
+      }
+    };
+
+    if (currentJobId && !pollingIntervalRef.current) {
+      // Start polling every 500ms
+      pollingIntervalRef.current = setInterval(pollJobStatus, 500);
+      // Also poll immediately
+      pollJobStatus();
+    }
+
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+    };
+  }, [currentJobId, toast, queryClient]);
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/products/${id}`),
@@ -174,28 +258,32 @@ export function Products({ user }: ProductsProps) {
     },
     onSuccess: (data: any) => {
       console.log("Bulk listing response:", data);
-      console.log("Success check:", data.success, "Listed count:", data.listedCount);
       
-      if (data.success === true && (data.listedCount || 0) > 0) {
-        toast({
-          title: "Bulk eBay Listing Completed",
-          description: `${data.listedCount} of ${data.totalProducts} products successfully listed on eBay.`,
+      if (data.success && data.jobId) {
+        // Start tracking the job
+        setCurrentJobId(data.jobId);
+        setBulkListingProgress({
+          id: data.jobId,
+          status: "processing",
+          total: data.total,
+          processed: 0,
+          succeeded: 0,
+          failed: 0,
+          currentProduct: null,
+          lastMessage: "Starting bulk listing...",
+          errorDetails: null,
+          createdAt: new Date().toISOString(),
+          completedAt: null
         });
-      } else if (data.success === false || (data.failedCount || 0) > 0) {
-        toast({
-          title: "Bulk Listing Issues",
-          description: `${data.failedCount || 0} products failed to list. Check individual results.`,
-          variant: "destructive",
-        });
+        setBulkListingModalOpen(true);
+        setSelectedProducts(new Set());
       } else {
         toast({
-          title: "eBay Listing Status",
-          description: `Listing completed. Check product status for details.`,
+          title: "Bulk Listing Failed",
+          description: data.message || "Failed to start bulk listing job.",
+          variant: "destructive",
         });
       }
-      setSelectedProducts(new Set());
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
     },
     onError: (error: any) => {
       toast({
@@ -898,6 +986,125 @@ export function Products({ user }: ProductsProps) {
         onClose={() => setProductModalOpen(false)}
         product={selectedProduct}
       />
+
+      {/* Bulk Listing Progress Modal */}
+      <Dialog 
+        open={bulkListingModalOpen} 
+        onOpenChange={(open) => {
+          if (!open && bulkListingProgress?.status !== "processing") {
+            setBulkListingModalOpen(false);
+            setCurrentJobId(null);
+            setBulkListingProgress(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md" data-testid="dialog-bulk-listing-progress">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {bulkListingProgress?.status === "processing" ? (
+                <>
+                  <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+                  Listing Products on eBay
+                </>
+              ) : bulkListingProgress?.status === "completed" ? (
+                <>
+                  <CheckCircle className="h-5 w-5 text-green-600" />
+                  Listing Complete
+                </>
+              ) : (
+                <>
+                  <XCircle className="h-5 w-5 text-red-600" />
+                  Listing Failed
+                </>
+              )}
+            </DialogTitle>
+            <DialogDescription>
+              {bulkListingProgress?.lastMessage || "Processing..."}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            {/* Progress Bar */}
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Progress</span>
+                <span className="font-medium">
+                  {bulkListingProgress?.processed || 0} / {bulkListingProgress?.total || 0}
+                </span>
+              </div>
+              <Progress 
+                value={bulkListingProgress?.total ? ((bulkListingProgress?.processed || 0) / bulkListingProgress.total) * 100 : 0}
+                className="h-3"
+                data-testid="progress-bulk-listing"
+              />
+            </div>
+
+            {/* Stats */}
+            <div className="grid grid-cols-3 gap-4 text-center">
+              <div className="space-y-1">
+                <div className="text-2xl font-bold text-green-600" data-testid="text-succeeded-count">
+                  {bulkListingProgress?.succeeded || 0}
+                </div>
+                <div className="text-xs text-muted-foreground">Succeeded</div>
+              </div>
+              <div className="space-y-1">
+                <div className="text-2xl font-bold text-red-600" data-testid="text-failed-count">
+                  {bulkListingProgress?.failed || 0}
+                </div>
+                <div className="text-xs text-muted-foreground">Failed</div>
+              </div>
+              <div className="space-y-1">
+                <div className="text-2xl font-bold text-gray-500" data-testid="text-remaining-count">
+                  {(bulkListingProgress?.total || 0) - (bulkListingProgress?.processed || 0)}
+                </div>
+                <div className="text-xs text-muted-foreground">Remaining</div>
+              </div>
+            </div>
+
+            {/* Current Product */}
+            {bulkListingProgress?.status === "processing" && bulkListingProgress?.currentProduct && (
+              <div className="bg-muted/50 rounded-lg p-3 text-center">
+                <p className="text-xs text-muted-foreground mb-1">Currently Processing</p>
+                <p className="text-sm font-medium truncate" data-testid="text-current-product">
+                  {bulkListingProgress.currentProduct}
+                </p>
+              </div>
+            )}
+
+            {/* Error Details (show if there are failed items) */}
+            {bulkListingProgress?.status === "completed" && bulkListingProgress?.failed > 0 && bulkListingProgress?.errorDetails && (
+              <div className="bg-red-50 dark:bg-red-950 rounded-lg p-3 max-h-32 overflow-y-auto">
+                <p className="text-xs text-red-600 dark:text-red-400 font-medium mb-2">Failed Items:</p>
+                <ul className="text-xs text-red-600 dark:text-red-400 space-y-1">
+                  {bulkListingProgress.errorDetails.slice(0, 5).map((err, idx) => (
+                    <li key={idx} className="truncate">
+                      Product #{err.productId}: {err.error}
+                    </li>
+                  ))}
+                  {bulkListingProgress.errorDetails.length > 5 && (
+                    <li className="font-medium">... and {bulkListingProgress.errorDetails.length - 5} more</li>
+                  )}
+                </ul>
+              </div>
+            )}
+
+            {/* Close Button (only when completed) */}
+            {bulkListingProgress?.status !== "processing" && (
+              <Button 
+                className="w-full"
+                onClick={() => {
+                  setBulkListingModalOpen(false);
+                  setCurrentJobId(null);
+                  setBulkListingProgress(null);
+                }}
+                data-testid="btn-close-progress"
+              >
+                Close
+              </Button>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
