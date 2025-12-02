@@ -13,13 +13,6 @@ import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -988,124 +981,115 @@ export function Products({ user }: ProductsProps) {
         product={selectedProduct}
       />
 
-      {/* Bulk Listing Progress Modal */}
-      <Dialog 
-        open={bulkListingModalOpen} 
-        onOpenChange={(open) => {
-          if (!open && bulkListingProgress?.status !== "processing") {
-            setBulkListingModalOpen(false);
-            setCurrentJobId(null);
-            setBulkListingProgress(null);
-          }
-        }}
-      >
-        <DialogContent className="sm:max-w-md" data-testid="dialog-bulk-listing-progress">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              {bulkListingProgress?.status === "processing" ? (
-                <>
-                  <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-                  Listing Products on eBay
-                </>
-              ) : bulkListingProgress?.status === "completed" ? (
-                <>
-                  <CheckCircle className="h-5 w-5 text-green-600" />
-                  Listing Complete
-                </>
-              ) : (
-                <>
-                  <XCircle className="h-5 w-5 text-red-600" />
-                  Listing Failed
-                </>
-              )}
-            </DialogTitle>
-            <DialogDescription>
-              {bulkListingProgress?.lastMessage || "Processing..."}
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            {/* Progress Bar */}
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Progress</span>
-                <span className="font-medium">
-                  {bulkListingProgress?.processed || 0} / {bulkListingProgress?.total || 0}
-                </span>
+      {/* Bulk Listing Progress Bar - Fixed at Bottom */}
+      {bulkListingProgress && (
+        <div 
+          className="fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-lg"
+          data-testid="progress-bar-bulk-listing"
+        >
+          {/* Main Progress Section */}
+          <div className="px-4 py-3">
+            <div className="max-w-7xl mx-auto">
+              {/* Header Row */}
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-3">
+                  {bulkListingProgress.status === "processing" ? (
+                    <div className="flex items-center gap-2 text-blue-600">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span className="font-medium text-sm">Listing Products on eBay</span>
+                    </div>
+                  ) : bulkListingProgress.status === "completed" ? (
+                    <div className="flex items-center gap-2 text-green-600">
+                      <CheckCircle className="h-4 w-4" />
+                      <span className="font-medium text-sm">Listing Complete</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-red-600">
+                      <XCircle className="h-4 w-4" />
+                      <span className="font-medium text-sm">Listing Failed</span>
+                    </div>
+                  )}
+                  
+                  {/* Current Product - inline */}
+                  {bulkListingProgress.status === "processing" && bulkListingProgress.currentProduct && (
+                    <span className="text-xs text-muted-foreground truncate max-w-md hidden md:inline" data-testid="text-current-product">
+                      Processing: {bulkListingProgress.currentProduct}
+                    </span>
+                  )}
+                </div>
+
+                {/* Stats - inline */}
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-lg font-bold text-green-600" data-testid="text-succeeded-count">
+                      {bulkListingProgress.succeeded || 0}
+                    </span>
+                    <span className="text-xs text-muted-foreground">success</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-lg font-bold text-red-600" data-testid="text-failed-count">
+                      {bulkListingProgress.failed || 0}
+                    </span>
+                    <span className="text-xs text-muted-foreground">failed</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-lg font-bold text-gray-500" data-testid="text-remaining-count">
+                      {(bulkListingProgress.total || 0) - (bulkListingProgress.processed || 0)}
+                    </span>
+                    <span className="text-xs text-muted-foreground">remaining</span>
+                  </div>
+                  
+                  {/* Progress Count */}
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300 ml-2">
+                    {bulkListingProgress.processed || 0} / {bulkListingProgress.total || 0}
+                  </span>
+
+                  {/* Close Button - only when not processing */}
+                  {bulkListingProgress.status !== "processing" && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setBulkListingModalOpen(false);
+                        setCurrentJobId(null);
+                        setBulkListingProgress(null);
+                      }}
+                      className="h-7 px-2 ml-2"
+                      data-testid="btn-close-progress"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
               </div>
+
+              {/* Progress Bar */}
               <Progress 
-                value={bulkListingProgress?.total ? ((bulkListingProgress?.processed || 0) / bulkListingProgress.total) * 100 : 0}
-                className="h-3"
+                value={bulkListingProgress.total ? ((bulkListingProgress.processed || 0) / bulkListingProgress.total) * 100 : 0}
+                className="h-2"
                 data-testid="progress-bulk-listing"
               />
+
+              {/* Error Details - expandable section */}
+              {bulkListingProgress.status === "completed" && bulkListingProgress.failed > 0 && bulkListingProgress.errorDetails && (
+                <div className="mt-2 bg-red-50 dark:bg-red-950/50 rounded px-3 py-2 max-h-20 overflow-y-auto">
+                  <p className="text-xs text-red-600 dark:text-red-400 font-medium mb-1">Failed Items:</p>
+                  <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-red-600 dark:text-red-400">
+                    {bulkListingProgress.errorDetails.slice(0, 5).map((err, idx) => (
+                      <span key={idx} className="truncate max-w-xs">
+                        #{err.productId}: {err.error}
+                      </span>
+                    ))}
+                    {bulkListingProgress.errorDetails.length > 5 && (
+                      <span className="font-medium">+{bulkListingProgress.errorDetails.length - 5} more</span>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
-
-            {/* Stats */}
-            <div className="grid grid-cols-3 gap-4 text-center">
-              <div className="space-y-1">
-                <div className="text-2xl font-bold text-green-600" data-testid="text-succeeded-count">
-                  {bulkListingProgress?.succeeded || 0}
-                </div>
-                <div className="text-xs text-muted-foreground">Succeeded</div>
-              </div>
-              <div className="space-y-1">
-                <div className="text-2xl font-bold text-red-600" data-testid="text-failed-count">
-                  {bulkListingProgress?.failed || 0}
-                </div>
-                <div className="text-xs text-muted-foreground">Failed</div>
-              </div>
-              <div className="space-y-1">
-                <div className="text-2xl font-bold text-gray-500" data-testid="text-remaining-count">
-                  {(bulkListingProgress?.total || 0) - (bulkListingProgress?.processed || 0)}
-                </div>
-                <div className="text-xs text-muted-foreground">Remaining</div>
-              </div>
-            </div>
-
-            {/* Current Product */}
-            {bulkListingProgress?.status === "processing" && bulkListingProgress?.currentProduct && (
-              <div className="bg-muted/50 rounded-lg p-3 text-center">
-                <p className="text-xs text-muted-foreground mb-1">Currently Processing</p>
-                <p className="text-sm font-medium truncate" data-testid="text-current-product">
-                  {bulkListingProgress.currentProduct}
-                </p>
-              </div>
-            )}
-
-            {/* Error Details (show if there are failed items) */}
-            {bulkListingProgress?.status === "completed" && bulkListingProgress?.failed > 0 && bulkListingProgress?.errorDetails && (
-              <div className="bg-red-50 dark:bg-red-950 rounded-lg p-3 max-h-32 overflow-y-auto">
-                <p className="text-xs text-red-600 dark:text-red-400 font-medium mb-2">Failed Items:</p>
-                <ul className="text-xs text-red-600 dark:text-red-400 space-y-1">
-                  {bulkListingProgress.errorDetails.slice(0, 5).map((err, idx) => (
-                    <li key={idx} className="truncate">
-                      Product #{err.productId}: {err.error}
-                    </li>
-                  ))}
-                  {bulkListingProgress.errorDetails.length > 5 && (
-                    <li className="font-medium">... and {bulkListingProgress.errorDetails.length - 5} more</li>
-                  )}
-                </ul>
-              </div>
-            )}
-
-            {/* Close Button (only when completed) */}
-            {bulkListingProgress?.status !== "processing" && (
-              <Button 
-                className="w-full"
-                onClick={() => {
-                  setBulkListingModalOpen(false);
-                  setCurrentJobId(null);
-                  setBulkListingProgress(null);
-                }}
-                data-testid="btn-close-progress"
-              >
-                Close
-              </Button>
-            )}
           </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+      )}
     </div>
   );
 }
