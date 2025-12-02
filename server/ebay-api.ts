@@ -172,6 +172,13 @@ export class EbayApiService {
     try {
       const accessToken = await this.getAccessToken();
       
+      // Track eBay API call in database
+      try {
+        await storage.trackApiCall('ebay');
+      } catch (error) {
+        console.error('Failed to track eBay API call:', error);
+      }
+      
       const response = await fetch(`${this.getApiUrl()}${endpoint}`, {
         method,
         headers: {
@@ -968,6 +975,13 @@ export class EbayApiService {
 
   private async makeTradingApiRequestForPolicies(xmlBody: string): Promise<string> {
     const tradingUrl = this.isProduction ? this.tradingApiUrl : this.sandboxTradingApiUrl;
+    
+    // Track eBay API call in database
+    try {
+      await storage.trackApiCall('ebay');
+    } catch (error) {
+      console.error('Failed to track eBay API call:', error);
+    }
     
     const response = await fetch(tradingUrl, {
       method: 'POST',
