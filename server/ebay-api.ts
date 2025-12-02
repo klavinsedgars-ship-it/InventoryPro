@@ -75,23 +75,14 @@ export class EbayApiService {
       throw new Error("eBay API credentials not properly configured");
     }
 
-    const userToken = process.env.EBAY_USER_TOKEN;
-    if (!userToken) {
-      console.warn("eBay User Token not configured - listings will fail");
-    } else {
-      console.log("✅ eBay API Service initialized");
-      console.log(`   Token length: ${userToken.length}`);
-      console.log(`   Token starts with: ${userToken.substring(0, 20)}...`);
-      console.log(`   Token ends with: ...${userToken.substring(userToken.length - 20)}`);
-    }
+    console.log("✅ eBay API Service initialized");
+    console.log("   Using working Auth'n'Auth token for listings");
   }
 
   private getAuthToken(): string {
-    const token = process.env.EBAY_USER_TOKEN;
-    if (!token) {
-      throw new Error("EBAY_USER_TOKEN not configured. Please set your eBay Auth'n'Auth token in secrets.");
-    }
-    return token;
+    // Use the working eBay Auth token (Auth'n'Auth format)
+    // This token was confirmed working for eBay listings
+    return "v^1.1#i^1#f^0#p^3#I^3#r^1#t^Ul4xMF83OjFCN0M0NTkxQkNFNTUyRUE0MjE4REMyMjcyODdDOTg5XzFfMSNFXjI2MA==";
   }
 
   private getApiUrl(): string {
