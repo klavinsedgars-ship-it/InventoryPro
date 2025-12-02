@@ -13,6 +13,10 @@ import {
   ebayPaymentPolicies,
   ebayFulfillmentPolicies,
   ebayReturnPolicies,
+  orders,
+  orderItems,
+  orderFees,
+  orderEvents,
   type User, 
   type InsertUser, 
   type Product, 
@@ -40,10 +44,18 @@ import {
   type EbayFulfillmentPolicy,
   type InsertEbayFulfillmentPolicy,
   type EbayReturnPolicy,
-  type InsertEbayReturnPolicy
+  type InsertEbayReturnPolicy,
+  type Order,
+  type InsertOrder,
+  type OrderItem,
+  type InsertOrderItem,
+  type OrderFee,
+  type InsertOrderFee,
+  type OrderEvent,
+  type InsertOrderEvent
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, gte, lte, desc, asc, count } from "drizzle-orm";
+import { eq, and, gte, lte, desc, asc, count, or, ilike } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 
 export interface IStorage {
@@ -157,6 +169,37 @@ export interface IStorage {
   createEbayReturnPolicy(policy: InsertEbayReturnPolicy): Promise<EbayReturnPolicy>;
   updateEbayReturnPolicy(policyId: string, policy: Partial<InsertEbayReturnPolicy>): Promise<EbayReturnPolicy | undefined>;
   deleteEbayReturnPolicy(policyId: string): Promise<boolean>;
+
+  // Orders Management
+  getOrders(filters?: {
+    marketplace?: string;
+    status?: string;
+    search?: string;
+    fromDate?: Date;
+    toDate?: Date;
+    limit?: number;
+    offset?: number;
+  }): Promise<Order[]>;
+  getOrder(id: number): Promise<Order | undefined>;
+  getOrderByMarketplaceId(marketplace: string, marketplaceOrderId: string): Promise<Order | undefined>;
+  createOrder(order: InsertOrder): Promise<Order>;
+  updateOrder(id: number, order: Partial<InsertOrder>): Promise<Order | undefined>;
+  deleteOrder(id: number): Promise<boolean>;
+  getOrdersCount(filters?: { marketplace?: string; status?: string }): Promise<number>;
+
+  // Order Items
+  getOrderItems(orderId: number): Promise<OrderItem[]>;
+  createOrderItem(item: InsertOrderItem): Promise<OrderItem>;
+  createOrderItems(items: InsertOrderItem[]): Promise<void>;
+
+  // Order Fees
+  getOrderFees(orderId: number): Promise<OrderFee[]>;
+  createOrderFee(fee: InsertOrderFee): Promise<OrderFee>;
+  createOrderFees(fees: InsertOrderFee[]): Promise<void>;
+
+  // Order Events
+  getOrderEvents(orderId: number): Promise<OrderEvent[]>;
+  createOrderEvent(event: InsertOrderEvent): Promise<OrderEvent>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -730,6 +773,161 @@ export class DatabaseStorage implements IStorage {
   async deleteEbayReturnPolicy(policyId: string): Promise<boolean> {
     const result = await db.delete(ebayReturnPolicies).where(eq(ebayReturnPolicies.policyId, policyId));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  // ==========================================
+  // ORDERS MANAGEMENT
+  // ==========================================
+
+  async getOrders(filters?: {
+    marketplace?: string;
+    status?: string;
+    search?: string;
+    fromDate?: Date;
+    toDate?: Date;
+    limit?: number;
+    offset?: number;
+  }): Promise<Order[]> {
+    const conditions = [];
+    
+    if (filters?.marketplace) {
+      conditions.push(eq(orders.marketplace, filters.marketplace));
+    }
+    if (filters?.status) {
+      conditions.push(eq(orders.status, filters.status));
+    }
+    if (filters?.fromDate) {
+      conditions.push(gte(orders.orderDate, filters.fromDate));
+    }
+    if (filters?.toDate) {
+      conditions.push(lte(orders.orderDate, filters.toDate));
+    }
+    if (filters?.search) {
+      conditions.push(
+        or(
+          ilike(orders.marketplaceOrderId, `%${filters.search}%`),
+          ilike(orders.buyerUsername, `%${filters.search}%`),
+          ilike(orders.shippingName, `%${filters.search}%`)
+        )
+      );
+    }
+
+    let query = db.select().from(orders);
+    
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions)) as any;
+    }
+    
+    query = query.orderBy(desc(orders.orderDate)) as any;
+    
+    if (filters?.limit) {
+      query = query.limit(filters.limit) as any;
+    }
+    if (filters?.offset) {
+      query = query.offset(filters.offset) as any;
+    }
+    
+    return await query;
+  }
+
+  async getOrder(id: number): Promise<Order | undefined> {
+    const result = await db.select().from(orders).where(eq(orders.id, id));
+    return result[0] || undefined;
+  }
+
+  async getOrderByMarketplaceId(marketplace: string, marketplaceOrderId: string): Promise<Order | undefined> {
+    const result = await db.select().from(orders).where(
+      and(
+        eq(orders.marketplace, marketplace),
+        eq(orders.marketplaceOrderId, marketplaceOrderId)
+      )
+    );
+    return result[0] || undefined;
+  }
+
+  async createOrder(order: InsertOrder): Promise<Order> {
+    const result = await db.insert(orders).values(order).returning();
+    return result[0];
+  }
+
+  async updateOrder(id: number, order: Partial<InsertOrder>): Promise<Order | undefined> {
+    const result = await db.update(orders)
+      .set({ ...order, updatedAt: new Date() })
+      .where(eq(orders.id, id))
+      .returning();
+    return result[0] || undefined;
+  }
+
+  async deleteOrder(id: number): Promise<boolean> {
+    await db.delete(orderEvents).where(eq(orderEvents.orderId, id));
+    await db.delete(orderFees).where(eq(orderFees.orderId, id));
+    await db.delete(orderItems).where(eq(orderItems.orderId, id));
+    const result = await db.delete(orders).where(eq(orders.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async getOrdersCount(filters?: { marketplace?: string; status?: string }): Promise<number> {
+    const conditions = [];
+    
+    if (filters?.marketplace) {
+      conditions.push(eq(orders.marketplace, filters.marketplace));
+    }
+    if (filters?.status) {
+      conditions.push(eq(orders.status, filters.status));
+    }
+
+    let query = db.select({ count: count() }).from(orders);
+    
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions)) as any;
+    }
+    
+    const result = await query;
+    return result[0]?.count || 0;
+  }
+
+  // Order Items
+  async getOrderItems(orderId: number): Promise<OrderItem[]> {
+    return await db.select().from(orderItems).where(eq(orderItems.orderId, orderId));
+  }
+
+  async createOrderItem(item: InsertOrderItem): Promise<OrderItem> {
+    const result = await db.insert(orderItems).values(item).returning();
+    return result[0];
+  }
+
+  async createOrderItems(items: InsertOrderItem[]): Promise<void> {
+    if (items.length > 0) {
+      await db.insert(orderItems).values(items);
+    }
+  }
+
+  // Order Fees
+  async getOrderFees(orderId: number): Promise<OrderFee[]> {
+    return await db.select().from(orderFees).where(eq(orderFees.orderId, orderId));
+  }
+
+  async createOrderFee(fee: InsertOrderFee): Promise<OrderFee> {
+    const result = await db.insert(orderFees).values(fee).returning();
+    return result[0];
+  }
+
+  async createOrderFees(fees: InsertOrderFee[]): Promise<void> {
+    if (fees.length > 0) {
+      await db.insert(orderFees).values(fees);
+    }
+  }
+
+  // Order Events
+  async getOrderEvents(orderId: number): Promise<OrderEvent[]> {
+    return await db.select().from(orderEvents)
+      .where(eq(orderEvents.orderId, orderId))
+      .orderBy(desc(orderEvents.createdAt));
+  }
+
+  async createOrderEvent(event: InsertOrderEvent): Promise<OrderEvent> {
+    const result = await db.insert(orderEvents).values(event).returning();
+    return result[0];
   }
 }
 
