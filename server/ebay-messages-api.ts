@@ -138,6 +138,18 @@ function stripHtmlTags(html: string): string {
   // Decode HTML entities first
   let text = decodeHtmlEntities(html);
   
+  // Remove entire style blocks including content
+  text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+  // Remove entire script blocks including content
+  text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+  // Remove head section entirely
+  text = text.replace(/<head[^>]*>[\s\S]*?<\/head>/gi, '');
+  // Remove HTML comments
+  text = text.replace(/<!--[\s\S]*?-->/g, '');
+  // Remove DOCTYPE and XML declarations
+  text = text.replace(/<!DOCTYPE[^>]*>/gi, '');
+  text = text.replace(/<\?xml[^>]*\?>/gi, '');
+  
   // Replace common block elements with newlines
   text = text.replace(/<br\s*\/?>/gi, '\n');
   text = text.replace(/<\/p>/gi, '\n\n');

@@ -3433,9 +3433,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
       .replace(/&quot;/g, '"').replace(/&apos;/g, "'");
     if (text.includes('<') || text.includes('&lt;')) {
+      // Remove entire style blocks including content
+      text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+      // Remove entire script blocks including content
+      text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+      // Remove head section entirely
+      text = text.replace(/<head[^>]*>[\s\S]*?<\/head>/gi, '');
+      // Remove HTML comments
+      text = text.replace(/<!--[\s\S]*?-->/g, '');
+      // Remove DOCTYPE and XML declarations
+      text = text.replace(/<!DOCTYPE[^>]*>/gi, '');
+      text = text.replace(/<\?xml[^>]*\?>/gi, '');
+      // Replace block elements with newlines
       text = text.replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n\n')
-        .replace(/<\/div>/gi, '\n').replace(/<\/tr>/gi, '\n').replace(/<\/li>/gi, '\n')
-        .replace(/<[^>]+>/g, '');
+        .replace(/<\/div>/gi, '\n').replace(/<\/tr>/gi, '\n').replace(/<\/li>/gi, '\n');
+      // Remove all remaining HTML tags
+      text = text.replace(/<[^>]+>/g, '');
+      // Clean up whitespace
       text = text.replace(/\n\s*\n\s*\n/g, '\n\n').replace(/[ \t]+/g, ' ').trim();
     }
     return text.trim();
