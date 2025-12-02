@@ -75,8 +75,14 @@ export class EbayApiService {
       throw new Error("eBay API credentials not properly configured");
     }
 
-    if (!process.env.EBAY_USER_TOKEN) {
+    const userToken = process.env.EBAY_USER_TOKEN;
+    if (!userToken) {
       console.warn("eBay User Token not configured - listings will fail");
+    } else {
+      console.log("✅ eBay API Service initialized");
+      console.log(`   Token length: ${userToken.length}`);
+      console.log(`   Token starts with: ${userToken.substring(0, 20)}...`);
+      console.log(`   Token ends with: ...${userToken.substring(userToken.length - 20)}`);
     }
   }
 
