@@ -36,6 +36,7 @@ import {
 import { calculateEbayStock, calculateBulkEbayStock, validateStockLimit, getRecommendedStockLimit } from "./stock-manager";
 import { imageProcessingService } from "./image-processing";
 import { triggerManualSync } from "./cron-jobs";
+import { ebayOrdersApi } from "./ebay-orders-api";
 
 // Type for authenticated requests
 interface AuthenticatedRequest extends Request {
@@ -3131,6 +3132,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({
         success: false,
         error: 'Failed to delete order'
+      });
+    }
+  });
+
+  // ==========================================
+  // EBAY ORDERS SYNC ROUTES
+  // ==========================================
+
+  // Sync orders from eBay
+  app.post('/api/orders/sync/ebay', requireAuth, async (req, res) => {
+    try {
+      const { daysBack = 30 } = req.body;
+      
+      console.log(`📦 Starting eBay orders sync (${daysBack} days)...`);
+      
+      const result = await ebayOrdersApi.syncOrdersFromEbay(daysBack);
+      
+      res.json({
+        success: true,
+        message: `Synced ${result.synced} new orders, updated ${result.updated} existing orders`,
+        ...result
+      });
+    } catch (error) {
+      console.error('eBay orders sync failed:', error);
+      res.status(500).json({
+        success: false,
+        error: (error as Error).message
+      });
+    }
+  });
+
+  // Check eBay OAuth status for orders
+  app.get('/api/orders/sync/status', requireAuth, async (req, res) => {
+    try {
+      const isConfigured = ebayOAuth.isOAuthConfigured();
+      
+      res.json({
+        success: true,
+        ebay: {
+          configured: isConfigured,
+          message: isConfigured 
+            ? 'eBay OAuth is configured and ready to sync orders'
+            : 'eBay OAuth not configured. Set EBAY_OAUTH_CLIENT_ID, EBAY_OAUTH_CLIENT_SECRET, and EBAY_OAUTH_REFRESH_TOKEN'
+        },
+        amazon: {
+          configured: false,
+          message: 'Amazon SP-API integration coming soon'
+        }
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: (error as Error).message
       });
     }
   });
