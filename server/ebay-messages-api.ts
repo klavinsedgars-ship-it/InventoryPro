@@ -180,11 +180,19 @@ export async function getMyMessages(
       return { success: true, messages: [], hasMoreMessages: false, totalCount: 0 };
     }
 
-    console.log(`Found ${messageIds.length} message IDs, fetching full messages...`);
+    console.log(`Found ${messageIds.length} message IDs, fetching full messages in batches of 10...`);
 
-    // Step 2: Get full message content using the IDs
-    const messageIdsXml = messageIds.map(id => `<MessageID>${id}</MessageID>`).join('\n    ');
-    const messagesRequest = `<?xml version="1.0" encoding="utf-8"?>
+    // Step 2: Get full message content using the IDs (batch of 10 max per eBay API limit)
+    const messages: EbayMessage[] = [];
+    const BATCH_SIZE = 10;
+    
+    for (let i = 0; i < messageIds.length; i += BATCH_SIZE) {
+      const batchIds = messageIds.slice(i, i + BATCH_SIZE);
+      const messageIdsXml = batchIds.map(id => `<MessageID>${id}</MessageID>`).join('\n    ');
+      
+      console.log(`Fetching batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(messageIds.length / BATCH_SIZE)} (${batchIds.length} messages)...`);
+      
+      const messagesRequest = `<?xml version="1.0" encoding="utf-8"?>
 <GetMyMessagesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <DetailLevel>ReturnMessages</DetailLevel>
   <MessageIDs>
@@ -192,36 +200,36 @@ export async function getMyMessages(
   </MessageIDs>
 </GetMyMessagesRequest>`;
 
-    const messagesResponse = await makeXmlRequest('GetMyMessages', messagesRequest);
-    
-    ack = parseXmlValue(messagesResponse, 'Ack');
-    if (ack !== 'Success' && ack !== 'Warning') {
-      const errorMessage = parseXmlValue(messagesResponse, 'LongMessage') || parseXmlValue(messagesResponse, 'ShortMessage') || 'Unknown error';
-      console.error('GetMyMessages (messages) failed:', errorMessage);
-      return { success: false, messages: [], hasMoreMessages: false, error: errorMessage };
-    }
+      const messagesResponse = await makeXmlRequest('GetMyMessages', messagesRequest);
+      
+      ack = parseXmlValue(messagesResponse, 'Ack');
+      if (ack !== 'Success' && ack !== 'Warning') {
+        const errorMessage = parseXmlValue(messagesResponse, 'LongMessage') || parseXmlValue(messagesResponse, 'ShortMessage') || 'Unknown error';
+        console.error('GetMyMessages (messages) failed:', errorMessage);
+        continue; // Skip this batch but continue with others
+      }
 
-    const messages: EbayMessage[] = [];
-    const messageBlocks = parseXmlArray(messagesResponse, 'Message', 'Message');
-    
-    for (const block of messageBlocks) {
-      const message: EbayMessage = {
-        messageId: parseXmlValue(block, 'MessageID') || '',
-        subject: parseXmlValue(block, 'Subject') || '(No Subject)',
-        body: parseXmlValue(block, 'Text') || parseXmlValue(block, 'Content') || '',
-        sender: parseXmlValue(block, 'Sender') || '',
-        senderEmail: parseXmlValue(block, 'SenderEmail') || undefined,
-        recipientUserId: parseXmlValue(block, 'RecipientUserID') || '',
-        itemId: parseXmlValue(block, 'ItemID') || undefined,
-        itemTitle: parseXmlValue(block, 'ItemTitle') || undefined,
-        creationDate: parseXmlValue(block, 'CreationDate') || parseXmlValue(block, 'ReceiveDate') || new Date().toISOString(),
-        messageType: parseXmlValue(block, 'MessageType') || 'Unknown',
-        isRead: parseXmlValue(block, 'Read') === 'true',
-        flagged: parseXmlValue(block, 'Flagged') === 'true',
-        responseEnabled: parseXmlValue(block, 'ResponseEnabled') === 'true',
-        externalMessageId: parseXmlValue(block, 'ExternalMessageID') || undefined,
-      };
-      messages.push(message);
+      const messageBlocks = parseXmlArray(messagesResponse, 'Message', 'Message');
+      
+      for (const block of messageBlocks) {
+        const message: EbayMessage = {
+          messageId: parseXmlValue(block, 'MessageID') || '',
+          subject: parseXmlValue(block, 'Subject') || '(No Subject)',
+          body: parseXmlValue(block, 'Text') || parseXmlValue(block, 'Content') || '',
+          sender: parseXmlValue(block, 'Sender') || '',
+          senderEmail: parseXmlValue(block, 'SenderEmail') || undefined,
+          recipientUserId: parseXmlValue(block, 'RecipientUserID') || '',
+          itemId: parseXmlValue(block, 'ItemID') || undefined,
+          itemTitle: parseXmlValue(block, 'ItemTitle') || undefined,
+          creationDate: parseXmlValue(block, 'CreationDate') || parseXmlValue(block, 'ReceiveDate') || new Date().toISOString(),
+          messageType: parseXmlValue(block, 'MessageType') || 'Unknown',
+          isRead: parseXmlValue(block, 'Read') === 'true',
+          flagged: parseXmlValue(block, 'Flagged') === 'true',
+          responseEnabled: parseXmlValue(block, 'ResponseEnabled') === 'true',
+          externalMessageId: parseXmlValue(block, 'ExternalMessageID') || undefined,
+        };
+        messages.push(message);
+      }
     }
 
     const hasMore = parseXmlValue(headersResponse, 'HasMoreMessages') === 'true';
