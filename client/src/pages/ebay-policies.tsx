@@ -187,7 +187,7 @@ export function EbayPolicies({ user }: EbayPoliciesProps) {
     <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
       <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
       <div className={`flex-1 flex flex-col overflow-hidden transition-all duration-200 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
-        <Header user={user} title="eBay Business Policies" />
+        <Header title="eBay Business Policies" />
         <main className="flex-1 overflow-y-auto p-8">
           <div className="max-w-7xl mx-auto space-y-6">
             {/* Header */}
@@ -427,6 +427,26 @@ export function EbayPolicies({ user }: EbayPoliciesProps) {
           </div>
         </main>
       </div>
+
+      {/* Create Policy Dialogs - controlled by activeTab and isCreateDialogOpen */}
+      <CreatePaymentPolicyDialog
+        onSubmit={(data) => createPaymentPolicyMutation.mutate(data)}
+        isPending={createPaymentPolicyMutation.isPending}
+        open={isCreateDialogOpen && activeTab === 'payment'}
+        onOpenChange={(open) => setIsCreateDialogOpen(open)}
+      />
+      <CreateFulfillmentPolicyDialog
+        onSubmit={(data) => createFulfillmentPolicyMutation.mutate(data)}
+        isPending={createFulfillmentPolicyMutation.isPending}
+        open={isCreateDialogOpen && activeTab === 'shipping'}
+        onOpenChange={(open) => setIsCreateDialogOpen(open)}
+      />
+      <CreateReturnPolicyDialog
+        onSubmit={(data) => createReturnPolicyMutation.mutate(data)}
+        isPending={createReturnPolicyMutation.isPending}
+        open={isCreateDialogOpen && activeTab === 'return'}
+        onOpenChange={(open) => setIsCreateDialogOpen(open)}
+      />
     </div>
   );
 }
@@ -709,12 +729,15 @@ function ReturnPolicyCard({
 // Create Payment Policy Dialog
 function CreatePaymentPolicyDialog({ 
   onSubmit, 
-  isPending 
+  isPending,
+  open,
+  onOpenChange
 }: { 
   onSubmit: (data: any) => void;
   isPending: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [immediatePay, setImmediatePay] = useState(true);
@@ -727,19 +750,13 @@ function CreatePaymentPolicyDialog({
       immediatePay,
       createOnEbay,
     });
-    setOpen(false);
+    onOpenChange(false);
     setName("");
     setDescription("");
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button data-testid="button-create-payment-policy">
-          <Plus className="h-4 w-4 mr-2" />
-          New Payment Policy
-        </Button>
-      </DialogTrigger>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Create Payment Policy</DialogTitle>
@@ -792,7 +809,7 @@ function CreatePaymentPolicyDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button onClick={handleSubmit} disabled={!name || isPending} data-testid="button-submit-payment-policy">
             {isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
             Create Policy
@@ -806,12 +823,15 @@ function CreatePaymentPolicyDialog({
 // Create Fulfillment Policy Dialog
 function CreateFulfillmentPolicyDialog({ 
   onSubmit, 
-  isPending 
+  isPending,
+  open,
+  onOpenChange
 }: { 
   onSubmit: (data: any) => void;
   isPending: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [handlingTime, setHandlingTime] = useState(3);
@@ -877,19 +897,13 @@ function CreateFulfillmentPolicyDialog({
       shippingOptions,
       pickupDropOff,
     });
-    setOpen(false);
+    onOpenChange(false);
     setName("");
     setDescription("");
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button data-testid="button-create-fulfillment-policy">
-          <Plus className="h-4 w-4 mr-2" />
-          New Shipping Policy
-        </Button>
-      </DialogTrigger>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Create Shipping Policy</DialogTitle>
@@ -1171,7 +1185,7 @@ function CreateFulfillmentPolicyDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button onClick={handleSubmit} disabled={!name || isPending} data-testid="button-submit-fulfillment-policy">
             {isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
             Create Policy
@@ -1185,12 +1199,15 @@ function CreateFulfillmentPolicyDialog({
 // Create Return Policy Dialog
 function CreateReturnPolicyDialog({ 
   onSubmit, 
-  isPending 
+  isPending,
+  open,
+  onOpenChange
 }: { 
   onSubmit: (data: any) => void;
   isPending: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [returnsAccepted, setReturnsAccepted] = useState(true);
@@ -1209,19 +1226,13 @@ function CreateReturnPolicyDialog({
       returnShippingCostPayer,
       createOnEbay,
     });
-    setOpen(false);
+    onOpenChange(false);
     setName("");
     setDescription("");
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button data-testid="button-create-return-policy">
-          <Plus className="h-4 w-4 mr-2" />
-          New Return Policy
-        </Button>
-      </DialogTrigger>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Create Return Policy</DialogTitle>
@@ -1315,7 +1326,7 @@ function CreateReturnPolicyDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button onClick={handleSubmit} disabled={!name || isPending} data-testid="button-submit-return-policy">
             {isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
             Create Policy
