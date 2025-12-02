@@ -2784,6 +2784,357 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ==========================================
+  // ORDERS MANAGEMENT ROUTES
+  // ==========================================
+
+  // Get all orders with filtering
+  app.get('/api/orders', requireAuth, async (req, res) => {
+    try {
+      const filters: {
+        marketplace?: string;
+        status?: string;
+        search?: string;
+        fromDate?: Date;
+        toDate?: Date;
+        limit?: number;
+        offset?: number;
+      } = {};
+
+      if (req.query.marketplace) filters.marketplace = req.query.marketplace as string;
+      if (req.query.status) filters.status = req.query.status as string;
+      if (req.query.search) filters.search = req.query.search as string;
+      if (req.query.fromDate) filters.fromDate = new Date(req.query.fromDate as string);
+      if (req.query.toDate) filters.toDate = new Date(req.query.toDate as string);
+      if (req.query.limit) filters.limit = parseInt(req.query.limit as string);
+      if (req.query.offset) filters.offset = parseInt(req.query.offset as string);
+
+      const orders = await storage.getOrders(filters);
+      const total = await storage.getOrdersCount({
+        marketplace: filters.marketplace,
+        status: filters.status
+      });
+
+      res.json({
+        success: true,
+        orders,
+        total,
+        limit: filters.limit,
+        offset: filters.offset
+      });
+    } catch (error) {
+      console.error('Failed to fetch orders:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch orders'
+      });
+    }
+  });
+
+  // Get order statistics/summary
+  app.get('/api/orders/stats', requireAuth, async (req, res) => {
+    try {
+      const [totalOrders, newOrders, packedOrders, shippedOrders] = await Promise.all([
+        storage.getOrdersCount(),
+        storage.getOrdersCount({ status: 'new' }),
+        storage.getOrdersCount({ status: 'packed' }),
+        storage.getOrdersCount({ status: 'shipped' })
+      ]);
+
+      const [ebayOrders, amazonOrders] = await Promise.all([
+        storage.getOrdersCount({ marketplace: 'ebay' }),
+        storage.getOrdersCount({ marketplace: 'amazon' })
+      ]);
+
+      res.json({
+        success: true,
+        stats: {
+          total: totalOrders,
+          byStatus: {
+            new: newOrders,
+            packed: packedOrders,
+            shipped: shippedOrders
+          },
+          byMarketplace: {
+            ebay: ebayOrders,
+            amazon: amazonOrders
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Failed to fetch order stats:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch order statistics'
+      });
+    }
+  });
+
+  // Get single order with full details
+  app.get('/api/orders/:id', requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const order = await storage.getOrder(id);
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          error: 'Order not found'
+        });
+      }
+
+      // Get related data
+      const [items, fees, events] = await Promise.all([
+        storage.getOrderItems(id),
+        storage.getOrderFees(id),
+        storage.getOrderEvents(id)
+      ]);
+
+      res.json({
+        success: true,
+        order: {
+          ...order,
+          items,
+          fees,
+          events
+        }
+      });
+    } catch (error) {
+      console.error('Failed to fetch order:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch order'
+      });
+    }
+  });
+
+  // Update order status
+  app.patch('/api/orders/:id/status', requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { status, notes, trackingNumber, trackingCarrier } = req.body;
+
+      const order = await storage.getOrder(id);
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          error: 'Order not found'
+        });
+      }
+
+      // Validate status transition
+      const validTransitions: Record<string, string[]> = {
+        'new': ['packed', 'cancelled'],
+        'packed': ['shipped', 'new'],
+        'shipped': ['delivered', 'returned'],
+        'delivered': ['completed', 'returned'],
+        'completed': [],
+        'returned': [],
+        'cancelled': []
+      };
+
+      if (!validTransitions[order.status]?.includes(status)) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid status transition from ${order.status} to ${status}`
+        });
+      }
+
+      // Update the order
+      const updateData: any = { status };
+      if (trackingNumber) updateData.trackingNumber = trackingNumber;
+      if (trackingCarrier) updateData.shippingCarrier = trackingCarrier;
+      if (status === 'shipped' && !updateData.shippedAt) updateData.shippedAt = new Date();
+
+      const updatedOrder = await storage.updateOrder(id, updateData);
+
+      // Log the status change event
+      await storage.createOrderEvent({
+        orderId: id,
+        eventType: 'status_change',
+        fromStatus: order.status,
+        toStatus: status,
+        note: notes || null
+      });
+
+      res.json({
+        success: true,
+        order: updatedOrder
+      });
+    } catch (error) {
+      console.error('Failed to update order status:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to update order status'
+      });
+    }
+  });
+
+  // Add tracking information
+  app.patch('/api/orders/:id/tracking', requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { trackingNumber, trackingCarrier, trackingUrl } = req.body;
+
+      const order = await storage.getOrder(id);
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          error: 'Order not found'
+        });
+      }
+
+      const updatedOrder = await storage.updateOrder(id, {
+        trackingNumber,
+        shippingCarrier: trackingCarrier,
+        trackingUrl
+      });
+
+      // Log the tracking update event
+      await storage.createOrderEvent({
+        orderId: id,
+        eventType: 'tracking_update',
+        note: `Tracking: ${trackingCarrier} - ${trackingNumber}`
+      });
+
+      res.json({
+        success: true,
+        order: updatedOrder
+      });
+    } catch (error) {
+      console.error('Failed to update tracking:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to update tracking information'
+      });
+    }
+  });
+
+  // Add note to order
+  app.post('/api/orders/:id/notes', requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { notes } = req.body;
+
+      const order = await storage.getOrder(id);
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          error: 'Order not found'
+        });
+      }
+
+      // Log the note as an event
+      const event = await storage.createOrderEvent({
+        orderId: id,
+        eventType: 'note',
+        note: notes
+      });
+
+      res.json({
+        success: true,
+        event
+      });
+    } catch (error) {
+      console.error('Failed to add order note:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to add order note'
+      });
+    }
+  });
+
+  // Get order events/history
+  app.get('/api/orders/:id/events', requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const events = await storage.getOrderEvents(id);
+
+      res.json({
+        success: true,
+        events
+      });
+    } catch (error) {
+      console.error('Failed to fetch order events:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch order events'
+      });
+    }
+  });
+
+  // Print shipping label placeholder (for Latvian Post integration later)
+  app.post('/api/orders/:id/print-label', requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const order = await storage.getOrder(id);
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          error: 'Order not found'
+        });
+      }
+
+      // Log the print label request
+      await storage.createOrderEvent({
+        orderId: id,
+        eventType: 'label_print',
+        note: 'Shipping label print requested (integration pending)'
+      });
+
+      // Placeholder response - will be replaced with actual Latvian Post API integration
+      res.json({
+        success: true,
+        message: 'Shipping label printing is not yet configured. Latvian Post API integration coming soon.',
+        order: {
+          id: order.id,
+          shippingName: order.shippingName,
+          shippingAddressLine1: order.shippingAddressLine1,
+          shippingAddressLine2: order.shippingAddressLine2,
+          shippingCity: order.shippingCity,
+          shippingStateOrProvince: order.shippingStateOrProvince,
+          shippingPostalCode: order.shippingPostalCode,
+          shippingCountry: order.shippingCountry
+        },
+        labelReady: false,
+        integrationStatus: 'pending'
+      });
+    } catch (error) {
+      console.error('Failed to print label:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to process print label request'
+      });
+    }
+  });
+
+  // Delete order (admin only)
+  app.delete('/api/orders/:id', requireAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const deleted = await storage.deleteOrder(id);
+
+      if (!deleted) {
+        return res.status(404).json({
+          success: false,
+          error: 'Order not found'
+        });
+      }
+
+      res.json({
+        success: true,
+        message: 'Order deleted successfully'
+      });
+    } catch (error) {
+      console.error('Failed to delete order:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to delete order'
+      });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

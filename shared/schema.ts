@@ -372,7 +372,6 @@ export const insertTmeProductCacheSchema = createInsertSchema(tmeProductCache).o
 
 export const insertBulkListingJobSchema = createInsertSchema(bulkListingJobs).omit({
   createdAt: true,
-  completedAt: true,
 });
 
 export const insertEbayPaymentPolicySchema = createInsertSchema(ebayPaymentPolicies).omit({
