@@ -35,32 +35,33 @@ export function Header({ title, subtitle, actions }: HeaderProps) {
   });
 
   return (
-    <header className="bg-white border-b border-gray-200 px-6 py-4">
+    <header className="bg-white border-b border-gray-200 px-4 py-2">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">{title}</h1>
+          <h1 className="text-lg font-semibold text-gray-900">{title}</h1>
           {subtitle && (
-            <p className="text-sm text-gray-600">{subtitle}</p>
+            <p className="text-xs text-gray-600">{subtitle}</p>
           )}
         </div>
         
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-2">
           {actions}
           <Button 
             onClick={() => syncMutation.mutate()}
             disabled={syncMutation.isPending}
-            className="flex items-center space-x-2"
+            size="sm"
+            className="flex items-center space-x-1 h-7 text-xs px-2"
           >
             <RefreshCw className={cn(
-              "w-4 h-4",
+              "w-3 h-3",
               syncMutation.isPending && "animate-spin"
             )} />
             <span>Sync Now</span>
           </Button>
           
-          <Button variant="ghost" size="icon" className="relative">
-            <Bell className="w-5 h-5" />
-            <span className="absolute top-0 right-0 block h-2 w-2 rounded-full bg-red-400 ring-2 ring-white"></span>
+          <Button variant="ghost" size="icon" className="relative h-7 w-7">
+            <Bell className="w-4 h-4" />
+            <span className="absolute top-0 right-0 block h-1.5 w-1.5 rounded-full bg-red-400 ring-1 ring-white"></span>
           </Button>
         </div>
       </div>

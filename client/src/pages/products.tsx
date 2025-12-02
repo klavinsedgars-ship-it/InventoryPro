@@ -503,16 +503,17 @@ export function Products({ user }: ProductsProps) {
           title="Products" 
           subtitle="Manage your inventory and product listings (sorted by latest synced)"
           actions={
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button 
                     variant="destructive" 
                     size="sm"
+                    className="h-7 text-xs px-2"
                     disabled={products.length === 0 || deleteAllMutation.isPending}
                     data-testid="button-delete-all"
                   >
-                    <Trash2 className="w-4 h-4 mr-1" />
+                    <Trash2 className="w-3 h-3 mr-1" />
                     {deleteAllMutation.isPending ? "..." : "Delete All"}
                   </Button>
                 </AlertDialogTrigger>
@@ -536,8 +537,8 @@ export function Products({ user }: ProductsProps) {
                   </AlertDialogFooter>
                 </AlertDialogContent>
               </AlertDialog>
-              <Button size="sm" onClick={handleAddProduct} data-testid="button-add-product">
-                <Plus className="w-4 h-4 mr-1" />
+              <Button size="sm" className="h-7 text-xs px-2" onClick={handleAddProduct} data-testid="button-add-product">
+                <Plus className="w-3 h-3 mr-1" />
                 Add
               </Button>
             </div>
