@@ -15,8 +15,6 @@ const BUNDLE_WORDS = [
   'bulk', 'bulks',
   'multiple', 'multiples',
   'lot', 'lots',
-  'set', 'sets',
-  'kit', 'kits',
   'pack', 'packs', 'packed',
   'roll', 'rolls',
   'batch', 'batches',
