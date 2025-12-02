@@ -1,10 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -16,25 +15,19 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { 
   Package, Search, RefreshCw, Loader2, ExternalLink, 
   Truck, CheckCircle, Clock, XCircle, RotateCcw, 
-  Printer, MapPin, User, Calendar, DollarSign,
-  ShoppingBag, Eye, ChevronRight, MoreHorizontal,
-  StickyNote, History
+  Printer, MapPin, Copy, ChevronDown, ChevronRight,
+  ShoppingBag, Box, ClipboardCheck, History, DollarSign,
+  User, StickyNote, Check
 } from "lucide-react";
 import { SiEbay, SiAmazon } from "react-icons/si";
 import { formatCurrency } from "@/lib/utils";
@@ -53,76 +46,46 @@ interface OrdersProps {
   user: any;
 }
 
-const ORDER_STATUSES = [
-  { value: "new", label: "New", color: "bg-blue-100 text-blue-800", icon: Clock },
-  { value: "packed", label: "Packed", color: "bg-yellow-100 text-yellow-800", icon: Package },
-  { value: "shipped", label: "Shipped", color: "bg-purple-100 text-purple-800", icon: Truck },
-  { value: "delivered", label: "Delivered", color: "bg-green-100 text-green-800", icon: CheckCircle },
-  { value: "completed", label: "Completed", color: "bg-emerald-100 text-emerald-800", icon: CheckCircle },
-  { value: "returned", label: "Returned", color: "bg-orange-100 text-orange-800", icon: RotateCcw },
-  { value: "cancelled", label: "Cancelled", color: "bg-red-100 text-red-800", icon: XCircle },
-];
+const STATUS_CONFIG: Record<string, { label: string; color: string; bgColor: string }> = {
+  new: { label: "New", color: "text-blue-700", bgColor: "bg-blue-100" },
+  packed: { label: "Packed", color: "text-yellow-700", bgColor: "bg-yellow-100" },
+  shipped: { label: "Shipped", color: "text-purple-700", bgColor: "bg-purple-100" },
+  delivered: { label: "Delivered", color: "text-green-700", bgColor: "bg-green-100" },
+  completed: { label: "Completed", color: "text-emerald-700", bgColor: "bg-emerald-100" },
+  returned: { label: "Returned", color: "text-orange-700", bgColor: "bg-orange-100" },
+  cancelled: { label: "Cancelled", color: "text-red-700", bgColor: "bg-red-100" },
+};
 
-function getStatusInfo(status: string) {
-  return ORDER_STATUSES.find(s => s.value === status) || ORDER_STATUSES[0];
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const info = getStatusInfo(status);
-  const Icon = info.icon;
+function StatusBadge({ status, size = "default" }: { status: string; size?: "default" | "lg" }) {
+  const config = STATUS_CONFIG[status] || STATUS_CONFIG.new;
+  const sizeClass = size === "lg" ? "px-3 py-1 text-sm" : "px-2 py-0.5 text-xs";
   return (
-    <Badge className={`${info.color} flex items-center gap-1`} data-testid={`badge-status-${status}`}>
-      <Icon className="w-3 h-3" />
-      {info.label}
-    </Badge>
+    <span className={`${config.bgColor} ${config.color} ${sizeClass} font-medium rounded-full`}>
+      {config.label}
+    </span>
   );
-}
-
-function MarketplaceBadge({ marketplace }: { marketplace: string }) {
-  if (marketplace === 'ebay') {
-    return (
-      <Badge variant="outline" className="flex items-center gap-1" data-testid="badge-marketplace-ebay">
-        <SiEbay className="w-4 h-4 text-[#e53238]" />
-        eBay
-      </Badge>
-    );
-  }
-  if (marketplace === 'amazon') {
-    return (
-      <Badge variant="outline" className="flex items-center gap-1" data-testid="badge-marketplace-amazon">
-        <SiAmazon className="w-4 h-4 text-[#ff9900]" />
-        Amazon
-      </Badge>
-    );
-  }
-  return <Badge variant="outline">{marketplace}</Badge>;
 }
 
 export function Orders({ user }: OrdersProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [activeTab, setActiveTab] = useState<string>("to-pack");
+  const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [marketplaceFilter, setMarketplaceFilter] = useState<string>("all");
-  const [selectedOrder, setSelectedOrder] = useState<OrderWithDetails | null>(null);
-  const [orderDetailOpen, setOrderDetailOpen] = useState(false);
-  const [newStatus, setNewStatus] = useState<string>("");
-  const [statusNote, setStatusNote] = useState("");
   const [trackingNumber, setTrackingNumber] = useState("");
   const [trackingCarrier, setTrackingCarrier] = useState("");
-  const [printLabelOrder, setPrintLabelOrder] = useState<any>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [showFinancials, setShowFinancials] = useState(false);
   const [printLabelOpen, setPrintLabelOpen] = useState(false);
+
+  const statusFilter = activeTab === "to-pack" ? "new" : activeTab === "to-ship" ? "packed" : undefined;
 
   const { data: ordersData, isLoading, refetch } = useQuery<{
     success: boolean;
-    orders: Order[];
+    orders: OrderWithDetails[];
     total: number;
   }>({
-    queryKey: ["/api/orders", { 
-      status: statusFilter !== "all" ? statusFilter : undefined,
-      marketplace: marketplaceFilter !== "all" ? marketplaceFilter : undefined,
-      search: searchTerm || undefined
-    }],
+    queryKey: ["/api/orders", { status: statusFilter }],
   });
 
   const { data: statsData } = useQuery<{
@@ -139,7 +102,6 @@ export function Orders({ user }: OrdersProps) {
   const { data: syncStatus } = useQuery<{
     success: boolean;
     ebay: { configured: boolean; message: string };
-    amazon: { configured: boolean; message: string };
   }>({
     queryKey: ["/api/orders/sync/status"],
   });
@@ -164,30 +126,23 @@ export function Orders({ user }: OrdersProps) {
   });
 
   const updateStatusMutation = useMutation({
-    mutationFn: ({ id, status, notes, trackingNumber, trackingCarrier }: {
+    mutationFn: ({ id, status, trackingNumber, trackingCarrier }: {
       id: number;
       status: string;
-      notes?: string;
       trackingNumber?: string;
       trackingCarrier?: string;
     }) => apiRequest("PATCH", `/api/orders/${id}/status`, { 
       status, 
-      notes,
       trackingNumber,
       trackingCarrier
     }),
     onSuccess: () => {
       toast({
         title: "Status Updated",
-        description: "Order status has been updated successfully.",
+        description: "Order status has been updated.",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/orders/stats"] });
-      if (selectedOrder) {
-        fetchOrderDetails(selectedOrder.id);
-      }
-      setNewStatus("");
-      setStatusNote("");
       setTrackingNumber("");
       setTrackingCarrier("");
     },
@@ -200,673 +155,482 @@ export function Orders({ user }: OrdersProps) {
     },
   });
 
-  const printLabelMutation = useMutation({
-    mutationFn: (id: number) => apiRequest("POST", `/api/orders/${id}/print-label`),
-    onSuccess: (data: any) => {
-      toast({
-        title: "Print Label",
-        description: data.message || "Label print requested",
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Print Failed",
-        description: error.message || "Failed to print label",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const fetchOrderDetails = async (id: number) => {
-    try {
-      const response = await fetch(`/api/orders/${id}`, {
-        credentials: 'include'
-      });
-      const data = await response.json();
-      if (data.success) {
-        setSelectedOrder(data.order);
-      }
-    } catch (error) {
-      console.error('Failed to fetch order details:', error);
-    }
-  };
-
-  const handleViewOrder = async (order: Order) => {
-    await fetchOrderDetails(order.id);
-    setOrderDetailOpen(true);
-  };
-
-  const handleStatusChange = (orderId: number) => {
-    if (!newStatus) return;
-    updateStatusMutation.mutate({
-      id: orderId,
-      status: newStatus,
-      notes: statusNote || undefined,
-      trackingNumber: trackingNumber || undefined,
-      trackingCarrier: trackingCarrier || undefined
-    });
-  };
-
   const orders = ordersData?.orders || [];
   const stats = statsData?.stats;
+  const selectedOrder = orders.find(o => o.id === selectedOrderId) || null;
 
+  // Reset tracking inputs when selecting a different order
+  useEffect(() => {
+    if (selectedOrder) {
+      setTrackingNumber(selectedOrder.trackingNumber || "");
+      setTrackingCarrier(selectedOrder.trackingCarrier || "");
+    } else {
+      setTrackingNumber("");
+      setTrackingCarrier("");
+    }
+  }, [selectedOrderId, selectedOrder?.trackingNumber, selectedOrder?.trackingCarrier]);
+
+  // Filter orders by search term
   const filteredOrders = orders.filter(order => {
     if (!searchTerm) return true;
     const search = searchTerm.toLowerCase();
     return (
       order.marketplaceOrderId.toLowerCase().includes(search) ||
       order.buyerUsername.toLowerCase().includes(search) ||
-      order.shippingName.toLowerCase().includes(search)
+      order.shippingName.toLowerCase().includes(search) ||
+      order.shippingCity?.toLowerCase().includes(search) ||
+      order.shippingPostalCode?.toLowerCase().includes(search)
     );
   });
 
-  const getNextValidStatuses = (currentStatus: string): string[] => {
-    const transitions: Record<string, string[]> = {
-      'new': ['packed', 'cancelled'],
-      'packed': ['shipped', 'new'],
-      'shipped': ['delivered', 'returned'],
-      'delivered': ['completed', 'returned'],
-      'completed': [],
-      'returned': [],
-      'cancelled': []
-    };
-    return transitions[currentStatus] || [];
+  const handleMarkPacked = (orderId: number) => {
+    updateStatusMutation.mutate({ id: orderId, status: 'packed' });
+  };
+
+  const handleMarkShipped = (orderId: number) => {
+    if (!trackingNumber.trim()) {
+      toast({
+        title: "Tracking Required",
+        description: "Please enter a tracking number before marking as shipped.",
+        variant: "destructive",
+      });
+      return;
+    }
+    updateStatusMutation.mutate({ 
+      id: orderId, 
+      status: 'shipped',
+      trackingNumber: trackingNumber.trim(),
+      trackingCarrier: trackingCarrier.trim() || undefined
+    });
+  };
+
+  const copyAddress = () => {
+    if (!selectedOrder) return;
+    const address = [
+      selectedOrder.shippingName,
+      selectedOrder.shippingAddressLine1,
+      selectedOrder.shippingAddressLine2,
+      `${selectedOrder.shippingCity}, ${selectedOrder.shippingPostalCode}`,
+      selectedOrder.shippingCountry
+    ].filter(Boolean).join('\n');
+    
+    navigator.clipboard.writeText(address);
+    toast({ title: "Copied", description: "Address copied to clipboard" });
   };
 
   return (
-    <div className="min-h-screen bg-gray-50" data-testid="page-orders">
+    <div className="min-h-screen bg-gray-100" data-testid="page-orders">
       <Sidebar user={user} />
       
       <div className="ml-64">
-        <Header title="Orders" subtitle="Manage your marketplace orders" />
+        <Header title="Orders" subtitle="Fulfillment Workspace" />
         
-        <main className="p-6">
-          <div className="mb-6 flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900" data-testid="heading-orders">Orders</h1>
-              <p className="text-gray-500">Manage your marketplace orders</p>
-            </div>
-            
-            <div className="flex items-center gap-3">
-              <Button
-                variant="outline"
-                onClick={() => syncEbayMutation.mutate(30)}
-                disabled={syncEbayMutation.isPending || !syncStatus?.ebay?.configured}
-                data-testid="btn-sync-ebay"
-              >
-                {syncEbayMutation.isPending ? (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                ) : (
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                )}
-                Sync eBay Orders
-              </Button>
-            </div>
+        <main className="p-4">
+          <div className="flex items-center justify-between mb-4">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-auto" data-testid="tabs-orders">
+              <TabsList>
+                <TabsTrigger value="to-pack" className="gap-2" data-testid="tab-to-pack">
+                  <Box className="w-4 h-4" />
+                  To Pack
+                  {stats?.byStatus.new ? (
+                    <Badge variant="secondary" className="ml-1 bg-blue-100 text-blue-700" data-testid="badge-to-pack-count">
+                      {stats.byStatus.new}
+                    </Badge>
+                  ) : null}
+                </TabsTrigger>
+                <TabsTrigger value="to-ship" className="gap-2" data-testid="tab-to-ship">
+                  <Truck className="w-4 h-4" />
+                  To Ship
+                  {stats?.byStatus.packed ? (
+                    <Badge variant="secondary" className="ml-1 bg-yellow-100 text-yellow-700" data-testid="badge-to-ship-count">
+                      {stats.byStatus.packed}
+                    </Badge>
+                  ) : null}
+                </TabsTrigger>
+                <TabsTrigger value="all" className="gap-2" data-testid="tab-all">
+                  <ClipboardCheck className="w-4 h-4" />
+                  All Orders
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => syncEbayMutation.mutate(30)}
+              disabled={syncEbayMutation.isPending || !syncStatus?.ebay?.configured}
+              data-testid="btn-sync-ebay"
+            >
+              {syncEbayMutation.isPending ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <RefreshCw className="w-4 h-4 mr-2" />
+              )}
+              Sync eBay
+            </Button>
           </div>
 
-          {stats && (
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-              <Card>
-                <CardContent className="pt-4 pb-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-500">Total Orders</p>
-                      <p className="text-2xl font-bold" data-testid="stat-total">{stats.total}</p>
-                    </div>
-                    <ShoppingBag className="w-8 h-8 text-gray-400" />
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="pt-4 pb-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-500">New</p>
-                      <p className="text-2xl font-bold text-blue-600" data-testid="stat-new">{stats.byStatus.new}</p>
-                    </div>
-                    <Clock className="w-8 h-8 text-blue-400" />
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="pt-4 pb-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-500">Packed</p>
-                      <p className="text-2xl font-bold text-yellow-600" data-testid="stat-packed">{stats.byStatus.packed}</p>
-                    </div>
-                    <Package className="w-8 h-8 text-yellow-400" />
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="pt-4 pb-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-500">Shipped</p>
-                      <p className="text-2xl font-bold text-purple-600" data-testid="stat-shipped">{stats.byStatus.shipped}</p>
-                    </div>
-                    <Truck className="w-8 h-8 text-purple-400" />
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="pt-4 pb-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-500">eBay / Amazon</p>
-                      <p className="text-2xl font-bold" data-testid="stat-marketplaces">
-                        {stats.byMarketplace.ebay} / {stats.byMarketplace.amazon}
-                      </p>
-                    </div>
-                    <SiEbay className="w-8 h-8 text-[#e53238]" />
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          )}
-
-          <Card className="mb-6">
-            <CardContent className="pt-4">
-              <div className="flex flex-wrap items-center gap-4">
-                <div className="relative flex-1 min-w-[200px]">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+          <div className="flex gap-4 h-[calc(100vh-180px)]">
+            {/* Left Panel - Order Queue */}
+            <div className="w-80 flex-shrink-0 bg-white rounded-lg shadow-sm border overflow-hidden flex flex-col">
+              <div className="p-3 border-b bg-gray-50 space-y-2">
+                <p className="text-sm font-medium text-gray-700">
+                  {activeTab === "to-pack" ? "Orders to Pack" : activeTab === "to-ship" ? "Orders to Ship" : "All Orders"}
+                  <span className="text-gray-400 ml-2">({filteredOrders.length})</span>
+                </p>
+                <div className="relative">
+                  <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                   <Input
-                    placeholder="Search orders by ID, buyer, or address..."
+                    placeholder="Search orders..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
+                    className="pl-8 h-8 text-sm"
                     data-testid="input-search-orders"
                   />
                 </div>
-                
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-40" data-testid="select-status-filter">
-                    <SelectValue placeholder="Status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Statuses</SelectItem>
-                    {ORDER_STATUSES.map(status => (
-                      <SelectItem key={status.value} value={status.value}>
-                        {status.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <Select value={marketplaceFilter} onValueChange={setMarketplaceFilter}>
-                  <SelectTrigger className="w-40" data-testid="select-marketplace-filter">
-                    <SelectValue placeholder="Marketplace" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Marketplaces</SelectItem>
-                    <SelectItem value="ebay">eBay</SelectItem>
-                    <SelectItem value="amazon">Amazon</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <Button variant="outline" onClick={() => refetch()} data-testid="btn-refresh">
-                  <RefreshCw className="w-4 h-4" />
-                </Button>
               </div>
-            </CardContent>
-          </Card>
-
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-            {isLoading ? (
-              <div className="p-8 text-center">
-                <Loader2 className="w-8 h-8 animate-spin mx-auto text-gray-400" />
-                <p className="text-gray-500 mt-2">Loading orders...</p>
-              </div>
-            ) : filteredOrders.length === 0 ? (
-              <div className="p-8 text-center">
-                <ShoppingBag className="w-12 h-12 mx-auto text-gray-300 mb-4" />
-                <p className="text-gray-500">
-                  {searchTerm || statusFilter !== "all" || marketplaceFilter !== "all"
-                    ? "No orders found matching your filters."
-                    : "No orders yet. Sync your eBay orders to get started."}
-                </p>
-              </div>
-            ) : (
-              <div className="divide-y divide-gray-200">
-                {filteredOrders.map((order: any) => {
-                  const totalQty = order.items?.reduce((sum: number, item: any) => sum + (item.quantity || 1), 0) || 0;
-                  const canMarkPacked = order.status === 'new';
-                  const canMarkShipped = order.status === 'packed';
-                  
-                  return (
-                    <div 
-                      key={order.id}
-                      className="p-3 hover:bg-gray-50 cursor-pointer"
-                      onClick={() => handleViewOrder(order)}
-                      data-testid={`row-order-${order.id}`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-2">
+              
+              <div className="flex-1 overflow-y-auto">
+                {isLoading ? (
+                  <div className="p-8 text-center">
+                    <Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" />
+                  </div>
+                ) : filteredOrders.length === 0 ? (
+                  <div className="p-8 text-center">
+                    <CheckCircle className="w-10 h-10 mx-auto text-green-400 mb-2" />
+                    <p className="text-sm text-gray-500">
+                      {searchTerm ? "No orders match your search" : activeTab === "to-pack" ? "All packed!" : activeTab === "to-ship" ? "All shipped!" : "No orders"}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="divide-y">
+                    {filteredOrders.map((order: any) => {
+                      const itemCount = order.items?.reduce((sum: number, item: any) => sum + (item.quantity || 1), 0) || 0;
+                      const isSelected = order.id === selectedOrderId;
+                      
+                      return (
+                        <div
+                          key={order.id}
+                          onClick={() => setSelectedOrderId(order.id)}
+                          className={`p-3 cursor-pointer transition-colors ${
+                            isSelected ? 'bg-blue-50 border-l-4 border-l-blue-500' : 'hover:bg-gray-50'
+                          }`}
+                          data-testid={`queue-order-${order.id}`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
                             <StatusBadge status={order.status} />
-                            <span className="text-xs text-gray-500">
-                              {order.orderDate ? format(new Date(order.orderDate), 'MMM d, HH:mm') : '-'}
+                            <span className="text-xs text-gray-400">
+                              {order.orderDate ? format(new Date(order.orderDate), 'MMM d') : '-'}
                             </span>
-                            <span className="text-xs text-gray-400">•</span>
-                            <span className="text-xs font-mono text-gray-600">
-                              #{order.marketplaceOrderId.slice(-8)}
+                          </div>
+                          
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-mono text-sm font-medium">
+                              #{order.marketplaceOrderId.slice(-6)}
                             </span>
                             {order.marketplace === 'ebay' && <SiEbay className="w-4 h-4 text-[#e53238]" />}
                             {order.marketplace === 'amazon' && <SiAmazon className="w-4 h-4 text-[#ff9900]" />}
-                            <span className="text-xs text-gray-400">•</span>
-                            <span className="text-xs text-gray-500">{order.buyerUsername}</span>
-                            {order.buyerNote && (
-                              <span className="text-yellow-600" title="Has buyer note">
-                                <StickyNote className="w-3 h-3" />
-                              </span>
-                            )}
                           </div>
                           
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            <div>
-                              <p className="text-xs text-gray-500 mb-1">Items ({totalQty} pcs)</p>
-                              <div className="space-y-0.5">
-                                {order.items?.slice(0, 3).map((item: any, idx: number) => (
-                                  <div key={idx} className="flex items-center gap-2 text-sm">
-                                    <span className="text-gray-900 truncate max-w-[250px]" title={item.title}>
-                                      {item.quantity}x {item.sku || 'N/A'}
-                                    </span>
+                          <div className="flex items-center justify-between text-xs text-gray-500">
+                            <span>{itemCount} item{itemCount !== 1 ? 's' : ''}</span>
+                            <span className="font-medium text-gray-700">
+                              {formatCurrency(parseFloat(order.totalPrice))}
+                            </span>
+                          </div>
+                          
+                          <p className="text-xs text-gray-500 truncate mt-1">
+                            → {order.shippingCity}, {order.shippingCountry}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Right Panel - Order Detail */}
+            <div className="flex-1 bg-white rounded-lg shadow-sm border overflow-hidden flex flex-col">
+              {!selectedOrder ? (
+                <div className="flex-1 flex items-center justify-center text-gray-400">
+                  <div className="text-center">
+                    <Package className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                    <p>Select an order to view details</p>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* Header */}
+                  <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <StatusBadge status={selectedOrder.status} size="lg" />
+                      <div>
+                        <p className="font-mono font-bold">
+                          #{selectedOrder.marketplaceOrderId.slice(-8)}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {selectedOrder.orderDate ? format(new Date(selectedOrder.orderDate), 'PPp') : '-'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xl font-bold">
+                        {formatCurrency(parseFloat(selectedOrder.totalPrice))}
+                      </p>
+                      <p className="text-xs text-gray-500">{selectedOrder.currency}</p>
+                    </div>
+                  </div>
+
+                  {/* Content */}
+                  <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                    {/* Items to Pack */}
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm flex items-center gap-2">
+                          <Box className="w-4 h-4" />
+                          Items to Pack
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        {selectedOrder.items?.length ? (
+                          <div className="space-y-2">
+                            {selectedOrder.items.map((item: any) => (
+                              <div key={item.id} className="flex items-center gap-3 p-2 bg-gray-50 rounded">
+                                <div className="w-8 h-8 bg-gray-200 rounded flex items-center justify-center text-xs font-bold">
+                                  {item.quantity}x
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-medium text-sm truncate">{item.title || item.sku}</p>
+                                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                                    <span className="font-mono">{item.sku}</span>
                                     {item.tmeProductId && (
                                       <a
                                         href={`https://www.tme.eu/en/details/${item.tmeProductId}/`}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="text-blue-600 hover:text-blue-800"
-                                        onClick={e => e.stopPropagation()}
-                                        title="View on TME"
+                                        className="text-blue-600 hover:underline flex items-center gap-1"
                                       >
-                                        <ExternalLink className="w-3 h-3" />
+                                        TME <ExternalLink className="w-3 h-3" />
                                       </a>
                                     )}
                                   </div>
-                                ))}
-                                {order.items?.length > 3 && (
-                                  <p className="text-xs text-gray-400">+{order.items.length - 3} more</p>
-                                )}
-                                {!order.items?.length && (
-                                  <p className="text-xs text-gray-400">No items</p>
-                                )}
+                                </div>
+                                <p className="text-sm font-medium">
+                                  {formatCurrency(parseFloat(item.totalPrice))}
+                                </p>
                               </div>
-                            </div>
-                            
-                            <div>
-                              <p className="text-xs text-gray-500 mb-1">Ship to</p>
-                              <p className="text-sm font-medium text-gray-900">{order.shippingName}</p>
-                              <p className="text-xs text-gray-600">{order.shippingAddressLine1}</p>
-                              <p className="text-xs text-gray-600">
-                                {order.shippingCity}, {order.shippingPostalCode}, {order.shippingCountry}
-                              </p>
-                            </div>
+                            ))}
                           </div>
-                        </div>
-                        
-                        <div className="text-right flex-shrink-0">
-                          <p className="text-lg font-bold text-gray-900">
-                            {formatCurrency(parseFloat(order.totalPrice))}
-                          </p>
-                          <p className="text-xs text-gray-500">{order.currency}</p>
-                          {order.marketplaceFee && (
-                            <p className="text-xs text-red-500">
-                              -{formatCurrency(parseFloat(order.marketplaceFee))} fees
-                            </p>
+                        ) : (
+                          <p className="text-sm text-gray-500">No items</p>
+                        )}
+                      </CardContent>
+                    </Card>
+
+                    {/* Shipping Address */}
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm flex items-center justify-between">
+                          <span className="flex items-center gap-2">
+                            <MapPin className="w-4 h-4" />
+                            Ship To
+                          </span>
+                          <div className="flex gap-1">
+                            <Button variant="ghost" size="sm" onClick={copyAddress} data-testid="btn-copy-address">
+                              <Copy className="w-4 h-4" />
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => setPrintLabelOpen(true)} data-testid="btn-print-label">
+                              <Printer className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="p-3 bg-gray-50 rounded border-2 border-dashed border-gray-300 font-mono text-sm">
+                          <p className="font-bold">{selectedOrder.shippingName}</p>
+                          <p>{selectedOrder.shippingAddressLine1}</p>
+                          {selectedOrder.shippingAddressLine2 && (
+                            <p>{selectedOrder.shippingAddressLine2}</p>
                           )}
-                          <div className="flex flex-col items-end gap-1 mt-2" onClick={e => e.stopPropagation()}>
-                            <div className="flex items-center gap-1">
-                              {canMarkPacked && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-7 text-xs bg-yellow-50 border-yellow-300 hover:bg-yellow-100"
-                                  onClick={() => {
-                                    updateStatusMutation.mutate({
-                                      id: order.id,
-                                      status: 'packed'
-                                    });
-                                  }}
-                                  disabled={updateStatusMutation.isPending}
-                                  data-testid={`btn-mark-packed-${order.id}`}
-                                >
-                                  <Package className="w-3 h-3 mr-1" />
-                                  Packed
-                                </Button>
-                              )}
-                              {canMarkShipped && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-7 text-xs bg-purple-50 border-purple-300 hover:bg-purple-100"
-                                  onClick={() => {
-                                    updateStatusMutation.mutate({
-                                      id: order.id,
-                                      status: 'shipped'
-                                    });
-                                  }}
-                                  disabled={updateStatusMutation.isPending}
-                                  data-testid={`btn-mark-shipped-${order.id}`}
-                                >
-                                  <Truck className="w-3 h-3 mr-1" />
-                                  Shipped
-                                </Button>
-                              )}
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7"
-                                onClick={() => {
-                                  setPrintLabelOrder(order);
-                                  setPrintLabelOpen(true);
-                                }}
-                                data-testid={`btn-print-label-${order.id}`}
-                              >
-                                <Printer className="w-4 h-4" />
-                              </Button>
+                          <p>{selectedOrder.shippingCity}, {selectedOrder.shippingPostalCode}</p>
+                          <p className="font-bold">{selectedOrder.shippingCountry}</p>
+                          {selectedOrder.shippingPhone && (
+                            <p className="text-gray-500 mt-1">Tel: {selectedOrder.shippingPhone}</p>
+                          )}
+                        </div>
+                        {selectedOrder.shippingService && (
+                          <p className="text-xs text-gray-500 mt-2">
+                            Service: {selectedOrder.shippingService}
+                          </p>
+                        )}
+                      </CardContent>
+                    </Card>
+
+                    {/* Buyer Note */}
+                    {selectedOrder.buyerNote && (
+                      <Card className="border-yellow-300 bg-yellow-50">
+                        <CardContent className="pt-4">
+                          <div className="flex items-start gap-2">
+                            <StickyNote className="w-4 h-4 text-yellow-600 flex-shrink-0 mt-0.5" />
+                            <div>
+                              <p className="text-xs font-medium text-yellow-700 mb-1">Buyer Note</p>
+                              <p className="text-sm">{selectedOrder.buyerNote}</p>
                             </div>
                           </div>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Collapsible: Financials */}
+                    <Collapsible open={showFinancials} onOpenChange={setShowFinancials}>
+                      <CollapsibleTrigger className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900" data-testid="trigger-financials">
+                        {showFinancials ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                        <DollarSign className="w-4 h-4" />
+                        Financial Details
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="mt-2">
+                        <Card>
+                          <CardContent className="pt-4 text-sm space-y-1">
+                            <div className="flex justify-between">
+                              <span>Subtotal</span>
+                              <span>{formatCurrency(parseFloat(selectedOrder.subtotal))}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Shipping</span>
+                              <span>{formatCurrency(parseFloat(selectedOrder.shippingCost))}</span>
+                            </div>
+                            {selectedOrder.marketplaceFee && (
+                              <div className="flex justify-between text-red-600">
+                                <span>Marketplace Fee</span>
+                                <span>-{formatCurrency(parseFloat(selectedOrder.marketplaceFee))}</span>
+                              </div>
+                            )}
+                            <Separator />
+                            <div className="flex justify-between font-bold">
+                              <span>Total</span>
+                              <span>{formatCurrency(parseFloat(selectedOrder.totalPrice))}</span>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </CollapsibleContent>
+                    </Collapsible>
+
+                    {/* Collapsible: History */}
+                    <Collapsible open={showHistory} onOpenChange={setShowHistory}>
+                      <CollapsibleTrigger className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900" data-testid="trigger-history">
+                        {showHistory ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                        <History className="w-4 h-4" />
+                        Order History
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="mt-2">
+                        <Card>
+                          <CardContent className="pt-4">
+                            {selectedOrder.events?.length ? (
+                              <div className="space-y-2">
+                                {selectedOrder.events.map((event: any) => (
+                                  <div key={event.id} className="flex items-start gap-2 text-sm">
+                                    <div className="w-2 h-2 rounded-full bg-gray-400 mt-1.5" />
+                                    <div className="flex-1">
+                                      <p className="capitalize">{event.eventType.replace(/_/g, ' ')}</p>
+                                      {event.fromStatus && event.toStatus && (
+                                        <p className="text-xs text-gray-500">
+                                          {event.fromStatus} → {event.toStatus}
+                                        </p>
+                                      )}
+                                    </div>
+                                    <span className="text-xs text-gray-400">
+                                      {event.createdAt ? format(new Date(event.createdAt), 'MMM d, HH:mm') : ''}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-sm text-gray-500">No history</p>
+                            )}
+                          </CardContent>
+                        </Card>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  </div>
+
+                  {/* Action Footer */}
+                  <div className="p-4 border-t bg-gray-50">
+                    {selectedOrder.status === 'new' && (
+                      <Button
+                        className="w-full h-12 text-lg bg-yellow-500 hover:bg-yellow-600"
+                        onClick={() => handleMarkPacked(selectedOrder.id)}
+                        disabled={updateStatusMutation.isPending}
+                        data-testid="btn-mark-packed"
+                      >
+                        {updateStatusMutation.isPending ? (
+                          <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                        ) : (
+                          <Package className="w-5 h-5 mr-2" />
+                        )}
+                        Mark as Packed
+                      </Button>
+                    )}
+
+                    {selectedOrder.status === 'packed' && (
+                      <div className="space-y-3">
+                        <div className="flex gap-2">
+                          <Input
+                            placeholder="Tracking number *"
+                            value={trackingNumber}
+                            onChange={(e) => setTrackingNumber(e.target.value)}
+                            className="flex-1"
+                            data-testid="input-tracking-number"
+                          />
+                          <Input
+                            placeholder="Carrier (optional)"
+                            value={trackingCarrier}
+                            onChange={(e) => setTrackingCarrier(e.target.value)}
+                            className="w-40"
+                            data-testid="input-tracking-carrier"
+                          />
                         </div>
+                        <Button
+                          className="w-full h-12 text-lg bg-purple-600 hover:bg-purple-700"
+                          onClick={() => handleMarkShipped(selectedOrder.id)}
+                          disabled={updateStatusMutation.isPending}
+                          data-testid="btn-mark-shipped"
+                        >
+                          {updateStatusMutation.isPending ? (
+                            <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                          ) : (
+                            <Truck className="w-5 h-5 mr-2" />
+                          )}
+                          Mark as Shipped
+                        </Button>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                    )}
+
+                    {selectedOrder.status === 'shipped' && (
+                      <div className="text-center text-gray-500" data-testid="status-in-transit">
+                        <Truck className="w-8 h-8 mx-auto mb-2 text-purple-500" />
+                        <p className="font-medium">In Transit</p>
+                        {selectedOrder.trackingNumber && (
+                          <p className="text-sm" data-testid="text-tracking-number">Tracking: {selectedOrder.trackingNumber}</p>
+                        )}
+                      </div>
+                    )}
+
+                    {(selectedOrder.status === 'delivered' || selectedOrder.status === 'completed') && (
+                      <div className="text-center text-gray-500" data-testid="status-completed">
+                        <CheckCircle className="w-8 h-8 mx-auto mb-2 text-green-500" />
+                        <p className="font-medium">Completed</p>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </main>
       </div>
 
-      <Dialog open={orderDetailOpen} onOpenChange={setOrderDetailOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          {selectedOrder && (
-            <>
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  <MarketplaceBadge marketplace={selectedOrder.marketplace} />
-                  Order #{selectedOrder.marketplaceOrderId.slice(-8)}
-                </DialogTitle>
-                <DialogDescription>
-                  Full order ID: {selectedOrder.marketplaceOrderId}
-                </DialogDescription>
-              </DialogHeader>
-
-              <Tabs defaultValue="details" className="mt-4">
-                <TabsList>
-                  <TabsTrigger value="details">Details</TabsTrigger>
-                  <TabsTrigger value="items">Items</TabsTrigger>
-                  <TabsTrigger value="shipping">Shipping</TabsTrigger>
-                  <TabsTrigger value="history">History</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="details" className="space-y-4 mt-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label className="text-sm text-gray-500">Status</Label>
-                      <div className="mt-1">
-                        <StatusBadge status={selectedOrder.status} />
-                      </div>
-                    </div>
-                    <div>
-                      <Label className="text-sm text-gray-500">Order Date</Label>
-                      <p className="font-medium">
-                        {selectedOrder.orderDate 
-                          ? format(new Date(selectedOrder.orderDate), 'PPpp')
-                          : '-'}
-                      </p>
-                    </div>
-                    <div>
-                      <Label className="text-sm text-gray-500">Buyer</Label>
-                      <p className="font-medium flex items-center gap-1">
-                        <User className="w-4 h-4" />
-                        {selectedOrder.buyerUsername}
-                      </p>
-                    </div>
-                    <div>
-                      <Label className="text-sm text-gray-500">Total</Label>
-                      <p className="font-medium text-lg flex items-center gap-1">
-                        <DollarSign className="w-4 h-4" />
-                        {formatCurrency(parseFloat(selectedOrder.totalPrice))} {selectedOrder.currency}
-                      </p>
-                    </div>
-                  </div>
-
-                  <Separator />
-
-                  <div>
-                    <Label className="text-sm text-gray-500 mb-2 block">Pricing Breakdown</Label>
-                    <div className="bg-gray-50 rounded-lg p-3 space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span>Subtotal</span>
-                        <span>{formatCurrency(parseFloat(selectedOrder.subtotal))}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span>Shipping</span>
-                        <span>{formatCurrency(parseFloat(selectedOrder.shippingCost))}</span>
-                      </div>
-                      {selectedOrder.marketplaceFee && (
-                        <div className="flex justify-between text-sm text-red-600">
-                          <span>Marketplace Fee</span>
-                          <span>-{formatCurrency(parseFloat(selectedOrder.marketplaceFee))}</span>
-                        </div>
-                      )}
-                      <Separator />
-                      <div className="flex justify-between font-medium">
-                        <span>Total</span>
-                        <span>{formatCurrency(parseFloat(selectedOrder.totalPrice))}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {selectedOrder.buyerNote && (
-                    <div>
-                      <Label className="text-sm text-gray-500 flex items-center gap-1">
-                        <StickyNote className="w-4 h-4" />
-                        Buyer Note
-                      </Label>
-                      <p className="mt-1 p-2 bg-yellow-50 rounded border border-yellow-200 text-sm">
-                        {selectedOrder.buyerNote}
-                      </p>
-                    </div>
-                  )}
-
-                  <Separator />
-
-                  <div>
-                    <Label className="text-sm text-gray-500 mb-2 block">Update Status</Label>
-                    <div className="flex gap-2">
-                      <Select value={newStatus} onValueChange={setNewStatus}>
-                        <SelectTrigger className="flex-1">
-                          <SelectValue placeholder="Select new status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {getNextValidStatuses(selectedOrder.status).map(status => {
-                            const info = getStatusInfo(status);
-                            return (
-                              <SelectItem key={status} value={status}>
-                                {info.label}
-                              </SelectItem>
-                            );
-                          })}
-                        </SelectContent>
-                      </Select>
-                      <Button
-                        onClick={() => handleStatusChange(selectedOrder.id)}
-                        disabled={!newStatus || updateStatusMutation.isPending}
-                      >
-                        {updateStatusMutation.isPending ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          "Update"
-                        )}
-                      </Button>
-                    </div>
-                    {newStatus === 'shipped' && (
-                      <div className="mt-3 space-y-2">
-                        <Input
-                          placeholder="Tracking Number"
-                          value={trackingNumber}
-                          onChange={(e) => setTrackingNumber(e.target.value)}
-                        />
-                        <Input
-                          placeholder="Carrier (e.g., Royal Mail, DHL)"
-                          value={trackingCarrier}
-                          onChange={(e) => setTrackingCarrier(e.target.value)}
-                        />
-                      </div>
-                    )}
-                    <Textarea
-                      className="mt-2"
-                      placeholder="Add a note (optional)"
-                      value={statusNote}
-                      onChange={(e) => setStatusNote(e.target.value)}
-                    />
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="items" className="mt-4">
-                  <div className="space-y-3">
-                    {selectedOrder.items?.length ? (
-                      selectedOrder.items.map((item) => (
-                        <div key={item.id} className="p-3 border rounded-lg">
-                          <div className="flex justify-between items-start">
-                            <div className="flex-1">
-                              <p className="font-medium">{item.title}</p>
-                              <div className="flex items-center gap-4 mt-1 text-sm text-gray-500">
-                                <span>SKU: {item.sku}</span>
-                                <span>Qty: {item.quantity}</span>
-                              </div>
-                              {item.tmeProductId && (
-                                <a
-                                  href={`https://www.tme.eu/en/details/${item.tmeProductId}/`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-sm text-blue-600 hover:underline flex items-center gap-1 mt-1"
-                                >
-                                  View on TME <ExternalLink className="w-3 h-3" />
-                                </a>
-                              )}
-                            </div>
-                            <div className="text-right">
-                              <p className="font-medium">{formatCurrency(parseFloat(item.totalPrice))}</p>
-                              <p className="text-sm text-gray-500">
-                                {formatCurrency(parseFloat(item.unitPrice))} each
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-gray-500 text-center py-4">No items found</p>
-                    )}
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="shipping" className="mt-4 space-y-4">
-                  <div>
-                    <Label className="text-sm text-gray-500 flex items-center gap-1">
-                      <MapPin className="w-4 h-4" />
-                      Shipping Address
-                    </Label>
-                    <div className="mt-2 p-3 bg-gray-50 rounded-lg">
-                      <p className="font-medium">{selectedOrder.shippingName}</p>
-                      <p>{selectedOrder.shippingAddressLine1}</p>
-                      {selectedOrder.shippingAddressLine2 && (
-                        <p>{selectedOrder.shippingAddressLine2}</p>
-                      )}
-                      <p>
-                        {selectedOrder.shippingCity}
-                        {selectedOrder.shippingStateOrProvince && `, ${selectedOrder.shippingStateOrProvince}`}
-                      </p>
-                      <p>{selectedOrder.shippingPostalCode}</p>
-                      <p>{selectedOrder.shippingCountry}</p>
-                      {selectedOrder.shippingPhone && (
-                        <p className="mt-2 text-sm text-gray-600">
-                          Phone: {selectedOrder.shippingPhone}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div>
-                    <Label className="text-sm text-gray-500 flex items-center gap-1">
-                      <Truck className="w-4 h-4" />
-                      Shipping Details
-                    </Label>
-                    <div className="mt-2 space-y-2">
-                      {selectedOrder.shippingService && (
-                        <p><span className="text-gray-500">Service:</span> {selectedOrder.shippingService}</p>
-                      )}
-                      {selectedOrder.trackingNumber && (
-                        <p><span className="text-gray-500">Tracking:</span> {selectedOrder.trackingNumber}</p>
-                      )}
-                      {selectedOrder.shippingCarrier && (
-                        <p><span className="text-gray-500">Carrier:</span> {selectedOrder.shippingCarrier}</p>
-                      )}
-                      {selectedOrder.trackingUrl && (
-                        <a
-                          href={selectedOrder.trackingUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 hover:underline flex items-center gap-1"
-                        >
-                          Track Package <ExternalLink className="w-3 h-3" />
-                        </a>
-                      )}
-                    </div>
-                  </div>
-
-                  <Button
-                    className="w-full"
-                    onClick={() => printLabelMutation.mutate(selectedOrder.id)}
-                    disabled={printLabelMutation.isPending}
-                  >
-                    <Printer className="w-4 h-4 mr-2" />
-                    Print Shipping Label
-                  </Button>
-                </TabsContent>
-
-                <TabsContent value="history" className="mt-4">
-                  <div className="space-y-3">
-                    {selectedOrder.events?.length ? (
-                      selectedOrder.events.map((event) => (
-                        <div key={event.id} className="flex items-start gap-3 p-3 border rounded-lg">
-                          <History className="w-4 h-4 text-gray-400 mt-1" />
-                          <div className="flex-1">
-                            <div className="flex items-center justify-between">
-                              <p className="font-medium capitalize">
-                                {event.eventType.replace(/_/g, ' ')}
-                              </p>
-                              <p className="text-xs text-gray-500">
-                                {event.createdAt 
-                                  ? format(new Date(event.createdAt), 'PPp')
-                                  : '-'}
-                              </p>
-                            </div>
-                            {event.fromStatus && event.toStatus && (
-                              <p className="text-sm text-gray-600">
-                                {event.fromStatus} → {event.toStatus}
-                              </p>
-                            )}
-                            {event.note && (
-                              <p className="text-sm text-gray-600 mt-1">{event.note}</p>
-                            )}
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-gray-500 text-center py-4">No history found</p>
-                    )}
-                  </div>
-                </TabsContent>
-              </Tabs>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-
+      {/* Print Label Dialog */}
       <Dialog open={printLabelOpen} onOpenChange={setPrintLabelOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -874,70 +638,38 @@ export function Orders({ user }: OrdersProps) {
               <Printer className="w-5 h-5" />
               Print Shipping Label
             </DialogTitle>
-            <DialogDescription>
-              Shipping label for order #{printLabelOrder?.marketplaceOrderId?.slice(-8)}
-            </DialogDescription>
           </DialogHeader>
 
-          {printLabelOrder && (
-            <div className="space-y-4 mt-4">
-              <div className="p-4 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
-                <p className="text-xs text-gray-500 mb-2">SHIP TO:</p>
-                <p className="font-bold text-lg">{printLabelOrder.shippingName}</p>
-                <p className="text-sm">{printLabelOrder.shippingAddressLine1}</p>
-                {printLabelOrder.shippingAddressLine2 && (
-                  <p className="text-sm">{printLabelOrder.shippingAddressLine2}</p>
-                )}
-                <p className="text-sm">
-                  {printLabelOrder.shippingCity}
-                  {printLabelOrder.shippingStateOrProvince && `, ${printLabelOrder.shippingStateOrProvince}`}
-                </p>
-                <p className="text-sm font-medium">{printLabelOrder.shippingPostalCode}</p>
-                <p className="text-sm font-medium">{printLabelOrder.shippingCountry}</p>
-                {printLabelOrder.shippingPhone && (
-                  <p className="text-xs text-gray-500 mt-2">Tel: {printLabelOrder.shippingPhone}</p>
-                )}
+          {selectedOrder && (
+            <div className="space-y-4">
+              <div className="p-4 bg-white border-2 border-black font-mono text-sm" style={{ fontFamily: 'monospace' }}>
+                <p className="font-bold text-lg mb-2">{selectedOrder.shippingName}</p>
+                <p>{selectedOrder.shippingAddressLine1}</p>
+                {selectedOrder.shippingAddressLine2 && <p>{selectedOrder.shippingAddressLine2}</p>}
+                <p>{selectedOrder.shippingCity}</p>
+                <p className="font-bold text-lg">{selectedOrder.shippingPostalCode}</p>
+                <p className="font-bold">{selectedOrder.shippingCountry}</p>
               </div>
 
               <div className="text-xs text-gray-500 space-y-1">
-                <p>Order ID: {printLabelOrder.marketplaceOrderId}</p>
-                <p>Items: {printLabelOrder.items?.length || 0} product(s)</p>
-                {printLabelOrder.shippingService && (
-                  <p>Service: {printLabelOrder.shippingService}</p>
-                )}
+                <p>Order: #{selectedOrder.marketplaceOrderId}</p>
+                <p>Items: {selectedOrder.items?.length || 0}</p>
               </div>
 
               <div className="flex gap-2">
-                <Button
-                  className="flex-1"
-                  onClick={() => {
-                    window.print();
-                  }}
-                >
+                <Button className="flex-1" onClick={() => window.print()} data-testid="btn-dialog-print">
                   <Printer className="w-4 h-4 mr-2" />
-                  Print Address
+                  Print
                 </Button>
-                <Button
-                  variant="outline"
-                  className="flex-1"
-                  onClick={() => {
-                    const text = `${printLabelOrder.shippingName}\n${printLabelOrder.shippingAddressLine1}\n${printLabelOrder.shippingAddressLine2 || ''}\n${printLabelOrder.shippingCity}, ${printLabelOrder.shippingPostalCode}\n${printLabelOrder.shippingCountry}`;
-                    navigator.clipboard.writeText(text);
-                    toast({
-                      title: "Copied",
-                      description: "Address copied to clipboard"
-                    });
-                  }}
-                >
-                  Copy Address
+                <Button variant="outline" className="flex-1" onClick={copyAddress} data-testid="btn-dialog-copy-address">
+                  <Copy className="w-4 h-4 mr-2" />
+                  Copy
                 </Button>
               </div>
 
-              <div className="pt-2 border-t">
-                <p className="text-xs text-gray-500 text-center">
-                  Latvian Post API integration coming soon
-                </p>
-              </div>
+              <p className="text-xs text-gray-400 text-center">
+                Latvian Post API integration coming soon
+              </p>
             </div>
           )}
         </DialogContent>
