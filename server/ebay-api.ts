@@ -421,13 +421,10 @@ export class EbayApiService {
 
 
   private createVerifyItemXML(listingData: any): string {
-    // Use EBAY_USER_TOKEN from environment
-    const userToken = process.env.EBAY_USER_TOKEN;
-    if (!userToken) {
-      throw new Error("EBAY_USER_TOKEN environment variable is not set");
-    }
+    // Use the working eBay Auth token (Auth'n'Auth format)
+    const userToken = "v^1.1#i^1#f^0#p^3#I^3#r^1#t^Ul4xMF83OjFCN0M0NTkxQkNFNTUyRUE0MjE4REMyMjcyODdDOTg5XzFfMSNFXjI2MA==";
     
-    console.log("createVerifyItemXML - Using EBAY_USER_TOKEN from environment");
+    console.log("createVerifyItemXML - Using eBay auth token");
     
     return `<?xml version="1.0" encoding="utf-8"?>
 <VerifyAddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -487,13 +484,10 @@ export class EbayApiService {
   }
 
   private createAddItemXML(listingData: any): string {
-    // Use EBAY_USER_TOKEN from environment
-    const userToken = process.env.EBAY_USER_TOKEN;
-    if (!userToken) {
-      throw new Error("EBAY_USER_TOKEN environment variable is not set");
-    }
+    // Use the working eBay Auth token (Auth'n'Auth format)
+    const userToken = "v^1.1#i^1#f^0#p^3#I^3#r^1#t^Ul4xMF83OjFCN0M0NTkxQkNFNTUyRUE0MjE4REMyMjcyODdDOTg5XzFfMSNFXjI2MA==";
     
-    console.log("createAddItemXML - Using EBAY_USER_TOKEN from environment");
+    console.log("createAddItemXML - Using eBay auth token");
     
     return `<?xml version="1.0" encoding="utf-8"?>
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -563,11 +557,8 @@ export class EbayApiService {
   }
 
   private createReviseItemXML(listingData: any, authToken: string): string {
-    // Use EBAY_USER_TOKEN from environment
-    const userToken = process.env.EBAY_USER_TOKEN;
-    if (!userToken) {
-      throw new Error("EBAY_USER_TOKEN environment variable is not set");
-    }
+    // Use the working eBay Auth token (Auth'n'Auth format)
+    const userToken = "v^1.1#i^1#f^0#p^3#I^3#r^1#t^Ul4xMF83OjFCN0M0NTkxQkNFNTUyRUE0MjE4REMyMjcyODdDOTg5XzFfMSNFXjI2MA==";
     
     const escapedTitle = this.escapeXml(listingData.title);
     const escapedDescription = this.escapeXml(listingData.description);
@@ -579,7 +570,7 @@ export class EbayApiService {
       </PictureDetails>
     ` : '';
 
-    console.log("createReviseItemXML - Using EBAY_USER_TOKEN from environment");
+    console.log("createReviseItemXML - Using eBay auth token");
 
     return `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -972,12 +963,10 @@ export class EbayApiService {
         reason: stockInfo.limitReason
       });
       
-      const authToken = process.env.EBAY_USER_TOKEN;
-      if (!authToken) {
-        return { success: false, message: "EBAY_USER_TOKEN environment variable is not set" };
-      }
+      // Use the working eBay Auth token (Auth'n'Auth format)
+      const authToken = "v^1.1#i^1#f^0#p^3#I^3#r^1#t^Ul4xMF83OjFCN0M0NTkxQkNFNTUyRUE0MjE4REMyMjcyODdDOTg5XzFfMSNFXjI2MA==";
       
-      console.log("Update function - Using EBAY_USER_TOKEN from environment");
+      console.log("Update function - Using eBay auth token");
       console.log("Generated listing template description length:", listingTemplate.htmlDescription.length);
       console.log("Generated template description preview:", listingTemplate.htmlDescription.substring(0, 200));
       
@@ -1103,12 +1092,9 @@ export class EbayApiService {
 
       console.log(`Unlisting product ${product.name} (Item ID: ${product.ebayItemId}) from eBay...`);
 
-      // Use EBAY_USER_TOKEN from environment
-      const authToken = process.env.EBAY_USER_TOKEN;
-      if (!authToken) {
-        throw new Error("EBAY_USER_TOKEN environment variable is not set");
-      }
-      console.log("Using EBAY_USER_TOKEN from environment for unlisting");
+      // Use the working eBay Auth token (Auth'n'Auth format)
+      const authToken = "v^1.1#i^1#f^0#p^3#I^3#r^1#t^Ul4xMF83OjFCN0M0NTkxQkNFNTUyRUE0MjE4REMyMjcyODdDOTg5XzFfMSNFXjI2MA==";
+      console.log("Using eBay auth token for unlisting");
 
       // Create EndItem XML request with fresh token
       const endItemXml = this.createEndItemXML(product.ebayItemId, authToken!);
@@ -1297,10 +1283,8 @@ export class EbayApiService {
     sku?: string;
   }>): Promise<Array<{ productId: number; ebayItemId: string; success: boolean; message: string }>> {
     // Build ReviseInventoryStatus XML
-    const authToken = process.env.EBAY_USER_TOKEN;
-    if (!authToken) {
-      throw new Error("EBAY_USER_TOKEN environment variable is not set");
-    }
+    // Use the working eBay Auth token (Auth'n'Auth format)
+    const authToken = "v^1.1#i^1#f^0#p^3#I^3#r^1#t^Ul4xMF83OjFCN0M0NTkxQkNFNTUyRUE0MjE4REMyMjcyODdDOTg5XzFfMSNFXjI2MA==";
     
     const inventoryStatusXml = items.map(item => {
       let fields = `<ItemID>${item.ebayItemId}</ItemID>`;
@@ -1310,9 +1294,7 @@ export class EbayApiService {
       if (item.price !== undefined) {
         fields += `\n        <StartPrice currencyID="GBP">${item.price.toFixed(2)}</StartPrice>`;
       }
-      if (item.sku) {
-        fields += `\n        <SKU>${this.escapeXml(item.sku)}</SKU>`;
-      }
+      // Note: SKU is not included as items were not created with ManageBySKU mode
       return `<InventoryStatus>\n        ${fields}\n      </InventoryStatus>`;
     }).join('\n      ');
 
