@@ -232,19 +232,14 @@ export class EbayApiService {
         }
       }
 
-      // Calculate package price for MOQ products
-      // IMPORTANT: product.salePrice is stored as PER-UNIT price from dynamic pricing
-      // For eBay listings of multi-pack products, we multiply by MOQ to get package price
-      // Example: 10x resistors @ €0.50/unit = €5.00 listing price for the pack
+      // For MOQ products, salePrice is ALREADY the package price (margin applied to package cost)
+      // No need to multiply by MOQ - dynamic pricing already calculated the package final price
+      // Example: 10x resistors with €0.81 package supplier cost → €4.99 salePrice (already package price)
       const moq = product.moq || 1;
-      let listingPrice = listingDetails.startPrice || parseFloat(product.salePrice) || 0;
+      const listingPrice = listingDetails.startPrice || parseFloat(product.salePrice) || 0;
       
       if (moq > 1 && !listingDetails.startPrice) {
-        // Calculate package price: unit sale price × MOQ
-        // product.salePrice is per-unit, so we multiply to get package price
-        const unitPrice = parseFloat(product.salePrice) || 0;
-        listingPrice = Math.round(unitPrice * moq * 100) / 100;
-        console.log(`📦 MOQ pricing applied: ${moq}x @ €${unitPrice.toFixed(2)}/unit = €${listingPrice.toFixed(2)} package`);
+        console.log(`📦 MOQ product: ${moq}x package, listing price €${listingPrice.toFixed(2)} (package price from dynamic pricing)`);
       }
 
       // Prepare listing data for eBay Trading API

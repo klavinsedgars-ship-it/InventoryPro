@@ -236,8 +236,15 @@ export function generatePricingSummary(supplierPrice: number): string {
 
 /**
  * Calculate package price for products sold in multiples (MOQ)
- * Package Price = Unit Supplier Price × MOQ × margin multiplier
- * Used for eBay listings that sell in the same quantity as TME's minimum order
+ * 
+ * CORRECT LOGIC:
+ * 1. Calculate package supplier cost = Unit Price × MOQ (this is what we pay TME)
+ * 2. Apply margin to the PACKAGE supplier cost (not per-unit!)
+ * 3. Result is the eBay listing price for the whole package
+ * 
+ * Example: 10x Microswitch @ €0.0811/unit
+ * - Package supplier cost = €0.0811 × 10 = €0.81
+ * - Apply margin to €0.81 → ~€4-5 eBay price for the 10-pack
  */
 export function calculatePackagePrice(
   unitSupplierPrice: number | string,
@@ -249,14 +256,15 @@ export function calculatePackagePrice(
     : unitSupplierPrice;
   
   // Calculate the package supplier price (what we pay TME for MOQ units)
-  const packageSupplierPrice = numericUnitPrice * moq;
+  const packageSupplierPrice = Math.round(numericUnitPrice * moq * 100) / 100;
   
-  // Get per-unit pricing result first
-  const unitResult = calculateDynamicPrice(numericUnitPrice);
+  // Apply margin to the PACKAGE supplier cost, not per-unit!
+  // This is the key fix: margin applies to total purchase price
+  const packageResult = calculateDynamicPrice(packageSupplierPrice);
   
-  if (!unitResult.isValid) {
+  if (!packageResult.isValid) {
     return {
-      ...unitResult,
+      ...packageResult,
       moq,
       multiples,
       packageSupplierPrice: 0,
@@ -266,23 +274,27 @@ export function calculatePackagePrice(
     };
   }
   
-  // Calculate package final price (unit sale price × MOQ)
-  // This is what customers pay for MOQ units on eBay
-  let packageFinalPrice = unitResult.finalPrice * moq;
+  // The package final price is the result of applying margin to package cost
+  const packageFinalPrice = packageResult.finalPrice;
   
-  // Apply rounding to package price
-  packageFinalPrice = applyRoundingRule(packageFinalPrice, PRICING_CONFIG.roundingRule);
-  
-  // Calculate effective per-unit price after rounding
-  const pricePerUnit = packageFinalPrice / moq;
+  // Calculate effective per-unit price after margin and rounding
+  const pricePerUnit = Math.round((packageFinalPrice / moq) * 100) / 100;
   
   return {
-    ...unitResult,
+    // Override supplier price to show per-unit for reference
+    supplierPrice: numericUnitPrice,
+    calculatedPrice: packageResult.calculatedPrice,
+    finalPrice: packageFinalPrice, // This is the eBay listing price
+    marginTier: packageResult.marginTier,
+    marginPercentage: packageResult.marginPercentage,
+    multiplier: packageResult.multiplier,
+    isValid: true,
+    errors: packageResult.errors,
     moq,
     multiples,
-    packageSupplierPrice: Math.round(packageSupplierPrice * 100) / 100,
+    packageSupplierPrice,
     packageFinalPrice,
-    pricePerUnit: Math.round(pricePerUnit * 100) / 100,
+    pricePerUnit,
     quantityLabel: formatQuantityLabel(moq)
   };
 }

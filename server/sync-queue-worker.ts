@@ -11,7 +11,7 @@
 
 import { storage } from "./storage";
 import { tmeApi } from "./tme-api";
-import { calculateDynamicPrice, getSupplierPriceForMoq } from "./dynamic-pricing";
+import { calculateDynamicPrice, calculatePackagePrice, getSupplierPriceForMoq } from "./dynamic-pricing";
 import type { SyncQueue } from "@shared/schema";
 
 interface QueueWorkerConfig {
@@ -134,12 +134,18 @@ export class SyncQueueWorker {
 
       // Get MOQ to find correct price tier
       const moq = tmeProduct.MinAmount || product.moq || 1;
+      const multiples = tmeProduct.Multiples || product.multiples || 1;
 
       // Calculate pricing - use correct price tier for MOQ quantity
       const supplierPrice = getSupplierPriceForMoq(price?.PriceList, moq);
+      
+      // For MOQ > 1 products: apply margin to PACKAGE cost (unit price × MOQ)
+      // For single items: apply margin to unit price directly
       const pricingResult =
         supplierPrice > 0
-          ? calculateDynamicPrice(supplierPrice)
+          ? moq > 1
+            ? calculatePackagePrice(supplierPrice, moq, multiples)
+            : calculateDynamicPrice(supplierPrice)
           : {
               finalPrice: supplierPrice,
               calculatedPrice: supplierPrice,

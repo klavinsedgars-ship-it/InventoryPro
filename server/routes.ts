@@ -837,7 +837,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               const multiples = product.Multiples || 1;
 
               // Calculate pricing - use correct price tier for MOQ quantity
-              const { getSupplierPriceForMoq, calculateDynamicPrice } = await import("./dynamic-pricing");
+              const { getSupplierPriceForMoq, calculateDynamicPrice, calculatePackagePrice } = await import("./dynamic-pricing");
               const supplierPrice = getSupplierPriceForMoq(price?.PriceList, moq);
               
               let pricingResult = {
@@ -848,7 +848,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
               };
 
               if (settings?.applyDynamicPricing && supplierPrice > 0) {
-                const result = calculateDynamicPrice(supplierPrice);
+                // For MOQ > 1: apply margin to PACKAGE cost (unit price × MOQ)
+                // This ensures margin is applied to what we actually pay TME
+                const result = moq > 1
+                  ? calculatePackagePrice(supplierPrice, moq, multiples)
+                  : calculateDynamicPrice(supplierPrice);
                 pricingResult = {
                   finalPrice: result.finalPrice,
                   calculatedPrice: result.calculatedPrice,
@@ -968,7 +972,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 const multiples = product.Multiples || 1;
 
                 // Calculate pricing - use correct price tier for MOQ quantity
-                const { getSupplierPriceForMoq, calculateDynamicPrice } = await import("./dynamic-pricing");
+                const { getSupplierPriceForMoq, calculateDynamicPrice, calculatePackagePrice } = await import("./dynamic-pricing");
                 const supplierPrice = getSupplierPriceForMoq(price?.PriceList, moq);
                 
                 let pricingResult = {
@@ -979,7 +983,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 };
 
                 if (settings.applyDynamicPricing && supplierPrice > 0) {
-                  const result = calculateDynamicPrice(supplierPrice);
+                  // For MOQ > 1: apply margin to PACKAGE cost (unit price × MOQ)
+                  const result = moq > 1
+                    ? calculatePackagePrice(supplierPrice, moq, multiples)
+                    : calculateDynamicPrice(supplierPrice);
                   pricingResult = {
                     finalPrice: result.finalPrice,
                     calculatedPrice: result.calculatedPrice,
@@ -1400,7 +1407,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 const multiples = product.Multiples || 1;
 
                 // Calculate pricing - use correct price tier for MOQ quantity
-                const { getSupplierPriceForMoq, calculateDynamicPrice } = await import("./dynamic-pricing");
+                const { getSupplierPriceForMoq, calculateDynamicPrice, calculatePackagePrice } = await import("./dynamic-pricing");
                 const supplierPrice = getSupplierPriceForMoq(price?.PriceList, moq);
                 
                 let pricingResult = {
@@ -1411,7 +1418,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 };
 
                 if (settings.applyDynamicPricing && supplierPrice > 0) {
-                  const result = calculateDynamicPrice(supplierPrice);
+                  // For MOQ > 1: apply margin to PACKAGE cost (unit price × MOQ)
+                  const result = moq > 1
+                    ? calculatePackagePrice(supplierPrice, moq, multiples)
+                    : calculateDynamicPrice(supplierPrice);
                   pricingResult = {
                     finalPrice: result.finalPrice,
                     calculatedPrice: result.calculatedPrice,
