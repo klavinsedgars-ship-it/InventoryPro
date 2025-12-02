@@ -104,8 +104,14 @@ async function fetchLiveTMEData(symbols: string[]): Promise<Map<string, { priceL
         // Store full PriceList for MOQ-aware pricing
         const priceList = item.PriceList || [];
         
-        // Extract stock amount
-        const stock = item.Amount || 0;
+        // Extract stock amount - check StockList first (sum of all warehouses), then fall back to Amount
+        let stock = 0;
+        if (item.StockList && item.StockList.length > 0) {
+          // Sum up stock from all warehouses
+          stock = item.StockList.reduce((sum: number, warehouse: { Amount: number }) => sum + (warehouse.Amount || 0), 0);
+        } else if (item.Amount !== undefined) {
+          stock = item.Amount;
+        }
         
         liveData.set(item.Symbol, { priceList, stock });
       }
