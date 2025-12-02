@@ -3426,6 +3426,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Helper function to clean HTML from message bodies
+  const cleanMessageBodyForStorage = (html: string): string => {
+    if (!html) return '';
+    let text = html
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+    if (text.includes('<') || text.includes('&lt;')) {
+      text = text.replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n\n')
+        .replace(/<\/div>/gi, '\n').replace(/<\/tr>/gi, '\n').replace(/<\/li>/gi, '\n')
+        .replace(/<[^>]+>/g, '');
+      text = text.replace(/\n\s*\n\s*\n/g, '\n\n').replace(/[ \t]+/g, ' ').trim();
+    }
+    return text.trim();
+  };
+
   // Sync messages from eBay
   app.post('/api/messages/sync/ebay', requireAuth, async (req, res) => {
     try {
@@ -3441,56 +3456,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log(`📬 Syncing eBay messages from last ${daysBack} days...`);
 
-      const result = await ebayMessagesApi.getMyMessages(startTime);
-
-      if (!result.success) {
-        return res.status(500).json({
-          success: false,
-          error: result.error
-        });
-      }
-
       let synced = 0;
       let updated = 0;
+      let pageNum = 1;
+      let hasMore = true;
 
-      for (const msg of result.messages) {
-        // Find or create thread
-        let thread = await storage.getMessageThreadByBuyer(msg.sender, msg.itemId);
+      // Keep fetching pages until no more messages
+      while (hasMore) {
+        console.log(`📬 Fetching message page ${pageNum}...`);
+        const result = await ebayMessagesApi.getMyMessages(startTime, undefined, 'Inbox', 100, pageNum);
 
-        if (!thread) {
-          thread = await storage.createMessageThread({
-            marketplace: 'ebay',
-            marketplaceThreadId: msg.messageId,
-            buyerUsername: msg.sender,
-            buyerEmail: msg.senderEmail,
-            itemId: msg.itemId,
-            itemTitle: msg.itemTitle,
-            subject: msg.subject,
-            status: 'open',
-            isRead: msg.isRead,
-            lastMessageAt: new Date(msg.creationDate)
-          });
-          synced++;
-        } else {
-          updated++;
-        }
-
-        // Check if message already exists
-        const existingMessages = await storage.getMessages(thread.id);
-        const exists = existingMessages.some(m => m.marketplaceMessageId === msg.messageId);
-
-        if (!exists) {
-          await storage.createMessage({
-            threadId: thread.id,
-            direction: 'inbound',
-            subject: msg.subject,
-            body: msg.body,
-            marketplaceMessageId: msg.messageId,
-            senderUsername: msg.sender,
-            senderEmail: msg.senderEmail,
-            status: 'delivered'
+        if (!result.success) {
+          return res.status(500).json({
+            success: false,
+            error: result.error
           });
         }
+
+        hasMore = result.hasMoreMessages || false;
+
+        for (const msg of result.messages) {
+          // Find or create thread
+          let thread = await storage.getMessageThreadByBuyer(msg.sender, msg.itemId);
+
+          if (!thread) {
+            thread = await storage.createMessageThread({
+              marketplace: 'ebay',
+              marketplaceThreadId: msg.messageId,
+              buyerUsername: msg.sender,
+              buyerEmail: msg.senderEmail,
+              itemId: msg.itemId,
+              itemTitle: msg.itemTitle,
+              subject: cleanMessageBodyForStorage(msg.subject),
+              status: 'open',
+              isRead: msg.isRead,
+              lastMessageAt: new Date(msg.creationDate)
+            });
+            synced++;
+          } else {
+            updated++;
+          }
+
+          // Check if message already exists
+          const existingMessages = await storage.getMessages(thread.id);
+          const exists = existingMessages.some(m => m.marketplaceMessageId === msg.messageId);
+
+          if (!exists) {
+            await storage.createMessage({
+              threadId: thread.id,
+              direction: 'inbound',
+              subject: cleanMessageBodyForStorage(msg.subject),
+              body: cleanMessageBodyForStorage(msg.body),
+              marketplaceMessageId: msg.messageId,
+              senderUsername: msg.sender,
+              senderEmail: msg.senderEmail,
+              status: 'delivered'
+            });
+          }
+        }
+
+        if (hasMore) pageNum++;
       }
 
       console.log(`📬 Synced ${synced} new threads, updated ${updated} existing threads`);
@@ -3499,7 +3524,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         success: true,
         synced,
         updated,
-        totalMessages: result.messages.length
+        totalMessages: synced + updated
       });
     } catch (error) {
       console.error('Failed to sync eBay messages:', error);
