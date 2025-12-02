@@ -472,6 +472,210 @@ export const OrderStatus = {
   ON_HOLD: 'on_hold',
 } as const;
 
+// ============================================
+// MESSAGING SYSTEM
+// ============================================
+
+// Message Threads - Conversations with buyers
+export const messageThreads = pgTable("message_threads", {
+  id: serial("id").primaryKey(),
+  
+  // Marketplace context
+  marketplace: text("marketplace").notNull().default("ebay"), // ebay, amazon
+  marketplaceThreadId: text("marketplace_thread_id"), // eBay message ID for thread reference
+  
+  // Buyer info
+  buyerUsername: text("buyer_username").notNull(),
+  buyerEmail: text("buyer_email"),
+  
+  // Order context (optional - some messages may not be order-related)
+  orderId: integer("order_id").references(() => orders.id),
+  marketplaceOrderId: text("marketplace_order_id"), // eBay/Amazon order ID
+  
+  // Item context
+  itemId: text("item_id"), // eBay listing ID
+  itemTitle: text("item_title"),
+  
+  // Thread status
+  status: text("status").notNull().default("open"), // open, closed, archived
+  isRead: boolean("is_read").notNull().default(false),
+  isStarred: boolean("is_starred").notNull().default(false),
+  lastMessageAt: timestamp("last_message_at"),
+  messageCount: integer("message_count").notNull().default(0),
+  
+  // Metadata
+  subject: text("subject"),
+  tags: text("tags").array(), // custom tags for organization
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Individual Messages within threads
+export const messages = pgTable("messages", {
+  id: serial("id").primaryKey(),
+  threadId: integer("thread_id").references(() => messageThreads.id).notNull(),
+  
+  // Message content
+  direction: text("direction").notNull(), // inbound (from buyer), outbound (to buyer)
+  subject: text("subject"),
+  body: text("body").notNull(),
+  bodyHtml: text("body_html"), // HTML version if available
+  
+  // Marketplace reference
+  marketplaceMessageId: text("marketplace_message_id"), // eBay's message ID
+  
+  // Sender info
+  senderUsername: text("sender_username").notNull(),
+  senderEmail: text("sender_email"),
+  
+  // Status
+  status: text("status").notNull().default("sent"), // draft, pending, sent, delivered, failed, read
+  errorMessage: text("error_message"), // If sending failed
+  
+  // Auto-message reference
+  templateId: integer("template_id").references(() => messageTemplates.id),
+  autoMessageRuleId: integer("auto_message_rule_id"),
+  
+  // Metadata
+  rawPayload: text("raw_payload"), // Original XML/JSON from eBay
+  sentAt: timestamp("sent_at"),
+  readAt: timestamp("read_at"),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Message Templates - Reusable message templates
+export const messageTemplates = pgTable("message_templates", {
+  id: serial("id").primaryKey(),
+  
+  name: text("name").notNull(), // Template name for quick selection
+  description: text("description"),
+  
+  // Content
+  subject: text("subject"),
+  body: text("body").notNull(),
+  
+  // Template type
+  category: text("category").notNull().default("general"), // general, thank_you, shipping, follow_up, return, custom
+  
+  // Placeholders available in this template
+  // {{buyer_name}}, {{order_id}}, {{item_title}}, {{tracking_number}}, {{shop_name}}, etc.
+  placeholders: text("placeholders").array(),
+  
+  // Usage stats
+  usageCount: integer("usage_count").notNull().default(0),
+  lastUsedAt: timestamp("last_used_at"),
+  
+  // Status
+  isActive: boolean("is_active").notNull().default(true),
+  isDefault: boolean("is_default").notNull().default(false), // Default for a category
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Auto Message Rules - Automated messaging triggers
+export const autoMessageRules = pgTable("auto_message_rules", {
+  id: serial("id").primaryKey(),
+  
+  name: text("name").notNull(),
+  description: text("description"),
+  
+  // Trigger configuration
+  triggerType: text("trigger_type").notNull(), // order_placed, order_packed, order_shipped, order_delivered, days_after_delivery
+  triggerDelay: integer("trigger_delay").default(0), // Delay in minutes/hours before sending
+  triggerDelayUnit: text("trigger_delay_unit").default("minutes"), // minutes, hours, days
+  
+  // Template to use
+  templateId: integer("template_id").references(() => messageTemplates.id).notNull(),
+  
+  // Conditions
+  marketplaces: text("marketplaces").array().default(["ebay"]), // Which marketplaces this applies to
+  minOrderValue: decimal("min_order_value", { precision: 10, scale: 2 }), // Only trigger if order value >= this
+  excludeCountries: text("exclude_countries").array(), // Don't send to these countries
+  
+  // Status
+  isActive: boolean("is_active").notNull().default(true),
+  
+  // Stats
+  sentCount: integer("sent_count").notNull().default(0),
+  lastTriggeredAt: timestamp("last_triggered_at"),
+  
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Scheduled Messages - Queue for pending auto-messages
+export const scheduledMessages = pgTable("scheduled_messages", {
+  id: serial("id").primaryKey(),
+  
+  // References
+  orderId: integer("order_id").references(() => orders.id),
+  ruleId: integer("rule_id").references(() => autoMessageRules.id),
+  templateId: integer("template_id").references(() => messageTemplates.id).notNull(),
+  
+  // Target
+  buyerUsername: text("buyer_username").notNull(),
+  itemId: text("item_id"),
+  
+  // Schedule
+  scheduledFor: timestamp("scheduled_for").notNull(),
+  
+  // Status
+  status: text("status").notNull().default("pending"), // pending, sent, cancelled, failed
+  sentAt: timestamp("sent_at"),
+  errorMessage: text("error_message"),
+  messageId: integer("message_id").references(() => messages.id), // Reference to sent message
+  
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Insert schemas for messaging
+export const insertMessageThreadSchema = createInsertSchema(messageThreads).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertMessageSchema = createInsertSchema(messages).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertMessageTemplateSchema = createInsertSchema(messageTemplates).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  usageCount: true,
+  lastUsedAt: true,
+});
+
+export const insertAutoMessageRuleSchema = createInsertSchema(autoMessageRules).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  sentCount: true,
+  lastTriggeredAt: true,
+});
+
+export const insertScheduledMessageSchema = createInsertSchema(scheduledMessages).omit({
+  id: true,
+  createdAt: true,
+});
+
+// Types for messaging
+export type MessageThread = typeof messageThreads.$inferSelect;
+export type InsertMessageThread = z.infer<typeof insertMessageThreadSchema>;
+export type Message = typeof messages.$inferSelect;
+export type InsertMessage = z.infer<typeof insertMessageSchema>;
+export type MessageTemplate = typeof messageTemplates.$inferSelect;
+export type InsertMessageTemplate = z.infer<typeof insertMessageTemplateSchema>;
+export type AutoMessageRule = typeof autoMessageRules.$inferSelect;
+export type InsertAutoMessageRule = z.infer<typeof insertAutoMessageRuleSchema>;
+export type ScheduledMessage = typeof scheduledMessages.$inferSelect;
+export type InsertScheduledMessage = z.infer<typeof insertScheduledMessageSchema>;
+
 export type OrderStatusType = typeof OrderStatus[keyof typeof OrderStatus];
 
 // Marketplace Enum
