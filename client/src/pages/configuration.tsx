@@ -40,6 +40,7 @@ export default function Configuration({ user }: ConfigurationProps) {
   const [newCategoryEbayMapping, setNewCategoryEbayMapping] = useState("");
   const [editingCategory, setEditingCategory] = useState<any>(null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   
   // Pricing tier states
   const [isPricingDialogOpen, setIsPricingDialogOpen] = useState(false);
@@ -422,8 +423,8 @@ export default function Configuration({ user }: ConfigurationProps) {
   if (isLoading) {
     return (
       <div className="bg-gray-50 min-h-screen">
-        <Sidebar />
-        <div className="ml-64 p-6">
+        <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+        <div className={`transition-all duration-200 ${sidebarCollapsed ? 'ml-16' : 'ml-64'} p-6`}>
           <div className="flex items-center justify-center h-96">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
           </div>
@@ -434,8 +435,8 @@ export default function Configuration({ user }: ConfigurationProps) {
 
   return (
     <div className="bg-gray-50 min-h-screen">
-      <Sidebar />
-      <div className="ml-64 p-6">
+      <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+      <div className={`transition-all duration-200 ${sidebarCollapsed ? 'ml-16' : 'ml-64'} p-6`}>
         <div className="w-full space-y-6">
           {/* Header */}
           <div className="bg-white rounded-lg shadow-sm p-6">

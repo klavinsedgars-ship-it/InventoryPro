@@ -36,6 +36,7 @@ interface ShippingPoliciesProps {
 export default function ShippingPolicies({ user }: ShippingPoliciesProps) {
   const [testWeight, setTestWeight] = useState<string>("");
   const queryClient = useQueryClient();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Fetch shipping policies
   const { data: policiesData } = useQuery({
@@ -72,8 +73,8 @@ export default function ShippingPolicies({ user }: ShippingPoliciesProps) {
 
   return (
     <div className="flex h-screen bg-gray-50">
-      <Sidebar />
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+      <div className={`flex-1 flex flex-col overflow-hidden transition-all duration-200 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
         <div className="flex-1 overflow-auto p-6">
           <div className="max-w-7xl mx-auto space-y-6">
             

@@ -23,6 +23,7 @@ export function Categories({ user }: CategoriesProps) {
   const queryClient = useQueryClient();
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const { data: categories = [], isLoading } = useQuery<Category[]>({
     queryKey: ["/api/categories"],
@@ -79,8 +80,8 @@ export function Categories({ user }: CategoriesProps) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Sidebar user={user} />
-      <div className="ml-64">
+      <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+      <div className={`transition-all duration-200 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
         <Header 
           title="Categories" 
           subtitle="Manage product categories and marketplace mappings"

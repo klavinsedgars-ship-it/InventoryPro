@@ -84,6 +84,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const [displayLimit] = useState(100); // Show 100 products per page in UI
   const [totalProductsAvailable, setTotalProductsAvailable] = useState(0);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [syncSettings, setSyncSettings] = useState<SyncSettings>({
     applyDynamicPricing: true,
     useStockLimit: true,
@@ -268,8 +269,8 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Sidebar user={user} />
-      <div className="ml-64">
+      <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+      <div className={`transition-all duration-200 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
         <Header title="TME Browser" />
         <main className="p-6">
           <div className="space-y-6">

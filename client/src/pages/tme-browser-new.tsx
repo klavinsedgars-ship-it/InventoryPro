@@ -50,6 +50,7 @@ export function TMEBrowserNew({ user }: TMEBrowserProps) {
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
   const [syncLoading, setSyncLoading] = useState(false);
   const productsPerPage = 50;
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const { data: categoriesData, isLoading: categoriesLoading } = useQuery({
     queryKey: ["/api/tme/categories"],
@@ -222,10 +223,10 @@ export function TMEBrowserNew({ user }: TMEBrowserProps) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header title="TME Product Browser" />
-      <div className="flex">
-        <Sidebar />
-        <main className="flex-1 p-6 ml-64 mt-16">
+      <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+      <div className={`transition-all duration-200 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
+        <Header title="TME Product Browser" />
+        <main className="flex-1 p-6">
           <div className="max-w-7xl mx-auto">
             <div className="mb-6">
               <h1 className="text-3xl font-bold text-gray-900">TME Product Browser</h1>

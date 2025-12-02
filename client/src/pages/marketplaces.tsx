@@ -61,6 +61,7 @@ export function Marketplaces({ user }: MarketplacesProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [timeRange, setTimeRange] = useState<string>("7d");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const { data: products = [] } = useQuery<Product[]>({
     queryKey: ["/api/products"],
@@ -241,8 +242,8 @@ export function Marketplaces({ user }: MarketplacesProps) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Sidebar user={user} />
-      <div className="ml-64">
+      <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+      <div className={`transition-all duration-200 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
         <Header 
           title="Marketplace Analytics" 
           subtitle="Monitor listing performance and marketplace health"

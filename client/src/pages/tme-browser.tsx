@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -179,6 +179,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   const [enhancedProducts, setEnhancedProducts] = useState<EnhancedProduct[]>([]);
   const [loadingEnhanced, setLoadingEnhanced] = useState(false);
   const [hideSyncedCategories, setHideSyncedCategories] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const [filters, setFilters] = useState<ProductFilters>({
     search: "",
@@ -618,8 +619,8 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Sidebar user={user} />
-      <div className="ml-64">
+      <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+      <div className={`transition-all duration-200 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
         <div className="border-b bg-white">
           <div className="px-6 py-3 flex items-center justify-between">
             <div>

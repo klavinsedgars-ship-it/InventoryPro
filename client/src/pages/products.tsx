@@ -66,6 +66,7 @@ export function Products({ user }: ProductsProps) {
   const [marketplaceFilter, setMarketplaceFilter] = useState<string>("all");
   const [moqFilter, setMoqFilter] = useState<string>("all");
   const [itemsPerPage, setItemsPerPage] = useState<number>(250);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   
   // Bulk listing progress state
   const [bulkListingModalOpen, setBulkListingModalOpen] = useState(false);
@@ -497,8 +498,8 @@ export function Products({ user }: ProductsProps) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Sidebar user={user} />
-      <div className="ml-64">
+      <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+      <div className={`transition-all duration-200 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
         <Header 
           title="Products" 
           subtitle="Manage your inventory and product listings (sorted by latest synced)"

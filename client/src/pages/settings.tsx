@@ -33,6 +33,7 @@ export function Settings({ user }: SettingsProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("profile");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Profile settings state
   const [profileData, setProfileData] = useState({
@@ -135,8 +136,8 @@ export function Settings({ user }: SettingsProps) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Sidebar user={user} />
-      <div className="ml-64">
+      <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+      <div className={`transition-all duration-200 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
         <Header 
           title="Settings" 
           subtitle="Manage your account, integrations, and preferences"

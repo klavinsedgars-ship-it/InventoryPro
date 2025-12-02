@@ -51,6 +51,7 @@ export function EbayPolicies({ user }: EbayPoliciesProps) {
   const [activeTab, setActiveTab] = useState("payment");
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [editingPolicy, setEditingPolicy] = useState<any>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Check OAuth configuration status
   const { data: oauthStatus } = useQuery<{ configured: boolean; message: string }>({
@@ -184,8 +185,8 @@ export function EbayPolicies({ user }: EbayPoliciesProps) {
 
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
-      <Sidebar user={user} />
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+      <div className={`flex-1 flex flex-col overflow-hidden transition-all duration-200 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
         <Header user={user} title="eBay Business Policies" />
         <main className="flex-1 overflow-y-auto p-8">
           <div className="max-w-7xl mx-auto space-y-6">

@@ -21,6 +21,7 @@ export function Dashboard({ user }: DashboardProps) {
   const [editBeforeListingModalOpen, setEditBeforeListingModalOpen] = useState(false);
   const [listingProduct, setListingProduct] = useState<Product | null>(null);
   const [listingMarketplace, setListingMarketplace] = useState<"ebay" | "amazon">("ebay");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const { data: metrics } = useQuery({
     queryKey: ["/api/dashboard/metrics"],
@@ -78,8 +79,8 @@ export function Dashboard({ user }: DashboardProps) {
   if (!metrics) {
     return (
       <div className="min-h-screen bg-gray-50">
-        <Sidebar user={user} />
-        <div className="ml-64">
+        <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+        <div className={`transition-all duration-200 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
           <Header title="Dashboard" subtitle="Loading..." />
           <div className="p-6">
             <div className="animate-pulse space-y-6">
@@ -97,8 +98,8 @@ export function Dashboard({ user }: DashboardProps) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Sidebar user={user} />
-      <div className="ml-64">
+      <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+      <div className={`transition-all duration-200 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
         <Header 
           title="Dashboard" 
           subtitle="Welcome back, monitor your inventory and marketplace performance"

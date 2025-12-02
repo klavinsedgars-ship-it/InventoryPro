@@ -22,6 +22,7 @@ interface ListingTemplate {
 export function TemplatePreview({ user }: { user: any }) {
   const { toast } = useToast();
   const [selectedProductId, setSelectedProductId] = useState<string>("");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Fetch products for selection
   const { data: products = [] } = useQuery<Array<{ id: number; name: string; sku: string }>>({
@@ -51,8 +52,8 @@ export function TemplatePreview({ user }: { user: any }) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Sidebar user={user} />
-      <div className="ml-64">
+      <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+      <div className={`transition-all duration-200 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
         <Header 
           title="eBay Listing Templates" 
           subtitle="Preview professional listing templates with TME product data"

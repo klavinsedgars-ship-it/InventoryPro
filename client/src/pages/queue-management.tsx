@@ -37,6 +37,7 @@ export function QueueManagement({ user }: { user: any }) {
   const queryClient = useQueryClient();
   const [selectedPriority, setSelectedPriority] = useState<number>(3);
   const [selectedOperation, setSelectedOperation] = useState<string>("list");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Fetch queue status and stats
   const { data: queueData, isLoading } = useQuery<{
@@ -122,8 +123,8 @@ export function QueueManagement({ user }: { user: any }) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Sidebar user={user} />
-      <div className="ml-64">
+      <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+      <div className={`transition-all duration-200 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
         <Header 
           title="Queue Management" 
           subtitle="Enterprise-scale eBay listing queue for 150K+ products"

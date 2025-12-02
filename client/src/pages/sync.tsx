@@ -21,6 +21,7 @@ export function TMESync({ user }: TMESyncProps) {
   const queryClient = useQueryClient();
   const [syncProgress, setSyncProgress] = useState(0);
   const [isManualSync, setIsManualSync] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const { data: syncLogs = [], isLoading: logsLoading } = useQuery<SyncLog[]>({
     queryKey: ["/api/sync/logs"],
@@ -125,8 +126,8 @@ export function TMESync({ user }: TMESyncProps) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Sidebar user={user} />
-      <div className="ml-64">
+      <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+      <div className={`transition-all duration-200 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
         <Header 
           title="TME Sync" 
           subtitle="Synchronize product data with TME supplier"
