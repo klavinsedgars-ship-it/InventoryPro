@@ -340,7 +340,7 @@ export class EbayAccountApiService {
           }
         ],
         shipToLocations: policy.shipToLocations || {
-          regionIncluded: [{ regionName: "United Kingdom", regionType: "COUNTRY" }]
+          regionIncluded: [{ regionName: "GB", regionType: "COUNTRY" }]
         },
         globalShipping: policy.globalShipping || false
       };
