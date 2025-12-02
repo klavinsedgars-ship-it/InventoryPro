@@ -13,12 +13,14 @@ import {
   Cog,
   Search,
   Image as ImageIcon,
-  FileStack
+  FileStack,
+  ClipboardList
 } from "lucide-react";
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Products', href: '/products', icon: Package },
+  { name: 'Orders', href: '/orders', icon: ClipboardList },
   { name: 'Analytics', href: '/marketplaces', icon: ShoppingCart },
   { name: 'TME Sync', href: '/sync', icon: RefreshCw },
   { name: 'TME Browser', href: '/tme-browser', icon: Search },
