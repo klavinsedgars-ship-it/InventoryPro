@@ -3361,7 +3361,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Send to eBay if configured
-      let ebayResult = { success: true, error: undefined as string | undefined };
+      let ebayResult: { success: boolean; error?: string } = { success: true };
       if (thread.marketplace === 'ebay' && thread.itemId && ebayOAuth.isOAuthConfigured()) {
         ebayResult = await ebayMessagesApi.sendMessageToPartner(
           thread.itemId,
@@ -3470,8 +3470,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             marketplaceMessageId: msg.messageId,
             senderUsername: msg.sender,
             senderEmail: msg.senderEmail,
-            status: 'delivered',
-            createdAt: new Date(msg.creationDate)
+            status: 'delivered'
           });
         }
       }
@@ -3817,7 +3816,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Send to eBay
-      let ebayResult = { success: true, error: undefined as string | undefined };
+      let ebayResult: { success: boolean; error?: string } = { success: true };
       if (order.marketplace === 'ebay' && ebayOAuth.isOAuthConfigured()) {
         // Get first item's ID for the message
         const items = await storage.getOrderItems(orderId);

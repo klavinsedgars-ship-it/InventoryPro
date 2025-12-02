@@ -1092,9 +1092,13 @@ export class DatabaseStorage implements IStorage {
     
     // Update thread's message count and last message time
     if (result[0]) {
+      const countResult = await db.select({ count: count() }).from(messages)
+        .where(eq(messages.threadId, message.threadId));
+      const msgCount = countResult[0]?.count || 0;
+      
       await db.update(messageThreads)
         .set({
-          messageCount: db.select({ count: count() }).from(messages).where(eq(messages.threadId, message.threadId)),
+          messageCount: msgCount,
           lastMessageAt: new Date(),
           updatedAt: new Date()
         })
