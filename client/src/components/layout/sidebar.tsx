@@ -1,10 +1,10 @@
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
-import { 
-  Package, 
-  LayoutDashboard, 
-  ShoppingCart, 
-  RefreshCw, 
+import {
+  Package,
+  LayoutDashboard,
+  ShoppingCart,
+  RefreshCw,
   Settings,
   Box,
   BarChart3,
@@ -18,7 +18,7 @@ import {
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Products', href: '/products', icon: Package },
-  { name: 'Marketplaces', href: '/marketplaces', icon: ShoppingCart },
+  { name: 'Analytics', href: '/marketplaces', icon: ShoppingCart },
   { name: 'TME Sync', href: '/sync', icon: RefreshCw },
   { name: 'TME Browser', href: '/tme-browser', icon: Search },
   { name: 'Configuration', href: '/configuration', icon: Cog },
@@ -56,8 +56,8 @@ export function Sidebar({ user }: SidebarProps) {
           {navigation.map((item) => {
             const isActive = location === item.href;
             return (
-              <Link 
-                key={item.name} 
+              <Link
+                key={item.name}
                 href={item.href}
                 className={cn(
                   "group flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors",
@@ -92,7 +92,7 @@ export function Sidebar({ user }: SidebarProps) {
                   <p className="text-xs text-gray-500 capitalize">{user.role}</p>
                 </div>
               </div>
-              <Link 
+              <Link
                 href="/settings"
                 className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
                 data-testid="nav-settings"
