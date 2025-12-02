@@ -328,8 +328,19 @@ export function Products({ user }: ProductsProps) {
 
   const bulkUnlistFromEbayMutation = useMutation({
     mutationFn: async (productIds: number[]) => {
+      // Filter to only products that are actually listed on eBay
+      const listedProductIds = productIds.filter(id => {
+        const product = products.find(p => p.id === id);
+        return product?.listedOnEbay && product?.ebayItemId;
+      });
+      
+      // If no products are listed, return early
+      if (listedProductIds.length === 0) {
+        return { successCount: 0, failCount: 0, total: 0, skipped: productIds.length };
+      }
+      
       const results = await Promise.all(
-        productIds.map(async (id) => {
+        listedProductIds.map(async (id) => {
           try {
             const response = await apiRequest("POST", "/api/ebay/unlist", { productId: id });
             return { id, success: true, data: await response.json() };
@@ -339,20 +350,26 @@ export function Products({ user }: ProductsProps) {
         })
       );
       const successCount = results.filter(r => r.success && r.data?.success).length;
-      const failCount = results.length - successCount;
-      return { successCount, failCount, total: results.length };
+      const failCount = results.filter(r => !r.success || !r.data?.success).length;
+      return { successCount, failCount, total: listedProductIds.length, skipped: productIds.length - listedProductIds.length };
     },
     onSuccess: (data: any) => {
-      if (data.successCount > 0) {
+      if (data.total === 0) {
         toast({
-          title: "Bulk Unlist Completed",
-          description: `${data.successCount} of ${data.total} products unlisted from eBay.`,
+          title: "No Products to Unlist",
+          description: "None of the selected products were listed on eBay.",
+        });
+      } else if (data.successCount > 0) {
+        toast({
+          title: "Products Unlisted",
+          description: `Successfully unlisted ${data.successCount} product${data.successCount > 1 ? 's' : ''} from eBay.`,
         });
       }
+      // Only show error if there were actual failures (not just skipped)
       if (data.failCount > 0) {
         toast({
           title: "Some Unlists Failed",
-          description: `${data.failCount} products failed to unlist.`,
+          description: `${data.failCount} product${data.failCount > 1 ? 's' : ''} failed to unlist from eBay.`,
           variant: "destructive",
         });
       }
