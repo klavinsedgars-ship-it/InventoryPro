@@ -789,17 +789,68 @@ function CreateFulfillmentPolicyDialog({
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [handlingTime, setHandlingTime] = useState(1);
+  const [handlingTime, setHandlingTime] = useState(3);
   const [globalShipping, setGlobalShipping] = useState(false);
   const [createOnEbay, setCreateOnEbay] = useState(true);
+  
+  const [costType, setCostType] = useState("FLAT_RATE");
+  const [shippingCarrier, setShippingCarrier] = useState("Royal Mail");
+  const [shippingService, setShippingService] = useState("UK_RoyalMailSecondClassStandard");
+  const [firstItemCost, setFirstItemCost] = useState("0.00");
+  const [additionalItemCost, setAdditionalItemCost] = useState("0.00");
+  const [freeShipping, setFreeShipping] = useState(true);
+  
+  const [internationalShipping, setInternationalShipping] = useState(false);
+  const [intlShippingCarrier, setIntlShippingCarrier] = useState("Royal Mail");
+  const [intlShippingService, setIntlShippingService] = useState("UK_RoyalMailAirmailInternational");
+  const [intlFirstItemCost, setIntlFirstItemCost] = useState("3.99");
+  const [intlAdditionalItemCost, setIntlAdditionalItemCost] = useState("1.00");
+  
+  const [pickupDropOff, setPickupDropOff] = useState(false);
 
   const handleSubmit = () => {
+    const shippingOptions: any[] = [
+      {
+        optionType: "DOMESTIC",
+        costType: costType,
+        shippingServices: [
+          {
+            shippingCarrierCode: shippingCarrier,
+            shippingServiceCode: shippingService,
+            shippingCost: { value: freeShipping ? "0.00" : firstItemCost, currency: "GBP" },
+            additionalShippingCost: { value: additionalItemCost, currency: "GBP" },
+            freeShipping: freeShipping,
+            sortOrder: 1
+          }
+        ]
+      }
+    ];
+    
+    if (internationalShipping) {
+      shippingOptions.push({
+        optionType: "INTERNATIONAL",
+        costType: "FLAT_RATE",
+        shippingServices: [
+          {
+            shippingCarrierCode: intlShippingCarrier,
+            shippingServiceCode: intlShippingService,
+            shippingCost: { value: intlFirstItemCost, currency: "GBP" },
+            additionalShippingCost: { value: intlAdditionalItemCost, currency: "GBP" },
+            freeShipping: false,
+            sortOrder: 1
+          }
+        ]
+      });
+    }
+    
     onSubmit({
       name,
       description,
       handlingTime,
       globalShipping,
       createOnEbay,
+      shippingOptions,
+      pickupDropOff,
     });
     setOpen(false);
     setName("");
@@ -814,21 +865,21 @@ function CreateFulfillmentPolicyDialog({
           New Shipping Policy
         </Button>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Create Shipping Policy</DialogTitle>
           <DialogDescription>
             Create a new shipping/fulfillment policy for your eBay listings
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4">
+        <div className="space-y-6">
           <div>
             <Label htmlFor="name">Policy Name</Label>
             <Input
               id="name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g., UK Standard Shipping"
+              placeholder="e.g., Free Domestic Postage"
               data-testid="input-fulfillment-policy-name"
             />
           </div>
@@ -838,46 +889,260 @@ function CreateFulfillmentPolicyDialog({
               id="description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Describe this shipping policy..."
+              placeholder="Additional text to help identify this policy..."
               data-testid="input-fulfillment-policy-description"
             />
           </div>
-          <div>
-            <Label htmlFor="handlingTime">Handling Time (Days)</Label>
-            <Select value={String(handlingTime)} onValueChange={(v) => setHandlingTime(Number(v))}>
-              <SelectTrigger data-testid="select-handling-time">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="0">Same Day</SelectItem>
-                <SelectItem value="1">1 Day</SelectItem>
-                <SelectItem value="2">2 Days</SelectItem>
-                <SelectItem value="3">3 Days</SelectItem>
-                <SelectItem value="5">5 Days</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex items-center justify-between">
-            <div>
-              <Label>Global Shipping Program</Label>
-              <p className="text-sm text-gray-500">Enable eBay Global Shipping</p>
+          
+          <div className="border-t pt-4">
+            <h4 className="font-semibold mb-3">Domestic Postage</h4>
+            <div className="space-y-4">
+              <div>
+                <Label>Cost Type</Label>
+                <Select value={costType} onValueChange={setCostType}>
+                  <SelectTrigger data-testid="select-cost-type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="FLAT_RATE">Flat: same cost to all buyers</SelectItem>
+                    <SelectItem value="CALCULATED">Calculated: cost varies by buyer location</SelectItem>
+                    <SelectItem value="NOT_SPECIFIED">No postage: local pickup only</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              {costType !== "NOT_SPECIFIED" && (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label>Shipping Carrier</Label>
+                      <Select value={shippingCarrier} onValueChange={setShippingCarrier}>
+                        <SelectTrigger data-testid="select-shipping-carrier">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Royal Mail">Royal Mail</SelectItem>
+                          <SelectItem value="Parcelforce">Parcelforce</SelectItem>
+                          <SelectItem value="DPD">DPD</SelectItem>
+                          <SelectItem value="Hermes">Evri (Hermes)</SelectItem>
+                          <SelectItem value="UPS">UPS</SelectItem>
+                          <SelectItem value="FedEx">FedEx</SelectItem>
+                          <SelectItem value="Other">Other</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Shipping Service</Label>
+                      <Select value={shippingService} onValueChange={setShippingService}>
+                        <SelectTrigger data-testid="select-shipping-service">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="UK_RoyalMailSecondClassStandard">Royal Mail 2nd Class (2-3 days)</SelectItem>
+                          <SelectItem value="UK_RoyalMailFirstClassStandard">Royal Mail 1st Class (1-2 days)</SelectItem>
+                          <SelectItem value="UK_RoyalMailSecondClassRecorded">Royal Mail 2nd Class Signed</SelectItem>
+                          <SelectItem value="UK_RoyalMailFirstClassRecorded">Royal Mail 1st Class Signed</SelectItem>
+                          <SelectItem value="UK_RoyalMailSpecialDeliveryNextDay">Special Delivery Next Day</SelectItem>
+                          <SelectItem value="UK_RoyalMailSpecialDelivery9am">Special Delivery 9am</SelectItem>
+                          <SelectItem value="UK_Parcelforce48">Parcelforce 48</SelectItem>
+                          <SelectItem value="UK_Parcelforce24">Parcelforce 24</SelectItem>
+                          <SelectItem value="UK_OtherCourier">Other Courier</SelectItem>
+                          <SelectItem value="UK_OtherCourier3Days">Other Courier (3 days)</SelectItem>
+                          <SelectItem value="UK_OtherCourier5Days">Other Courier (5 days)</SelectItem>
+                          <SelectItem value="UK_OtherCourier7Days">Other Courier (up to 7 days)</SelectItem>
+                          <SelectItem value="UK_CollectPlusTracked">Collect+ Tracked</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                    <div>
+                      <Label>Offer Free Postage</Label>
+                      <p className="text-sm text-gray-500">Entice buyers with free shipping</p>
+                    </div>
+                    <Switch
+                      checked={freeShipping}
+                      onCheckedChange={setFreeShipping}
+                      data-testid="switch-free-shipping"
+                    />
+                  </div>
+                  
+                  {!freeShipping && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label>Buyer Pays (First Item) £</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={firstItemCost}
+                          onChange={(e) => setFirstItemCost(e.target.value)}
+                          placeholder="0.00"
+                          data-testid="input-first-item-cost"
+                        />
+                      </div>
+                      <div>
+                        <Label>Each Additional Item £</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={additionalItemCost}
+                          onChange={(e) => setAdditionalItemCost(e.target.value)}
+                          placeholder="0.00"
+                          data-testid="input-additional-item-cost"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
-            <Switch
-              checked={globalShipping}
-              onCheckedChange={setGlobalShipping}
-              data-testid="switch-global-shipping"
-            />
           </div>
-          <div className="flex items-center justify-between">
-            <div>
-              <Label>Create on eBay</Label>
-              <p className="text-sm text-gray-500">Also create this policy on eBay</p>
+          
+          <div className="border-t pt-4">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h4 className="font-semibold">International Postage</h4>
+                <p className="text-sm text-gray-500">Ship to buyers outside the UK</p>
+              </div>
+              <Switch
+                checked={internationalShipping}
+                onCheckedChange={setInternationalShipping}
+                data-testid="switch-international-shipping"
+              />
             </div>
-            <Switch
-              checked={createOnEbay}
-              onCheckedChange={setCreateOnEbay}
-              data-testid="switch-create-fulfillment-on-ebay"
-            />
+            
+            {internationalShipping && (
+              <div className="space-y-4 pl-4 border-l-2 border-primary">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label>International Carrier</Label>
+                    <Select value={intlShippingCarrier} onValueChange={setIntlShippingCarrier}>
+                      <SelectTrigger data-testid="select-intl-carrier">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Royal Mail">Royal Mail</SelectItem>
+                        <SelectItem value="Parcelforce">Parcelforce</SelectItem>
+                        <SelectItem value="DHL">DHL</SelectItem>
+                        <SelectItem value="UPS">UPS</SelectItem>
+                        <SelectItem value="FedEx">FedEx</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>International Service</Label>
+                    <Select value={intlShippingService} onValueChange={setIntlShippingService}>
+                      <SelectTrigger data-testid="select-intl-service">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="UK_RoyalMailAirmailInternational">Royal Mail International Standard</SelectItem>
+                        <SelectItem value="UK_RoyalMailInternationalTracked">Royal Mail International Tracked</SelectItem>
+                        <SelectItem value="UK_RoyalMailInternationalSigned">Royal Mail International Signed</SelectItem>
+                        <SelectItem value="UK_ParcelForceInternationalDatapost">Parcelforce Global Express</SelectItem>
+                        <SelectItem value="UK_ParcelForceIrelandexpress">Parcelforce Ireland Express</SelectItem>
+                        <SelectItem value="UK_ParcelForceEuro48">Parcelforce Euro 48</SelectItem>
+                        <SelectItem value="UK_OtherCourierOrDeliveryInternational">Other International Courier</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label>International Cost (First Item) £</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={intlFirstItemCost}
+                      onChange={(e) => setIntlFirstItemCost(e.target.value)}
+                      placeholder="3.99"
+                      data-testid="input-intl-first-cost"
+                    />
+                  </div>
+                  <div>
+                    <Label>Each Additional Item £</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={intlAdditionalItemCost}
+                      onChange={(e) => setIntlAdditionalItemCost(e.target.value)}
+                      placeholder="1.00"
+                      data-testid="input-intl-additional-cost"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+          
+          <div className="border-t pt-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="font-semibold">Collection in Person</h4>
+                <p className="text-sm text-gray-500">Allow buyers to pick up items</p>
+              </div>
+              <Switch
+                checked={pickupDropOff}
+                onCheckedChange={setPickupDropOff}
+                data-testid="switch-pickup"
+              />
+            </div>
+          </div>
+          
+          <div className="border-t pt-4">
+            <h4 className="font-semibold mb-3">Preferences</h4>
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="handlingTime">Dispatch Time</Label>
+                <Select value={String(handlingTime)} onValueChange={(v) => setHandlingTime(Number(v))}>
+                  <SelectTrigger data-testid="select-handling-time">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">Same business day</SelectItem>
+                    <SelectItem value="1">1 working day</SelectItem>
+                    <SelectItem value="2">2 working days</SelectItem>
+                    <SelectItem value="3">3 working days</SelectItem>
+                    <SelectItem value="4">4 working days</SelectItem>
+                    <SelectItem value="5">5 working days</SelectItem>
+                    <SelectItem value="10">10 working days</SelectItem>
+                    <SelectItem value="15">15 working days</SelectItem>
+                    <SelectItem value="20">20 working days</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label>Global Shipping Program</Label>
+                  <p className="text-sm text-gray-500">Let eBay handle international shipping</p>
+                </div>
+                <Switch
+                  checked={globalShipping}
+                  onCheckedChange={setGlobalShipping}
+                  data-testid="switch-global-shipping"
+                />
+              </div>
+            </div>
+          </div>
+          
+          <div className="border-t pt-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label>Create on eBay</Label>
+                <p className="text-sm text-gray-500">Also create this policy on eBay</p>
+              </div>
+              <Switch
+                checked={createOnEbay}
+                onCheckedChange={setCreateOnEbay}
+                data-testid="switch-create-fulfillment-on-ebay"
+              />
+            </div>
           </div>
         </div>
         <DialogFooter>

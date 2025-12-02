@@ -913,8 +913,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { 
         name, description, marketplaceId, handlingTime, 
-        shippingOptions, shipToLocations, globalShipping, createOnEbay 
+        shippingOptions, shipToLocations, globalShipping, createOnEbay, pickupDropOff 
       } = req.body;
+      
+      const parsedShippingOptions = Array.isArray(shippingOptions) 
+        ? shippingOptions 
+        : (shippingOptions ? JSON.parse(shippingOptions) : undefined);
+      
+      const parsedShipToLocations = typeof shipToLocations === 'object' && !Array.isArray(shipToLocations)
+        ? shipToLocations
+        : (shipToLocations ? JSON.parse(shipToLocations) : undefined);
       
       if (createOnEbay) {
         const ebayPolicy = await ebayAccountApi.createFulfillmentPolicy({
@@ -922,9 +930,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           description,
           marketplaceId,
           handlingTime: handlingTime ? { value: handlingTime, unit: "DAY" } : undefined,
-          shippingOptions: shippingOptions ? JSON.parse(shippingOptions) : undefined,
-          shipToLocations: shipToLocations ? JSON.parse(shipToLocations) : undefined,
-          globalShipping
+          shippingOptions: parsedShippingOptions,
+          shipToLocations: parsedShipToLocations,
+          globalShipping,
+          pickupDropOff
         });
         
         if (!ebayPolicy) {
@@ -952,8 +961,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           description,
           marketplaceId: marketplaceId || "EBAY_GB",
           handlingTime: handlingTime || 1,
-          shippingOptions: shippingOptions || "[]",
-          shipToLocations: shipToLocations || "{}",
+          shippingOptions: JSON.stringify(parsedShippingOptions || []),
+          shipToLocations: JSON.stringify(parsedShipToLocations || {}),
           globalShipping: globalShipping ?? false,
           syncedFromEbay: false
         });

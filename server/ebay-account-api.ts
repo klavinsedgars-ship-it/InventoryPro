@@ -308,6 +308,7 @@ export class EbayAccountApiService {
         shippingCarrierCode: string;
         shippingServiceCode: string;
         shippingCost?: { value: string; currency: string };
+        additionalShippingCost?: { value: string; currency: string };
         freeShipping?: boolean;
         sortOrder?: number;
       }>;
@@ -316,9 +317,10 @@ export class EbayAccountApiService {
       regionIncluded?: Array<{ regionName: string; regionType: string }>;
     };
     globalShipping?: boolean;
+    pickupDropOff?: boolean;
   }): Promise<EbayFulfillmentPolicyResponse | null> {
     try {
-      const requestBody = {
+      const requestBody: any = {
         name: policy.name,
         description: policy.description,
         marketplaceId: policy.marketplaceId || this.defaultMarketplaceId,
@@ -344,6 +346,10 @@ export class EbayAccountApiService {
         },
         globalShipping: policy.globalShipping || false
       };
+      
+      if (policy.pickupDropOff) {
+        requestBody.pickupDropOff = true;
+      }
 
       return await this.makeRequest<EbayFulfillmentPolicyResponse>(
         "POST",
