@@ -844,6 +844,11 @@ function CreateFulfillmentPolicyDialog({
       }
     ];
 
+    // Countries to always exclude from shipping (Belarus due to shipping restrictions)
+    const excludedCountries = [
+      { regionName: "BY", regionType: "COUNTRY" }  // Belarus
+    ];
+
     if (internationalShipping) {
       // Map destination region to eBay's supported region identifiers
       // eBay UK only accepts these predefined regions, not individual country codes
@@ -867,7 +872,8 @@ function CreateFulfillmentPolicyDialog({
             freeShipping: false,
             sortOrder: 1,
             shipToLocations: {
-              regionIncluded: getRegionIncluded(intlShipTo)
+              regionIncluded: getRegionIncluded(intlShipTo),
+              regionExcluded: excludedCountries
             }
           }
         ]
@@ -875,12 +881,14 @@ function CreateFulfillmentPolicyDialog({
     }
 
     // Policy-level ship-to locations (where items can be shipped)
+    // Always exclude Belarus from all shipping policies
     const shipToLocations = {
       regionIncluded: internationalShipping 
         ? intlShipTo === "Worldwide"
           ? [{ regionName: "Worldwide", regionType: "WORLDWIDE" }]
           : [{ regionName: "Europe", regionType: "WORLD_REGION" }]
-        : [{ regionName: "GB", regionType: "COUNTRY" }]
+        : [{ regionName: "GB", regionType: "COUNTRY" }],
+      regionExcluded: excludedCountries
     };
 
     onSubmit({
