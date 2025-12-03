@@ -960,8 +960,7 @@ function CreateFulfillmentPolicyDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="FLAT_RATE">Flat: same cost to all buyers</SelectItem>
-                    <SelectItem value="CALCULATED">Calculated: cost varies by buyer location</SelectItem>
+                    <SelectItem value="FLAT_RATE">Flat Rate: same cost to all buyers</SelectItem>
                     <SelectItem value="NOT_SPECIFIED">No postage: local pickup only</SelectItem>
                   </SelectContent>
                 </Select>
@@ -1002,11 +1001,9 @@ function CreateFulfillmentPolicyDialog({
                           <SelectItem value="UK_RoyalMailSpecialDelivery9am">Special Delivery 9am</SelectItem>
                           <SelectItem value="UK_Parcelforce48">Parcelforce 48</SelectItem>
                           <SelectItem value="UK_Parcelforce24">Parcelforce 24</SelectItem>
-                          <SelectItem value="UK_OtherCourier">Other Courier</SelectItem>
-                          <SelectItem value="UK_OtherCourier3Days">Other Courier (3 days)</SelectItem>
-                          <SelectItem value="UK_OtherCourier5Days">Other Courier (5 days)</SelectItem>
-                          <SelectItem value="UK_OtherCourier7Days">Other Courier (up to 7 days)</SelectItem>
                           <SelectItem value="UK_CollectPlusTracked">Collect+ Tracked</SelectItem>
+                          <SelectItem value="UK_SellersStandardRate">Standard Delivery</SelectItem>
+                          <SelectItem value="UK_EconomyShippingFromOutside">Economy Delivery</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
