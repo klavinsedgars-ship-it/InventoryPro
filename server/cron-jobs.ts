@@ -458,6 +458,62 @@ async function syncToEbay(diffs: DiffResult[]): Promise<{
 }
 
 /**
+ * Check for products that need relisting (ended but now have stock)
+ * This is a separate check from the diff-based sync to catch products
+ * where the stock didn't change but the product needs to be relisted
+ */
+async function checkAndRelistBackInStock(): Promise<{ relisted: number; failed: number }> {
+  const result = { relisted: 0, failed: 0 };
+  
+  try {
+    // Get all products that have an eBay Item ID but are not currently listed
+    const products = await storage.getProducts();
+    const productsToRelist = products.filter(p => 
+      p.ebayItemId && // Has been listed before
+      !p.listedOnEbay && // Currently ended/unlisted
+      (p.stock || 0) > 0 // Has stock available
+    );
+    
+    if (productsToRelist.length === 0) {
+      console.log('📦 No products need relisting (all ended products still out of stock)');
+      return result;
+    }
+    
+    console.log(`🔄 Found ${productsToRelist.length} products to relist (back in stock)`);
+    
+    for (const product of productsToRelist) {
+      try {
+        console.log(`   📦 Relisting "${product.name}" (${product.sku}) - stock: ${product.stock}`);
+        
+        // Use listProduct with forceNew=true to create a new listing
+        const listResult = await ebayApi.listProduct(product.id, {}, true);
+        
+        if (listResult.success) {
+          result.relisted++;
+          console.log(`   ✅ Re-listed "${product.name}" (${product.sku}) - New Item ID: ${listResult.itemId}`);
+        } else {
+          result.failed++;
+          console.log(`   ❌ Failed to re-list "${product.name}": ${listResult.message}`);
+        }
+      } catch (error) {
+        result.failed++;
+        console.log(`   ❌ Error re-listing "${product.name}": ${(error as Error).message}`);
+      }
+      
+      // Delay between listing calls to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    
+    console.log(`✅ Relist check complete: ${result.relisted} relisted, ${result.failed} failed`);
+    return result;
+    
+  } catch (error) {
+    console.error('❌ Relist check failed:', error);
+    return result;
+  }
+}
+
+/**
  * Main daily sync function
  * Fetches local SKUs, compares with TME, queues only changed items, syncs to eBay
  */
@@ -509,6 +565,12 @@ export async function runDailySync(): Promise<{
     
     // Step 5: Sync changes to eBay in batches
     const ebayResult = await syncToEbay(diffs);
+    
+    // Step 6: Check for products that need relisting (previously ended, now back in stock)
+    // This catches products that weren't in the diffs because stock didn't change
+    const relistResult = await checkAndRelistBackInStock();
+    ebayResult.relisted += relistResult.relisted;
+    ebayResult.failed += relistResult.failed;
     
     const duration = Math.round((Date.now() - startTime) / 1000);
     

@@ -1224,10 +1224,11 @@ export class EbayApiService {
 
       console.log("eBay unlisting successful:", { itemId: product.ebayItemId, productId });
 
-      // Update product in database
+      // Update product in database - KEEP ebayItemId so we can relist when stock returns
+      // Only set listedOnEbay to false to indicate the listing is currently ended
       await storage.updateProduct(productId, {
-        listedOnEbay: false,
-        ebayItemId: null
+        listedOnEbay: false
+        // Don't clear ebayItemId - we need it to know this product was previously listed
       });
 
       await storage.createSyncLog({
