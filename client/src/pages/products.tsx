@@ -481,6 +481,7 @@ export function Products({ user }: ProductsProps) {
 
     // Marketplace filter
     const matchesMarketplace = marketplaceFilter === "all" ||
+      (marketplaceFilter === "listed" && (product.listedOnEbay || product.listedOnAmazon)) ||
       (marketplaceFilter === "ebay" && product.listedOnEbay) ||
       (marketplaceFilter === "amazon" && product.listedOnAmazon) ||
       (marketplaceFilter === "unlisted" && !product.listedOnEbay && !product.listedOnAmazon);
@@ -609,13 +610,14 @@ export function Products({ user }: ProductsProps) {
               </Select>
 
               <Select value={marketplaceFilter} onValueChange={setMarketplaceFilter}>
-                <SelectTrigger className="w-24 h-9" data-testid="select-marketplace">
+                <SelectTrigger className="w-28 h-9" data-testid="select-marketplace">
                   <SelectValue placeholder="Market" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="ebay">eBay</SelectItem>
-                  <SelectItem value="amazon">Amazon</SelectItem>
+                  <SelectItem value="all">All Markets</SelectItem>
+                  <SelectItem value="listed">Listed Only</SelectItem>
+                  <SelectItem value="ebay">eBay Only</SelectItem>
+                  <SelectItem value="amazon">Amazon Only</SelectItem>
                   <SelectItem value="unlisted">Unlisted</SelectItem>
                 </SelectContent>
               </Select>
