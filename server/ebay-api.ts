@@ -1470,6 +1470,215 @@ export class EbayApiService {
       message: `Bulk update: ${result.succeeded} succeeded, ${result.failed} failed`
     };
   }
+  /**
+   * Get eBay shipping service details using GeteBayDetails Trading API
+   * Returns valid domestic and international shipping services for the UK marketplace
+   */
+  async getShippingServices(): Promise<{
+    success: boolean;
+    domestic: Array<{
+      code: string;
+      description: string;
+      carrier: string;
+      shippingTimeMin: number;
+      shippingTimeMax: number;
+    }>;
+    international: Array<{
+      code: string;
+      description: string;
+      carrier: string;
+      shippingTimeMin: number;
+      shippingTimeMax: number;
+    }>;
+    error?: string;
+  }> {
+    try {
+      const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GeteBayDetailsRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <DetailName>ShippingServiceDetails</DetailName>
+</GeteBayDetailsRequest>`;
+
+      const response = await this.makeTradingApiRequest(xml, 'GeteBayDetails');
+      
+      // Parse the XML response
+      const domestic: Array<{
+        code: string;
+        description: string;
+        carrier: string;
+        shippingTimeMin: number;
+        shippingTimeMax: number;
+      }> = [];
+      const international: Array<{
+        code: string;
+        description: string;
+        carrier: string;
+        shippingTimeMin: number;
+        shippingTimeMax: number;
+      }> = [];
+
+      // Simple XML parsing for shipping services
+      const serviceRegex = /<ShippingServiceDetails>([\s\S]*?)<\/ShippingServiceDetails>/g;
+      let match;
+      
+      while ((match = serviceRegex.exec(response)) !== null) {
+        const serviceBlock = match[1];
+        
+        // Check if valid for selling flow
+        const validMatch = serviceBlock.match(/<ValidForSellingFlow>(true|false)<\/ValidForSellingFlow>/);
+        if (!validMatch || validMatch[1] !== 'true') continue;
+        
+        // Extract service details
+        const codeMatch = serviceBlock.match(/<ShippingService>([^<]+)<\/ShippingService>/);
+        const descMatch = serviceBlock.match(/<Description>([^<]+)<\/Description>/);
+        const carrierMatch = serviceBlock.match(/<ShippingCarrier>([^<]+)<\/ShippingCarrier>/);
+        const intlMatch = serviceBlock.match(/<InternationalService>(true|false)<\/InternationalService>/);
+        const timeMinMatch = serviceBlock.match(/<ShippingTimeMin>(\d+)<\/ShippingTimeMin>/);
+        const timeMaxMatch = serviceBlock.match(/<ShippingTimeMax>(\d+)<\/ShippingTimeMax>/);
+        
+        if (codeMatch && descMatch) {
+          const service = {
+            code: codeMatch[1],
+            description: descMatch[1],
+            carrier: carrierMatch ? carrierMatch[1] : 'Other',
+            shippingTimeMin: timeMinMatch ? parseInt(timeMinMatch[1]) : 1,
+            shippingTimeMax: timeMaxMatch ? parseInt(timeMaxMatch[1]) : 5
+          };
+          
+          if (intlMatch && intlMatch[1] === 'true') {
+            international.push(service);
+          } else {
+            domestic.push(service);
+          }
+        }
+      }
+
+      console.log(`📦 Fetched ${domestic.length} domestic and ${international.length} international shipping services`);
+      
+      return {
+        success: true,
+        domestic,
+        international
+      };
+    } catch (error) {
+      console.error('Failed to get shipping services:', error);
+      return {
+        success: false,
+        domestic: [],
+        international: [],
+        error: (error as Error).message
+      };
+    }
+  }
+
+  /**
+   * Get eBay shipping locations/regions using GeteBayDetails Trading API
+   */
+  async getShippingLocations(): Promise<{
+    success: boolean;
+    regions: Array<{
+      code: string;
+      description: string;
+    }>;
+    error?: string;
+  }> {
+    try {
+      const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GeteBayDetailsRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <DetailName>ShippingLocationDetails</DetailName>
+</GeteBayDetailsRequest>`;
+
+      const response = await this.makeTradingApiRequest(xml, 'GeteBayDetails');
+      
+      const regions: Array<{ code: string; description: string }> = [];
+
+      // Parse shipping locations
+      const locationRegex = /<ShippingLocationDetails>([\s\S]*?)<\/ShippingLocationDetails>/g;
+      let match;
+      
+      while ((match = locationRegex.exec(response)) !== null) {
+        const locationBlock = match[1];
+        
+        const codeMatch = locationBlock.match(/<ShippingLocation>([^<]+)<\/ShippingLocation>/);
+        const descMatch = locationBlock.match(/<Description>([^<]+)<\/Description>/);
+        
+        if (codeMatch) {
+          regions.push({
+            code: codeMatch[1],
+            description: descMatch ? descMatch[1] : codeMatch[1]
+          });
+        }
+      }
+
+      console.log(`🌍 Fetched ${regions.length} shipping locations`);
+      
+      return {
+        success: true,
+        regions
+      };
+    } catch (error) {
+      console.error('Failed to get shipping locations:', error);
+      return {
+        success: false,
+        regions: [],
+        error: (error as Error).message
+      };
+    }
+  }
+
+  /**
+   * Get dispatch time options using GeteBayDetails Trading API
+   */
+  async getDispatchTimeOptions(): Promise<{
+    success: boolean;
+    options: Array<{
+      value: number;
+      description: string;
+    }>;
+    error?: string;
+  }> {
+    try {
+      const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GeteBayDetailsRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <DetailName>DispatchTimeMaxDetails</DetailName>
+</GeteBayDetailsRequest>`;
+
+      const response = await this.makeTradingApiRequest(xml, 'GeteBayDetails');
+      
+      const options: Array<{ value: number; description: string }> = [];
+
+      // Parse dispatch time options
+      const optionRegex = /<DispatchTimeMaxDetails>([\s\S]*?)<\/DispatchTimeMaxDetails>/g;
+      let match;
+      
+      while ((match = optionRegex.exec(response)) !== null) {
+        const optionBlock = match[1];
+        
+        const valueMatch = optionBlock.match(/<DispatchTimeMax>(\d+)<\/DispatchTimeMax>/);
+        const descMatch = optionBlock.match(/<Description>([^<]+)<\/Description>/);
+        
+        if (valueMatch) {
+          options.push({
+            value: parseInt(valueMatch[1]),
+            description: descMatch ? descMatch[1] : `${valueMatch[1]} working days`
+          });
+        }
+      }
+
+      console.log(`⏱️ Fetched ${options.length} dispatch time options`);
+      
+      return {
+        success: true,
+        options
+      };
+    } catch (error) {
+      console.error('Failed to get dispatch time options:', error);
+      return {
+        success: false,
+        options: [],
+        error: (error as Error).message
+      };
+    }
+  }
 }
 
 export const ebayApi = new EbayApiService();

@@ -764,6 +764,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get available shipping services from eBay
+  app.get("/api/ebay/shipping-services", requireAuth, async (req, res) => {
+    try {
+      const result = await ebayApi.getShippingServices();
+      res.json(result);
+    } catch (error) {
+      console.error("Failed to get shipping services:", error);
+      res.status(500).json({ 
+        success: false, 
+        domestic: [],
+        international: [],
+        error: (error as Error).message || "Failed to get shipping services"
+      });
+    }
+  });
+
+  // Get available shipping locations/regions from eBay
+  app.get("/api/ebay/shipping-locations", requireAuth, async (req, res) => {
+    try {
+      const result = await ebayApi.getShippingLocations();
+      res.json(result);
+    } catch (error) {
+      console.error("Failed to get shipping locations:", error);
+      res.status(500).json({ 
+        success: false, 
+        regions: [],
+        error: (error as Error).message || "Failed to get shipping locations"
+      });
+    }
+  });
+
+  // Get dispatch time options from eBay
+  app.get("/api/ebay/dispatch-times", requireAuth, async (req, res) => {
+    try {
+      const result = await ebayApi.getDispatchTimeOptions();
+      res.json(result);
+    } catch (error) {
+      console.error("Failed to get dispatch time options:", error);
+      res.status(500).json({ 
+        success: false, 
+        options: [],
+        error: (error as Error).message || "Failed to get dispatch time options"
+      });
+    }
+  });
+
   // Get all local policies
   app.get("/api/ebay/business-policies", requireAuth, async (req, res) => {
     try {
