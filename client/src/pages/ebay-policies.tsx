@@ -882,11 +882,27 @@ function CreateFulfillmentPolicyDialog({
             shippingCost: { value: intlFirstItemCost, currency: "GBP" },
             additionalShippingCost: { value: intlAdditionalItemCost, currency: "GBP" },
             freeShipping: false,
-            sortOrder: 1
+            sortOrder: 1,
+            shipToLocations: {
+              regionIncluded: [
+                { regionName: "Europe", regionType: "WORLD_REGION" },
+                { regionName: "Worldwide", regionType: "WORLDWIDE" }
+              ]
+            }
           }
         ]
       });
     }
+
+    const shipToLocations = {
+      regionIncluded: internationalShipping 
+        ? [
+            { regionName: "GB", regionType: "COUNTRY" },
+            { regionName: "Europe", regionType: "WORLD_REGION" },
+            { regionName: "Worldwide", regionType: "WORLDWIDE" }
+          ]
+        : [{ regionName: "GB", regionType: "COUNTRY" }]
+    };
 
     onSubmit({
       name,
@@ -895,6 +911,7 @@ function CreateFulfillmentPolicyDialog({
       globalShipping,
       createOnEbay,
       shippingOptions,
+      shipToLocations,
       pickupDropOff,
     });
     onOpenChange(false);
