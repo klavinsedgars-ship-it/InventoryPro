@@ -41,11 +41,11 @@ export interface PackagePriceResult extends PriceCalculationResult {
 // Core pricing configuration based on specification
 export const PRICING_CONFIG: PricingConfig = {
   tiers: [
-    // Low-cost component tiers for resistors, capacitors, etc.
-    { min: 0.001, max: 0.05, multiplier: 15.00, label: "Micro Components", marginPercentage: 1400 },
-    { min: 0.05, max: 0.25, multiplier: 8.00, label: "Small Components", marginPercentage: 700 },
-    { min: 0.25, max: 1.00, multiplier: 6.50, label: "Low Cost", marginPercentage: 550 },
-    { min: 1.00, max: 5.00, multiplier: 6.00, label: "Ultra High", marginPercentage: 500 },
+    // Low-cost component tiers for resistors, capacitors, etc. (reduced margins)
+    { min: 0.001, max: 0.05, multiplier: 10.00, label: "Micro Components", marginPercentage: 900 },
+    { min: 0.05, max: 0.25, multiplier: 6.00, label: "Small Components", marginPercentage: 500 },
+    { min: 0.25, max: 1.00, multiplier: 5.00, label: "Low Cost", marginPercentage: 400 },
+    { min: 1.00, max: 5.00, multiplier: 4.00, label: "Budget", marginPercentage: 300 },
     { min: 5.01, max: 9.99, multiplier: 4.00, label: "Very High", marginPercentage: 300 },
     { min: 10.00, max: 15.00, multiplier: 3.00, label: "High", marginPercentage: 200 },
     { min: 15.01, max: 25.00, multiplier: 2.50, label: "Medium-High", marginPercentage: 150 },
