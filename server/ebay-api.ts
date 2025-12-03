@@ -423,11 +423,24 @@ export class EbayApiService {
             };
           }
           
-          // If actual error, parse and report it
-          const errorMatch = response.match(/<ShortMessage>(.*?)<\/ShortMessage>/) ||
-                           response.match(/<LongMessage>(.*?)<\/LongMessage>/) ||
-                           response.match(/<ErrorCode>(\d+)<\/ErrorCode>/);
-          const errorMessage = errorMatch ? errorMatch[1] : 'Unknown eBay API error';
+          // If actual error, parse and report it - find actual Error-level messages, not just Warnings
+          // Look for errors with SeverityCode=Error (not Warning)
+          const errorBlockRegex = /<Errors>[\s\S]*?<SeverityCode>Error<\/SeverityCode>[\s\S]*?<\/Errors>/g;
+          const errorBlocks = response.match(errorBlockRegex);
+          
+          let errorMessage = 'Unknown eBay API error';
+          if (errorBlocks && errorBlocks.length > 0) {
+            // Extract the short message from the first actual error
+            const shortMsgMatch = errorBlocks[0].match(/<ShortMessage>(.*?)<\/ShortMessage>/);
+            const longMsgMatch = errorBlocks[0].match(/<LongMessage>(.*?)<\/LongMessage>/);
+            errorMessage = shortMsgMatch ? shortMsgMatch[1] : (longMsgMatch ? longMsgMatch[1] : errorMessage);
+          } else {
+            // Fallback: get first message if no Error-level found
+            const fallbackMatch = response.match(/<ShortMessage>(.*?)<\/ShortMessage>/) ||
+                                 response.match(/<LongMessage>(.*?)<\/LongMessage>/);
+            errorMessage = fallbackMatch ? fallbackMatch[1] : errorMessage;
+          }
+          
           console.log("eBay API Error - Full response:", response);
           throw new Error(`eBay listing failed: ${errorMessage}`);
         }
