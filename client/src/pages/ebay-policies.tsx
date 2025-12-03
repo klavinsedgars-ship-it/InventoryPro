@@ -845,39 +845,14 @@ function CreateFulfillmentPolicyDialog({
     ];
 
     if (internationalShipping) {
-      // Map destination region to proper eBay region format
-      const regionMapping: { [key: string]: { regionName: string; regionType: string }[] } = {
-        "Europe": [{ regionName: "Europe", regionType: "WORLD_REGION" }],
-        "Worldwide": [{ regionName: "Worldwide", regionType: "WORLDWIDE" }],
-        "EU": [
-          { regionName: "AT", regionType: "COUNTRY" },
-          { regionName: "BE", regionType: "COUNTRY" },
-          { regionName: "BG", regionType: "COUNTRY" },
-          { regionName: "CY", regionType: "COUNTRY" },
-          { regionName: "CZ", regionType: "COUNTRY" },
-          { regionName: "DE", regionType: "COUNTRY" },
-          { regionName: "DK", regionType: "COUNTRY" },
-          { regionName: "EE", regionType: "COUNTRY" },
-          { regionName: "ES", regionType: "COUNTRY" },
-          { regionName: "FI", regionType: "COUNTRY" },
-          { regionName: "FR", regionType: "COUNTRY" },
-          { regionName: "GR", regionType: "COUNTRY" },
-          { regionName: "HR", regionType: "COUNTRY" },
-          { regionName: "HU", regionType: "COUNTRY" },
-          { regionName: "IE", regionType: "COUNTRY" },
-          { regionName: "IT", regionType: "COUNTRY" },
-          { regionName: "LT", regionType: "COUNTRY" },
-          { regionName: "LU", regionType: "COUNTRY" },
-          { regionName: "LV", regionType: "COUNTRY" },
-          { regionName: "MT", regionType: "COUNTRY" },
-          { regionName: "NL", regionType: "COUNTRY" },
-          { regionName: "PL", regionType: "COUNTRY" },
-          { regionName: "PT", regionType: "COUNTRY" },
-          { regionName: "RO", regionType: "COUNTRY" },
-          { regionName: "SE", regionType: "COUNTRY" },
-          { regionName: "SI", regionType: "COUNTRY" },
-          { regionName: "SK", regionType: "COUNTRY" }
-        ]
+      // Map destination region to eBay's supported region identifiers
+      // eBay UK only accepts these predefined regions, not individual country codes
+      const getRegionIncluded = (destination: string) => {
+        if (destination === "Worldwide") {
+          return [{ regionName: "Worldwide", regionType: "WORLDWIDE" }];
+        }
+        // For Europe and EU, use Europe region (covers all European countries)
+        return [{ regionName: "Europe", regionType: "WORLD_REGION" }];
       };
 
       shippingOptions.push({
@@ -892,19 +867,19 @@ function CreateFulfillmentPolicyDialog({
             freeShipping: false,
             sortOrder: 1,
             shipToLocations: {
-              regionIncluded: regionMapping[intlShipTo] || regionMapping["Europe"]
+              regionIncluded: getRegionIncluded(intlShipTo)
             }
           }
         ]
       });
     }
 
+    // Policy-level ship-to locations (where items can be shipped)
     const shipToLocations = {
       regionIncluded: internationalShipping 
-        ? [
-            { regionName: "GB", regionType: "COUNTRY" },
-            { regionName: intlShipTo === "EU" ? "Europe" : intlShipTo, regionType: intlShipTo === "Worldwide" ? "WORLDWIDE" : "WORLD_REGION" }
-          ]
+        ? intlShipTo === "Worldwide"
+          ? [{ regionName: "Worldwide", regionType: "WORLDWIDE" }]
+          : [{ regionName: "Europe", regionType: "WORLD_REGION" }]
         : [{ regionName: "GB", regionType: "COUNTRY" }]
     };
 
