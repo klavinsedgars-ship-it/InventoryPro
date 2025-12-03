@@ -841,15 +841,15 @@ function CreateFulfillmentPolicyDialog({
   const [costType, setCostType] = useState("FLAT_RATE");
   const [shippingCarrier, setShippingCarrier] = useState("Royal Mail");
   const [shippingService, setShippingService] = useState("UK_RoyalMailSecondClassStandard");
-  const [firstItemCost, setFirstItemCost] = useState("0.00");
-  const [additionalItemCost, setAdditionalItemCost] = useState("0.00");
-  const [freeShipping, setFreeShipping] = useState(true);
+  const [firstItemCost, setFirstItemCost] = useState("3.50");
+  const [additionalItemCost, setAdditionalItemCost] = useState("0.50");
+  const [freeShipping, setFreeShipping] = useState(false);
 
   const [internationalShipping, setInternationalShipping] = useState(false);
   const [intlShippingCarrier, setIntlShippingCarrier] = useState("Royal Mail");
-  const [intlShippingService, setIntlShippingService] = useState("UK_RoyalMailAirmailInternational");
-  const [intlFirstItemCost, setIntlFirstItemCost] = useState("3.99");
-  const [intlAdditionalItemCost, setIntlAdditionalItemCost] = useState("1.00");
+  const [intlShippingService, setIntlShippingService] = useState("UK_RoyalMailInternationalTracked");
+  const [intlFirstItemCost, setIntlFirstItemCost] = useState("9.99");
+  const [intlAdditionalItemCost, setIntlAdditionalItemCost] = useState("2.00");
 
   const [pickupDropOff, setPickupDropOff] = useState(false);
 
@@ -995,15 +995,15 @@ function CreateFulfillmentPolicyDialog({
                         <SelectContent>
                           <SelectItem value="UK_RoyalMailSecondClassStandard">Royal Mail 2nd Class (2-3 days)</SelectItem>
                           <SelectItem value="UK_RoyalMailFirstClassStandard">Royal Mail 1st Class (1-2 days)</SelectItem>
-                          <SelectItem value="UK_RoyalMailSecondClassRecorded">Royal Mail 2nd Class Signed</SelectItem>
-                          <SelectItem value="UK_RoyalMailFirstClassRecorded">Royal Mail 1st Class Signed</SelectItem>
-                          <SelectItem value="UK_RoyalMailSpecialDeliveryNextDay">Special Delivery Next Day</SelectItem>
-                          <SelectItem value="UK_RoyalMailSpecialDelivery9am">Special Delivery 9am</SelectItem>
-                          <SelectItem value="UK_Parcelforce48">Parcelforce 48</SelectItem>
-                          <SelectItem value="UK_Parcelforce24">Parcelforce 24</SelectItem>
-                          <SelectItem value="UK_CollectPlusTracked">Collect+ Tracked</SelectItem>
-                          <SelectItem value="UK_SellersStandardRate">Standard Delivery</SelectItem>
-                          <SelectItem value="UK_EconomyShippingFromOutside">Economy Delivery</SelectItem>
+                          <SelectItem value="UK_RoyalMailTracked48">Royal Mail Tracked 48 (2 days)</SelectItem>
+                          <SelectItem value="UK_RoyalMailTracked24">Royal Mail Tracked 24 (1 day)</SelectItem>
+                          <SelectItem value="UK_RoyalMailSecondClassRecorded">Royal Mail 2nd Class Signed For</SelectItem>
+                          <SelectItem value="UK_RoyalMailFirstClassRecorded">Royal Mail 1st Class Signed For</SelectItem>
+                          <SelectItem value="UK_RoyalMailSpecialDeliveryNextDay">Special Delivery Guaranteed by 1pm</SelectItem>
+                          <SelectItem value="UK_RoyalMailSpecialDelivery9am">Special Delivery Guaranteed by 9am</SelectItem>
+                          <SelectItem value="UK_Parcelforce48">Parcelforce express48</SelectItem>
+                          <SelectItem value="UK_Parcelforce24">Parcelforce express24</SelectItem>
+                          <SelectItem value="UK_myHermesDoorToDoorService">Evri ParcelShop / Home Delivery</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -1092,13 +1092,12 @@ function CreateFulfillmentPolicyDialog({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="UK_RoyalMailAirmailInternational">Royal Mail International Standard</SelectItem>
                         <SelectItem value="UK_RoyalMailInternationalTracked">Royal Mail International Tracked</SelectItem>
                         <SelectItem value="UK_RoyalMailInternationalSigned">Royal Mail International Signed</SelectItem>
+                        <SelectItem value="UK_RoyalMailAirmailInternational">Royal Mail International Economy</SelectItem>
                         <SelectItem value="UK_ParcelForceInternationalDatapost">Parcelforce Global Express</SelectItem>
-                        <SelectItem value="UK_ParcelForceIrelandexpress">Parcelforce Ireland Express</SelectItem>
                         <SelectItem value="UK_ParcelForceEuro48">Parcelforce Euro 48</SelectItem>
-                        <SelectItem value="UK_OtherCourierOrDeliveryInternational">Other International Courier</SelectItem>
+                        <SelectItem value="UK_ParcelForceIrelandexpress">Parcelforce Ireland Express</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
