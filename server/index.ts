@@ -94,8 +94,8 @@ app.use((req, res, next) => {
     syncQueueWorker.start();
     log(`🚀 Sync Queue Worker started`);
     
-    // Start the daily sync scheduler (runs at 2 AM)
-    startDailySyncScheduler();
+    // Start the daily sync scheduler (runs at 2 AM, also checks for missed syncs)
+    startDailySyncScheduler().catch(err => console.error('Scheduler error:', err));
     log(`⏰ Daily Sync Scheduler started (runs at 2:00 AM)`);
     
     // Start the auto-message scheduler for delayed message rules

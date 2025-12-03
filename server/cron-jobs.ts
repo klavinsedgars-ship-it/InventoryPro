@@ -563,25 +563,85 @@ export async function runDailySync(): Promise<{
 }
 
 /**
+ * Get the last daily sync date from the database
+ */
+async function getLastSyncDate(): Promise<string | null> {
+  try {
+    const logs = await storage.getSyncLogs(10);
+    const lastDailySync = logs.find(log => 
+      log.source === 'cron' && 
+      log.operation === 'daily_sync_complete' &&
+      log.status === 'success'
+    );
+    if (lastDailySync) {
+      return new Date(lastDailySync.syncedAt!).toDateString();
+    }
+    return null;
+  } catch (error) {
+    console.error('Failed to get last sync date:', error);
+    return null;
+  }
+}
+
+/**
+ * Check if we missed today's scheduled sync (app was sleeping/restarted)
+ */
+async function checkMissedSync(): Promise<boolean> {
+  const now = new Date();
+  const currentHour = now.getHours();
+  const todayDate = now.toDateString();
+  
+  // Only check if we're past the scheduled time (after 2 AM)
+  if (currentHour < SYNC_CONFIG.dailyRunHour) {
+    return false;
+  }
+  
+  // Check if we already ran today
+  const lastSyncDate = await getLastSyncDate();
+  if (lastSyncDate === todayDate) {
+    console.log('✅ Daily sync already completed today');
+    return false;
+  }
+  
+  console.log(`⚠️ Missed daily sync! Last sync was: ${lastSyncDate || 'never'}`);
+  return true;
+}
+
+/**
  * Start the daily sync scheduler
  * Uses setInterval to check every minute if it's time to run
+ * Also checks on startup if we missed today's scheduled sync
  */
-export function startDailySyncScheduler(): void {
-  let lastRunDate = '';
-  
+export async function startDailySyncScheduler(): Promise<void> {
   console.log('⏰ Daily sync scheduler started');
   console.log(`   Scheduled time: ${SYNC_CONFIG.dailyRunHour}:${String(SYNC_CONFIG.dailyRunMinute).padStart(2, '0')} AM`);
   
-  // Check every minute if it's time to run
+  // Check if we missed today's sync (app was sleeping during scheduled time)
+  const missedSync = await checkMissedSync();
+  if (missedSync) {
+    console.log('🔄 Running missed daily sync now...');
+    // Run in background after a short delay to let server fully start
+    setTimeout(async () => {
+      try {
+        await runDailySync();
+      } catch (error) {
+        console.error('Failed to run missed sync:', error);
+      }
+    }, 10000); // Wait 10 seconds for server to be ready
+  }
+  
+  // Regular scheduler - check every minute
   setInterval(async () => {
     const now = new Date();
     const todayDate = now.toDateString();
     
-    // Only run once per day at the scheduled time
-    if (shouldRunDailySync() && lastRunDate !== todayDate) {
-      lastRunDate = todayDate;
-      console.log('🕐 Daily sync triggered by scheduler');
-      await runDailySync();
+    // Check if it's time to run and we haven't run today
+    if (shouldRunDailySync()) {
+      const lastSyncDate = await getLastSyncDate();
+      if (lastSyncDate !== todayDate) {
+        console.log('🕐 Daily sync triggered by scheduler');
+        await runDailySync();
+      }
     }
   }, 60000); // Check every minute
 }
