@@ -318,7 +318,7 @@ export function EbayPolicies({ user }: EbayPoliciesProps) {
                               <TableHead className="font-semibold">Description</TableHead>
                               <TableHead className="font-semibold">Marketplace</TableHead>
                               <TableHead className="font-semibold">Immediate Pay</TableHead>
-                              <TableHead className="font-semibold">Status</TableHead>
+                              <TableHead className="font-semibold">Payment Methods</TableHead>
                               <TableHead className="text-right font-semibold">Actions</TableHead>
                             </TableRow>
                           </TableHeader>
@@ -361,6 +361,7 @@ export function EbayPolicies({ user }: EbayPoliciesProps) {
                               <TableHead className="font-semibold">Marketplace</TableHead>
                               <TableHead className="font-semibold">Handling Time</TableHead>
                               <TableHead className="font-semibold">Global Shipping</TableHead>
+                              <TableHead className="font-semibold">Shipping Options</TableHead>
                               <TableHead className="text-right font-semibold">Actions</TableHead>
                             </TableRow>
                           </TableHeader>
@@ -401,6 +402,7 @@ export function EbayPolicies({ user }: EbayPoliciesProps) {
                               <TableHead className="font-semibold">Policy Name</TableHead>
                               <TableHead className="font-semibold">Description</TableHead>
                               <TableHead className="font-semibold">Marketplace</TableHead>
+                              <TableHead className="font-semibold">Returns Accepted</TableHead>
                               <TableHead className="font-semibold">Return Period</TableHead>
                               <TableHead className="font-semibold">Refund Method</TableHead>
                               <TableHead className="font-semibold">Shipping Paid By</TableHead>
@@ -451,7 +453,7 @@ export function EbayPolicies({ user }: EbayPoliciesProps) {
   );
 }
 
-// Payment Policy Card
+// Payment Policy Row (for Table)
 function PaymentPolicyCard({ 
   policy, 
   onDelete, 
@@ -464,83 +466,66 @@ function PaymentPolicyCard({
   const paymentMethods = policy.paymentMethods ? JSON.parse(policy.paymentMethods) : [];
 
   return (
-    <Card data-testid={`card-payment-policy-${policy.policyId}`}>
-      <CardContent className="pt-6">
-        <div className="flex items-start justify-between">
-          <div className="flex-1">
-            <div className="flex items-center gap-2">
-              <h4 className="font-semibold text-lg">{policy.name}</h4>
-              {policy.syncedFromEbay ? (
-                <Badge variant="outline" className="text-green-600 border-green-600">
-                  <Cloud className="h-3 w-3 mr-1" />
-                  eBay
-                </Badge>
-              ) : (
-                <Badge variant="outline" className="text-gray-600">
-                  <HardDrive className="h-3 w-3 mr-1" />
-                  Local
-                </Badge>
-              )}
-              {policy.isDefault && (
-                <Badge className="bg-primary">Default</Badge>
-              )}
-            </div>
-            {policy.description && (
-              <p className="text-gray-500 text-sm mt-1">{policy.description}</p>
-            )}
-            <div className="flex flex-wrap gap-4 mt-3 text-sm">
-              <div className="flex items-center gap-1">
-                <span className="text-gray-500">Marketplace:</span>
-                <span className="font-medium">{policy.marketplaceId}</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <span className="text-gray-500">Immediate Pay:</span>
-                {policy.immediatePay ? (
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                ) : (
-                  <XCircle className="h-4 w-4 text-red-500" />
-                )}
-              </div>
-              {paymentMethods.length > 0 && (
-                <div className="flex items-center gap-1">
-                  <span className="text-gray-500">Methods:</span>
-                  <span className="font-medium">
-                    {paymentMethods.map((m: any) => m.paymentMethodType).join(", ")}
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700" data-testid="button-delete-payment-policy">
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Delete Payment Policy?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This will delete "{policy.name}" from both eBay and your local database. This action cannot be undone.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={onDelete} disabled={isDeleting}>
-                    {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete"}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </div>
+    <TableRow data-testid={`row-payment-policy-${policy.policyId}`}>
+      <TableCell>
+        <div className="flex items-center gap-2">
+          <span className="font-medium">{policy.name}</span>
+          {policy.syncedFromEbay ? (
+            <Badge variant="outline" className="text-green-600 border-green-600 text-xs">
+              <Cloud className="h-3 w-3 mr-1" />
+              eBay
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="text-gray-600 text-xs">
+              <HardDrive className="h-3 w-3 mr-1" />
+              Local
+            </Badge>
+          )}
+          {policy.isDefault && (
+            <Badge className="bg-primary text-xs">Default</Badge>
+          )}
         </div>
-      </CardContent>
-    </Card>
+      </TableCell>
+      <TableCell className="text-gray-500">{policy.description || "-"}</TableCell>
+      <TableCell>{policy.marketplaceId}</TableCell>
+      <TableCell>
+        {policy.immediatePay ? (
+          <CheckCircle className="h-4 w-4 text-green-500" />
+        ) : (
+          <XCircle className="h-4 w-4 text-red-500" />
+        )}
+      </TableCell>
+      <TableCell>
+        {paymentMethods.length > 0 ? paymentMethods.map((m: any) => m.paymentMethodType).join(", ") : "-"}
+      </TableCell>
+      <TableCell className="text-right">
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700" data-testid="button-delete-payment-policy">
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Payment Policy?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will delete "{policy.name}" from both eBay and your local database. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={onDelete} disabled={isDeleting}>
+                {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </TableCell>
+    </TableRow>
   );
 }
 
-// Fulfillment Policy Card
+// Fulfillment Policy Row (for Table)
 function FulfillmentPolicyCard({ 
   policy, 
   onDelete, 
@@ -553,85 +538,65 @@ function FulfillmentPolicyCard({
   const shippingOptions = policy.shippingOptions ? JSON.parse(policy.shippingOptions) : [];
 
   return (
-    <Card data-testid={`card-fulfillment-policy-${policy.policyId}`}>
-      <CardContent className="pt-6">
-        <div className="flex items-start justify-between">
-          <div className="flex-1">
-            <div className="flex items-center gap-2">
-              <h4 className="font-semibold text-lg">{policy.name}</h4>
-              {policy.syncedFromEbay ? (
-                <Badge variant="outline" className="text-green-600 border-green-600">
-                  <Cloud className="h-3 w-3 mr-1" />
-                  eBay
-                </Badge>
-              ) : (
-                <Badge variant="outline" className="text-gray-600">
-                  <HardDrive className="h-3 w-3 mr-1" />
-                  Local
-                </Badge>
-              )}
-              {policy.isDefault && (
-                <Badge className="bg-primary">Default</Badge>
-              )}
-            </div>
-            {policy.description && (
-              <p className="text-gray-500 text-sm mt-1">{policy.description}</p>
-            )}
-            <div className="flex flex-wrap gap-4 mt-3 text-sm">
-              <div className="flex items-center gap-1">
-                <span className="text-gray-500">Marketplace:</span>
-                <span className="font-medium">{policy.marketplaceId}</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <span className="text-gray-500">Handling Time:</span>
-                <span className="font-medium">{policy.handlingTime} day(s)</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <span className="text-gray-500">Global Shipping:</span>
-                {policy.globalShipping ? (
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                ) : (
-                  <XCircle className="h-4 w-4 text-gray-400" />
-                )}
-              </div>
-              {shippingOptions.length > 0 && (
-                <div className="flex items-center gap-1">
-                  <span className="text-gray-500">Options:</span>
-                  <span className="font-medium">{shippingOptions.length} configured</span>
-                </div>
-              )}
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700" data-testid="button-delete-fulfillment-policy">
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Delete Shipping Policy?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This will delete "{policy.name}" from both eBay and your local database. This action cannot be undone.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={onDelete} disabled={isDeleting}>
-                    {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete"}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </div>
+    <TableRow data-testid={`row-fulfillment-policy-${policy.policyId}`}>
+      <TableCell>
+        <div className="flex items-center gap-2">
+          <span className="font-medium">{policy.name}</span>
+          {policy.syncedFromEbay ? (
+            <Badge variant="outline" className="text-green-600 border-green-600 text-xs">
+              <Cloud className="h-3 w-3 mr-1" />
+              eBay
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="text-gray-600 text-xs">
+              <HardDrive className="h-3 w-3 mr-1" />
+              Local
+            </Badge>
+          )}
+          {policy.isDefault && (
+            <Badge className="bg-primary text-xs">Default</Badge>
+          )}
         </div>
-      </CardContent>
-    </Card>
+      </TableCell>
+      <TableCell className="text-gray-500">{policy.description || "-"}</TableCell>
+      <TableCell>{policy.marketplaceId}</TableCell>
+      <TableCell>{policy.handlingTime} day(s)</TableCell>
+      <TableCell>
+        {policy.globalShipping ? (
+          <CheckCircle className="h-4 w-4 text-green-500" />
+        ) : (
+          <XCircle className="h-4 w-4 text-gray-400" />
+        )}
+      </TableCell>
+      <TableCell>{shippingOptions.length} configured</TableCell>
+      <TableCell className="text-right">
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700" data-testid="button-delete-fulfillment-policy">
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Shipping Policy?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will delete "{policy.name}" from both eBay and your local database. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={onDelete} disabled={isDeleting}>
+                {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </TableCell>
+    </TableRow>
   );
 }
 
-// Return Policy Card
+// Return Policy Row (for Table)
 function ReturnPolicyCard({ 
   policy, 
   onDelete, 
@@ -642,87 +607,62 @@ function ReturnPolicyCard({
   isDeleting: boolean;
 }) {
   return (
-    <Card data-testid={`card-return-policy-${policy.policyId}`}>
-      <CardContent className="pt-6">
-        <div className="flex items-start justify-between">
-          <div className="flex-1">
-            <div className="flex items-center gap-2">
-              <h4 className="font-semibold text-lg">{policy.name}</h4>
-              {policy.syncedFromEbay ? (
-                <Badge variant="outline" className="text-green-600 border-green-600">
-                  <Cloud className="h-3 w-3 mr-1" />
-                  eBay
-                </Badge>
-              ) : (
-                <Badge variant="outline" className="text-gray-600">
-                  <HardDrive className="h-3 w-3 mr-1" />
-                  Local
-                </Badge>
-              )}
-              {policy.isDefault && (
-                <Badge className="bg-primary">Default</Badge>
-              )}
-            </div>
-            {policy.description && (
-              <p className="text-gray-500 text-sm mt-1">{policy.description}</p>
-            )}
-            <div className="flex flex-wrap gap-4 mt-3 text-sm">
-              <div className="flex items-center gap-1">
-                <span className="text-gray-500">Marketplace:</span>
-                <span className="font-medium">{policy.marketplaceId}</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <span className="text-gray-500">Returns Accepted:</span>
-                {policy.returnsAccepted ? (
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                ) : (
-                  <XCircle className="h-4 w-4 text-red-500" />
-                )}
-              </div>
-              {policy.returnsAccepted && (
-                <>
-                  <div className="flex items-center gap-1">
-                    <span className="text-gray-500">Return Period:</span>
-                    <span className="font-medium">{policy.returnPeriod} days</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <span className="text-gray-500">Refund:</span>
-                    <span className="font-medium">{policy.refundMethod?.replace(/_/g, " ")}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <span className="text-gray-500">Shipping Paid By:</span>
-                    <span className="font-medium">{policy.returnShippingCostPayer}</span>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700" data-testid="button-delete-return-policy">
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Delete Return Policy?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This will delete "{policy.name}" from both eBay and your local database. This action cannot be undone.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={onDelete} disabled={isDeleting}>
-                    {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete"}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </div>
+    <TableRow data-testid={`row-return-policy-${policy.policyId}`}>
+      <TableCell>
+        <div className="flex items-center gap-2">
+          <span className="font-medium">{policy.name}</span>
+          {policy.syncedFromEbay ? (
+            <Badge variant="outline" className="text-green-600 border-green-600 text-xs">
+              <Cloud className="h-3 w-3 mr-1" />
+              eBay
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="text-gray-600 text-xs">
+              <HardDrive className="h-3 w-3 mr-1" />
+              Local
+            </Badge>
+          )}
+          {policy.isDefault && (
+            <Badge className="bg-primary text-xs">Default</Badge>
+          )}
         </div>
-      </CardContent>
-    </Card>
+      </TableCell>
+      <TableCell className="text-gray-500">{policy.description || "-"}</TableCell>
+      <TableCell>{policy.marketplaceId}</TableCell>
+      <TableCell>
+        {policy.returnsAccepted ? (
+          <CheckCircle className="h-4 w-4 text-green-500" />
+        ) : (
+          <XCircle className="h-4 w-4 text-red-500" />
+        )}
+      </TableCell>
+      <TableCell>{policy.returnsAccepted ? `${policy.returnPeriod} days` : "-"}</TableCell>
+      <TableCell>{policy.returnsAccepted ? policy.refundMethod?.replace(/_/g, " ") : "-"}</TableCell>
+      <TableCell>{policy.returnsAccepted ? policy.returnShippingCostPayer : "-"}</TableCell>
+      <TableCell className="text-right">
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-700" data-testid="button-delete-return-policy">
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Return Policy?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will delete "{policy.name}" from both eBay and your local database. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={onDelete} disabled={isDeleting}>
+                {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -820,6 +760,15 @@ function CreatePaymentPolicyDialog({
   );
 }
 
+// Shipping service type
+interface ShippingServiceOption {
+  code: string;
+  description: string;
+  carrier: string;
+  shippingTimeMin: number;
+  shippingTimeMax: number;
+}
+
 // Create Fulfillment Policy Dialog
 function CreateFulfillmentPolicyDialog({ 
   onSubmit, 
@@ -834,24 +783,48 @@ function CreateFulfillmentPolicyDialog({
 }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [handlingTime, setHandlingTime] = useState(3);
+  const [handlingTime, setHandlingTime] = useState(2);
   const [globalShipping, setGlobalShipping] = useState(false);
   const [createOnEbay, setCreateOnEbay] = useState(true);
 
   const [costType, setCostType] = useState("FLAT_RATE");
-  const [shippingCarrier, setShippingCarrier] = useState("Royal Mail");
   const [shippingService, setShippingService] = useState("UK_RoyalMailSecondClassStandard");
   const [firstItemCost, setFirstItemCost] = useState("3.50");
   const [additionalItemCost, setAdditionalItemCost] = useState("0.50");
   const [freeShipping, setFreeShipping] = useState(false);
 
   const [internationalShipping, setInternationalShipping] = useState(false);
-  const [intlShippingCarrier, setIntlShippingCarrier] = useState("Royal Mail");
-  const [intlShippingService, setIntlShippingService] = useState("UK_RoyalMailInternationalTracked");
+  const [intlShippingService, setIntlShippingService] = useState("UK_RoyalMailInternationalTrackedAndSigned");
   const [intlFirstItemCost, setIntlFirstItemCost] = useState("9.99");
   const [intlAdditionalItemCost, setIntlAdditionalItemCost] = useState("2.00");
+  const [intlShipTo, setIntlShipTo] = useState("Europe");
 
   const [pickupDropOff, setPickupDropOff] = useState(false);
+
+  // Fetch shipping services from eBay
+  const { data: shippingServicesData, isLoading: loadingServices } = useQuery<{
+    success: boolean;
+    domestic: ShippingServiceOption[];
+    international: ShippingServiceOption[];
+  }>({
+    queryKey: ["/api/ebay/shipping-services"],
+    staleTime: 1000 * 60 * 60, // Cache for 1 hour
+  });
+
+  const domesticServices = shippingServicesData?.domestic || [];
+  const internationalServices = shippingServicesData?.international || [];
+
+  // Get carrier code from service code
+  const getCarrierFromService = (serviceCode: string): string => {
+    if (serviceCode.includes('RoyalMail')) return 'Royal Mail';
+    if (serviceCode.includes('Parcelforce')) return 'Parcelforce';
+    if (serviceCode.includes('myHermes') || serviceCode.includes('Evri')) return 'Evri';
+    if (serviceCode.includes('DPD')) return 'DPD';
+    if (serviceCode.includes('UPS')) return 'UPS';
+    if (serviceCode.includes('FedEx')) return 'FedEx';
+    if (serviceCode.includes('DHL')) return 'DHL';
+    return 'Other';
+  };
 
   const handleSubmit = () => {
     const shippingOptions: any[] = [
@@ -860,7 +833,7 @@ function CreateFulfillmentPolicyDialog({
         costType: costType,
         shippingServices: [
           {
-            shippingCarrierCode: shippingCarrier,
+            shippingCarrierCode: getCarrierFromService(shippingService),
             shippingServiceCode: shippingService,
             shippingCost: { value: freeShipping ? "0.00" : firstItemCost, currency: "GBP" },
             additionalShippingCost: { value: additionalItemCost, currency: "GBP" },
@@ -872,22 +845,54 @@ function CreateFulfillmentPolicyDialog({
     ];
 
     if (internationalShipping) {
+      // Map destination region to proper eBay region format
+      const regionMapping: { [key: string]: { regionName: string; regionType: string }[] } = {
+        "Europe": [{ regionName: "Europe", regionType: "WORLD_REGION" }],
+        "Worldwide": [{ regionName: "Worldwide", regionType: "WORLDWIDE" }],
+        "EU": [
+          { regionName: "AT", regionType: "COUNTRY" },
+          { regionName: "BE", regionType: "COUNTRY" },
+          { regionName: "BG", regionType: "COUNTRY" },
+          { regionName: "CY", regionType: "COUNTRY" },
+          { regionName: "CZ", regionType: "COUNTRY" },
+          { regionName: "DE", regionType: "COUNTRY" },
+          { regionName: "DK", regionType: "COUNTRY" },
+          { regionName: "EE", regionType: "COUNTRY" },
+          { regionName: "ES", regionType: "COUNTRY" },
+          { regionName: "FI", regionType: "COUNTRY" },
+          { regionName: "FR", regionType: "COUNTRY" },
+          { regionName: "GR", regionType: "COUNTRY" },
+          { regionName: "HR", regionType: "COUNTRY" },
+          { regionName: "HU", regionType: "COUNTRY" },
+          { regionName: "IE", regionType: "COUNTRY" },
+          { regionName: "IT", regionType: "COUNTRY" },
+          { regionName: "LT", regionType: "COUNTRY" },
+          { regionName: "LU", regionType: "COUNTRY" },
+          { regionName: "LV", regionType: "COUNTRY" },
+          { regionName: "MT", regionType: "COUNTRY" },
+          { regionName: "NL", regionType: "COUNTRY" },
+          { regionName: "PL", regionType: "COUNTRY" },
+          { regionName: "PT", regionType: "COUNTRY" },
+          { regionName: "RO", regionType: "COUNTRY" },
+          { regionName: "SE", regionType: "COUNTRY" },
+          { regionName: "SI", regionType: "COUNTRY" },
+          { regionName: "SK", regionType: "COUNTRY" }
+        ]
+      };
+
       shippingOptions.push({
         optionType: "INTERNATIONAL",
         costType: "FLAT_RATE",
         shippingServices: [
           {
-            shippingCarrierCode: intlShippingCarrier,
+            shippingCarrierCode: getCarrierFromService(intlShippingService),
             shippingServiceCode: intlShippingService,
             shippingCost: { value: intlFirstItemCost, currency: "GBP" },
             additionalShippingCost: { value: intlAdditionalItemCost, currency: "GBP" },
             freeShipping: false,
             sortOrder: 1,
             shipToLocations: {
-              regionIncluded: [
-                { regionName: "Europe", regionType: "WORLD_REGION" },
-                { regionName: "Worldwide", regionType: "WORLDWIDE" }
-              ]
+              regionIncluded: regionMapping[intlShipTo] || regionMapping["Europe"]
             }
           }
         ]
@@ -898,8 +903,7 @@ function CreateFulfillmentPolicyDialog({
       regionIncluded: internationalShipping 
         ? [
             { regionName: "GB", regionType: "COUNTRY" },
-            { regionName: "Europe", regionType: "WORLD_REGION" },
-            { regionName: "Worldwide", regionType: "WORLDWIDE" }
+            { regionName: intlShipTo === "EU" ? "Europe" : intlShipTo, regionType: intlShipTo === "Worldwide" ? "WORLDWIDE" : "WORLD_REGION" }
           ]
         : [{ regionName: "GB", regionType: "COUNTRY" }]
     };
@@ -960,7 +964,7 @@ function CreateFulfillmentPolicyDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="FLAT_RATE">Flat Rate: same cost to all buyers</SelectItem>
+                    <SelectItem value="FLAT_RATE">Flat: same cost to all buyers</SelectItem>
                     <SelectItem value="NOT_SPECIFIED">No postage: local pickup only</SelectItem>
                   </SelectContent>
                 </Select>
@@ -968,51 +972,51 @@ function CreateFulfillmentPolicyDialog({
 
               {costType !== "NOT_SPECIFIED" && (
                 <>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label>Shipping Carrier</Label>
-                      <Select value={shippingCarrier} onValueChange={setShippingCarrier}>
-                        <SelectTrigger data-testid="select-shipping-carrier">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Royal Mail">Royal Mail</SelectItem>
-                          <SelectItem value="Parcelforce">Parcelforce</SelectItem>
-                          <SelectItem value="DPD">DPD</SelectItem>
-                          <SelectItem value="Hermes">Evri (Hermes)</SelectItem>
-                          <SelectItem value="UPS">UPS</SelectItem>
-                          <SelectItem value="FedEx">FedEx</SelectItem>
-                          <SelectItem value="Other">Other</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label>Shipping Service</Label>
+                  <div>
+                    <Label>Postage Service</Label>
+                    {loadingServices ? (
+                      <div className="flex items-center gap-2 p-2 text-sm text-gray-500">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Loading services from eBay...
+                      </div>
+                    ) : (
                       <Select value={shippingService} onValueChange={setShippingService}>
                         <SelectTrigger data-testid="select-shipping-service">
-                          <SelectValue />
+                          <SelectValue placeholder="Select a postage service" />
                         </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="UK_RoyalMailSecondClassStandard">Royal Mail 2nd Class (2-3 days)</SelectItem>
-                          <SelectItem value="UK_RoyalMailFirstClassStandard">Royal Mail 1st Class (1-2 days)</SelectItem>
-                          <SelectItem value="UK_RoyalMailTracked48">Royal Mail Tracked 48 (2 days)</SelectItem>
-                          <SelectItem value="UK_RoyalMailTracked24">Royal Mail Tracked 24 (1 day)</SelectItem>
-                          <SelectItem value="UK_RoyalMailSecondClassRecorded">Royal Mail 2nd Class Signed For</SelectItem>
-                          <SelectItem value="UK_RoyalMailFirstClassRecorded">Royal Mail 1st Class Signed For</SelectItem>
-                          <SelectItem value="UK_RoyalMailSpecialDeliveryNextDay">Special Delivery Guaranteed by 1pm</SelectItem>
-                          <SelectItem value="UK_RoyalMailSpecialDelivery9am">Special Delivery Guaranteed by 9am</SelectItem>
-                          <SelectItem value="UK_Parcelforce48">Parcelforce express48</SelectItem>
-                          <SelectItem value="UK_Parcelforce24">Parcelforce express24</SelectItem>
-                          <SelectItem value="UK_myHermesDoorToDoorService">Evri ParcelShop / Home Delivery</SelectItem>
+                        <SelectContent className="max-h-80">
+                          {domesticServices.length > 0 ? (
+                            domesticServices.map((service) => (
+                              <SelectItem key={service.code} value={service.code}>
+                                {service.description} ({service.shippingTimeMin}-{service.shippingTimeMax} days)
+                              </SelectItem>
+                            ))
+                          ) : (
+                            <>
+                              <SelectItem value="UK_RoyalMailSecondClassStandard">Royal Mail 2nd Class (2-3 days)</SelectItem>
+                              <SelectItem value="UK_RoyalMailFirstClassStandard">Royal Mail 1st Class (1-2 days)</SelectItem>
+                              <SelectItem value="UK_RoyalMailTracked48">Royal Mail Tracked 48 (2 days)</SelectItem>
+                              <SelectItem value="UK_RoyalMailTracked24">Royal Mail Tracked 24 (1 day)</SelectItem>
+                              <SelectItem value="UK_RoyalMailSecondClassRecorded">Royal Mail 2nd Class Signed For</SelectItem>
+                              <SelectItem value="UK_RoyalMailFirstClassRecorded">Royal Mail 1st Class Signed For</SelectItem>
+                              <SelectItem value="UK_RoyalMailSpecialDeliveryNextDay">Special Delivery by 1pm</SelectItem>
+                              <SelectItem value="UK_RoyalMailSpecialDelivery9am">Special Delivery by 9am</SelectItem>
+                              <SelectItem value="UK_Parcelforce48">Parcelforce express48</SelectItem>
+                              <SelectItem value="UK_Parcelforce24">Parcelforce express24</SelectItem>
+                              <SelectItem value="UK_myHermesDoorToDoorService">Evri ParcelShop</SelectItem>
+                              <SelectItem value="UK_OtherCourier3Days">Other Courier (3 days)</SelectItem>
+                              <SelectItem value="UK_OtherCourier5Days">Other Courier (5 days)</SelectItem>
+                            </>
+                          )}
                         </SelectContent>
                       </Select>
-                    </div>
+                    )}
                   </div>
 
                   <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
                     <div>
-                      <Label>Offer Free Postage</Label>
-                      <p className="text-sm text-gray-500">Entice buyers with free shipping</p>
+                      <Label>Free Postage</Label>
+                      <p className="text-sm text-gray-500">Offer free shipping to buyers</p>
                     </div>
                     <Switch
                       checked={freeShipping}
@@ -1024,14 +1028,14 @@ function CreateFulfillmentPolicyDialog({
                   {!freeShipping && (
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <Label>Buyer Pays (First Item) £</Label>
+                        <Label>Cost (First Item) £</Label>
                         <Input
                           type="number"
                           step="0.01"
                           min="0"
                           value={firstItemCost}
                           onChange={(e) => setFirstItemCost(e.target.value)}
-                          placeholder="0.00"
+                          placeholder="3.50"
                           data-testid="input-first-item-cost"
                         />
                       </div>
@@ -1043,7 +1047,7 @@ function CreateFulfillmentPolicyDialog({
                           min="0"
                           value={additionalItemCost}
                           onChange={(e) => setAdditionalItemCost(e.target.value)}
-                          placeholder="0.00"
+                          placeholder="0.50"
                           data-testid="input-additional-item-cost"
                         />
                       </div>
@@ -1058,7 +1062,7 @@ function CreateFulfillmentPolicyDialog({
             <div className="flex items-center justify-between mb-3">
               <div>
                 <h4 className="font-semibold">International Postage</h4>
-                <p className="text-sm text-gray-500">Ship to buyers outside the UK</p>
+                <p className="text-sm text-gray-500">Add postage services for international buyers</p>
               </div>
               <Switch
                 checked={internationalShipping}
@@ -1069,49 +1073,64 @@ function CreateFulfillmentPolicyDialog({
 
             {internationalShipping && (
               <div className="space-y-4 pl-4 border-l-2 border-primary">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>International Carrier</Label>
-                    <Select value={intlShippingCarrier} onValueChange={setIntlShippingCarrier}>
-                      <SelectTrigger data-testid="select-intl-carrier">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Royal Mail">Royal Mail</SelectItem>
-                        <SelectItem value="Parcelforce">Parcelforce</SelectItem>
-                        <SelectItem value="DHL">DHL</SelectItem>
-                        <SelectItem value="UPS">UPS</SelectItem>
-                        <SelectItem value="FedEx">FedEx</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>International Service</Label>
+                <div>
+                  <Label>Ship To</Label>
+                  <Select value={intlShipTo} onValueChange={setIntlShipTo}>
+                    <SelectTrigger data-testid="select-ship-to">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Europe">Europe</SelectItem>
+                      <SelectItem value="EU">European Union (EU countries only)</SelectItem>
+                      <SelectItem value="Worldwide">Worldwide</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>International Postage Service</Label>
+                  {loadingServices ? (
+                    <div className="flex items-center gap-2 p-2 text-sm text-gray-500">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Loading services from eBay...
+                    </div>
+                  ) : (
                     <Select value={intlShippingService} onValueChange={setIntlShippingService}>
                       <SelectTrigger data-testid="select-intl-service">
-                        <SelectValue />
+                        <SelectValue placeholder="Select an international postage service" />
                       </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="UK_RoyalMailInternationalTracked">Royal Mail International Tracked</SelectItem>
-                        <SelectItem value="UK_RoyalMailInternationalSigned">Royal Mail International Signed</SelectItem>
-                        <SelectItem value="UK_RoyalMailAirmailInternational">Royal Mail International Economy</SelectItem>
-                        <SelectItem value="UK_ParcelForceInternationalDatapost">Parcelforce Global Express</SelectItem>
-                        <SelectItem value="UK_ParcelForceEuro48">Parcelforce Euro 48</SelectItem>
-                        <SelectItem value="UK_ParcelForceIrelandexpress">Parcelforce Ireland Express</SelectItem>
+                      <SelectContent className="max-h-80">
+                        {internationalServices.length > 0 ? (
+                          internationalServices.map((service) => (
+                            <SelectItem key={service.code} value={service.code}>
+                              {service.description} ({service.shippingTimeMin}-{service.shippingTimeMax} days)
+                            </SelectItem>
+                          ))
+                        ) : (
+                          <>
+                            <SelectItem value="UK_RoyalMailInternationalTrackedAndSigned">Royal Mail Int'l Tracked & Signed</SelectItem>
+                            <SelectItem value="UK_RoyalMailInternationalTracked">Royal Mail Int'l Tracked</SelectItem>
+                            <SelectItem value="UK_RoyalMailInternationalSigned">Royal Mail Int'l Signed</SelectItem>
+                            <SelectItem value="UK_RoyalMailAirmailInternational">Royal Mail Int'l Standard</SelectItem>
+                            <SelectItem value="UK_ParcelForceInternationalDatapost">Parcelforce Global Express</SelectItem>
+                            <SelectItem value="UK_ParcelForceEuro48">Parcelforce Euro 48</SelectItem>
+                            <SelectItem value="UK_ParcelForceIrelandexpress">Parcelforce Ireland Express</SelectItem>
+                            <SelectItem value="UK_OtherCourierOrDeliveryInternational">Other International Courier</SelectItem>
+                          </>
+                        )}
                       </SelectContent>
                     </Select>
-                  </div>
+                  )}
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label>International Cost (First Item) £</Label>
+                    <Label>Cost (First Item) £</Label>
                     <Input
                       type="number"
                       step="0.01"
                       min="0"
                       value={intlFirstItemCost}
                       onChange={(e) => setIntlFirstItemCost(e.target.value)}
-                      placeholder="3.99"
+                      placeholder="9.99"
                       data-testid="input-intl-first-cost"
                     />
                   </div>
@@ -1123,7 +1142,7 @@ function CreateFulfillmentPolicyDialog({
                       min="0"
                       value={intlAdditionalItemCost}
                       onChange={(e) => setIntlAdditionalItemCost(e.target.value)}
-                      placeholder="1.00"
+                      placeholder="2.00"
                       data-testid="input-intl-additional-cost"
                     />
                   </div>
