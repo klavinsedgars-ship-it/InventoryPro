@@ -119,6 +119,28 @@ export function Marketplaces({ user }: MarketplacesProps) {
   const tmeUsage = tmeUsageData?.usage;
   const ebayUsage = ebayUsageData?.usage;
 
+  // eBay Seller Limits query
+  const { data: sellerLimitsData, isLoading: sellerLimitsLoading } = useQuery<{
+    success: boolean;
+    limits?: {
+      itemLimit: number;
+      itemsListed: number;
+      itemsRemaining: number;
+      itemUsagePercent: number;
+      valueLimit: number;
+      valueListed: number;
+      valueRemaining: number;
+      valueUsagePercent: number;
+      currency: string;
+    };
+    error?: string;
+  }>({
+    queryKey: ["/api/ebay/seller-limits"],
+    refetchInterval: 60000, // Refresh every minute
+  });
+
+  const sellerLimits = sellerLimitsData?.limits;
+
   // Manual sync trigger mutations
   const triggerDailySyncMutation = useMutation({
     mutationFn: async () => {
@@ -518,6 +540,117 @@ export function Marketplaces({ user }: MarketplacesProps) {
                   </div>
                 </CardContent>
               </Card>
+            </div>
+
+            {/* eBay Seller Limits Section */}
+            <div className="mt-4">
+              <h3 className="text-md font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                <ShoppingCart className="w-4 h-4" />
+                eBay Seller Limits
+              </h3>
+              
+              {sellerLimitsLoading ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {[1, 2].map((i) => (
+                    <Card key={i} className="animate-pulse">
+                      <CardContent className="p-6">
+                        <div className="h-20 bg-gray-200 rounded"></div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              ) : sellerLimits ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Item Count Limit */}
+                  <Card className="border-l-4 border-l-blue-500">
+                    <CardHeader className="pb-2">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-sm font-medium flex items-center gap-2">
+                          <Package className="w-4 h-4 text-blue-600" />
+                          Listing Count Limit
+                        </CardTitle>
+                        <Badge className={`border-0 ${
+                          sellerLimits.itemUsagePercent >= 90 ? 'bg-red-50 text-red-600' :
+                          sellerLimits.itemUsagePercent >= 70 ? 'bg-yellow-50 text-yellow-600' :
+                          'bg-green-50 text-green-600'
+                        }`}>
+                          {sellerLimits.itemUsagePercent >= 90 ? 'Near Limit' :
+                           sellerLimits.itemUsagePercent >= 70 ? 'Warning' : 'OK'}
+                        </Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="pt-2">
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-500">Products Listed:</span>
+                          <span className="font-medium">{sellerLimits.itemsListed.toLocaleString()} / {sellerLimits.itemLimit.toLocaleString()}</span>
+                        </div>
+                        <Progress 
+                          value={sellerLimits.itemUsagePercent} 
+                          className="h-2"
+                        />
+                        <div className="flex justify-between text-xs text-gray-500">
+                          <span>{sellerLimits.itemUsagePercent}% used</span>
+                          <span className="font-medium text-green-600">{sellerLimits.itemsRemaining.toLocaleString()} remaining</span>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Value Limit */}
+                  <Card className="border-l-4 border-l-emerald-500">
+                    <CardHeader className="pb-2">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-sm font-medium flex items-center gap-2">
+                          <DollarSign className="w-4 h-4 text-emerald-600" />
+                          Listing Value Limit
+                        </CardTitle>
+                        <Badge className={`border-0 ${
+                          sellerLimits.valueUsagePercent >= 90 ? 'bg-red-50 text-red-600' :
+                          sellerLimits.valueUsagePercent >= 70 ? 'bg-yellow-50 text-yellow-600' :
+                          'bg-green-50 text-green-600'
+                        }`}>
+                          {sellerLimits.valueUsagePercent >= 90 ? 'Near Limit' :
+                           sellerLimits.valueUsagePercent >= 70 ? 'Warning' : 'OK'}
+                        </Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="pt-2">
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-500">Total Value:</span>
+                          <span className="font-medium">
+                            {sellerLimits.currency === 'GBP' ? '£' : sellerLimits.currency}
+                            {sellerLimits.valueListed.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / 
+                            {sellerLimits.currency === 'GBP' ? '£' : sellerLimits.currency}
+                            {sellerLimits.valueLimit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        <Progress 
+                          value={sellerLimits.valueUsagePercent} 
+                          className="h-2"
+                        />
+                        <div className="flex justify-between text-xs text-gray-500">
+                          <span>{sellerLimits.valueUsagePercent}% used</span>
+                          <span className="font-medium text-green-600">
+                            {sellerLimits.currency === 'GBP' ? '£' : sellerLimits.currency}
+                            {sellerLimits.valueRemaining.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} remaining
+                          </span>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              ) : (
+                <Card className="border-yellow-200 bg-yellow-50">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 text-yellow-700">
+                      <AlertCircle className="w-4 h-4" />
+                      <span className="text-sm">Unable to load eBay seller limits. Make sure eBay OAuth is configured.</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           </div>
 

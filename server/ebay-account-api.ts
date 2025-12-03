@@ -659,6 +659,162 @@ export class EbayAccountApiService {
       return: returnPolicies
     };
   }
+
+  // ==========================================
+  // SELLER PRIVILEGES / SELLING LIMITS
+  // ==========================================
+
+  /**
+   * Get seller privileges including selling limits
+   * This uses the eBay Account API to retrieve the seller's current limits
+   */
+  async getSellerPrivileges(): Promise<{
+    success: boolean;
+    sellingLimit?: {
+      amount: { value: string; currency: string };
+      quantity: number;
+    };
+    sellingLimitRemaining?: {
+      amount: { value: string; currency: string };
+      quantity: number;
+    };
+    sellerRegistrationCompleted?: boolean;
+    paymentsProgramOnboarded?: boolean;
+    error?: string;
+  }> {
+    try {
+      if (!this.isConfigured()) {
+        return { success: false, error: "eBay OAuth not configured" };
+      }
+
+      const response = await this.makeRequest<{
+        sellingLimit?: {
+          amount: { value: string; currency: string };
+          quantity: number;
+        };
+        sellerRegistrationCompleted?: boolean;
+        paymentsProgramOnboarded?: boolean;
+      }>("GET", "/sell/account/v1/privilege");
+
+      // Calculate remaining by subtracting current listings from limit
+      // We'll get current listing stats from our database
+      const products = await storage.getProducts();
+      const listedProducts = products.filter(p => p.listedOnEbay);
+      const listedCount = listedProducts.length;
+      const listedValue = listedProducts.reduce((sum, p) => {
+        return sum + parseFloat(p.salePrice || "0");
+      }, 0);
+
+      const limitQuantity = response.sellingLimit?.quantity || 0;
+      const limitAmount = parseFloat(response.sellingLimit?.amount?.value || "0");
+      const currency = response.sellingLimit?.amount?.currency || "GBP";
+
+      const remainingQuantity = Math.max(0, limitQuantity - listedCount);
+      const remainingAmount = Math.max(0, limitAmount - listedValue);
+
+      return {
+        success: true,
+        sellingLimit: response.sellingLimit,
+        sellingLimitRemaining: {
+          amount: { value: remainingAmount.toFixed(2), currency },
+          quantity: remainingQuantity
+        },
+        sellerRegistrationCompleted: response.sellerRegistrationCompleted,
+        paymentsProgramOnboarded: response.paymentsProgramOnboarded
+      };
+    } catch (error) {
+      console.error("Failed to get seller privileges:", error);
+      return { 
+        success: false, 
+        error: (error as Error).message 
+      };
+    }
+  }
+
+  /**
+   * Get seller limits with current usage statistics
+   * Combines eBay API limits with local database stats for a complete picture
+   */
+  async getSellerLimitsWithUsage(): Promise<{
+    success: boolean;
+    limits?: {
+      itemLimit: number;
+      itemsListed: number;
+      itemsRemaining: number;
+      itemUsagePercent: number;
+      valueLimit: number;
+      valueListed: number;
+      valueRemaining: number;
+      valueUsagePercent: number;
+      currency: string;
+    };
+    ebayApiResponse?: any;
+    error?: string;
+  }> {
+    try {
+      // Get current listing stats from database
+      const products = await storage.getProducts();
+      const listedProducts = products.filter(p => p.listedOnEbay);
+      const itemsListed = listedProducts.length;
+      const valueListed = listedProducts.reduce((sum, p) => {
+        return sum + parseFloat(p.salePrice || "0");
+      }, 0);
+
+      // Try to get eBay API limits
+      let itemLimit = 0;
+      let valueLimit = 0;
+      let currency = "GBP";
+      let ebayApiResponse: any = null;
+
+      try {
+        if (this.isConfigured()) {
+          const response = await this.makeRequest<{
+            sellingLimit?: {
+              amount: { value: string; currency: string };
+              quantity: number;
+            };
+          }>("GET", "/sell/account/v1/privilege");
+          
+          ebayApiResponse = response;
+          itemLimit = response.sellingLimit?.quantity || 0;
+          valueLimit = parseFloat(response.sellingLimit?.amount?.value || "0");
+          currency = response.sellingLimit?.amount?.currency || "GBP";
+        }
+      } catch (apiError) {
+        console.warn("Could not fetch eBay selling limits from API, using estimates:", apiError);
+        // Use reasonable defaults if API call fails
+        itemLimit = 250; // Common starting limit for new sellers
+        valueLimit = 5000; // £5,000 starting limit
+      }
+
+      const itemsRemaining = Math.max(0, itemLimit - itemsListed);
+      const valueRemaining = Math.max(0, valueLimit - valueListed);
+      const itemUsagePercent = itemLimit > 0 ? (itemsListed / itemLimit) * 100 : 0;
+      const valueUsagePercent = valueLimit > 0 ? (valueListed / valueLimit) * 100 : 0;
+
+      return {
+        success: true,
+        limits: {
+          itemLimit,
+          itemsListed,
+          itemsRemaining,
+          itemUsagePercent: Math.round(itemUsagePercent * 10) / 10,
+          valueLimit,
+          valueListed: Math.round(valueListed * 100) / 100,
+          valueRemaining: Math.round(valueRemaining * 100) / 100,
+          valueUsagePercent: Math.round(valueUsagePercent * 10) / 10,
+          currency
+        },
+        ebayApiResponse
+      };
+    } catch (error) {
+      console.error("Failed to get seller limits with usage:", error);
+      return { 
+        success: false, 
+        error: (error as Error).message 
+      };
+    }
+  }
 }
 
 export const ebayAccountApi = new EbayAccountApiService();

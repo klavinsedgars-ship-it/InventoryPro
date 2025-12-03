@@ -1522,6 +1522,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     });
 
+    // Get eBay seller limits (item count and value limits)
+    app.get("/api/ebay/seller-limits", requireAuth, async (req, res) => {
+      try {
+        const result = await ebayAccountApi.getSellerLimitsWithUsage();
+        res.json(result);
+      } catch (error) {
+        console.error("Failed to get eBay seller limits:", error);
+        res.status(500).json({
+          success: false,
+          error: "Failed to get eBay seller limits"
+        });
+      }
+    });
+
     // Sync selected TME products - alias to optimized endpoint
     app.post("/api/tme/sync-selected", async (req, res) => {
       try {
