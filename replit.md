@@ -71,6 +71,14 @@ Preferred communication style: Simple, everyday language.
   - Sync from eBay: POST /api/ebay/business-policies/sync
   - Check OAuth status: GET /api/ebay/business-policies/status
   - Frontend: /ebay-policies page with tabs for each policy type
+- **Automatic Weight-Based Shipping Policy Assignment**: When listing products to eBay, the system automatically assigns the correct shipping policy based on product weight:
+  - 0.01-99gr: £3.99 (UK/Europe), +£1 additional item (Policy ID: 268493033019)
+  - 100-499gr: £4.99 (UK/Europe), +£1 additional item (Policy ID: 268493034019)
+  - 500-999gr: £6.99 (UK/Europe), +£1 additional item (Policy ID: 268493035019)
+  - 999-1999gr: £9.99 (UK/Europe), +£5 additional item (Policy ID: 268493036019)
+  - All policies exclude Belarus (BY) from shipping destinations
+  - Uses SellerProfiles with ShippingProfileID in eBay Trading API XML requests
+  - Implementation in `server/shipping-policies.ts`
 
 ## External Dependencies
 

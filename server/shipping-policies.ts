@@ -1,6 +1,14 @@
 /**
  * eBay Shipping Policy Management
  * Maps product weight to appropriate shipping policy IDs
+ * 
+ * Weight-based shipping policies created on eBay:
+ * - 0.01-99gr: £3.99 (UK/Europe), +£1 additional item
+ * - 100-499gr: £4.99 (UK/Europe), +£1 additional item
+ * - 500-999gr: £6.99 (UK/Europe), +£1 additional item
+ * - 999-1999gr: £9.99 (UK/Europe), +£5 additional item
+ * 
+ * All policies exclude Belarus (BY) from shipping
  */
 
 export interface WeightRange {
@@ -10,83 +18,95 @@ export interface WeightRange {
 
 export interface ShippingPolicy {
   id: string;
+  ebayPolicyId: string;  // The actual eBay fulfillment policy ID
   name: string;
   weightRange: WeightRange;
   description: string;
+  price: string;
+  additionalItemPrice: string;
   isDefault?: boolean;
 }
 
 // Shipping policy mapping based on weight ranges (in grams)
+// eBay policy IDs were created via Account API on 2025-12-03
 export const SHIPPING_POLICIES: ShippingPolicy[] = [
   {
-    id: "policy_light",
-    name: "Light Items (0-99g)",
-    weightRange: { min: 0, max: 99 },
-    description: "Small electronics components, resistors, LEDs"
+    id: "policy_0_99",
+    ebayPolicyId: "268493033019",
+    name: "0.01-99gr",
+    weightRange: { min: 0.01, max: 99 },
+    description: "Light items: SMD components, resistors, capacitors, small ICs",
+    price: "£3.99",
+    additionalItemPrice: "£1.00"
   },
   {
-    id: "policy_small",
-    name: "Small Items (100-250g)", 
-    weightRange: { min: 100, max: 250 },
-    description: "Sensors, small modules, development boards"
+    id: "policy_100_499",
+    ebayPolicyId: "268493034019",
+    name: "100-499gr", 
+    weightRange: { min: 100, max: 499 },
+    description: "Small items: sensors, modules, connectors, small boards",
+    price: "£4.99",
+    additionalItemPrice: "£1.00"
   },
   {
-    id: "policy_medium",
-    name: "Medium Items (251-500g)",
-    weightRange: { min: 251, max: 500 },
-    description: "Arduino boards, larger modules, cables"
+    id: "policy_500_999",
+    ebayPolicyId: "268493035019",
+    name: "500-999gr",
+    weightRange: { min: 500, max: 999 },
+    description: "Medium items: development boards, larger modules, cables",
+    price: "£6.99",
+    additionalItemPrice: "£1.00"
   },
   {
-    id: "policy_heavy",
-    name: "Heavy Items (501-999g)",
-    weightRange: { min: 501, max: 999 },
-    description: "Power supplies, larger boards, kits"
-  },
-  {
-    id: "policy_very_heavy",
-    name: "Very Heavy Items (1-4.9kg)",
-    weightRange: { min: 1000, max: 4999 },
-    description: "Large power supplies, complete kits, multiple items"
-  },
-  {
-    id: "policy_oversized",
-    name: "Oversized Items (5kg+)",
-    weightRange: { min: 5000, max: 99999 },
-    description: "Large equipment, bulk orders"
+    id: "policy_999_1999",
+    ebayPolicyId: "268493036019",
+    name: "999-1999gr",
+    weightRange: { min: 1000, max: 1999 },
+    description: "Heavy items: power supplies, kits, bulk components",
+    price: "£9.99",
+    additionalItemPrice: "£5.00"
   }
 ];
 
-// Default policy for items without weight or invalid weight
-export const DEFAULT_SHIPPING_POLICY = "policy_medium";
+// Default policy for items without weight or invalid weight (lightest policy)
+export const DEFAULT_SHIPPING_POLICY_ID = "268493033019";
+export const DEFAULT_SHIPPING_POLICY_NAME = "0.01-99gr";
 
 /**
- * Get shipping policy ID based on product weight
+ * Get eBay shipping policy ID based on product weight in grams
  */
 export function getShippingPolicyId(weightGrams: number | null | undefined): string {
-  // Handle invalid weight
-  if (weightGrams === null || weightGrams === undefined || weightGrams < 0) {
-    console.warn(`Invalid weight: ${weightGrams}, using default policy: ${DEFAULT_SHIPPING_POLICY}`);
-    return DEFAULT_SHIPPING_POLICY;
+  // Handle invalid or missing weight - use lightest policy
+  if (weightGrams === null || weightGrams === undefined || weightGrams <= 0) {
+    console.log(`No weight specified, using default policy: ${DEFAULT_SHIPPING_POLICY_NAME} (${DEFAULT_SHIPPING_POLICY_ID})`);
+    return DEFAULT_SHIPPING_POLICY_ID;
   }
 
-  // Find matching policy
+  // Find matching policy based on weight
   for (const policy of SHIPPING_POLICIES) {
     if (weightGrams >= policy.weightRange.min && weightGrams <= policy.weightRange.max) {
-      console.log(`Weight ${weightGrams}g matched to policy: ${policy.id} (${policy.name})`);
-      return policy.id;
+      console.log(`Weight ${weightGrams}g matched to policy: ${policy.name} (eBay ID: ${policy.ebayPolicyId})`);
+      return policy.ebayPolicyId;
     }
   }
 
-  // Fallback for extreme weights
-  console.warn(`Weight ${weightGrams}g outside all ranges, using default policy: ${DEFAULT_SHIPPING_POLICY}`);
-  return DEFAULT_SHIPPING_POLICY;
+  // For weights above our max range (1999g), use the heaviest policy
+  if (weightGrams > 1999) {
+    const heaviestPolicy = SHIPPING_POLICIES[SHIPPING_POLICIES.length - 1];
+    console.warn(`Weight ${weightGrams}g exceeds max range, using heaviest policy: ${heaviestPolicy.name} (${heaviestPolicy.ebayPolicyId})`);
+    return heaviestPolicy.ebayPolicyId;
+  }
+
+  // Fallback to default
+  console.warn(`Weight ${weightGrams}g outside all ranges, using default policy: ${DEFAULT_SHIPPING_POLICY_ID}`);
+  return DEFAULT_SHIPPING_POLICY_ID;
 }
 
 /**
- * Get policy details by ID
+ * Get policy details by eBay policy ID
  */
-export function getShippingPolicyById(policyId: string): ShippingPolicy | null {
-  return SHIPPING_POLICIES.find(policy => policy.id === policyId) || null;
+export function getShippingPolicyById(ebayPolicyId: string): ShippingPolicy | null {
+  return SHIPPING_POLICIES.find(policy => policy.ebayPolicyId === ebayPolicyId) || null;
 }
 
 /**
@@ -95,11 +115,19 @@ export function getShippingPolicyById(policyId: string): ShippingPolicy | null {
 export function getShippingPolicyName(weightGrams: number | null | undefined): string {
   const policyId = getShippingPolicyId(weightGrams);
   const policy = getShippingPolicyById(policyId);
-  return policy?.name || "Default Policy";
+  return policy?.name || DEFAULT_SHIPPING_POLICY_NAME;
 }
 
 /**
- * Validate shipping policy mapping
+ * Get full policy details by weight
+ */
+export function getShippingPolicyByWeight(weightGrams: number | null | undefined): ShippingPolicy | null {
+  const policyId = getShippingPolicyId(weightGrams);
+  return getShippingPolicyById(policyId);
+}
+
+/**
+ * Validate shipping policy mapping - check for gaps and overlaps
  */
 export function validateShippingPolicies(): { isValid: boolean; errors: string[] } {
   const errors: string[] = [];
@@ -143,36 +171,44 @@ export function getAllShippingPolicies(): ShippingPolicy[] {
 }
 
 /**
- * Bulk assign shipping policies to products
+ * Bulk assign shipping policies to products based on weight
  */
 export function assignShippingPolicies(products: Array<{ id: number; weight: number | null }>): Array<{
   productId: number;
   weight: number | null;
-  policyId: string;
+  ebayPolicyId: string;
   policyName: string;
+  price: string;
 }> {
-  return products.map(product => ({
-    productId: product.id,
-    weight: product.weight,
-    policyId: getShippingPolicyId(product.weight),
-    policyName: getShippingPolicyName(product.weight)
-  }));
+  return products.map(product => {
+    const weightGrams = product.weight !== null ? product.weight : null;
+    const policy = getShippingPolicyByWeight(weightGrams);
+    return {
+      productId: product.id,
+      weight: product.weight,
+      ebayPolicyId: getShippingPolicyId(weightGrams),
+      policyName: policy?.name || DEFAULT_SHIPPING_POLICY_NAME,
+      price: policy?.price || "£3.99"
+    };
+  });
 }
 
 /**
- * Generate shipping policy summary for admin
+ * Generate shipping policy summary for admin dashboard
  */
 export function generatePolicySummary(): string {
-  let summary = "eBay Shipping Policy Configuration:\n\n";
+  let summary = "eBay Weight-Based Shipping Policies:\n\n";
   
   SHIPPING_POLICIES.forEach(policy => {
     summary += `${policy.name}\n`;
-    summary += `  Policy ID: ${policy.id}\n`;
+    summary += `  eBay Policy ID: ${policy.ebayPolicyId}\n`;
     summary += `  Weight Range: ${policy.weightRange.min}-${policy.weightRange.max}g\n`;
+    summary += `  Price: ${policy.price} (additional: ${policy.additionalItemPrice})\n`;
     summary += `  Description: ${policy.description}\n\n`;
   });
   
-  summary += `Default Policy: ${DEFAULT_SHIPPING_POLICY}\n`;
+  summary += `Default Policy: ${DEFAULT_SHIPPING_POLICY_NAME} (${DEFAULT_SHIPPING_POLICY_ID})\n`;
+  summary += `Note: All policies exclude Belarus (BY) from shipping\n`;
   
   const validation = validateShippingPolicies();
   if (!validation.isValid) {

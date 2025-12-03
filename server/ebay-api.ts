@@ -509,6 +509,7 @@ export class EbayApiService {
 
   private createVerifyItemXML(listingData: any): string {
     console.log("createVerifyItemXML - Using OAuth via header");
+    console.log(`Shipping policy ID for listing: ${listingData.shippingPolicyId}`);
     
     return `<?xml version="1.0" encoding="utf-8"?>
 <VerifyAddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -526,19 +527,13 @@ export class EbayApiService {
     <Location>Riga, Latvia</Location>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
-    <DispatchTimeMax>3</DispatchTimeMax>
     <PictureDetails>
       <PictureURL>${listingData.pictureURLs && listingData.pictureURLs.length > 0 ? this.escapeXml(listingData.pictureURLs[0]) : ""}</PictureURL>
     </PictureDetails>
-    <ShippingDetails>
-      <ShippingType>Flat</ShippingType>
-      <ShippingServiceOptions>
-        <ShippingServicePriority>1</ShippingServicePriority>
-        <ShippingService>UK_RoyalMailSecondClassStandard</ShippingService>
-        <ShippingServiceCost currencyID="GBP">3.50</ShippingServiceCost>
-      </ShippingServiceOptions>
-    </ShippingDetails>
     <SellerProfiles>
+      <SellerShippingProfile>
+        <ShippingProfileID>${listingData.shippingPolicyId}</ShippingProfileID>
+      </SellerShippingProfile>
       <SellerPaymentProfile>
         <PaymentProfileID>209734844019</PaymentProfileID>
       </SellerPaymentProfile>
@@ -566,6 +561,7 @@ export class EbayApiService {
 
   private createAddItemXML(listingData: any): string {
     console.log("createAddItemXML - Using OAuth via header");
+    console.log(`Shipping policy ID for listing: ${listingData.shippingPolicyId}`);
     
     return `<?xml version="1.0" encoding="utf-8"?>
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -583,19 +579,13 @@ export class EbayApiService {
     <Location>Riga, Latvia</Location>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
-    <DispatchTimeMax>3</DispatchTimeMax>
     <PictureDetails>
       <PictureURL>${listingData.pictureURLs && listingData.pictureURLs.length > 0 ? this.escapeXml(listingData.pictureURLs[0]) : ""}</PictureURL>
     </PictureDetails>
-    <ShippingDetails>
-      <ShippingType>Flat</ShippingType>
-      <ShippingServiceOptions>
-        <ShippingServicePriority>1</ShippingServicePriority>
-        <ShippingService>UK_RoyalMailSecondClassStandard</ShippingService>
-        <ShippingServiceCost currencyID="GBP">3.50</ShippingServiceCost>
-      </ShippingServiceOptions>
-    </ShippingDetails>
     <SellerProfiles>
+      <SellerShippingProfile>
+        <ShippingProfileID>${listingData.shippingPolicyId}</ShippingProfileID>
+      </SellerShippingProfile>
       <SellerPaymentProfile>
         <PaymentProfileID>209734844019</PaymentProfileID>
       </SellerPaymentProfile>
@@ -641,6 +631,7 @@ export class EbayApiService {
     ` : '';
 
     console.log("createReviseItemXML - Using OAuth via header");
+    console.log(`Shipping policy ID for revision: ${listingData.shippingPolicyId}`);
 
     return `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -659,9 +650,11 @@ export class EbayApiService {
     <Location>Riga, Latvia</Location>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
-    <DispatchTimeMax>3</DispatchTimeMax>
     ${pictureXML}
     <SellerProfiles>
+      <SellerShippingProfile>
+        <ShippingProfileID>${listingData.shippingPolicyId}</ShippingProfileID>
+      </SellerShippingProfile>
       <SellerPaymentProfile>
         <PaymentProfileID>209734844019</PaymentProfileID>
       </SellerPaymentProfile>
