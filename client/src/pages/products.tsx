@@ -749,16 +749,28 @@ export function Products({ user }: ProductsProps) {
                 <CardContent className="py-4">
                   <div className="space-y-4">
                     <div>
-                      <Label className="text-sm font-medium">Price Range (€{priceRange[0]} - €{priceRange[1]})</Label>
-                      <div className="mt-2">
-                        <Slider
-                          value={priceRange}
-                          onValueChange={(value) => setPriceRange(value as [number, number])}
-                          max={1000}
+                      <Label className="text-sm font-medium">Price Range</Label>
+                      <div className="mt-2 flex items-center gap-2">
+                        <Input
+                          type="number"
+                          placeholder="From"
+                          value={priceRange[0] || ''}
+                          onChange={(e) => setPriceRange([Number(e.target.value) || 0, priceRange[1]])}
+                          className="w-24 h-9"
                           min={0}
-                          step={10}
-                          className="w-full"
+                          data-testid="input-price-from"
                         />
+                        <span className="text-gray-500">-</span>
+                        <Input
+                          type="number"
+                          placeholder="To"
+                          value={priceRange[1] || ''}
+                          onChange={(e) => setPriceRange([priceRange[0], Number(e.target.value) || 1000])}
+                          className="w-24 h-9"
+                          min={0}
+                          data-testid="input-price-to"
+                        />
+                        <span className="text-sm text-gray-500">€</span>
                       </div>
                     </div>
                     <div className="flex justify-end">

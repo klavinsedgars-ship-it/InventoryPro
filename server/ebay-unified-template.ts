@@ -26,7 +26,7 @@ export function generateUnifiedEbayTemplate(product: Product): UnifiedTemplate {
 }
 
 /**
- * Generate consistent title format: [MOQ]x Product Name - SKU | Brand | Fast UK Shipping
+ * Generate consistent title format: [MOQ]x Product Name - SKU | Brand | Fast EU Shipping
  * For products sold in multiples, prefix with quantity (e.g., "10x Resistor 1K")
  */
 function generateUnifiedTitle(product: Product, specs: any): string {
@@ -38,17 +38,17 @@ function generateUnifiedTitle(product: Product, specs: any): string {
   const moq = product.moq || 1;
   const moqPrefix = moq > 1 ? `${moq}x ` : '';
   
-  let title = `${moqPrefix}${name}${sku}${brand} | Fast UK Shipping`;
+  let title = `${moqPrefix}${name}${sku}${brand} | Fast EU Shipping`;
   
   // Ensure eBay 80 character limit
   if (title.length > 80) {
     // Try shorter version without brand
-    title = `${moqPrefix}${name}${sku} | UK Stock`;
+    title = `${moqPrefix}${name}${sku} | EU Stock`;
     if (title.length > 80) {
       // Further shorten by truncating name
-      const maxNameLen = 80 - moqPrefix.length - sku.length - ' | UK Stock'.length;
+      const maxNameLen = 80 - moqPrefix.length - sku.length - ' | EU Stock'.length;
       const truncatedName = name.slice(0, Math.max(20, maxNameLen));
-      title = `${moqPrefix}${truncatedName}${sku} | UK Stock`.slice(0, 80);
+      title = `${moqPrefix}${truncatedName}${sku} | EU Stock`.slice(0, 80);
     }
   }
   
@@ -78,7 +78,7 @@ function generateUnifiedDescription(product: Product, specs: any, category: stri
   sections.push('✅ HIGH QUALITY ELECTRONIC COMPONENT');
   sections.push('✅ GENUINE MANUFACTURER SPECIFICATIONS');
   sections.push('✅ TECHNICAL DOCUMENTATION INCLUDED');
-  sections.push('✅ SAME DAY DISPATCH FROM UK WAREHOUSE');
+  sections.push('✅ DISPATCH FROM EU WAREHOUSE WITHIN 2-3 DAYS');
   sections.push('✅ PROFESSIONAL TECHNICAL SUPPORT');
   sections.push('');
   
@@ -116,13 +116,12 @@ function generateUnifiedDescription(product: Product, specs: any, category: stri
   sections.push('• All products tested before dispatch');
   sections.push('• Genuine components from authorized suppliers');
   sections.push('• 30-day return guarantee');
-  sections.push('• 12-month manufacturer warranty');
   sections.push('');
   
   // Shipping (same for all products)
   sections.push('🚚 SHIPPING INFORMATION:');
-  sections.push('• Same day dispatch (orders before 2PM)');
-  sections.push('• Free UK shipping on orders over £20');
+  sections.push('• Usually dispatch in 2-3 days after order placed');
+  sections.push('• Express delivery available for additional fee');
   sections.push('• Tracked delivery available');
   sections.push('• International shipping available');
   sections.push('');
@@ -169,7 +168,7 @@ function generateUnifiedHtmlDescription(product: Product, specs: any, category: 
       ✅ HIGH QUALITY ELECTRONIC COMPONENT<br>
       ✅ GENUINE MANUFACTURER SPECIFICATIONS<br>
       ✅ TECHNICAL DOCUMENTATION INCLUDED<br>
-      ✅ SAME DAY DISPATCH FROM UK WAREHOUSE<br>
+      ✅ DISPATCH FROM EU WAREHOUSE WITHIN 2-3 DAYS<br>
       ✅ PROFESSIONAL TECHNICAL SUPPORT<br>
       ✅ 30-DAY RETURN GUARANTEE
     </div>
@@ -216,7 +215,6 @@ function generateUnifiedHtmlDescription(product: Product, specs: any, category: 
       <li>All products tested before dispatch</li>
       <li>Genuine components from authorized suppliers</li>
       <li>30-day return guarantee</li>
-      <li>12-month manufacturer warranty</li>
     </ul>
   </div>
   
@@ -224,8 +222,8 @@ function generateUnifiedHtmlDescription(product: Product, specs: any, category: 
   <div style="background-color: #ffffff; border: 1px solid #cccccc; padding: 15px; margin-bottom: 15px;">
     <h3 style="color: #0066cc; font-size: 16px; margin: 0 0 10px 0; border-bottom: 1px solid #0066cc;">🚚 SHIPPING INFORMATION</h3>
     <ul style="margin: 5px 0; padding-left: 20px; font-size: 14px;">
-      <li>Same day dispatch (orders before 2PM)</li>
-      <li>Free UK shipping on orders over £20</li>
+      <li>Usually dispatch in 2-3 days after order placed</li>
+      <li>Express delivery available for additional fee</li>
       <li>Tracked delivery available</li>
       <li>International shipping available</li>
     </ul>

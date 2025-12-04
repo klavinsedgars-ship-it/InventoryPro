@@ -55,14 +55,14 @@ function generateTitle(product: Product, specs: ProductSpecs): string {
     name,
     model ? `- ${model}` : '',
     manufacturer ? `| ${manufacturer}` : '',
-    '| Fast UK Shipping'
+    '| Fast EU Shipping'
   ].filter(Boolean);
   
   let title = components.join(' ');
   
   // Ensure title doesn't exceed 80 characters
   if (title.length > 80) {
-    title = `${name} ${model} | ${manufacturer} | UK Stock`.slice(0, 80);
+    title = `${name} ${model} | ${manufacturer} | EU Stock`.slice(0, 80);
   }
   
   return title;
@@ -97,7 +97,7 @@ function generateDescription(product: Product, specs: ProductSpecs, category: st
   sections.push('✅ High quality electronic component');
   sections.push('✅ Genuine manufacturer specifications');
   sections.push('✅ Technical documentation included');
-  sections.push('✅ Same day dispatch from UK warehouse');
+  sections.push('✅ Dispatch from EU warehouse within 2-3 days');
   sections.push('');
   
   // Technical specifications
@@ -152,7 +152,7 @@ function generateDescription(product: Product, specs: ProductSpecs, category: st
   }
   
   // Footer
-  sections.push('🚚 FAST UK SHIPPING | 📞 TECHNICAL SUPPORT | 💯 QUALITY GUARANTEE');
+  sections.push('🚚 FAST EU SHIPPING | 📞 TECHNICAL SUPPORT | 💯 QUALITY GUARANTEE');
   sections.push('');
   sections.push('Professional electronics supplier serving makers, engineers, and hobbyists.');
   sections.push('All products tested and verified before dispatch.');
@@ -372,10 +372,10 @@ export function generateConditionDescription(category: string): string {
  */
 export function generateShippingTemplate(): string {
   return `
-🚚 FAST UK SHIPPING OPTIONS:
-• Standard Delivery (2-3 days): FREE on orders over £20
-• Express Delivery (1-2 days): £4.99
-• Next Day Delivery: £7.99
+🚚 SHIPPING FROM EU:
+• Usually dispatch in 2-3 days after order placed
+• Express delivery available for additional fee
+• Tracked delivery available
 
 📦 PACKAGING:
 • Anti-static packaging for sensitive components
@@ -383,9 +383,8 @@ export function generateShippingTemplate(): string {
 • Secure packaging to prevent damage
 
 🌍 INTERNATIONAL SHIPPING:
-• EU: 5-7 working days
+• UK & EU: 5-7 working days
 • Worldwide: 7-14 working days
-• All duties and taxes included
   `;
 }
 
@@ -400,8 +399,7 @@ export function generateReturnPolicy(): string {
 • Original packaging not required
 • No restocking fees
 
-🛡️ WARRANTY:
-• 12-month manufacturer warranty
+🛡️ QUALITY GUARANTEE:
 • Technical support included
 • Replacement guarantee for DOA items
   `;
