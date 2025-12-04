@@ -475,7 +475,8 @@ export function Products({ user }: ProductsProps) {
 
     // Stock filter
     const matchesStock = stockFilter === "all" || 
-      (stockFilter === "low" && product.stock < 5) ||
+      (stockFilter === "low" && product.stock < 5 && product.stock > 0) ||
+      (stockFilter === "high" && product.stock > 5) ||
       (stockFilter === "out" && product.stock === 0) ||
       (stockFilter === "available" && product.stock > 0);
 
@@ -604,6 +605,7 @@ export function Products({ user }: ProductsProps) {
                 <SelectContent>
                   <SelectItem value="all">All Stock</SelectItem>
                   <SelectItem value="available">Available</SelectItem>
+                  <SelectItem value="high">High (&gt;5)</SelectItem>
                   <SelectItem value="low">Low (&lt;5)</SelectItem>
                   <SelectItem value="out">Out</SelectItem>
                 </SelectContent>
@@ -638,6 +640,7 @@ export function Products({ user }: ProductsProps) {
                   <SelectValue placeholder="Show" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="50">50</SelectItem>
                   <SelectItem value="250">250</SelectItem>
                   <SelectItem value="500">500</SelectItem>
                   <SelectItem value="1000">1000</SelectItem>
