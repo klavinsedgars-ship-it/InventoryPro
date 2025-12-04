@@ -184,7 +184,7 @@ function generateHtmlDescription(product: Product, specs: ProductSpecs, category
       ${html}
       <br><br>
       <div style="background: #f5f5f5; padding: 15px; border-radius: 5px; text-align: center;">
-        <strong>🚚 FAST UK SHIPPING | 📞 TECHNICAL SUPPORT | 💯 QUALITY GUARANTEE</strong>
+        <strong>🚚 FAST EU SHIPPING | 📞 TECHNICAL SUPPORT | 💯 QUALITY GUARANTEE</strong>
       </div>
     </div>
   `;
