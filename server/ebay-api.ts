@@ -646,6 +646,21 @@ export class EbayApiService {
     console.log("createReviseItemXML - Using OAuth via header");
     console.log(`Shipping policy ID for revision: ${listingData.shippingPolicyId}`);
 
+    // Only include SellerProfiles if we have a valid shipping policy ID
+    // For template-only updates (title/description), we don't want to change existing policies
+    const sellerProfilesXML = listingData.shippingPolicyId ? `
+    <SellerProfiles>
+      <SellerShippingProfile>
+        <ShippingProfileID>${listingData.shippingPolicyId}</ShippingProfileID>
+      </SellerShippingProfile>
+      <SellerPaymentProfile>
+        <PaymentProfileID>209734844019</PaymentProfileID>
+      </SellerPaymentProfile>
+      <SellerReturnProfile>
+        <ReturnProfileID>161272624019</ReturnProfileID>
+      </SellerReturnProfile>
+    </SellerProfiles>` : '';
+
     return `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <Item>
@@ -663,18 +678,7 @@ export class EbayApiService {
     <Location>Riga, Latvia</Location>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
-    ${pictureXML}
-    <SellerProfiles>
-      <SellerShippingProfile>
-        <ShippingProfileID>${listingData.shippingPolicyId}</ShippingProfileID>
-      </SellerShippingProfile>
-      <SellerPaymentProfile>
-        <PaymentProfileID>209734844019</PaymentProfileID>
-      </SellerPaymentProfile>
-      <SellerReturnProfile>
-        <ReturnProfileID>161272624019</ReturnProfileID>
-      </SellerReturnProfile>
-    </SellerProfiles>
+    ${pictureXML}${sellerProfilesXML}
   </Item>
 </ReviseFixedPriceItemRequest>`;
   }

@@ -672,6 +672,104 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Bulk sync template to all eBay listings (updates title & description)
+  app.post("/api/ebay/bulk-sync-template", requireAuth, async (req, res) => {
+    try {
+      // Get all products listed on eBay
+      const allProducts = await storage.getProducts();
+      const listedProducts = allProducts.filter(p => p.listedOnEbay && p.ebayItemId);
+      
+      if (listedProducts.length === 0) {
+        return res.json({
+          success: true,
+          message: "No products are currently listed on eBay",
+          processed: 0,
+          succeeded: 0,
+          failed: 0
+        });
+      }
+
+      console.log(`📝 Starting bulk template sync for ${listedProducts.length} eBay listings`);
+      
+      const results: Array<{ productId: number; name: string; success: boolean; message: string }> = [];
+      let succeeded = 0;
+      let failed = 0;
+
+      // Process each product with rate limiting (1 per second to avoid hitting eBay limits)
+      for (let i = 0; i < listedProducts.length; i++) {
+        const product = listedProducts[i];
+        
+        try {
+          console.log(`⏳ Updating listing ${i + 1}/${listedProducts.length}: ${product.name}`);
+          
+          // Use updateProduct which regenerates the template
+          const updateResult = await ebayApi.updateProduct(product.id, undefined, true);
+          
+          if (updateResult.success) {
+            succeeded++;
+            results.push({
+              productId: product.id,
+              name: product.name,
+              success: true,
+              message: "Template updated successfully"
+            });
+          } else {
+            failed++;
+            results.push({
+              productId: product.id,
+              name: product.name,
+              success: false,
+              message: updateResult.message || "Update failed"
+            });
+          }
+        } catch (error) {
+          failed++;
+          results.push({
+            productId: product.id,
+            name: product.name,
+            success: false,
+            message: (error as Error).message
+          });
+        }
+
+        // Rate limiting: wait 1.5 seconds between updates to stay under eBay limits
+        if (i < listedProducts.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1500));
+        }
+      }
+
+      console.log(`✅ Bulk template sync complete: ${succeeded} succeeded, ${failed} failed`);
+
+      await storage.createSyncLog({
+        source: "ebay",
+        operation: "bulk_template_sync",
+        status: failed === 0 ? "success" : "partial",
+        itemsProcessed: listedProducts.length,
+        itemsSucceeded: succeeded,
+        itemsFailed: failed,
+        details: JSON.stringify({ 
+          message: `Template sync: ${succeeded} updated, ${failed} failed`,
+          failedItems: results.filter(r => !r.success).slice(0, 10)
+        })
+      });
+
+      res.json({
+        success: failed === 0,
+        message: `Template sync complete: ${succeeded} listings updated, ${failed} failed`,
+        processed: listedProducts.length,
+        succeeded,
+        failed,
+        results: results.slice(0, 50) // Return first 50 results
+      });
+    } catch (error) {
+      console.error("Bulk template sync failed:", error);
+      res.status(500).json({
+        success: false,
+        message: `Bulk template sync failed: ${(error as Error).message}`
+      });
+    }
+  });
+
   app.get("/api/ebay/test", requireAuth, async (req, res) => {
     try {
       const result = await ebayApi.testConnection();
