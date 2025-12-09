@@ -51,15 +51,15 @@ interface AuthenticatedRequest extends Request {
 
 export async function registerRoutes(app: Express): Promise<Server> {
 
-  // Auth middleware - production-ready with optional dev bypass
+  // Auth middleware - production-ready with optional bypass
   const requireAuth = (req: any, res: any, next: any) => {
-    // Allow bypass only in development with explicit environment variable
-    if (process.env.NODE_ENV === 'development' && process.env.BYPASS_AUTH === 'true') {
-      console.warn('⚠️ Auth bypassed - development mode');
+    // Allow bypass when environment variable is explicitly set
+    if (process.env.BYPASS_AUTH === 'true') {
+      console.warn('⚠️ Auth bypassed');
       return next();
     }
     
-    // Production authentication check
+    // Authentication check
     if (!req.session?.userId) {
       return res.status(401).json({ message: "Authentication required" });
     }
