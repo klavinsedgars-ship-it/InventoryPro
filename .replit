@@ -23,6 +23,10 @@ localPort = 35915
 externalPort = 3001
 
 [[ports]]
+localPort = 36183
+externalPort = 8000
+
+[[ports]]
 localPort = 37209
 externalPort = 3003
 
@@ -78,6 +82,6 @@ TME_TOKEN = "d7afea65884e5febfc8bd419c6d8a2ff24c5142a28156f36b8"
 TME_CUSTOMER_NUMBER = "40071812"
 TME_CONTACT_NUMBER = "676772"
 TME_APPLICATION_SECRET = "267d30e978ba3ceea916"
+BYPASS_AUTH = "true"
 
 [userenv.development]
-BYPASS_AUTH = "true"
