@@ -17,8 +17,3 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   const app = await getApp();
   return app(req, res);
 }
-
-export const config = {
-  runtime: "nodejs20.x",
-  maxDuration: 60,
-};
