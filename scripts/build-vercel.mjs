@@ -12,7 +12,7 @@ run("vite build");
 
 // 2. Vercel serverless function (bundle handler so it's self-contained)
 run(
-  "esbuild server/vercel-handler.ts --bundle --platform=node --target=node20 --format=esm --packages=external --outfile=api/_proxy.js",
+  "esbuild server/vercel-handler.ts --bundle --platform=node --target=node20 --format=esm --packages=external --outfile=api/proxy.js",
 );
 
 // 3. Stamp the build so /__build.json identifies which commit is live

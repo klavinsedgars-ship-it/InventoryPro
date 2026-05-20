@@ -4,7 +4,7 @@
   "outputDirectory": "dist/public",
   "framework": null,
   "rewrites": [
-    { "source": "/api/(.+)", "destination": "/api/_proxy?_origPath=$1" },
+    { "source": "/api/(.+)", "destination": "/api/proxy?_origPath=$1" },
     { "source": "/((?!api/|__build).*)", "destination": "/index.html" }
   ]
 }
