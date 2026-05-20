@@ -4,7 +4,7 @@
   "outputDirectory": "dist/public",
   "framework": null,
   "functions": {
-    "api/[[...slug]].ts": {
+    "api/[...path].ts": {
       "maxDuration": 60
     }
   },
