@@ -1,9 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "vite build && esbuild server/vercel-handler.ts --bundle --platform=node --target=node20 --format=esm --packages=external --outfile='api/[...path].js'",
+  "buildCommand": "vite build && esbuild server/vercel-handler.ts --bundle --platform=node --target=node20 --format=esm --packages=external --outfile=api/_proxy.js",
   "outputDirectory": "dist/public",
   "framework": null,
   "rewrites": [
+    { "source": "/api/((?!_proxy).+)", "destination": "/api/_proxy?_origPath=$1" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }

@@ -7180,7 +7180,9 @@ var autoMessageScheduler = {
 async function registerRoutes(app) {
   const requireAuth = (req, res, next) => {
     if (process.env.BYPASS_AUTH === "true") {
-      console.warn("\u26A0\uFE0F Auth bypassed");
+      if (!req.session?.userId) {
+        req.session.userId = 1;
+      }
       return next();
     }
     if (!req.session?.userId) {
@@ -10608,6 +10610,15 @@ function getApp() {
   return appPromise;
 }
 async function handler(req, res) {
+  if (req.url) {
+    const parsed = new URL(req.url, "http://localhost");
+    const origPath = parsed.searchParams.get("_origPath");
+    if (origPath) {
+      parsed.searchParams.delete("_origPath");
+      const remainingSearch = parsed.search;
+      req.url = `/api/${origPath}${remainingSearch}`;
+    }
+  }
   const app = await getApp();
   return app(req, res);
 }

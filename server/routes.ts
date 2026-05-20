@@ -51,15 +51,19 @@ interface AuthenticatedRequest extends Request {
 
 export async function registerRoutes(app: Express): Promise<Server> {
 
-  // Auth middleware - production-ready with optional bypass
+  // Auth middleware - production-ready with optional bypass.
+  // When BYPASS_AUTH=true, every request is treated as authenticated as
+  // user id 1 (the seeded admin), so /api/auth/me returns a real user and
+  // the frontend doesn't gate on login. Intended for demo/staging only;
+  // never set this in real production.
   const requireAuth = (req: any, res: any, next: any) => {
-    // Allow bypass when environment variable is explicitly set
     if (process.env.BYPASS_AUTH === 'true') {
-      console.warn('⚠️ Auth bypassed');
+      if (!req.session?.userId) {
+        req.session.userId = 1;
+      }
       return next();
     }
-    
-    // Authentication check
+
     if (!req.session?.userId) {
       return res.status(401).json({ message: "Authentication required" });
     }

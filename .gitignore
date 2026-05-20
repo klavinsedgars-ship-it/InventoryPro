@@ -8,7 +8,7 @@ vite.config.ts.*
 # Vercel
 .vercel
 # Pre-bundled Vercel function output (built from server/vercel-handler.ts).
-# We commit api/[...path].js so Vercel detects the function at scan-time
+# We commit api/_proxy.js so Vercel detects the function at scan-time
 # (which happens before buildCommand runs). The buildCommand re-bundles it
 # fresh on each deploy.
 api/*.mjs
