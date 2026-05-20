@@ -1538,12 +1538,13 @@ var Marketplace = {
 
 // server/db.ts
 neonConfig.webSocketConstructor = ws;
-if (!process.env.DATABASE_URL) {
+var connectionString = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.POSTGRES_URL;
+if (!connectionString) {
   throw new Error(
-    "DATABASE_URL must be set. Did you forget to provision a database?"
+    "DATABASE_URL (or NEON_DATABASE_URL / POSTGRES_URL) must be set. Did you forget to provision a database?"
   );
 }
-var pool = new Pool({ connectionString: process.env.DATABASE_URL });
+var pool = new Pool({ connectionString });
 var db = drizzle({ client: pool, schema: schema_exports });
 
 // server/routes.ts
