@@ -4,3 +4,33 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+
+# Vercel
+.vercel
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Cookie jars (never commit session tokens)
+*_cookies.txt
+cookies*.txt
+
+# Ad-hoc test / debug scripts (keep them out of the repo root)
+test_*.js
+test_*.xml
+debug_*.js
+manual_*.js
+sync_random_products.js
+sync_multipack_products.js
+update_stock.js
+update_token.sh
+set_token.sh
+
+# Local processed image cache
+processed_images/
+
+# IDE
+.idea
+.vscode
