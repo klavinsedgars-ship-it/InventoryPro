@@ -7,6 +7,9 @@ vite.config.ts.*
 
 # Vercel
 .vercel
+# Pre-bundled Vercel function output (built from server/vercel-handler.ts)
+api/*.js
+api/*.mjs
 
 # Environment / secrets
 .env
