@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Switch, Route } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
@@ -18,74 +18,47 @@ import { TemplatePreview } from "@/pages/template-preview";
 import Configuration from "@/pages/configuration";
 import { Login } from "@/pages/login";
 import NotFound from "@/pages/not-found";
-import ImageProcessingPage from './pages/image-processing';
+import ImageProcessingPage from "./pages/image-processing";
 import { EbayPolicies } from "@/pages/ebay-policies";
 import { Orders } from "@/pages/orders";
 import MessagesPage from "@/pages/messages";
 
+type User = {
+  id: number;
+  username: string;
+  email: string;
+  role: string;
+} | null;
+
 function AppContent() {
-  // Temporary bypass for authentication - using mock user
-  const [user, setUser] = useState<any>({
-    id: 1,
-    username: "admin",
-    email: "admin@inventorysync.com",
-    role: "admin"
+  const [loggedInUser, setLoggedInUser] = useState<User>(null);
+
+  const { data, isLoading, isError } = useQuery<{ user: NonNullable<User> } | null>({
+    queryKey: ["/api/auth/me"],
+    queryFn: async () => {
+      const response = await fetch("/api/auth/me", { credentials: "include" });
+      if (response.status === 401) return null;
+      if (!response.ok) throw new Error(`Auth check failed: ${response.status}`);
+      return response.json();
+    },
+    retry: false,
+    staleTime: 5 * 60 * 1000,
   });
-  const [isLoading, setIsLoading] = useState(false);
 
-  // Disabled authentication check for development
-  // const { data: userData, error } = useQuery({
-  //   queryKey: ["/api/auth/me"],
-  //   queryFn: async () => {
-  //     const response = await fetch("/api/auth/me", {
-  //       credentials: "include",
-  //     });
-  //     if (!response.ok) {
-  //       throw new Error("Not authenticated");
-  //     }
-  //     return response.json();
-  //   },
-  //   retry: false,
-  // });
-
-  // useEffect(() => {
-  //   if (userData) {
-  //     setUser(userData.user);
-  //   } else if (error) {
-  //     setUser(null);
-  //   }
-  //   setIsLoading(false);
-  // }, [userData, error]);
-
-  const handleLoginSuccess = (userData: any) => {
-    setUser(userData);
-  };
-
-  const handleLogout = async () => {
-    try {
-      await fetch("/api/auth/logout", {
-        method: "POST",
-        credentials: "include",
-      });
-      setUser(null);
-      queryClient.clear();
-    } catch (error) {
-      console.error("Logout failed:", error);
-    }
-  };
+  // Prefer the most-recent client-side login over the cached query result
+  const user: User = loggedInUser ?? data?.user ?? null;
 
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
       </div>
     );
   }
 
-  // Authentication disabled for development
-  // if (!user) {
-  //   return <Login onSuccess={handleLoginSuccess} />;
-  // }
+  if (!user || isError) {
+    return <Login onSuccess={(u) => setLoggedInUser(u)} />;
+  }
 
   return (
     <Switch>
