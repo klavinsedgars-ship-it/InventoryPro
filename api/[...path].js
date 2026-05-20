@@ -3590,12 +3590,16 @@ import sharp from "sharp";
 import crypto2 from "crypto";
 import fs from "fs/promises";
 import path from "path";
+import os from "os";
+var DEFAULT_CACHE_DIR = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME ? path.join(os.tmpdir(), "inventorypro-processed-images") : "./processed_images";
 var ImageProcessingService = class {
-  cacheDir = "./processed_images";
+  cacheDir = DEFAULT_CACHE_DIR;
   maxImageSize = 5 * 1024 * 1024;
   // 5MB limit
   constructor() {
-    this.ensureCacheDirectory();
+    this.ensureCacheDirectory().catch((err) => {
+      console.warn(`[image-processing] cache dir init failed (${this.cacheDir}):`, err.message);
+    });
   }
   async ensureCacheDirectory() {
     try {

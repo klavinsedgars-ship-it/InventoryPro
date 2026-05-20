@@ -3,6 +3,15 @@ import sharp from 'sharp';
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
+import os from 'os';
+
+// On serverless (Vercel/Lambda), the working directory is read-only;
+// only /tmp is writable. Fall back to /tmp on Vercel; otherwise use a
+// local ./processed_images directory.
+const DEFAULT_CACHE_DIR =
+  process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME
+    ? path.join(os.tmpdir(), 'inventorypro-processed-images')
+    : './processed_images';
 
 interface ImageProcessingResult {
   success: boolean;
@@ -13,11 +22,15 @@ interface ImageProcessingResult {
 }
 
 export class ImageProcessingService {
-  private cacheDir = './processed_images';
+  private cacheDir = DEFAULT_CACHE_DIR;
   private maxImageSize = 5 * 1024 * 1024; // 5MB limit
 
   constructor() {
-    this.ensureCacheDirectory();
+    // Best-effort: if it fails (read-only FS, permissions), swallow.
+    // Each operation that writes will create the dir again as needed.
+    this.ensureCacheDirectory().catch((err) => {
+      console.warn(`[image-processing] cache dir init failed (${this.cacheDir}):`, err.message);
+    });
   }
 
   private async ensureCacheDirectory() {
