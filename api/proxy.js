@@ -7532,12 +7532,24 @@ async function registerRoutes(app) {
         lastMessage: "Starting bulk listing...",
         errorDetails: null
       });
-      processAsyncBulkListing(jobId, productIds, categoryId);
+      const FIRE_AND_FORGET = process.env.LONG_BACKGROUND_JOBS === "true";
+      if (FIRE_AND_FORGET) {
+        processAsyncBulkListing(jobId, productIds, categoryId);
+        return res.json({
+          success: true,
+          jobId,
+          message: `Bulk listing job started for ${productIds.length} products`,
+          total: productIds.length
+        });
+      }
+      await processAsyncBulkListing(jobId, productIds, categoryId);
+      const finalJob = await storage.getBulkListingJob(jobId);
       res.json({
         success: true,
         jobId,
-        message: `Bulk listing job started for ${productIds.length} products`,
-        total: productIds.length
+        message: `Bulk listing complete: ${finalJob?.succeeded ?? 0} listed, ${finalJob?.failed ?? 0} failed`,
+        total: productIds.length,
+        job: finalJob
       });
     } catch (error) {
       console.error("eBay bulk listing failed:", error);

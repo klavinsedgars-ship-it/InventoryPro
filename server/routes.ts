@@ -487,15 +487,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
         errorDetails: null
       });
 
-      // Start async processing - don't await
-      processAsyncBulkListing(jobId, productIds, categoryId);
+      // On Vercel serverless, the function is killed the instant we
+      // res.json() — any "background" work after that dies mid-flight.
+      // So process inline. This works while the batch fits inside the
+      // function timeout (10s on Hobby ≈ 2-3 items, 60s on Pro ≈ 15-20).
+      // For larger batches we'd need a cron-driven queue worker.
+      const FIRE_AND_FORGET = process.env.LONG_BACKGROUND_JOBS === "true";
+      if (FIRE_AND_FORGET) {
+        processAsyncBulkListing(jobId, productIds, categoryId);
+        return res.json({
+          success: true,
+          jobId,
+          message: `Bulk listing job started for ${productIds.length} products`,
+          total: productIds.length,
+        });
+      }
 
-      // Return immediately with job ID
+      await processAsyncBulkListing(jobId, productIds, categoryId);
+      const finalJob = await storage.getBulkListingJob(jobId);
       res.json({
         success: true,
         jobId,
-        message: `Bulk listing job started for ${productIds.length} products`,
-        total: productIds.length
+        message: `Bulk listing complete: ${finalJob?.succeeded ?? 0} listed, ${finalJob?.failed ?? 0} failed`,
+        total: productIds.length,
+        job: finalJob,
       });
     } catch (error) {
       console.error("eBay bulk listing failed:", error);
