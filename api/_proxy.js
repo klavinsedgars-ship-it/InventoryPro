@@ -7178,10 +7178,17 @@ var autoMessageScheduler = {
 
 // server/routes.ts
 async function registerRoutes(app) {
-  const requireAuth = (req, res, next) => {
+  const requireAuth = async (req, res, next) => {
     if (process.env.BYPASS_AUTH === "true") {
       if (!req.session?.userId) {
-        req.session.userId = 1;
+        try {
+          const admin = await storage.getUserByUsername("admin");
+          if (admin) {
+            req.session.userId = admin.id;
+          }
+        } catch (err) {
+          console.error("BYPASS_AUTH admin lookup failed:", err);
+        }
       }
       return next();
     }

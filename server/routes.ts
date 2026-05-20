@@ -53,13 +53,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Auth middleware - production-ready with optional bypass.
   // When BYPASS_AUTH=true, every request is treated as authenticated as
-  // user id 1 (the seeded admin), so /api/auth/me returns a real user and
-  // the frontend doesn't gate on login. Intended for demo/staging only;
-  // never set this in real production.
-  const requireAuth = (req: any, res: any, next: any) => {
+  // the seeded admin (looked up by username, since the auto-generated id
+  // depends on insert order and varies per DB). Intended for demo/staging
+  // only; never set this in real production.
+  const requireAuth = async (req: any, res: any, next: any) => {
     if (process.env.BYPASS_AUTH === 'true') {
       if (!req.session?.userId) {
-        req.session.userId = 1;
+        try {
+          const admin = await storage.getUserByUsername('admin');
+          if (admin) {
+            req.session.userId = admin.id;
+          }
+        } catch (err) {
+          console.error('BYPASS_AUTH admin lookup failed:', err);
+        }
       }
       return next();
     }
