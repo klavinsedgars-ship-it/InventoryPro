@@ -3,11 +3,6 @@
   "buildCommand": "vite build && esbuild server/vercel-handler.ts --bundle --platform=node --target=node20 --format=esm --packages=external --outfile='api/[...path].js'",
   "outputDirectory": "dist/public",
   "framework": null,
-  "functions": {
-    "api/[...path].js": {
-      "maxDuration": 60
-    }
-  },
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
