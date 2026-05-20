@@ -116,6 +116,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Use to verify which commit is actually running and whether
   // BYPASS_AUTH is being read by the function.
   app.get("/api/__version", (req, res) => {
+    const clientId =
+      process.env.EBAY_OAUTH_CLIENT_ID || process.env.EBAY_APP_ID || "";
+    const clientSecret =
+      process.env.EBAY_OAUTH_CLIENT_SECRET || process.env.EBAY_CERT_ID || "";
+    const refreshToken =
+      process.env.EBAY_OAUTH_REFRESH_TOKEN ||
+      process.env.EBAY_REFRESH_TOKEN ||
+      "";
+
     res.json({
       commit: process.env.VERCEL_GIT_COMMIT_SHA || "unknown",
       branch: process.env.VERCEL_GIT_COMMIT_REF || "unknown",
@@ -123,8 +132,110 @@ export async function registerRoutes(app: Express): Promise<Server> {
       nodeEnv: process.env.NODE_ENV || "unknown",
       hasDatabase:
         !!(process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.POSTGRES_URL),
+      ebay: {
+        hasClientId: !!clientId,
+        clientIdLength: clientId.length,
+        hasClientSecret: !!clientSecret,
+        clientSecretLength: clientSecret.length,
+        hasRefreshToken: !!refreshToken,
+        refreshTokenLength: refreshToken.length,
+      },
+      tme: {
+        hasToken: !!process.env.TME_TOKEN,
+        hasAppSecret: !!process.env.TME_APPLICATION_SECRET,
+        hasCustomerNumber: !!process.env.TME_CUSTOMER_NUMBER,
+        hasContactNumber: !!process.env.TME_CONTACT_NUMBER,
+      },
       time: new Date().toISOString(),
     });
+  });
+
+  // Diagnostic - hits eBay's OAuth refresh endpoint with the configured
+  // credentials and returns the raw response. No DB, no listing logic.
+  // Reveals exact reason for "OAuth authentication fail" errors.
+  app.get("/api/__ebay-check", async (_req, res) => {
+    const clientId =
+      process.env.EBAY_OAUTH_CLIENT_ID || process.env.EBAY_APP_ID || "";
+    const clientSecret =
+      process.env.EBAY_OAUTH_CLIENT_SECRET || process.env.EBAY_CERT_ID || "";
+    const refreshToken =
+      process.env.EBAY_OAUTH_REFRESH_TOKEN ||
+      process.env.EBAY_REFRESH_TOKEN ||
+      "";
+
+    if (!clientId || !clientSecret || !refreshToken) {
+      return res.status(400).json({
+        ok: false,
+        stage: "config",
+        message: "One or more eBay OAuth env vars are missing",
+        hasClientId: !!clientId,
+        hasClientSecret: !!clientSecret,
+        hasRefreshToken: !!refreshToken,
+      });
+    }
+
+    const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString(
+      "base64",
+    );
+    const scopes = [
+      "https://api.ebay.com/oauth/api_scope",
+      "https://api.ebay.com/oauth/api_scope/sell.account",
+      "https://api.ebay.com/oauth/api_scope/sell.inventory",
+      "https://api.ebay.com/oauth/api_scope/sell.marketing",
+      "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
+    ].join(" ");
+
+    try {
+      const response = await fetch(
+        "https://api.ebay.com/identity/v1/oauth2/token",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Authorization: `Basic ${credentials}`,
+          },
+          body: new URLSearchParams({
+            grant_type: "refresh_token",
+            refresh_token: refreshToken,
+            scope: scopes,
+          }).toString(),
+        },
+      );
+
+      const bodyText = await response.text();
+      let bodyJson: any = null;
+      try {
+        bodyJson = JSON.parse(bodyText);
+      } catch {}
+
+      if (!response.ok) {
+        return res.status(200).json({
+          ok: false,
+          stage: "ebay-rejected",
+          httpStatus: response.status,
+          ebayError: bodyJson?.error,
+          ebayErrorDescription: bodyJson?.error_description,
+          rawBody: bodyText.slice(0, 500),
+        });
+      }
+
+      return res.json({
+        ok: true,
+        stage: "success",
+        tokenType: bodyJson?.token_type,
+        expiresIn: bodyJson?.expires_in,
+        accessTokenPreview:
+          typeof bodyJson?.access_token === "string"
+            ? bodyJson.access_token.slice(0, 12) + "..."
+            : null,
+      });
+    } catch (err) {
+      return res.status(500).json({
+        ok: false,
+        stage: "network",
+        error: (err as Error).message,
+      });
+    }
   });
 
   app.get("/api/auth/me", requireAuth, async (req, res) => {
