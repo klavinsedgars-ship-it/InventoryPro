@@ -1,10 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "vite build && esbuild server/vercel-handler.ts --bundle --platform=node --target=node20 --format=esm --packages=external --outfile=api/_proxy.js",
+  "buildCommand": "vite build && esbuild server/vercel-handler.ts --bundle --platform=node --target=node20 --format=esm --packages=external --outfile=api/_proxy.js && node -e \"require('fs').writeFileSync('dist/public/__build.json', JSON.stringify({commit: process.env.VERCEL_GIT_COMMIT_SHA || 'local', ref: process.env.VERCEL_GIT_COMMIT_REF || 'local', builtAt: new Date().toISOString()}, null, 2))\"",
   "outputDirectory": "dist/public",
   "framework": null,
   "rewrites": [
-    { "source": "/api/((?!_proxy).+)", "destination": "/api/_proxy?_origPath=$1" },
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    { "source": "/api/(.+)", "destination": "/api/_proxy?_origPath=$1" },
+    { "source": "/((?!api/|__build).*)", "destination": "/index.html" }
   ]
 }
