@@ -7226,7 +7226,27 @@ async function registerRoutes(app) {
       res.json({ message: "Logged out successfully" });
     });
   });
+  app.get("/api/__version", (req, res) => {
+    res.json({
+      commit: process.env.VERCEL_GIT_COMMIT_SHA || "unknown",
+      branch: process.env.VERCEL_GIT_COMMIT_REF || "unknown",
+      bypassAuth: process.env.BYPASS_AUTH === "true",
+      nodeEnv: process.env.NODE_ENV || "unknown",
+      hasDatabase: !!(process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.POSTGRES_URL),
+      time: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  });
   app.get("/api/auth/me", requireAuth, async (req, res) => {
+    if (process.env.BYPASS_AUTH === "true") {
+      return res.json({
+        user: {
+          id: req.session.userId ?? 0,
+          username: "admin",
+          email: "admin@inventorysync.com",
+          role: "admin"
+        }
+      });
+    }
     try {
       const user = await storage.getUser(req.session.userId);
       if (!user) {

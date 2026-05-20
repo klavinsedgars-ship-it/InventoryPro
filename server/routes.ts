@@ -112,7 +112,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // Diagnostic endpoint - no auth required, no DB access.
+  // Use to verify which commit is actually running and whether
+  // BYPASS_AUTH is being read by the function.
+  app.get("/api/__version", (req, res) => {
+    res.json({
+      commit: process.env.VERCEL_GIT_COMMIT_SHA || "unknown",
+      branch: process.env.VERCEL_GIT_COMMIT_REF || "unknown",
+      bypassAuth: process.env.BYPASS_AUTH === "true",
+      nodeEnv: process.env.NODE_ENV || "unknown",
+      hasDatabase:
+        !!(process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.POSTGRES_URL),
+      time: new Date().toISOString(),
+    });
+  });
+
   app.get("/api/auth/me", requireAuth, async (req, res) => {
+    // When BYPASS_AUTH is on, never depend on the DB - return a synthetic
+    // admin so the frontend can render even on a fresh / mis-seeded DB.
+    if (process.env.BYPASS_AUTH === "true") {
+      return res.json({
+        user: {
+          id: (req.session as any).userId ?? 0,
+          username: "admin",
+          email: "admin@inventorysync.com",
+          role: "admin",
+        },
+      });
+    }
+
     try {
       const user = await storage.getUser((req.session as any).userId);
       if (!user) {
