@@ -150,6 +150,93 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // One-shot OAuth code exchange. Pass ?code=<auth-code>&ruName=<RuName>
+  // (or rely on the configured RuName env var) and we hit eBay's token
+  // endpoint with the configured client_id/secret. Returns the new
+  // refresh_token so it can be saved to EBAY_OAUTH_REFRESH_TOKEN.
+  // Codes are single-use and expire in ~5 minutes, so this is safe to
+  // expose temporarily.
+  app.get("/api/__ebay-exchange", async (req, res) => {
+    const code = String(req.query.code || "");
+    const ruName =
+      String(req.query.ruName || "") || process.env.EBAY_RUNAME || "";
+
+    if (!code || !ruName) {
+      return res.status(400).json({
+        ok: false,
+        message:
+          "Both ?code=<authcode> and ?ruName=<RuName> required (or set EBAY_RUNAME env var)",
+        haveCode: !!code,
+        haveRuName: !!ruName,
+      });
+    }
+
+    const clientId =
+      process.env.EBAY_OAUTH_CLIENT_ID || process.env.EBAY_APP_ID || "";
+    const clientSecret =
+      process.env.EBAY_OAUTH_CLIENT_SECRET || process.env.EBAY_CERT_ID || "";
+
+    if (!clientId || !clientSecret) {
+      return res.status(400).json({
+        ok: false,
+        message: "Client ID or Client Secret missing from env",
+      });
+    }
+
+    const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString(
+      "base64",
+    );
+    try {
+      const response = await fetch(
+        "https://api.ebay.com/identity/v1/oauth2/token",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Authorization: `Basic ${credentials}`,
+          },
+          body: new URLSearchParams({
+            grant_type: "authorization_code",
+            code,
+            redirect_uri: ruName,
+          }).toString(),
+        },
+      );
+      const bodyText = await response.text();
+      let bodyJson: any = null;
+      try {
+        bodyJson = JSON.parse(bodyText);
+      } catch {}
+
+      if (!response.ok) {
+        return res.status(200).json({
+          ok: false,
+          stage: "ebay-rejected",
+          httpStatus: response.status,
+          ebayError: bodyJson?.error,
+          ebayErrorDescription: bodyJson?.error_description,
+          rawBody: bodyText.slice(0, 500),
+        });
+      }
+
+      return res.json({
+        ok: true,
+        message:
+          "Save the refresh_token below to Vercel env var EBAY_OAUTH_REFRESH_TOKEN.",
+        refresh_token: bodyJson?.refresh_token,
+        refresh_token_expires_in: bodyJson?.refresh_token_expires_in,
+        access_token_expires_in: bodyJson?.expires_in,
+        token_type: bodyJson?.token_type,
+      });
+    } catch (err) {
+      return res.status(500).json({
+        ok: false,
+        stage: "network",
+        error: (err as Error).message,
+      });
+    }
+  });
+
   // Diagnostic - hits eBay's OAuth refresh endpoint with the configured
   // credentials and returns the raw response. No DB, no listing logic.
   // Reveals exact reason for "OAuth authentication fail" errors.

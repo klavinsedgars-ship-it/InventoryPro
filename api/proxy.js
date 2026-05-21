@@ -7253,6 +7253,76 @@ async function registerRoutes(app) {
       time: (/* @__PURE__ */ new Date()).toISOString()
     });
   });
+  app.get("/api/__ebay-exchange", async (req, res) => {
+    const code = String(req.query.code || "");
+    const ruName = String(req.query.ruName || "") || process.env.EBAY_RUNAME || "";
+    if (!code || !ruName) {
+      return res.status(400).json({
+        ok: false,
+        message: "Both ?code=<authcode> and ?ruName=<RuName> required (or set EBAY_RUNAME env var)",
+        haveCode: !!code,
+        haveRuName: !!ruName
+      });
+    }
+    const clientId = process.env.EBAY_OAUTH_CLIENT_ID || process.env.EBAY_APP_ID || "";
+    const clientSecret = process.env.EBAY_OAUTH_CLIENT_SECRET || process.env.EBAY_CERT_ID || "";
+    if (!clientId || !clientSecret) {
+      return res.status(400).json({
+        ok: false,
+        message: "Client ID or Client Secret missing from env"
+      });
+    }
+    const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString(
+      "base64"
+    );
+    try {
+      const response = await fetch(
+        "https://api.ebay.com/identity/v1/oauth2/token",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Authorization: `Basic ${credentials}`
+          },
+          body: new URLSearchParams({
+            grant_type: "authorization_code",
+            code,
+            redirect_uri: ruName
+          }).toString()
+        }
+      );
+      const bodyText = await response.text();
+      let bodyJson = null;
+      try {
+        bodyJson = JSON.parse(bodyText);
+      } catch {
+      }
+      if (!response.ok) {
+        return res.status(200).json({
+          ok: false,
+          stage: "ebay-rejected",
+          httpStatus: response.status,
+          ebayError: bodyJson?.error,
+          ebayErrorDescription: bodyJson?.error_description,
+          rawBody: bodyText.slice(0, 500)
+        });
+      }
+      return res.json({
+        ok: true,
+        message: "Save the refresh_token below to Vercel env var EBAY_OAUTH_REFRESH_TOKEN.",
+        refresh_token: bodyJson?.refresh_token,
+        refresh_token_expires_in: bodyJson?.refresh_token_expires_in,
+        access_token_expires_in: bodyJson?.expires_in,
+        token_type: bodyJson?.token_type
+      });
+    } catch (err) {
+      return res.status(500).json({
+        ok: false,
+        stage: "network",
+        error: err.message
+      });
+    }
+  });
   app.get("/api/__ebay-check", async (_req, res) => {
     const clientId = process.env.EBAY_OAUTH_CLIENT_ID || process.env.EBAY_APP_ID || "";
     const clientSecret = process.env.EBAY_OAUTH_CLIENT_SECRET || process.env.EBAY_CERT_ID || "";
