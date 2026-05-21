@@ -1109,18 +1109,19 @@ export function Products({ user }: ProductsProps) {
 
               {/* Error Details - expandable section */}
               {bulkListingProgress.status === "completed" && bulkListingProgress.failed > 0 && bulkListingProgress.errorDetails && (
-                <div className="mt-2 bg-red-50 dark:bg-red-950/50 rounded px-3 py-2 max-h-20 overflow-y-auto">
+                <div className="mt-2 bg-red-50 dark:bg-red-950/50 rounded px-3 py-2 max-h-64 overflow-y-auto">
                   <p className="text-xs text-red-600 dark:text-red-400 font-medium mb-1">Failed Items:</p>
-                  <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-red-600 dark:text-red-400">
-                    {bulkListingProgress.errorDetails.slice(0, 5).map((err, idx) => (
-                      <span key={idx} className="truncate max-w-xs">
-                        #{err.productId}: {err.error}
-                      </span>
+                  <ul className="flex flex-col gap-1 text-xs text-red-700 dark:text-red-300">
+                    {bulkListingProgress.errorDetails.map((err, idx) => (
+                      <li
+                        key={idx}
+                        className="whitespace-pre-wrap break-words font-mono leading-snug"
+                        title={err.error}
+                      >
+                        <span className="font-semibold">#{err.productId}:</span> {err.error}
+                      </li>
                     ))}
-                    {bulkListingProgress.errorDetails.length > 5 && (
-                      <span className="font-medium">+{bulkListingProgress.errorDetails.length - 5} more</span>
-                    )}
-                  </div>
+                  </ul>
                 </div>
               )}
             </div>
