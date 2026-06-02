@@ -29,63 +29,74 @@ export interface ShippingPolicy {
 
 // Shipping policy mapping based on weight ranges (in grams).
 // The eBay fulfillment-policy IDs come from env vars so the same code
-// works across marketplaces (UK / DE / ...). The hardcoded fallbacks are
-// the original UK policy IDs, kept so existing UK behaviour is unchanged
-// when the env vars aren't set.
+// works across marketplaces. Fallbacks are the original UK policy IDs.
 //
-// DE policy IDs (created 2026-06 via /api/__bootstrap-de-policies) are
-// provided through:
-//   EBAY_SHIPPING_POLICY_0_99GR
-//   EBAY_SHIPPING_POLICY_100_499GR
-//   EBAY_SHIPPING_POLICY_500_999GR
-//   EBAY_SHIPPING_POLICY_1000_1999GR
+// DE policy IDs (created via /api/__bootstrap-de-policies) come from:
+//   EBAY_SHIPPING_POLICY_0_20GR
+//   EBAY_SHIPPING_POLICY_21_100GR
+//   EBAY_SHIPPING_POLICY_101_500GR
+//   EBAY_SHIPPING_POLICY_501_1000GR
+//   EBAY_SHIPPING_POLICY_1001_2000GR
 //
-// Weight bands use half-open intervals [min, max) so there is no gap at
-// the boundaries (the old code had a hole at 999.01–999.99g that fell
-// through to the default policy).
+// The 5 bands match Latvijas Pasts' Sīkpaka (parcel-with-goods) tariff
+// brackets exactly, so each product lands in the band whose postal rate
+// it actually costs to ship. Prices below are Germany Economy +15%
+// (packaging markup) — informational only; the live rates live on eBay
+// in the policies themselves.
+//
+// Weight bands use half-open intervals [min, max).
 export const SHIPPING_POLICIES: ShippingPolicy[] = [
   {
-    id: "policy_0_99",
-    ebayPolicyId: process.env.EBAY_SHIPPING_POLICY_0_99GR || "268493033019",
-    name: "0-99gr",
-    weightRange: { min: 0, max: 100 },
-    description: "Light items: SMD components, resistors, capacitors, small ICs",
-    price: "4.99",
+    id: "policy_0_20",
+    ebayPolicyId: process.env.EBAY_SHIPPING_POLICY_0_20GR || process.env.EBAY_SHIPPING_POLICY_0_99GR || "268493033019",
+    name: "0-20gr",
+    weightRange: { min: 0, max: 21 },
+    description: "Tiny items: SMD parts, single resistors/capacitors",
+    price: "5.79",
     additionalItemPrice: "1.00"
   },
   {
-    id: "policy_100_499",
-    ebayPolicyId: process.env.EBAY_SHIPPING_POLICY_100_499GR || "268493034019",
-    name: "100-499gr",
-    weightRange: { min: 100, max: 500 },
-    description: "Small items: sensors, modules, connectors, small boards",
-    price: "6.99",
+    id: "policy_21_100",
+    ebayPolicyId: process.env.EBAY_SHIPPING_POLICY_21_100GR || "268493033019",
+    name: "21-100gr",
+    weightRange: { min: 21, max: 101 },
+    description: "Light items: small ICs, connectors, sensors",
+    price: "5.89",
     additionalItemPrice: "1.00"
   },
   {
-    id: "policy_500_999",
-    ebayPolicyId: process.env.EBAY_SHIPPING_POLICY_500_999GR || "268493035019",
-    name: "500-999gr",
-    weightRange: { min: 500, max: 1000 },
-    description: "Medium items: development boards, larger modules, cables",
-    price: "9.99",
+    id: "policy_101_500",
+    ebayPolicyId: process.env.EBAY_SHIPPING_POLICY_101_500GR || process.env.EBAY_SHIPPING_POLICY_100_499GR || "268493034019",
+    name: "101-500gr",
+    weightRange: { min: 101, max: 501 },
+    description: "Small items: modules, small boards, cables",
+    price: "7.09",
+    additionalItemPrice: "1.00"
+  },
+  {
+    id: "policy_501_1000",
+    ebayPolicyId: process.env.EBAY_SHIPPING_POLICY_501_1000GR || process.env.EBAY_SHIPPING_POLICY_500_999GR || "268493035019",
+    name: "501-1000gr",
+    weightRange: { min: 501, max: 1001 },
+    description: "Medium items: development boards, larger modules",
+    price: "9.39",
     additionalItemPrice: "2.00"
   },
   {
-    id: "policy_1000_1999",
-    ebayPolicyId: process.env.EBAY_SHIPPING_POLICY_1000_1999GR || "268493036019",
-    name: "1000-1999gr",
-    weightRange: { min: 1000, max: 2000 },
+    id: "policy_1001_2000",
+    ebayPolicyId: process.env.EBAY_SHIPPING_POLICY_1001_2000GR || process.env.EBAY_SHIPPING_POLICY_1000_1999GR || "268493036019",
+    name: "1001-2000gr",
+    weightRange: { min: 1001, max: 2001 },
     description: "Heavy items: power supplies, kits, bulk components",
-    price: "14.99",
+    price: "10.99",
     additionalItemPrice: "5.00"
   }
 ];
 
 // Default policy for items without weight or invalid weight (lightest policy)
 export const DEFAULT_SHIPPING_POLICY_ID =
-  process.env.EBAY_SHIPPING_POLICY_0_99GR || "268493033019";
-export const DEFAULT_SHIPPING_POLICY_NAME = "0-99gr";
+  process.env.EBAY_SHIPPING_POLICY_0_20GR || process.env.EBAY_SHIPPING_POLICY_0_99GR || "268493033019";
+export const DEFAULT_SHIPPING_POLICY_NAME = "0-20gr";
 
 /**
  * Get eBay shipping policy ID based on product weight in grams
@@ -105,8 +116,8 @@ export function getShippingPolicyId(weightGrams: number | null | undefined): str
     }
   }
 
-  // For weights above our max range (1999g), use the heaviest policy
-  if (weightGrams > 1999) {
+  // For weights above our max range (2000g), use the heaviest policy
+  if (weightGrams >= 2001) {
     const heaviestPolicy = SHIPPING_POLICIES[SHIPPING_POLICIES.length - 1];
     console.warn(`Weight ${weightGrams}g exceeds max range, using heaviest policy: ${heaviestPolicy.name} (${heaviestPolicy.ebayPolicyId})`);
     return heaviestPolicy.ebayPolicyId;

@@ -253,31 +253,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const body = (req.body || {}) as any;
 
     const paymentName = String(body.paymentName || "EU Managed Payments");
-    const returnName = String(body.returnName || "30 Tage Rückgabe (Käufer zahlt Versand)");
-    const bandsInput = Array.isArray(body.shipping) ? body.shipping : null;
+    const returnName = String(body.returnName || "30 Tage Rückgabe");
 
+    // 5 weight bands matching Latvijas Pasts' Sīkpaka (parcel-with-goods)
+    // tariff brackets. Prices are Economy service + 15% packaging markup:
+    //   de = Germany rate (domestic shipping for eBay.de buyers)
+    //   eu = most-expensive-EU rate (covers the whole EEZ international zone
+    //        without ever undercharging)
+    // Rates rounded up so the 15% markup is always fully covered.
     type Band = {
       label: string;
-      first: string;
+      varKey: string;
+      de: string;   // domestic (Germany) flat rate
+      eu: string;   // international (rest of EU/EEA) flat rate
       additional: string;
       weightMin: number;
       weightMax: number;
     };
 
-    const bands: Band[] = bandsInput && bandsInput.length === 4
+    const bandsInput = Array.isArray(body.shipping) ? body.shipping : null;
+    const defaultBands: Band[] = [
+      { label: "0-20g",     varKey: "EBAY_SHIPPING_POLICY_0_20GR",     de: "5.79", eu: "6.79",  additional: "1.00", weightMin: 0,    weightMax: 20 },
+      { label: "21-100g",   varKey: "EBAY_SHIPPING_POLICY_21_100GR",   de: "5.89", eu: "6.79",  additional: "1.00", weightMin: 21,   weightMax: 100 },
+      { label: "101-500g",  varKey: "EBAY_SHIPPING_POLICY_101_500GR",  de: "7.09", eu: "7.89",  additional: "1.00", weightMin: 101,  weightMax: 500 },
+      { label: "501-1000g", varKey: "EBAY_SHIPPING_POLICY_501_1000GR", de: "9.39", eu: "10.99", additional: "2.00", weightMin: 501,  weightMax: 1000 },
+      { label: "1001-2000g",varKey: "EBAY_SHIPPING_POLICY_1001_2000GR",de: "10.99",eu: "14.79", additional: "5.00", weightMin: 1001, weightMax: 2000 },
+    ];
+
+    const bands: Band[] = bandsInput && bandsInput.length === defaultBands.length
       ? bandsInput.map((b: any, i: number) => ({
-          label: String(b.label ?? ["0-99g","100-499g","500-999g","1000-1999g"][i]),
-          first: String(b.first ?? ""),
-          additional: String(b.additional ?? "1.00"),
-          weightMin: Number(b.weightMin ?? [0.01,100,500,1000][i]),
-          weightMax: Number(b.weightMax ?? [99,499,999,1999][i]),
+          ...defaultBands[i],
+          de: String(b.de ?? defaultBands[i].de),
+          eu: String(b.eu ?? defaultBands[i].eu),
+          additional: String(b.additional ?? defaultBands[i].additional),
         }))
-      : [
-          { label: "0-99g",     first: "4.99",  additional: "1.00", weightMin: 0.01, weightMax: 99 },
-          { label: "100-499g",  first: "6.99",  additional: "1.00", weightMin: 100,  weightMax: 499 },
-          { label: "500-999g",  first: "9.99",  additional: "2.00", weightMin: 500,  weightMax: 999 },
-          { label: "1000-1999g",first: "14.99", additional: "5.00", weightMin: 1000, weightMax: 1999 },
-        ];
+      : defaultBands;
 
     const results: any = { payment: null, return: null, shipping: [] };
     const errors: string[] = [];
@@ -374,19 +384,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     for (const band of bands) {
-      // DE_OtherShippingMethods + carrier "Other" failed LSAS validation
-      // ("LOGISTICS_INFO_IS_MISSING") — eBay DE wants a concrete carrier +
-      // service pair so it can track tracking-number quality. DHL Paket
-      // is the universal default that German buyers expect; the actual
-      // fulfillment carrier (Omniva / Latvijas Pasts / DPD) is independent
-      // of what we declare here. Buyer sees "DHL Paket" as the service
-      // category, which sets shipping expectations.
+      // Domestic (Germany) uses DHL Paket — DE_OtherShippingMethods failed
+      // LSAS validation ("LOGISTICS_INFO_IS_MISSING"); eBay DE wants a
+      // concrete carrier+service pair. The actual fulfilment carrier
+      // (Omniva / Latvijas Pasts) is independent of what we declare.
+      // International (rest of EU/EEA) uses a generic economy international
+      // service. Buyers in DE see the domestic rate; EU buyers see the eu
+      // rate. Both are Economy (untracked) + 15% packaging markup.
       const r = await ebayApiCall("/sell/account/v1/fulfillment_policy", {
-        name: `EU ${band.label} (€${band.first})`,
-        description: `Standard shipping for items ${band.label}`,
+        name: `EU ${band.label} (DE €${band.de})`,
+        description: `Economy shipping for items ${band.label}`,
         marketplaceId: "EBAY_DE",
         categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES" }],
-        handlingTime: { value: 1, unit: "DAY" },
+        handlingTime: { value: 2, unit: "DAY" },
         shippingOptions: [
           {
             optionType: "DOMESTIC",
@@ -395,16 +405,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
               {
                 shippingCarrierCode: "DHL",
                 shippingServiceCode: "DE_DHLPaket",
-                shippingCost: { value: band.first, currency: "EUR" },
+                shippingCost: { value: band.de, currency: "EUR" },
                 additionalShippingCost: { value: band.additional, currency: "EUR" },
                 freeShipping: false,
                 sortOrder: 1,
               },
             ],
           },
+          {
+            optionType: "INTERNATIONAL",
+            costType: "FLAT_RATE",
+            shippingServices: [
+              {
+                shippingCarrierCode: "Other",
+                shippingServiceCode: "DE_EconomyInternational",
+                shippingCost: { value: band.eu, currency: "EUR" },
+                additionalShippingCost: { value: band.additional, currency: "EUR" },
+                freeShipping: false,
+                sortOrder: 1,
+                shipToLocations: {
+                  regionIncluded: [{ regionName: "EUROPE", regionType: "WORLD_REGION" }],
+                },
+              },
+            ],
+          },
         ],
         shipToLocations: {
-          regionIncluded: [{ regionName: "DE", regionType: "COUNTRY" }],
+          regionIncluded: [
+            { regionName: "DE", regionType: "COUNTRY" },
+            { regionName: "EUROPE", regionType: "WORLD_REGION" },
+          ],
         },
         globalShipping: false,
       });
@@ -435,12 +465,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const envSnippet: string[] = [];
     if (results.payment?.id) envSnippet.push(`EBAY_PAYMENT_PROFILE_ID=${results.payment.id}`);
     if (results.return?.id) envSnippet.push(`EBAY_RETURN_PROFILE_ID=${results.return.id}`);
-    const bandToVar: Record<string, string> = {
-      "0-99g": "EBAY_SHIPPING_POLICY_0_99GR",
-      "100-499g": "EBAY_SHIPPING_POLICY_100_499GR",
-      "500-999g": "EBAY_SHIPPING_POLICY_500_999GR",
-      "1000-1999g": "EBAY_SHIPPING_POLICY_1000_1999GR",
-    };
+    const bandToVar: Record<string, string> = Object.fromEntries(
+      bands.map((b) => [b.label, b.varKey]),
+    );
     for (const s of results.shipping) {
       const varName = bandToVar[s.band];
       if (varName) envSnippet.push(`${varName}=${s.id}`);
