@@ -7329,6 +7329,118 @@ async function registerRoutes(app) {
       });
     }
   });
+  app.post("/api/__bootstrap-de-policies", async (req, res) => {
+    const body = req.body || {};
+    const paymentName = String(body.paymentName || "EU Managed Payments");
+    const returnName = String(body.returnName || "30 Tage R\xFCckgabe (K\xE4ufer zahlt Versand)");
+    const bandsInput = Array.isArray(body.shipping) ? body.shipping : null;
+    const bands = bandsInput && bandsInput.length === 4 ? bandsInput.map((b, i) => ({
+      label: String(b.label ?? ["0-99g", "100-499g", "500-999g", "1000-1999g"][i]),
+      first: String(b.first ?? ""),
+      additional: String(b.additional ?? "1.00"),
+      weightMin: Number(b.weightMin ?? [0.01, 100, 500, 1e3][i]),
+      weightMax: Number(b.weightMax ?? [99, 499, 999, 1999][i])
+    })) : [
+      { label: "0-99g", first: "4.99", additional: "1.00", weightMin: 0.01, weightMax: 99 },
+      { label: "100-499g", first: "6.99", additional: "1.00", weightMin: 100, weightMax: 499 },
+      { label: "500-999g", first: "9.99", additional: "2.00", weightMin: 500, weightMax: 999 },
+      { label: "1000-1999g", first: "14.99", additional: "5.00", weightMin: 1e3, weightMax: 1999 }
+    ];
+    const results = { payment: null, return: null, shipping: [] };
+    const errors = [];
+    try {
+      const p = await ebayAccountApi.createPaymentPolicy({
+        name: paymentName,
+        description: "eBay-managed payments for EU marketplace",
+        marketplaceId: "EBAY_DE",
+        immediatePay: true
+      });
+      if (p) results.payment = { id: p.paymentPolicyId, name: p.name };
+      else errors.push("Payment policy: createPaymentPolicy returned null (see server logs)");
+    } catch (e) {
+      errors.push(`Payment policy: ${e.message}`);
+    }
+    try {
+      const r = await ebayAccountApi.createReturnPolicy({
+        name: returnName,
+        description: "30-day returns, buyer pays return shipping",
+        marketplaceId: "EBAY_DE",
+        returnsAccepted: true,
+        returnPeriod: { value: 30, unit: "DAY" },
+        refundMethod: "MONEY_BACK",
+        returnShippingCostPayer: "BUYER"
+      });
+      if (r) results.return = { id: r.returnPolicyId, name: r.name };
+      else errors.push("Return policy: createReturnPolicy returned null (see server logs)");
+    } catch (e) {
+      errors.push(`Return policy: ${e.message}`);
+    }
+    for (const band of bands) {
+      try {
+        const f = await ebayAccountApi.createFulfillmentPolicy({
+          name: `EU ${band.label} (\u20AC${band.first})`,
+          description: `Standard shipping for items ${band.label}`,
+          marketplaceId: "EBAY_DE",
+          handlingTime: { value: 1, unit: "DAY" },
+          shippingOptions: [
+            {
+              optionType: "DOMESTIC",
+              costType: "FLAT_RATE",
+              shippingServices: [
+                {
+                  shippingCarrierCode: "Other",
+                  shippingServiceCode: "DE_OtherShippingMethods",
+                  shippingCost: { value: band.first, currency: "EUR" },
+                  additionalShippingCost: { value: band.additional, currency: "EUR" },
+                  freeShipping: false,
+                  sortOrder: 1
+                }
+              ]
+            }
+          ],
+          shipToLocations: {
+            regionIncluded: [{ regionName: "DE", regionType: "COUNTRY" }]
+          },
+          globalShipping: false
+        });
+        if (f) {
+          results.shipping.push({
+            id: f.fulfillmentPolicyId,
+            name: f.name,
+            band: band.label,
+            weightMin: band.weightMin,
+            weightMax: band.weightMax
+          });
+        } else {
+          errors.push(`Shipping ${band.label}: createFulfillmentPolicy returned null`);
+        }
+      } catch (e) {
+        errors.push(`Shipping ${band.label}: ${e.message}`);
+      }
+    }
+    const envSnippet = [];
+    if (results.payment?.id) envSnippet.push(`EBAY_PAYMENT_PROFILE_ID=${results.payment.id}`);
+    if (results.return?.id) envSnippet.push(`EBAY_RETURN_PROFILE_ID=${results.return.id}`);
+    const bandToVar = {
+      "0-99g": "EBAY_SHIPPING_POLICY_0_99GR",
+      "100-499g": "EBAY_SHIPPING_POLICY_100_499GR",
+      "500-999g": "EBAY_SHIPPING_POLICY_500_999GR",
+      "1000-1999g": "EBAY_SHIPPING_POLICY_1000_1999GR"
+    };
+    for (const s of results.shipping) {
+      const varName = bandToVar[s.band];
+      if (varName) envSnippet.push(`${varName}=${s.id}`);
+    }
+    envSnippet.push("EBAY_MARKETPLACE_SITE_ID=77");
+    envSnippet.push("EBAY_LISTING_CURRENCY=EUR");
+    res.json({
+      ok: errors.length === 0,
+      results,
+      errors,
+      envSnippet: envSnippet.join("\n"),
+      note: "Save the envSnippet block to Vercel Project Settings -> Environment Variables. Redeploy with 'Use existing Build Cache' unchecked. The code switch wiring up these vars lands in the next commit."
+    });
+  });
   app.get("/api/__ebay-check", async (_req, res) => {
     const clientId = process.env.EBAY_OAUTH_CLIENT_ID || process.env.EBAY_APP_ID || "";
     const clientSecret = process.env.EBAY_OAUTH_CLIENT_SECRET || process.env.EBAY_CERT_ID || "";
