@@ -88,6 +88,14 @@ export function Products({ user }: ProductsProps) {
   const { data: stockInfoResponse } = useQuery({
     queryKey: ["/api/stock/info"],
   });
+
+  // Which eBay domain to link listings to (driven by the configured
+  // marketplace site id on the server, not hardcoded to co.uk).
+  const { data: publicConfig } = useQuery<{ ebaySiteId: string; ebayDomain: string }>({
+    queryKey: ["/api/public-config"],
+    staleTime: 60 * 60 * 1000,
+  });
+  const ebayDomain = publicConfig?.ebayDomain || "www.ebay.com";
   
   const stockInfo = (stockInfoResponse as any)?.stockInfo || [];
 
@@ -945,7 +953,7 @@ export function Products({ user }: ProductsProps) {
                           <div className="flex items-center justify-center gap-1">
                             {product.listedOnEbay && product.ebayItemId ? (
                               <a 
-                                href={`https://www.ebay.co.uk/itm/${product.ebayItemId}`}
+                                href={`https://${ebayDomain}/itm/${product.ebayItemId}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 title={`View on eBay (${product.ebayItemId})`}

@@ -112,6 +112,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // Public, unauthenticated config the frontend needs to render correctly
+  // (e.g. which eBay domain to link listings to). No secrets.
+  app.get("/api/public-config", (_req, res) => {
+    const siteId = process.env.EBAY_MARKETPLACE_SITE_ID || "3";
+    // eBay site-id -> consumer domain
+    const SITE_DOMAINS: Record<string, string> = {
+      "0": "www.ebay.com",
+      "3": "www.ebay.co.uk",
+      "77": "www.ebay.de",
+      "71": "www.ebay.fr",
+      "101": "www.ebay.it",
+      "186": "www.ebay.es",
+      "205": "www.ebay.ie",
+      "23": "www.ebay.be",
+      "146": "www.ebay.nl",
+      "16": "www.ebay.com.au",
+    };
+    res.json({
+      ebaySiteId: siteId,
+      ebayDomain: SITE_DOMAINS[siteId] || "www.ebay.com",
+    });
+  });
+
   // Diagnostic endpoint - no auth required, no DB access.
   // Use to verify which commit is actually running and whether
   // BYPASS_AUTH is being read by the function.

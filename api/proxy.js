@@ -7268,6 +7268,25 @@ async function registerRoutes(app) {
       res.json({ message: "Logged out successfully" });
     });
   });
+  app.get("/api/public-config", (_req, res) => {
+    const siteId = process.env.EBAY_MARKETPLACE_SITE_ID || "3";
+    const SITE_DOMAINS = {
+      "0": "www.ebay.com",
+      "3": "www.ebay.co.uk",
+      "77": "www.ebay.de",
+      "71": "www.ebay.fr",
+      "101": "www.ebay.it",
+      "186": "www.ebay.es",
+      "205": "www.ebay.ie",
+      "23": "www.ebay.be",
+      "146": "www.ebay.nl",
+      "16": "www.ebay.com.au"
+    };
+    res.json({
+      ebaySiteId: siteId,
+      ebayDomain: SITE_DOMAINS[siteId] || "www.ebay.com"
+    });
+  });
   app.get("/api/__version", (req, res) => {
     const clientId = process.env.EBAY_OAUTH_CLIENT_ID || process.env.EBAY_APP_ID || "";
     const clientSecret = process.env.EBAY_OAUTH_CLIENT_SECRET || process.env.EBAY_CERT_ID || "";
