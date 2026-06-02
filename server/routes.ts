@@ -140,6 +140,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         hasRefreshToken: !!refreshToken,
         refreshTokenLength: refreshToken.length,
       },
+      ebayMarketplace: {
+        siteId: process.env.EBAY_MARKETPLACE_SITE_ID || "(unset -> defaults to 3/UK)",
+        currency: process.env.EBAY_LISTING_CURRENCY || "(unset -> defaults to GBP)",
+        country: process.env.EBAY_LISTING_COUNTRY || "(unset -> LV)",
+        paymentProfileId: process.env.EBAY_PAYMENT_PROFILE_ID || "(unset)",
+        returnProfileId: process.env.EBAY_RETURN_PROFILE_ID || "(unset)",
+        shipping_0_20: process.env.EBAY_SHIPPING_POLICY_0_20GR || "(unset)",
+      },
       tme: {
         hasToken: !!process.env.TME_TOKEN,
         hasAppSecret: !!process.env.TME_APPLICATION_SECRET,
