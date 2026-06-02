@@ -4132,16 +4132,19 @@ var EbayApiService = class {
               message: `eBay API integration successful! OAuth token and API calls working. Demo listing created for "${product.name}"`
             };
           }
-          const errorBlockRegex = /<Errors>[\s\S]*?<SeverityCode>Error<\/SeverityCode>[\s\S]*?<\/Errors>/g;
-          const errorBlocks = response.match(errorBlockRegex);
+          const allErrorBlocks = response.match(/<Errors>[\s\S]*?<\/Errors>/g) || [];
+          const errorSeverityBlocks = allErrorBlocks.filter(
+            (b) => /<SeverityCode>Error<\/SeverityCode>/.test(b)
+          );
+          const chosen = errorSeverityBlocks[0] || allErrorBlocks[0];
           let errorMessage = "Unknown eBay API error";
-          if (errorBlocks && errorBlocks.length > 0) {
-            const shortMsgMatch = errorBlocks[0].match(/<ShortMessage>(.*?)<\/ShortMessage>/);
-            const longMsgMatch = errorBlocks[0].match(/<LongMessage>(.*?)<\/LongMessage>/);
-            errorMessage = shortMsgMatch ? shortMsgMatch[1] : longMsgMatch ? longMsgMatch[1] : errorMessage;
-          } else {
-            const fallbackMatch = response.match(/<ShortMessage>(.*?)<\/ShortMessage>/) || response.match(/<LongMessage>(.*?)<\/LongMessage>/);
-            errorMessage = fallbackMatch ? fallbackMatch[1] : errorMessage;
+          if (chosen) {
+            const longMsg = chosen.match(/<LongMessage>(.*?)<\/LongMessage>/)?.[1];
+            const shortMsg = chosen.match(/<ShortMessage>(.*?)<\/ShortMessage>/)?.[1];
+            const paramVal = chosen.match(/<ErrorParameters[^>]*>\s*<Value>(.*?)<\/Value>/)?.[1];
+            const code = chosen.match(/<ErrorCode>(\d+)<\/ErrorCode>/)?.[1];
+            errorMessage = [longMsg || shortMsg, paramVal && paramVal !== longMsg ? paramVal : null].filter(Boolean).join(" \u2014 ");
+            if (code) errorMessage = `[eBay ${code}] ${errorMessage}`;
           }
           console.log("eBay API Error - Full response:", response);
           throw new Error(`eBay listing failed: ${errorMessage}`);

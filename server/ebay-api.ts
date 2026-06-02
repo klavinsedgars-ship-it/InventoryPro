@@ -455,24 +455,31 @@ export class EbayApiService {
             };
           }
           
-          // If actual error, parse and report it - find actual Error-level messages, not just Warnings
-          // Look for errors with SeverityCode=Error (not Warning)
-          const errorBlockRegex = /<Errors>[\s\S]*?<SeverityCode>Error<\/SeverityCode>[\s\S]*?<\/Errors>/g;
-          const errorBlocks = response.match(errorBlockRegex);
-          
+          // Parse each <Errors> block individually, then prefer the one
+          // with SeverityCode=Error. The previous regex spanned across
+          // block boundaries and reported the first (often a harmless
+          // Warning) message instead of the real failure.
+          const allErrorBlocks = response.match(/<Errors>[\s\S]*?<\/Errors>/g) || [];
+          const errorSeverityBlocks = allErrorBlocks.filter((b) =>
+            /<SeverityCode>Error<\/SeverityCode>/.test(b),
+          );
+          const chosen = errorSeverityBlocks[0] || allErrorBlocks[0];
+
           let errorMessage = 'Unknown eBay API error';
-          if (errorBlocks && errorBlocks.length > 0) {
-            // Extract the short message from the first actual error
-            const shortMsgMatch = errorBlocks[0].match(/<ShortMessage>(.*?)<\/ShortMessage>/);
-            const longMsgMatch = errorBlocks[0].match(/<LongMessage>(.*?)<\/LongMessage>/);
-            errorMessage = shortMsgMatch ? shortMsgMatch[1] : (longMsgMatch ? longMsgMatch[1] : errorMessage);
-          } else {
-            // Fallback: get first message if no Error-level found
-            const fallbackMatch = response.match(/<ShortMessage>(.*?)<\/ShortMessage>/) ||
-                                 response.match(/<LongMessage>(.*?)<\/LongMessage>/);
-            errorMessage = fallbackMatch ? fallbackMatch[1] : errorMessage;
+          if (chosen) {
+            // eBay error 240 with a tax/policy block puts the real reason
+            // in ErrorParameters; ShortMessage is generic. Prefer the
+            // longest available text.
+            const longMsg = chosen.match(/<LongMessage>(.*?)<\/LongMessage>/)?.[1];
+            const shortMsg = chosen.match(/<ShortMessage>(.*?)<\/ShortMessage>/)?.[1];
+            const paramVal = chosen.match(/<ErrorParameters[^>]*>\s*<Value>(.*?)<\/Value>/)?.[1];
+            const code = chosen.match(/<ErrorCode>(\d+)<\/ErrorCode>/)?.[1];
+            errorMessage = [longMsg || shortMsg, paramVal && paramVal !== longMsg ? paramVal : null]
+              .filter(Boolean)
+              .join(' — ');
+            if (code) errorMessage = `[eBay ${code}] ${errorMessage}`;
           }
-          
+
           console.log("eBay API Error - Full response:", response);
           throw new Error(`eBay listing failed: ${errorMessage}`);
         }
