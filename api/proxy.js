@@ -4007,21 +4007,27 @@ var EbayApiService = class {
       let processedImageUrls = [];
       if (product.imageUrl) {
         const fixedImageUrl = product.imageUrl.startsWith("//") ? "https:" + product.imageUrl : product.imageUrl;
-        try {
-          console.log(`\u{1F5BC}\uFE0F Processing image for eBay listing: ${fixedImageUrl}`);
-          const imageResult = await imageProcessingService.removeWatermark(fixedImageUrl);
-          if (imageResult.success && imageResult.processedImageUrl) {
-            const baseUrl = process.env.REPL_URL || "https://2456a1da-de77-4e0b-816f-7e7cfe47cc15-00-23jr7vbxsin6z.kirk.replit.dev";
-            const absoluteImageUrl = imageResult.processedImageUrl.startsWith("http") ? imageResult.processedImageUrl : `${baseUrl}${imageResult.processedImageUrl}`;
-            processedImageUrls = [absoluteImageUrl];
-            console.log(`\u2705 Watermark removed, using processed image: ${absoluteImageUrl}`);
-          } else {
-            console.log(`\u26A0\uFE0F Watermark removal failed, using original image: ${imageResult.error}`);
+        const isServerless = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+        const publicBaseUrl = process.env.PUBLIC_BASE_URL || process.env.REPL_URL;
+        if (isServerless || !publicBaseUrl) {
+          console.log(`\u{1F5BC}\uFE0F Using original TME image URL (no persistent storage for processed images): ${fixedImageUrl}`);
+          processedImageUrls = [fixedImageUrl];
+        } else {
+          try {
+            console.log(`\u{1F5BC}\uFE0F Processing image for eBay listing: ${fixedImageUrl}`);
+            const imageResult = await imageProcessingService.removeWatermark(fixedImageUrl);
+            if (imageResult.success && imageResult.processedImageUrl) {
+              const absoluteImageUrl = imageResult.processedImageUrl.startsWith("http") ? imageResult.processedImageUrl : `${publicBaseUrl}${imageResult.processedImageUrl}`;
+              processedImageUrls = [absoluteImageUrl];
+              console.log(`\u2705 Watermark removed, using processed image: ${absoluteImageUrl}`);
+            } else {
+              console.log(`\u26A0\uFE0F Watermark removal failed, using original image: ${imageResult.error}`);
+              processedImageUrls = [fixedImageUrl];
+            }
+          } catch (error) {
+            console.warn(`\u26A0\uFE0F Image processing failed, using original: ${error}`);
             processedImageUrls = [fixedImageUrl];
           }
-        } catch (error) {
-          console.warn(`\u26A0\uFE0F Image processing failed, using original: ${error}`);
-          processedImageUrls = [fixedImageUrl];
         }
       }
       const moq = product.moq || 1;

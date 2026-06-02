@@ -278,30 +278,43 @@ export class EbayApiService {
       let processedImageUrls: string[] = [];
       if (product.imageUrl) {
         // Fix protocol-relative URLs (starting with //)
-        const fixedImageUrl = product.imageUrl.startsWith('//') 
-          ? 'https:' + product.imageUrl 
+        const fixedImageUrl = product.imageUrl.startsWith('//')
+          ? 'https:' + product.imageUrl
           : product.imageUrl;
-        
-        try {
-          console.log(`🖼️ Processing image for eBay listing: ${fixedImageUrl}`);
-          const imageResult = await imageProcessingService.removeWatermark(fixedImageUrl);
-          
-          if (imageResult.success && imageResult.processedImageUrl) {
-            // Convert relative URL to absolute URL for eBay
-            const baseUrl = process.env.REPL_URL || 'https://2456a1da-de77-4e0b-816f-7e7cfe47cc15-00-23jr7vbxsin6z.kirk.replit.dev';
-            const absoluteImageUrl = imageResult.processedImageUrl.startsWith('http') 
-              ? imageResult.processedImageUrl 
-              : `${baseUrl}${imageResult.processedImageUrl}`;
-            
-            processedImageUrls = [absoluteImageUrl];
-            console.log(`✅ Watermark removed, using processed image: ${absoluteImageUrl}`);
-          } else {
-            console.log(`⚠️ Watermark removal failed, using original image: ${imageResult.error}`);
+
+        // Watermark removal saves processed images to local disk and serves
+        // them via /api/images/processed/. On serverless (Vercel/Lambda)
+        // /tmp is per-invocation, so the file eBay tries to fetch later
+        // will not be on the same instance — eBay gets a 404 and the
+        // listing goes up with no image. Until we wire up persistent
+        // storage (Vercel Blob / S3), just send TME's original URL straight
+        // through. eBay will display it (with TME's watermark intact).
+        const isServerless = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+        const publicBaseUrl = process.env.PUBLIC_BASE_URL || process.env.REPL_URL;
+
+        if (isServerless || !publicBaseUrl) {
+          console.log(`🖼️ Using original TME image URL (no persistent storage for processed images): ${fixedImageUrl}`);
+          processedImageUrls = [fixedImageUrl];
+        } else {
+          try {
+            console.log(`🖼️ Processing image for eBay listing: ${fixedImageUrl}`);
+            const imageResult = await imageProcessingService.removeWatermark(fixedImageUrl);
+
+            if (imageResult.success && imageResult.processedImageUrl) {
+              const absoluteImageUrl = imageResult.processedImageUrl.startsWith('http')
+                ? imageResult.processedImageUrl
+                : `${publicBaseUrl}${imageResult.processedImageUrl}`;
+
+              processedImageUrls = [absoluteImageUrl];
+              console.log(`✅ Watermark removed, using processed image: ${absoluteImageUrl}`);
+            } else {
+              console.log(`⚠️ Watermark removal failed, using original image: ${imageResult.error}`);
+              processedImageUrls = [fixedImageUrl];
+            }
+          } catch (error) {
+            console.warn(`⚠️ Image processing failed, using original: ${error}`);
             processedImageUrls = [fixedImageUrl];
           }
-        } catch (error) {
-          console.warn(`⚠️ Image processing failed, using original: ${error}`);
-          processedImageUrls = [fixedImageUrl];
         }
       }
 
