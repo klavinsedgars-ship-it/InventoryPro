@@ -282,76 +282,119 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const results: any = { payment: null, return: null, shipping: [] };
     const errors: string[] = [];
 
-    try {
-      const p = await ebayAccountApi.createPaymentPolicy({
+    // Call eBay's Account API directly so we can surface the actual HTTP
+    // error body instead of the swallow-and-return-null pattern the
+    // ebayAccountApi helper uses.
+    const ebayApiCall = async (
+      endpoint: string,
+      body: any,
+    ): Promise<{ ok: true; data: any } | { ok: false; status: number; error: string }> => {
+      try {
+        const token = await ebayOAuth.getValidAccessToken();
+        const url = `https://api.ebay.com${endpoint}`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Content-Language": "de-DE",
+            "Accept-Language": "de-DE",
+          },
+          body: JSON.stringify(body),
+        });
+        const text = await response.text();
+        let parsed: any = null;
+        try {
+          parsed = JSON.parse(text);
+        } catch {}
+        if (!response.ok) {
+          const err = parsed?.errors?.[0];
+          const msg = err
+            ? `${err.errorId ?? ""} ${err.longMessage ?? err.message ?? ""} ${
+                err.parameters ? JSON.stringify(err.parameters) : ""
+              }`.trim()
+            : text.slice(0, 500);
+          return { ok: false, status: response.status, error: msg };
+        }
+        return { ok: true, data: parsed };
+      } catch (err) {
+        return { ok: false, status: 0, error: (err as Error).message };
+      }
+    };
+
+    {
+      const r = await ebayApiCall("/sell/account/v1/payment_policy", {
         name: paymentName,
         description: "eBay-managed payments for EU marketplace",
         marketplaceId: "EBAY_DE",
+        categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES" }],
+        paymentMethods: [],
         immediatePay: true,
       });
-      if (p) results.payment = { id: (p as any).paymentPolicyId, name: p.name };
-      else errors.push("Payment policy: createPaymentPolicy returned null (see server logs)");
-    } catch (e) {
-      errors.push(`Payment policy: ${(e as Error).message}`);
+      if (r.ok) {
+        results.payment = { id: r.data.paymentPolicyId, name: r.data.name };
+      } else {
+        errors.push(`Payment policy [HTTP ${r.status}]: ${r.error}`);
+      }
     }
 
-    try {
-      const r = await ebayAccountApi.createReturnPolicy({
+    {
+      const r = await ebayApiCall("/sell/account/v1/return_policy", {
         name: returnName,
         description: "30-day returns, buyer pays return shipping",
         marketplaceId: "EBAY_DE",
+        categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES" }],
         returnsAccepted: true,
         returnPeriod: { value: 30, unit: "DAY" },
         refundMethod: "MONEY_BACK",
         returnShippingCostPayer: "BUYER",
       });
-      if (r) results.return = { id: (r as any).returnPolicyId, name: r.name };
-      else errors.push("Return policy: createReturnPolicy returned null (see server logs)");
-    } catch (e) {
-      errors.push(`Return policy: ${(e as Error).message}`);
+      if (r.ok) {
+        results.return = { id: r.data.returnPolicyId, name: r.data.name };
+      } else {
+        errors.push(`Return policy [HTTP ${r.status}]: ${r.error}`);
+      }
     }
 
     for (const band of bands) {
-      try {
-        const f = await ebayAccountApi.createFulfillmentPolicy({
-          name: `EU ${band.label} (€${band.first})`,
-          description: `Standard shipping for items ${band.label}`,
-          marketplaceId: "EBAY_DE",
-          handlingTime: { value: 1, unit: "DAY" },
-          shippingOptions: [
-            {
-              optionType: "DOMESTIC",
-              costType: "FLAT_RATE",
-              shippingServices: [
-                {
-                  shippingCarrierCode: "Other",
-                  shippingServiceCode: "DE_OtherShippingMethods",
-                  shippingCost: { value: band.first, currency: "EUR" },
-                  additionalShippingCost: { value: band.additional, currency: "EUR" },
-                  freeShipping: false,
-                  sortOrder: 1,
-                },
-              ],
-            },
-          ],
-          shipToLocations: {
-            regionIncluded: [{ regionName: "DE", regionType: "COUNTRY" }],
+      const r = await ebayApiCall("/sell/account/v1/fulfillment_policy", {
+        name: `EU ${band.label} (€${band.first})`,
+        description: `Standard shipping for items ${band.label}`,
+        marketplaceId: "EBAY_DE",
+        categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES" }],
+        handlingTime: { value: 1, unit: "DAY" },
+        shippingOptions: [
+          {
+            optionType: "DOMESTIC",
+            costType: "FLAT_RATE",
+            shippingServices: [
+              {
+                shippingCarrierCode: "Other",
+                shippingServiceCode: "DE_OtherShippingMethods",
+                shippingCost: { value: band.first, currency: "EUR" },
+                additionalShippingCost: { value: band.additional, currency: "EUR" },
+                freeShipping: false,
+                sortOrder: 1,
+              },
+            ],
           },
-          globalShipping: false,
+        ],
+        shipToLocations: {
+          regionIncluded: [{ regionName: "DE", regionType: "COUNTRY" }],
+        },
+        globalShipping: false,
+      });
+      if (r.ok) {
+        results.shipping.push({
+          id: r.data.fulfillmentPolicyId,
+          name: r.data.name,
+          band: band.label,
+          weightMin: band.weightMin,
+          weightMax: band.weightMax,
         });
-        if (f) {
-          results.shipping.push({
-            id: (f as any).fulfillmentPolicyId,
-            name: f.name,
-            band: band.label,
-            weightMin: band.weightMin,
-            weightMax: band.weightMax,
-          });
-        } else {
-          errors.push(`Shipping ${band.label}: createFulfillmentPolicy returned null`);
-        }
-      } catch (e) {
-        errors.push(`Shipping ${band.label}: ${(e as Error).message}`);
+      } else {
+        errors.push(`Shipping ${band.label} [HTTP ${r.status}]: ${r.error}`);
       }
     }
 
