@@ -7421,6 +7421,20 @@ async function registerRoutes(app) {
         return { ok: false, status: 0, error: err.message };
       }
     };
+    const fetchExisting = async (type) => {
+      try {
+        const token = await ebayOAuth.getValidAccessToken();
+        const resp = await fetch(
+          `https://api.ebay.com/sell/account/v1/${type}_policy?marketplace_id=EBAY_DE`,
+          { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } }
+        );
+        if (!resp.ok) return [];
+        const data = await resp.json();
+        return data[`${type}Policies`] || [];
+      } catch {
+        return [];
+      }
+    };
     {
       const r = await ebayApiCall("/sell/account/v1/payment_policy", {
         name: paymentName,
@@ -7459,7 +7473,15 @@ async function registerRoutes(app) {
         if (dupMatch) {
           results.return = { id: dupMatch[1], name: "(existing eBay policy)" };
         } else {
-          errors.push(`Return policy [HTTP ${r.status}]: ${r.error}`);
+          const existing = await fetchExisting("return");
+          if (existing.length > 0) {
+            results.return = {
+              id: existing[0].returnPolicyId,
+              name: `(reused existing: ${existing[0].name})`
+            };
+          } else {
+            errors.push(`Return policy [HTTP ${r.status}]: ${r.error}`);
+          }
         }
       }
     }
@@ -7490,8 +7512,7 @@ async function registerRoutes(app) {
             costType: "FLAT_RATE",
             shippingServices: [
               {
-                shippingCarrierCode: "Other",
-                shippingServiceCode: "DE_EconomyInternational",
+                shippingServiceCode: "DE_SonstigerVersandInternational",
                 shippingCost: { value: band.eu1, currency: "EUR" },
                 additionalShippingCost: { value: band.additional, currency: "EUR" },
                 freeShipping: false,
@@ -7501,8 +7522,7 @@ async function registerRoutes(app) {
                 }
               },
               {
-                shippingCarrierCode: "Other",
-                shippingServiceCode: "DE_EconomyInternational",
+                shippingServiceCode: "DE_SonstigerVersandInternational",
                 shippingCost: { value: band.eu2, currency: "EUR" },
                 additionalShippingCost: { value: band.additional, currency: "EUR" },
                 freeShipping: false,
@@ -7512,8 +7532,7 @@ async function registerRoutes(app) {
                 }
               },
               {
-                shippingCarrierCode: "Other",
-                shippingServiceCode: "DE_EconomyInternational",
+                shippingServiceCode: "DE_SonstigerVersandInternational",
                 shippingCost: { value: band.eu3, currency: "EUR" },
                 additionalShippingCost: { value: band.additional, currency: "EUR" },
                 freeShipping: false,

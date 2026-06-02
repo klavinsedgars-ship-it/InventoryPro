@@ -347,6 +347,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     };
 
+    // Fetch existing policies of a type for EBAY_DE (used as a fallback when
+    // creation fails because an equivalent policy already exists).
+    const fetchExisting = async (
+      type: "payment" | "return" | "fulfillment",
+    ): Promise<any[]> => {
+      try {
+        const token = await ebayOAuth.getValidAccessToken();
+        const resp = await fetch(
+          `https://api.ebay.com/sell/account/v1/${type}_policy?marketplace_id=EBAY_DE`,
+          { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } },
+        );
+        if (!resp.ok) return [];
+        const data = await resp.json();
+        return data[`${type}Policies`] || [];
+      } catch {
+        return [];
+      }
+    };
+
     {
       const r = await ebayApiCall("/sell/account/v1/payment_policy", {
         name: paymentName,
@@ -392,7 +411,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (dupMatch) {
           results.return = { id: dupMatch[1], name: "(existing eBay policy)" };
         } else {
-          errors.push(`Return policy [HTTP ${r.status}]: ${r.error}`);
+          // Reuse an existing return policy if one is already set up
+          // (eBay 200002 fires when the requested method/an equivalent
+          // policy already exists on this marketplace).
+          const existing = await fetchExisting("return");
+          if (existing.length > 0) {
+            results.return = {
+              id: existing[0].returnPolicyId,
+              name: `(reused existing: ${existing[0].name})`,
+            };
+          } else {
+            errors.push(`Return policy [HTTP ${r.status}]: ${r.error}`);
+          }
         }
       }
     }
@@ -436,8 +466,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             costType: "FLAT_RATE",
             shippingServices: [
               {
-                shippingCarrierCode: "Other",
-                shippingServiceCode: "DE_EconomyInternational",
+                shippingServiceCode: "DE_SonstigerVersandInternational",
                 shippingCost: { value: band.eu1, currency: "EUR" },
                 additionalShippingCost: { value: band.additional, currency: "EUR" },
                 freeShipping: false,
@@ -447,8 +476,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 },
               },
               {
-                shippingCarrierCode: "Other",
-                shippingServiceCode: "DE_EconomyInternational",
+                shippingServiceCode: "DE_SonstigerVersandInternational",
                 shippingCost: { value: band.eu2, currency: "EUR" },
                 additionalShippingCost: { value: band.additional, currency: "EUR" },
                 freeShipping: false,
@@ -458,8 +486,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 },
               },
               {
-                shippingCarrierCode: "Other",
-                shippingServiceCode: "DE_EconomyInternational",
+                shippingServiceCode: "DE_SonstigerVersandInternational",
                 shippingCost: { value: band.eu3, currency: "EUR" },
                 additionalShippingCost: { value: band.additional, currency: "EUR" },
                 freeShipping: false,
