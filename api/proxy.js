@@ -7579,6 +7579,50 @@ async function registerRoutes(app) {
       note: "Save the envSnippet block to Vercel Project Settings -> Environment Variables. Redeploy with 'Use existing Build Cache' unchecked. The code switch wiring up these vars lands in the next commit."
     });
   });
+  app.get("/api/__ebay-shipping-services", async (req, res) => {
+    const siteId = String(req.query.siteId || "77");
+    try {
+      const token = await ebayOAuth.getValidAccessToken();
+      const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GeteBayDetailsRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <DetailName>ShippingServiceDetails</DetailName>
+</GeteBayDetailsRequest>`;
+      const resp = await fetch("https://api.ebay.com/ws/api.dll", {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/xml; charset=utf-8",
+          "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+          "X-EBAY-API-DEV-NAME": process.env.EBAY_DEV_ID || "",
+          "X-EBAY-API-APP-NAME": process.env.EBAY_APP_ID || "",
+          "X-EBAY-API-CERT-NAME": process.env.EBAY_CERT_ID || "",
+          "X-EBAY-API-CALL-NAME": "GeteBayDetails",
+          "X-EBAY-API-SITEID": siteId,
+          "X-EBAY-API-IAF-TOKEN": token
+        },
+        body: xml
+      });
+      const text2 = await resp.text();
+      const blocks = text2.match(/<ShippingServiceDetails>[\s\S]*?<\/ShippingServiceDetails>/g) || [];
+      const domestic = [];
+      const international = [];
+      for (const b of blocks) {
+        if (!/<ValidForSellingFlow>true<\/ValidForSellingFlow>/.test(b)) continue;
+        const code = b.match(/<ShippingService>(.*?)<\/ShippingService>/)?.[1];
+        if (!code) continue;
+        if (/<InternationalService>true<\/InternationalService>/.test(b)) international.push(code);
+        else domestic.push(code);
+      }
+      res.json({
+        ok: true,
+        siteId,
+        counts: { domestic: domestic.length, international: international.length },
+        international,
+        domestic
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
   app.get("/api/__end-ebay-item", async (req, res) => {
     const itemId = String(req.query.itemId || "");
     const siteId = String(req.query.siteId || "3");

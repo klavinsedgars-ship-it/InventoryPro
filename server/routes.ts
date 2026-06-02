@@ -531,6 +531,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // List valid eBay shipping service codes for a site (default DE=77),
+  // so we stop guessing international service codes. Returns domestic and
+  // international service codes via Trading GeteBayDetails.
+  //   GET /api/__ebay-shipping-services?siteId=77
+  app.get("/api/__ebay-shipping-services", async (req, res) => {
+    const siteId = String(req.query.siteId || "77");
+    try {
+      const token = await ebayOAuth.getValidAccessToken();
+      const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GeteBayDetailsRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <DetailName>ShippingServiceDetails</DetailName>
+</GeteBayDetailsRequest>`;
+      const resp = await fetch("https://api.ebay.com/ws/api.dll", {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/xml; charset=utf-8",
+          "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+          "X-EBAY-API-DEV-NAME": process.env.EBAY_DEV_ID || "",
+          "X-EBAY-API-APP-NAME": process.env.EBAY_APP_ID || "",
+          "X-EBAY-API-CERT-NAME": process.env.EBAY_CERT_ID || "",
+          "X-EBAY-API-CALL-NAME": "GeteBayDetails",
+          "X-EBAY-API-SITEID": siteId,
+          "X-EBAY-API-IAF-TOKEN": token,
+        },
+        body: xml,
+      });
+      const text = await resp.text();
+      // Each <ShippingServiceDetails> has <ShippingService>code</ShippingService>,
+      // optional <InternationalService>true</InternationalService>, and
+      // <ValidForSellingFlow>true</ValidForSellingFlow>.
+      const blocks = text.match(/<ShippingServiceDetails>[\s\S]*?<\/ShippingServiceDetails>/g) || [];
+      const domestic: string[] = [];
+      const international: string[] = [];
+      for (const b of blocks) {
+        if (!/<ValidForSellingFlow>true<\/ValidForSellingFlow>/.test(b)) continue;
+        const code = b.match(/<ShippingService>(.*?)<\/ShippingService>/)?.[1];
+        if (!code) continue;
+        if (/<InternationalService>true<\/InternationalService>/.test(b)) international.push(code);
+        else domestic.push(code);
+      }
+      res.json({
+        ok: true,
+        siteId,
+        counts: { domestic: domestic.length, international: international.length },
+        international,
+        domestic,
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: (err as Error).message });
+    }
+  });
+
   // End (remove) an eBay listing by raw ItemID, on a specified site.
   // Needed because the old UK listing was created on site 3 (UK) while the
   // app is now configured for site 77 (DE); ending it needs the UK site
