@@ -7579,6 +7579,50 @@ async function registerRoutes(app) {
       note: "Save the envSnippet block to Vercel Project Settings -> Environment Variables. Redeploy with 'Use existing Build Cache' unchecked. The code switch wiring up these vars lands in the next commit."
     });
   });
+  app.get("/api/__end-ebay-item", async (req, res) => {
+    const itemId = String(req.query.itemId || "");
+    const siteId = String(req.query.siteId || "3");
+    if (!/^\d+$/.test(itemId)) {
+      return res.status(400).json({ ok: false, message: "valid numeric ?itemId= required" });
+    }
+    try {
+      const token = await ebayOAuth.getValidAccessToken();
+      const xml = `<?xml version="1.0" encoding="utf-8"?>
+<EndFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ItemID>${itemId}</ItemID>
+  <EndingReason>NotAvailable</EndingReason>
+</EndFixedPriceItemRequest>`;
+      const resp = await fetch("https://api.ebay.com/ws/api.dll", {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/xml; charset=utf-8",
+          "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+          "X-EBAY-API-DEV-NAME": process.env.EBAY_DEV_ID || "",
+          "X-EBAY-API-APP-NAME": process.env.EBAY_APP_ID || "",
+          "X-EBAY-API-CERT-NAME": process.env.EBAY_CERT_ID || "",
+          "X-EBAY-API-CALL-NAME": "EndFixedPriceItem",
+          "X-EBAY-API-SITEID": siteId,
+          "X-EBAY-API-IAF-TOKEN": token
+        },
+        body: xml
+      });
+      const text2 = await resp.text();
+      const ack = text2.match(/<Ack>(.*?)<\/Ack>/)?.[1] || "Unknown";
+      const shortMsg = text2.match(/<ShortMessage>(.*?)<\/ShortMessage>/)?.[1];
+      const ended = ack === "Success" || ack === "Warning";
+      const alreadyEnded = /auction.*already|ended|not.*active|1047|cannot be ended/i.test(text2);
+      res.json({
+        ok: ended || alreadyEnded,
+        ack,
+        itemId,
+        siteId,
+        message: shortMsg || (ended ? "Listing ended" : "See raw"),
+        raw: text2.slice(0, 600)
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
   app.get("/api/__ebay-check", async (_req, res) => {
     const clientId = process.env.EBAY_OAUTH_CLIENT_ID || process.env.EBAY_APP_ID || "";
     const clientSecret = process.env.EBAY_OAUTH_CLIENT_SECRET || process.env.EBAY_CERT_ID || "";

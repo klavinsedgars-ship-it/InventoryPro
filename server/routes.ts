@@ -531,6 +531,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // End (remove) an eBay listing by raw ItemID, on a specified site.
+  // Needed because the old UK listing was created on site 3 (UK) while the
+  // app is now configured for site 77 (DE); ending it needs the UK site
+  // context + EndFixedPriceItem. Usage:
+  //   GET /api/__end-ebay-item?itemId=306978602604&siteId=3
+  app.get("/api/__end-ebay-item", async (req, res) => {
+    const itemId = String(req.query.itemId || "");
+    const siteId = String(req.query.siteId || "3"); // 3=UK, 77=DE
+    if (!/^\d+$/.test(itemId)) {
+      return res.status(400).json({ ok: false, message: "valid numeric ?itemId= required" });
+    }
+    try {
+      const token = await ebayOAuth.getValidAccessToken();
+      const xml = `<?xml version="1.0" encoding="utf-8"?>
+<EndFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ItemID>${itemId}</ItemID>
+  <EndingReason>NotAvailable</EndingReason>
+</EndFixedPriceItemRequest>`;
+      const resp = await fetch("https://api.ebay.com/ws/api.dll", {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/xml; charset=utf-8",
+          "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+          "X-EBAY-API-DEV-NAME": process.env.EBAY_DEV_ID || "",
+          "X-EBAY-API-APP-NAME": process.env.EBAY_APP_ID || "",
+          "X-EBAY-API-CERT-NAME": process.env.EBAY_CERT_ID || "",
+          "X-EBAY-API-CALL-NAME": "EndFixedPriceItem",
+          "X-EBAY-API-SITEID": siteId,
+          "X-EBAY-API-IAF-TOKEN": token,
+        },
+        body: xml,
+      });
+      const text = await resp.text();
+      const ack = text.match(/<Ack>(.*?)<\/Ack>/)?.[1] || "Unknown";
+      const shortMsg = text.match(/<ShortMessage>(.*?)<\/ShortMessage>/)?.[1];
+      const ended = ack === "Success" || ack === "Warning";
+      // If it's already ended, eBay reports an error we can treat as success
+      const alreadyEnded = /auction.*already|ended|not.*active|1047|cannot be ended/i.test(text);
+      res.json({
+        ok: ended || alreadyEnded,
+        ack,
+        itemId,
+        siteId,
+        message: shortMsg || (ended ? "Listing ended" : "See raw"),
+        raw: text.slice(0, 600),
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: (err as Error).message });
+    }
+  });
+
   // credentials and returns the raw response. No DB, no listing logic.
   // Reveals exact reason for "OAuth authentication fail" errors.
   app.get("/api/__ebay-check", async (_req, res) => {
