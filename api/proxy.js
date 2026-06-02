@@ -7391,24 +7391,34 @@ async function registerRoutes(app) {
       if (r.ok) {
         results.payment = { id: r.data.paymentPolicyId, name: r.data.name };
       } else {
-        errors.push(`Payment policy [HTTP ${r.status}]: ${r.error}`);
+        const dupMatch = r.error.match(/duplicatePolicyId.*?(\d{8,})/);
+        if (dupMatch) {
+          results.payment = { id: dupMatch[1], name: "(existing eBay policy)" };
+        } else {
+          errors.push(`Payment policy [HTTP ${r.status}]: ${r.error}`);
+        }
       }
     }
     {
       const r = await ebayApiCall("/sell/account/v1/return_policy", {
         name: returnName,
-        description: "30-day returns, buyer pays return shipping",
+        description: "30 Tage R\xFCckgabe, Verk\xE4ufer zahlt R\xFCckversand",
         marketplaceId: "EBAY_DE",
         categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES" }],
         returnsAccepted: true,
         returnPeriod: { value: 30, unit: "DAY" },
         refundMethod: "MONEY_BACK",
-        returnShippingCostPayer: "BUYER"
+        returnShippingCostPayer: "SELLER"
       });
       if (r.ok) {
         results.return = { id: r.data.returnPolicyId, name: r.data.name };
       } else {
-        errors.push(`Return policy [HTTP ${r.status}]: ${r.error}`);
+        const dupMatch = r.error.match(/duplicatePolicyId.*?(\d{8,})/);
+        if (dupMatch) {
+          results.return = { id: dupMatch[1], name: "(existing eBay policy)" };
+        } else {
+          errors.push(`Return policy [HTTP ${r.status}]: ${r.error}`);
+        }
       }
     }
     for (const band of bands) {
@@ -7424,8 +7434,8 @@ async function registerRoutes(app) {
             costType: "FLAT_RATE",
             shippingServices: [
               {
-                shippingCarrierCode: "Other",
-                shippingServiceCode: "DE_OtherShippingMethods",
+                shippingCarrierCode: "DHL",
+                shippingServiceCode: "DE_DHLPaket",
                 shippingCost: { value: band.first, currency: "EUR" },
                 additionalShippingCost: { value: band.additional, currency: "EUR" },
                 freeShipping: false,
@@ -7448,7 +7458,18 @@ async function registerRoutes(app) {
           weightMax: band.weightMax
         });
       } else {
-        errors.push(`Shipping ${band.label} [HTTP ${r.status}]: ${r.error}`);
+        const dupMatch = r.error.match(/duplicatePolicyId.*?(\d{8,})/);
+        if (dupMatch) {
+          results.shipping.push({
+            id: dupMatch[1],
+            name: "(existing eBay policy)",
+            band: band.label,
+            weightMin: band.weightMin,
+            weightMax: band.weightMax
+          });
+        } else {
+          errors.push(`Shipping ${band.label} [HTTP ${r.status}]: ${r.error}`);
+        }
       }
     }
     const envSnippet = [];

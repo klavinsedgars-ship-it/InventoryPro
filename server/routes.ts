@@ -335,29 +335,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (r.ok) {
         results.payment = { id: r.data.paymentPolicyId, name: r.data.name };
       } else {
-        errors.push(`Payment policy [HTTP ${r.status}]: ${r.error}`);
+        // eBay returns 20400 with `duplicatePolicyId` when a policy with
+        // the same name (or auto-created equivalent) already exists. Use
+        // it instead of erroring out.
+        const dupMatch = r.error.match(/duplicatePolicyId.*?(\d{8,})/);
+        if (dupMatch) {
+          results.payment = { id: dupMatch[1], name: "(existing eBay policy)" };
+        } else {
+          errors.push(`Payment policy [HTTP ${r.status}]: ${r.error}`);
+        }
       }
     }
 
     {
+      // DE consumer law (Widerrufsrecht): the seller normally pays
+      // return shipping for consumer goods. eBay rejects BUYER as
+      // returnShippingCostPayer on EBAY_DE with errorId 200002.
       const r = await ebayApiCall("/sell/account/v1/return_policy", {
         name: returnName,
-        description: "30-day returns, buyer pays return shipping",
+        description: "30 Tage Rückgabe, Verkäufer zahlt Rückversand",
         marketplaceId: "EBAY_DE",
         categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES" }],
         returnsAccepted: true,
         returnPeriod: { value: 30, unit: "DAY" },
         refundMethod: "MONEY_BACK",
-        returnShippingCostPayer: "BUYER",
+        returnShippingCostPayer: "SELLER",
       });
       if (r.ok) {
         results.return = { id: r.data.returnPolicyId, name: r.data.name };
       } else {
-        errors.push(`Return policy [HTTP ${r.status}]: ${r.error}`);
+        const dupMatch = r.error.match(/duplicatePolicyId.*?(\d{8,})/);
+        if (dupMatch) {
+          results.return = { id: dupMatch[1], name: "(existing eBay policy)" };
+        } else {
+          errors.push(`Return policy [HTTP ${r.status}]: ${r.error}`);
+        }
       }
     }
 
     for (const band of bands) {
+      // DE_OtherShippingMethods + carrier "Other" failed LSAS validation
+      // ("LOGISTICS_INFO_IS_MISSING") — eBay DE wants a concrete carrier +
+      // service pair so it can track tracking-number quality. DHL Paket
+      // is the universal default that German buyers expect; the actual
+      // fulfillment carrier (Omniva / Latvijas Pasts / DPD) is independent
+      // of what we declare here. Buyer sees "DHL Paket" as the service
+      // category, which sets shipping expectations.
       const r = await ebayApiCall("/sell/account/v1/fulfillment_policy", {
         name: `EU ${band.label} (€${band.first})`,
         description: `Standard shipping for items ${band.label}`,
@@ -370,8 +393,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             costType: "FLAT_RATE",
             shippingServices: [
               {
-                shippingCarrierCode: "Other",
-                shippingServiceCode: "DE_OtherShippingMethods",
+                shippingCarrierCode: "DHL",
+                shippingServiceCode: "DE_DHLPaket",
                 shippingCost: { value: band.first, currency: "EUR" },
                 additionalShippingCost: { value: band.additional, currency: "EUR" },
                 freeShipping: false,
@@ -394,7 +417,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           weightMax: band.weightMax,
         });
       } else {
-        errors.push(`Shipping ${band.label} [HTTP ${r.status}]: ${r.error}`);
+        const dupMatch = r.error.match(/duplicatePolicyId.*?(\d{8,})/);
+        if (dupMatch) {
+          results.shipping.push({
+            id: dupMatch[1],
+            name: "(existing eBay policy)",
+            band: band.label,
+            weightMin: band.weightMin,
+            weightMax: band.weightMax,
+          });
+        } else {
+          errors.push(`Shipping ${band.label} [HTTP ${r.status}]: ${r.error}`);
+        }
       }
     }
 
