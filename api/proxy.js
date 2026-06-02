@@ -7371,11 +7371,11 @@ async function registerRoutes(app) {
     const returnName = String(body.returnName || "30 Tage R\xFCckgabe");
     const bandsInput = Array.isArray(body.shipping) ? body.shipping : null;
     const defaultBands = [
-      { label: "0-20g", varKey: "EBAY_SHIPPING_POLICY_0_20GR", de: "5.79", eu: "6.99", additional: "1.00", weightMin: 0, weightMax: 20 },
-      { label: "21-100g", varKey: "EBAY_SHIPPING_POLICY_21_100GR", de: "5.89", eu: "6.99", additional: "1.00", weightMin: 21, weightMax: 100 },
-      { label: "101-500g", varKey: "EBAY_SHIPPING_POLICY_101_500GR", de: "7.09", eu: "8.99", additional: "1.00", weightMin: 101, weightMax: 500 },
-      { label: "501-1000g", varKey: "EBAY_SHIPPING_POLICY_501_1000GR", de: "9.39", eu: "11.99", additional: "2.00", weightMin: 501, weightMax: 1e3 },
-      { label: "1001-2000g", varKey: "EBAY_SHIPPING_POLICY_1001_2000GR", de: "10.99", eu: "14.99", additional: "5.00", weightMin: 1001, weightMax: 2e3 }
+      { label: "0-20g", varKey: "EBAY_SHIPPING_POLICY_0_20GR", de: "5.79", eu: "5.49", additional: "1.00", weightMin: 0, weightMax: 20 },
+      { label: "21-100g", varKey: "EBAY_SHIPPING_POLICY_21_100GR", de: "5.89", eu: "5.49", additional: "1.00", weightMin: 21, weightMax: 100 },
+      { label: "101-500g", varKey: "EBAY_SHIPPING_POLICY_101_500GR", de: "7.09", eu: "6.99", additional: "1.00", weightMin: 101, weightMax: 500 },
+      { label: "501-1000g", varKey: "EBAY_SHIPPING_POLICY_501_1000GR", de: "9.39", eu: "10.49", additional: "2.00", weightMin: 501, weightMax: 1e3 },
+      { label: "1001-2000g", varKey: "EBAY_SHIPPING_POLICY_1001_2000GR", de: "10.99", eu: "12.99", additional: "5.00", weightMin: 1001, weightMax: 2e3 }
     ];
     const bands = bandsInput && bandsInput.length === defaultBands.length ? bandsInput.map((b, i) => ({
       ...defaultBands[i],
