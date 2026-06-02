@@ -14,10 +14,6 @@ import bcrypt from "bcryptjs";
 import { tmeApi } from "./tme-api";
 import { tmeApiOptimized } from "./tme-api-optimized";
 import { ebayApi } from "./ebay-api";
-import { createSimpleUKListingXML } from "./ebay-uk-config";
-import { createBasicUKListingXML } from "./ebay-basic-uk-config";
-import { createTestListingXML } from "./ebay-test-listing";
-import { createListingWithExternalImageXML } from "./ebay-external-image";
 import { ebayOAuth } from "./ebay-oauth";
 import { ebayAccountApi } from "./ebay-account-api";
 import fs from 'fs';
@@ -164,8 +160,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         refreshTokenLength: refreshToken.length,
       },
       ebayMarketplace: {
-        siteId: process.env.EBAY_MARKETPLACE_SITE_ID || "(unset -> defaults to 3/UK)",
-        currency: process.env.EBAY_LISTING_CURRENCY || "(unset -> defaults to GBP)",
+        siteId: process.env.EBAY_MARKETPLACE_SITE_ID || "(unset -> defaults to 77/DE)",
+        currency: process.env.EBAY_LISTING_CURRENCY || "(unset -> defaults to EUR)",
         country: process.env.EBAY_LISTING_COUNTRY || "(unset -> LV)",
         paymentProfileId: process.env.EBAY_PAYMENT_PROFILE_ID || "(unset)",
         returnProfileId: process.env.EBAY_RETURN_PROFILE_ID || "(unset)",
@@ -1646,7 +1642,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           policyId: `local_${Date.now()}`,
           name,
           description,
-          marketplaceId: marketplaceId || "EBAY_GB",
+          marketplaceId: marketplaceId || "EBAY_DE",
           paymentMethods: paymentMethods || "[]",
           immediatePay: immediatePay ?? true,
           syncedFromEbay: false
@@ -1784,7 +1780,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           policyId: `local_${Date.now()}`,
           name,
           description,
-          marketplaceId: marketplaceId || "EBAY_GB",
+          marketplaceId: marketplaceId || "EBAY_DE",
           handlingTime: handlingTime || 1,
           shippingOptions: JSON.stringify(parsedShippingOptions || []),
           shipToLocations: JSON.stringify(parsedShipToLocations || {}),
@@ -1915,7 +1911,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           policyId: `local_${Date.now()}`,
           name,
           description,
-          marketplaceId: marketplaceId || "EBAY_GB",
+          marketplaceId: marketplaceId || "EBAY_DE",
           returnsAccepted: returnsAccepted ?? true,
           returnPeriod: returnPeriod || 30,
           refundMethod: refundMethod || "MONEY_BACK",

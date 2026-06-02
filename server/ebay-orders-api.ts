@@ -329,7 +329,7 @@ export class EbayOrdersApiService {
       subtotal: ebayOrder.pricingSummary.priceSubtotal.value,
       shippingCost: ebayOrder.pricingSummary.deliveryCost?.value || "0.00",
       totalPrice: ebayOrder.pricingSummary.total.value,
-      currency: ebayOrder.pricingSummary.total.currency || 'GBP',
+      currency: ebayOrder.pricingSummary.total.currency || 'EUR',
       
       marketplaceFee: ebayOrder.totalMarketplaceFee?.value || null,
       paymentProcessingFee: null,
@@ -386,7 +386,7 @@ export class EbayOrdersApiService {
         feeType: 'ebay_final_value',
         description: 'eBay Final Value Fee',
         amount: ebayOrder.totalMarketplaceFee.value,
-        currency: ebayOrder.totalMarketplaceFee.currency || 'GBP'
+        currency: ebayOrder.totalMarketplaceFee.currency || 'EUR'
       };
       await storage.createOrderFee(fee);
     }

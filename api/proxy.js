@@ -2924,7 +2924,7 @@ function generateDescription(product, specs, category) {
     sections.push(`\u2022 Sold as a complete pack only`);
     sections.push(`\u2022 Cannot be split or sold individually`);
     const perPiecePrice = (parseFloat(product.salePrice) / product.minOrderQuantity).toFixed(2);
-    sections.push(`\u2022 Effective price per piece: \xA3${perPiecePrice}`);
+    sections.push(`\u2022 Effective price per piece: \u20AC${perPiecePrice}`);
   } else {
     sections.push(`\u2022 1x ${product.name || "Electronic Component"}`);
   }
@@ -3890,12 +3890,24 @@ var EbayApiService = class {
   sandboxUrl = "https://api.sandbox.ebay.com";
   tradingApiUrl = "https://api.ebay.com/ws/api.dll";
   sandboxTradingApiUrl = "https://api.sandbox.ebay.com/ws/api.dll";
-  // Marketplace config — env-driven so the same code lists to UK (site 3,
-  // GBP) or DE (site 77, EUR) etc. without code changes. Defaults keep
-  // the original UK behaviour when env vars are unset.
-  siteId = process.env.EBAY_MARKETPLACE_SITE_ID || "3";
-  // 3=UK, 77=DE
-  listingCurrency = process.env.EBAY_LISTING_CURRENCY || "GBP";
+  // Marketplace config — env-driven so the same code lists to DE (site 77,
+  // EUR) or any other marketplace without code changes. Defaults to DE
+  // (the active marketplace) when env vars are unset.
+  siteId = process.env.EBAY_MARKETPLACE_SITE_ID || "77";
+  // 77=DE, 3=UK
+  listingCurrency = process.env.EBAY_LISTING_CURRENCY || "EUR";
+  // REST marketplace id derived from the site id (3->EBAY_GB, 77->EBAY_DE...)
+  marketplaceId = (() => {
+    const map = {
+      "0": "EBAY_US",
+      "3": "EBAY_GB",
+      "77": "EBAY_DE",
+      "71": "EBAY_FR",
+      "101": "EBAY_IT",
+      "186": "EBAY_ES"
+    };
+    return map[process.env.EBAY_MARKETPLACE_SITE_ID || "77"] || "EBAY_DE";
+  })();
   listingCountry = process.env.EBAY_LISTING_COUNTRY || "LV";
   listingLocation = process.env.EBAY_LISTING_LOCATION || "Riga, Latvia";
   paymentProfileId = process.env.EBAY_PAYMENT_PROFILE_ID || "209734844019";
@@ -3952,7 +3964,7 @@ var EbayApiService = class {
         headers: {
           "Authorization": `Bearer ${accessToken}`,
           "Content-Type": "application/json",
-          "X-EBAY-C-MARKETPLACE-ID": "EBAY_GB"
+          "X-EBAY-C-MARKETPLACE-ID": this.marketplaceId
         },
         body: body ? JSON.stringify(body) : void 0
       });
@@ -4606,7 +4618,7 @@ ${nameValueLists}
         "X-EBAY-API-APP-NAME": this.credentials.appId,
         "X-EBAY-API-CERT-NAME": this.credentials.certId,
         "X-EBAY-API-CALL-NAME": "GetUser",
-        "X-EBAY-API-SITEID": "3",
+        "X-EBAY-API-SITEID": this.siteId,
         "X-EBAY-API-IAF-TOKEN": oauthToken
       },
       body: xmlBody
@@ -5112,8 +5124,7 @@ var EbayAccountApiService = class {
   baseUrl = "https://api.ebay.com";
   sandboxUrl = "https://api.sandbox.ebay.com";
   isProduction = true;
-  defaultMarketplaceId = "EBAY_GB";
-  // UK marketplace
+  defaultMarketplaceId = process.env.EBAY_MARKETPLACE_ID || "EBAY_DE";
   constructor() {
     console.log("\u2705 eBay Account API Service initialized");
     console.log("   Using unified OAuth service");
@@ -5289,9 +5300,9 @@ var EbayAccountApiService = class {
             costType: "FLAT_RATE",
             shippingServices: [
               {
-                shippingCarrierCode: "Royal Mail",
-                shippingServiceCode: "UK_RoyalMailSecondClassStandard",
-                shippingCost: { value: "0.00", currency: "GBP" },
+                shippingCarrierCode: "DHL",
+                shippingServiceCode: "DE_DHLPaket",
+                shippingCost: { value: "0.00", currency: "EUR" },
                 freeShipping: true,
                 sortOrder: 1
               }
@@ -5576,7 +5587,7 @@ var EbayAccountApiService = class {
       }, 0);
       const limitQuantity = response.sellingLimit?.quantity || 0;
       const limitAmount = parseFloat(response.sellingLimit?.amount?.value || "0");
-      const currency = response.sellingLimit?.amount?.currency || "GBP";
+      const currency = response.sellingLimit?.amount?.currency || "EUR";
       const remainingQuantity = Math.max(0, limitQuantity - listedCount);
       const remainingAmount = Math.max(0, limitAmount - listedValue);
       return {
@@ -5611,7 +5622,7 @@ var EbayAccountApiService = class {
       }, 0);
       let itemLimit = 0;
       let valueLimit = 0;
-      let currency = "GBP";
+      let currency = "EUR";
       let ebayApiResponse = null;
       try {
         if (this.isConfigured()) {
@@ -5619,7 +5630,7 @@ var EbayAccountApiService = class {
           ebayApiResponse = response;
           itemLimit = response.sellingLimit?.quantity || 0;
           valueLimit = parseFloat(response.sellingLimit?.amount?.value || "0");
-          currency = response.sellingLimit?.amount?.currency || "GBP";
+          currency = response.sellingLimit?.amount?.currency || "EUR";
         }
       } catch (apiError) {
         console.warn("Could not fetch eBay selling limits from API, using estimates:", apiError);
@@ -6598,7 +6609,7 @@ var EbayOrdersApiService = class {
       subtotal: ebayOrder.pricingSummary.priceSubtotal.value,
       shippingCost: ebayOrder.pricingSummary.deliveryCost?.value || "0.00",
       totalPrice: ebayOrder.pricingSummary.total.value,
-      currency: ebayOrder.pricingSummary.total.currency || "GBP",
+      currency: ebayOrder.pricingSummary.total.currency || "EUR",
       marketplaceFee: ebayOrder.totalMarketplaceFee?.value || null,
       paymentProcessingFee: null,
       shippingService: shippingInfo?.shippingServiceCode || null,
@@ -6640,7 +6651,7 @@ var EbayOrdersApiService = class {
         feeType: "ebay_final_value",
         description: "eBay Final Value Fee",
         amount: ebayOrder.totalMarketplaceFee.value,
-        currency: ebayOrder.totalMarketplaceFee.currency || "GBP"
+        currency: ebayOrder.totalMarketplaceFee.currency || "EUR"
       };
       await storage.createOrderFee(fee);
     }
@@ -6726,8 +6737,7 @@ async function makeXmlRequest(callName, xmlBody, retries = 3) {
   const token = await ebayOAuth.getValidAccessToken();
   const headers = {
     "Content-Type": "text/xml",
-    "X-EBAY-API-SITEID": "3",
-    // UK site
+    "X-EBAY-API-SITEID": process.env.EBAY_MARKETPLACE_SITE_ID || "77",
     "X-EBAY-API-COMPATIBILITY-LEVEL": "1225",
     "X-EBAY-API-CALL-NAME": callName,
     "X-EBAY-API-IAF-TOKEN": token
@@ -7306,8 +7316,8 @@ async function registerRoutes(app) {
         refreshTokenLength: refreshToken.length
       },
       ebayMarketplace: {
-        siteId: process.env.EBAY_MARKETPLACE_SITE_ID || "(unset -> defaults to 3/UK)",
-        currency: process.env.EBAY_LISTING_CURRENCY || "(unset -> defaults to GBP)",
+        siteId: process.env.EBAY_MARKETPLACE_SITE_ID || "(unset -> defaults to 77/DE)",
+        currency: process.env.EBAY_LISTING_CURRENCY || "(unset -> defaults to EUR)",
         country: process.env.EBAY_LISTING_COUNTRY || "(unset -> LV)",
         paymentProfileId: process.env.EBAY_PAYMENT_PROFILE_ID || "(unset)",
         returnProfileId: process.env.EBAY_RETURN_PROFILE_ID || "(unset)",
@@ -8500,7 +8510,7 @@ async function registerRoutes(app) {
           policyId: `local_${Date.now()}`,
           name,
           description,
-          marketplaceId: marketplaceId || "EBAY_GB",
+          marketplaceId: marketplaceId || "EBAY_DE",
           paymentMethods: paymentMethods || "[]",
           immediatePay: immediatePay ?? true,
           syncedFromEbay: false
@@ -8622,7 +8632,7 @@ async function registerRoutes(app) {
           policyId: `local_${Date.now()}`,
           name,
           description,
-          marketplaceId: marketplaceId || "EBAY_GB",
+          marketplaceId: marketplaceId || "EBAY_DE",
           handlingTime: handlingTime || 1,
           shippingOptions: JSON.stringify(parsedShippingOptions || []),
           shipToLocations: JSON.stringify(parsedShipToLocations || {}),
@@ -8744,7 +8754,7 @@ async function registerRoutes(app) {
           policyId: `local_${Date.now()}`,
           name,
           description,
-          marketplaceId: marketplaceId || "EBAY_GB",
+          marketplaceId: marketplaceId || "EBAY_DE",
           returnsAccepted: returnsAccepted ?? true,
           returnPeriod: returnPeriod || 30,
           refundMethod: refundMethod || "MONEY_BACK",

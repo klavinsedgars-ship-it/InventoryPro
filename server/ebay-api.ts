@@ -119,11 +119,19 @@ export class EbayApiService {
   private sandboxUrl = "https://api.sandbox.ebay.com";
   private tradingApiUrl = "https://api.ebay.com/ws/api.dll";
   private sandboxTradingApiUrl = "https://api.sandbox.ebay.com/ws/api.dll";
-  // Marketplace config — env-driven so the same code lists to UK (site 3,
-  // GBP) or DE (site 77, EUR) etc. without code changes. Defaults keep
-  // the original UK behaviour when env vars are unset.
-  private siteId = process.env.EBAY_MARKETPLACE_SITE_ID || "3"; // 3=UK, 77=DE
-  private listingCurrency = process.env.EBAY_LISTING_CURRENCY || "GBP";
+  // Marketplace config — env-driven so the same code lists to DE (site 77,
+  // EUR) or any other marketplace without code changes. Defaults to DE
+  // (the active marketplace) when env vars are unset.
+  private siteId = process.env.EBAY_MARKETPLACE_SITE_ID || "77"; // 77=DE, 3=UK
+  private listingCurrency = process.env.EBAY_LISTING_CURRENCY || "EUR";
+  // REST marketplace id derived from the site id (3->EBAY_GB, 77->EBAY_DE...)
+  private marketplaceId = (() => {
+    const map: Record<string, string> = {
+      "0": "EBAY_US", "3": "EBAY_GB", "77": "EBAY_DE",
+      "71": "EBAY_FR", "101": "EBAY_IT", "186": "EBAY_ES",
+    };
+    return map[process.env.EBAY_MARKETPLACE_SITE_ID || "77"] || "EBAY_DE";
+  })();
   private listingCountry = process.env.EBAY_LISTING_COUNTRY || "LV";
   private listingLocation = process.env.EBAY_LISTING_LOCATION || "Riga, Latvia";
   private paymentProfileId =
@@ -196,7 +204,7 @@ export class EbayApiService {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
-          'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB',
+          'X-EBAY-C-MARKETPLACE-ID': this.marketplaceId,
         },
         body: body ? JSON.stringify(body) : undefined,
       });
@@ -1047,7 +1055,7 @@ export class EbayApiService {
         'X-EBAY-API-APP-NAME': this.credentials.appId,
         'X-EBAY-API-CERT-NAME': this.credentials.certId,
         'X-EBAY-API-CALL-NAME': 'GetUser',
-        'X-EBAY-API-SITEID': '3',
+        'X-EBAY-API-SITEID': this.siteId,
         'X-EBAY-API-IAF-TOKEN': oauthToken
       },
       body: xmlBody

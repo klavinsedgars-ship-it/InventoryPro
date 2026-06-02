@@ -788,13 +788,13 @@ function CreateFulfillmentPolicyDialog({
   const [createOnEbay, setCreateOnEbay] = useState(true);
 
   const [costType, setCostType] = useState("FLAT_RATE");
-  const [shippingService, setShippingService] = useState("UK_RoyalMailSecondClassStandard");
-  const [firstItemCost, setFirstItemCost] = useState("3.50");
-  const [additionalItemCost, setAdditionalItemCost] = useState("0.50");
+  const [shippingService, setShippingService] = useState("DE_DHLPaket");
+  const [firstItemCost, setFirstItemCost] = useState("5.49");
+  const [additionalItemCost, setAdditionalItemCost] = useState("1.00");
   const [freeShipping, setFreeShipping] = useState(false);
 
   const [internationalShipping, setInternationalShipping] = useState(false);
-  const [intlShippingService, setIntlShippingService] = useState("UK_RoyalMailInternationalTrackedAndSigned");
+  const [intlShippingService, setIntlShippingService] = useState("DE_SonstigerVersandInternational");
   const [intlFirstItemCost, setIntlFirstItemCost] = useState("9.99");
   const [intlAdditionalItemCost, setIntlAdditionalItemCost] = useState("2.00");
   const [intlShipTo, setIntlShipTo] = useState("Europe");
@@ -816,13 +816,12 @@ function CreateFulfillmentPolicyDialog({
 
   // Get carrier code from service code
   const getCarrierFromService = (serviceCode: string): string => {
-    if (serviceCode.includes('RoyalMail')) return 'Royal Mail';
-    if (serviceCode.includes('Parcelforce')) return 'Parcelforce';
-    if (serviceCode.includes('myHermes') || serviceCode.includes('Evri')) return 'Evri';
+    if (serviceCode.includes('DHL')) return 'DHL';
+    if (serviceCode.includes('Hermes')) return 'Hermes';
     if (serviceCode.includes('DPD')) return 'DPD';
     if (serviceCode.includes('UPS')) return 'UPS';
     if (serviceCode.includes('FedEx')) return 'FedEx';
-    if (serviceCode.includes('DHL')) return 'DHL';
+    if (serviceCode.includes('deutschePost') || serviceCode.includes('DeutschePost')) return 'Deutsche Post';
     return 'Other';
   };
 
@@ -835,8 +834,8 @@ function CreateFulfillmentPolicyDialog({
           {
             shippingCarrierCode: getCarrierFromService(shippingService),
             shippingServiceCode: shippingService,
-            shippingCost: { value: freeShipping ? "0.00" : firstItemCost, currency: "GBP" },
-            additionalShippingCost: { value: additionalItemCost, currency: "GBP" },
+            shippingCost: { value: freeShipping ? "0.00" : firstItemCost, currency: "EUR" },
+            additionalShippingCost: { value: additionalItemCost, currency: "EUR" },
             freeShipping: freeShipping,
             sortOrder: 1
           }
@@ -867,8 +866,8 @@ function CreateFulfillmentPolicyDialog({
           {
             shippingCarrierCode: getCarrierFromService(intlShippingService),
             shippingServiceCode: intlShippingService,
-            shippingCost: { value: intlFirstItemCost, currency: "GBP" },
-            additionalShippingCost: { value: intlAdditionalItemCost, currency: "GBP" },
+            shippingCost: { value: intlFirstItemCost, currency: "EUR" },
+            additionalShippingCost: { value: intlAdditionalItemCost, currency: "EUR" },
             freeShipping: false,
             sortOrder: 1,
             shipToLocations: {
@@ -976,19 +975,14 @@ function CreateFulfillmentPolicyDialog({
                             ))
                           ) : (
                             <>
-                              <SelectItem value="UK_RoyalMailSecondClassStandard">Royal Mail 2nd Class (2-3 days)</SelectItem>
-                              <SelectItem value="UK_RoyalMailFirstClassStandard">Royal Mail 1st Class (1-2 days)</SelectItem>
-                              <SelectItem value="UK_RoyalMailTracked48">Royal Mail Tracked 48 (2 days)</SelectItem>
-                              <SelectItem value="UK_RoyalMailTracked24">Royal Mail Tracked 24 (1 day)</SelectItem>
-                              <SelectItem value="UK_RoyalMailSecondClassRecorded">Royal Mail 2nd Class Signed For</SelectItem>
-                              <SelectItem value="UK_RoyalMailFirstClassRecorded">Royal Mail 1st Class Signed For</SelectItem>
-                              <SelectItem value="UK_RoyalMailSpecialDeliveryNextDay">Special Delivery by 1pm</SelectItem>
-                              <SelectItem value="UK_RoyalMailSpecialDelivery9am">Special Delivery by 9am</SelectItem>
-                              <SelectItem value="UK_Parcelforce48">Parcelforce express48</SelectItem>
-                              <SelectItem value="UK_Parcelforce24">Parcelforce express24</SelectItem>
-                              <SelectItem value="UK_myHermesDoorToDoorService">Evri ParcelShop</SelectItem>
-                              <SelectItem value="UK_OtherCourier3Days">Other Courier (3 days)</SelectItem>
-                              <SelectItem value="UK_OtherCourier5Days">Other Courier (5 days)</SelectItem>
+                              <SelectItem value="DE_DHLPaket">DHL Paket (1-2 Tage)</SelectItem>
+                              <SelectItem value="DE_DHLPackchen">DHL Päckchen</SelectItem>
+                              <SelectItem value="DE_deutschePostWarenpost">Deutsche Post Warenpost</SelectItem>
+                              <SelectItem value="DE_DeutschePostBrief">Deutsche Post Brief</SelectItem>
+                              <SelectItem value="DE_HermesPaket">Hermes Paket</SelectItem>
+                              <SelectItem value="DE_DPDClassic">DPD Classic</SelectItem>
+                              <SelectItem value="DE_GLSPaket">GLS Paket</SelectItem>
+                              <SelectItem value="DE_SonstigeDomestic">Sonstiger Versand (Inland)</SelectItem>
                             </>
                           )}
                         </SelectContent>
@@ -1090,14 +1084,12 @@ function CreateFulfillmentPolicyDialog({
                           ))
                         ) : (
                           <>
-                            <SelectItem value="UK_RoyalMailInternationalTrackedAndSigned">Royal Mail Int'l Tracked & Signed</SelectItem>
-                            <SelectItem value="UK_RoyalMailInternationalTracked">Royal Mail Int'l Tracked</SelectItem>
-                            <SelectItem value="UK_RoyalMailInternationalSigned">Royal Mail Int'l Signed</SelectItem>
-                            <SelectItem value="UK_RoyalMailAirmailInternational">Royal Mail Int'l Standard</SelectItem>
-                            <SelectItem value="UK_ParcelForceInternationalDatapost">Parcelforce Global Express</SelectItem>
-                            <SelectItem value="UK_ParcelForceEuro48">Parcelforce Euro 48</SelectItem>
-                            <SelectItem value="UK_ParcelForceIrelandexpress">Parcelforce Ireland Express</SelectItem>
-                            <SelectItem value="UK_OtherCourierOrDeliveryInternational">Other International Courier</SelectItem>
+                            <SelectItem value="DE_SonstigerVersandInternational">Sonstiger Versand International</SelectItem>
+                            <SelectItem value="DE_DHLPaketInternational">DHL Paket International</SelectItem>
+                            <SelectItem value="DE_DHLPackchenInternational">DHL Päckchen International</SelectItem>
+                            <SelectItem value="DE_deutschePostWarenpostInternational">Deutsche Post Warenpost International</SelectItem>
+                            <SelectItem value="DE_DeutschePostBriefInternational">Deutsche Post Brief International</SelectItem>
+                            <SelectItem value="DE_HermesPaketInternational">Hermes Paket International</SelectItem>
                           </>
                         )}
                       </SelectContent>

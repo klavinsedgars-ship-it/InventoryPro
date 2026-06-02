@@ -129,7 +129,7 @@ function generateDescription(product: Product, specs: ProductSpecs, category: st
     sections.push(`• Sold as a complete pack only`);
     sections.push(`• Cannot be split or sold individually`);
     const perPiecePrice = (parseFloat(product.salePrice) / product.minOrderQuantity).toFixed(2);
-    sections.push(`• Effective price per piece: £${perPiecePrice}`);
+    sections.push(`• Effective price per piece: €${perPiecePrice}`);
   } else {
     // For single products
     sections.push(`• 1x ${product.name || 'Electronic Component'}`);
@@ -383,7 +383,7 @@ export function generateShippingTemplate(): string {
 • Secure packaging to prevent damage
 
 🌍 INTERNATIONAL SHIPPING:
-• UK & EU: 5-7 working days
+• Germany & EU: 3-7 working days
 • Worldwide: 7-14 working days
   `;
 }

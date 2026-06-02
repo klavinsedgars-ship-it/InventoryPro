@@ -192,7 +192,7 @@ export function EditBeforeListingModal({
                 name="salePrice"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Price (GBP)</FormLabel>
+                    <FormLabel>Price (EUR)</FormLabel>
                     <FormControl>
                       <Input {...field} type="number" step="0.01" placeholder="0.00" />
                     </FormControl>
