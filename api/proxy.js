@@ -7371,16 +7371,21 @@ async function registerRoutes(app) {
     const returnName = String(body.returnName || "30 Tage R\xFCckgabe");
     const bandsInput = Array.isArray(body.shipping) ? body.shipping : null;
     const defaultBands = [
-      { label: "0-20g", varKey: "EBAY_SHIPPING_POLICY_0_20GR", de: "5.79", eu: "6.79", additional: "1.00", weightMin: 0, weightMax: 20 },
-      { label: "21-100g", varKey: "EBAY_SHIPPING_POLICY_21_100GR", de: "5.89", eu: "6.79", additional: "1.00", weightMin: 21, weightMax: 100 },
-      { label: "101-500g", varKey: "EBAY_SHIPPING_POLICY_101_500GR", de: "7.09", eu: "7.89", additional: "1.00", weightMin: 101, weightMax: 500 },
-      { label: "501-1000g", varKey: "EBAY_SHIPPING_POLICY_501_1000GR", de: "9.39", eu: "10.99", additional: "2.00", weightMin: 501, weightMax: 1e3 },
-      { label: "1001-2000g", varKey: "EBAY_SHIPPING_POLICY_1001_2000GR", de: "10.99", eu: "14.79", additional: "5.00", weightMin: 1001, weightMax: 2e3 }
+      { label: "0-20g", varKey: "EBAY_SHIPPING_POLICY_0_20GR", de: "5.79", eu1: "5.49", eu2: "6.49", eu3: "7.49", additional: "1.00", weightMin: 0, weightMax: 20 },
+      { label: "21-100g", varKey: "EBAY_SHIPPING_POLICY_21_100GR", de: "5.89", eu1: "5.49", eu2: "6.49", eu3: "7.49", additional: "1.00", weightMin: 21, weightMax: 100 },
+      { label: "101-500g", varKey: "EBAY_SHIPPING_POLICY_101_500GR", de: "7.09", eu1: "7.49", eu2: "7.49", eu3: "8.99", additional: "1.00", weightMin: 101, weightMax: 500 },
+      { label: "501-1000g", varKey: "EBAY_SHIPPING_POLICY_501_1000GR", de: "9.39", eu1: "10.99", eu2: "10.49", eu3: "11.99", additional: "2.00", weightMin: 501, weightMax: 1e3 },
+      { label: "1001-2000g", varKey: "EBAY_SHIPPING_POLICY_1001_2000GR", de: "10.99", eu1: "14.99", eu2: "13.49", eu3: "14.99", additional: "5.00", weightMin: 1001, weightMax: 2e3 }
     ];
+    const EU1_COUNTRIES = ["EE", "LT", "PL", "CZ", "SK", "HU", "SI", "HR", "RO", "BG"];
+    const EU2_COUNTRIES = ["FR", "NL", "BE", "LU", "AT", "DK", "SE"];
+    const EU3_COUNTRIES = ["IT", "ES", "PT", "GR", "IE", "FI", "CY", "MT"];
     const bands = bandsInput && bandsInput.length === defaultBands.length ? bandsInput.map((b, i) => ({
       ...defaultBands[i],
       de: String(b.de ?? defaultBands[i].de),
-      eu: String(b.eu ?? defaultBands[i].eu),
+      eu1: String(b.eu1 ?? defaultBands[i].eu1),
+      eu2: String(b.eu2 ?? defaultBands[i].eu2),
+      eu3: String(b.eu3 ?? defaultBands[i].eu3),
       additional: String(b.additional ?? defaultBands[i].additional)
     })) : defaultBands;
     const results = { payment: null, return: null, shipping: [] };
@@ -7487,12 +7492,37 @@ async function registerRoutes(app) {
               {
                 shippingCarrierCode: "Other",
                 shippingServiceCode: "DE_EconomyInternational",
-                shippingCost: { value: band.eu, currency: "EUR" },
+                shippingCost: { value: band.eu1, currency: "EUR" },
                 additionalShippingCost: { value: band.additional, currency: "EUR" },
                 freeShipping: false,
                 sortOrder: 1,
                 shipToLocations: {
-                  regionIncluded: [{ regionName: "EUROPE", regionType: "WORLD_REGION" }]
+                  regionIncluded: EU1_COUNTRIES.map((c) => ({ regionName: c, regionType: "COUNTRY" }))
+                }
+              },
+              {
+                shippingCarrierCode: "Other",
+                shippingServiceCode: "DE_EconomyInternational",
+                shippingCost: { value: band.eu2, currency: "EUR" },
+                additionalShippingCost: { value: band.additional, currency: "EUR" },
+                freeShipping: false,
+                sortOrder: 2,
+                shipToLocations: {
+                  regionIncluded: EU2_COUNTRIES.map((c) => ({ regionName: c, regionType: "COUNTRY" }))
+                }
+              },
+              {
+                shippingCarrierCode: "Other",
+                shippingServiceCode: "DE_EconomyInternational",
+                shippingCost: { value: band.eu3, currency: "EUR" },
+                additionalShippingCost: { value: band.additional, currency: "EUR" },
+                freeShipping: false,
+                sortOrder: 3,
+                shipToLocations: {
+                  regionIncluded: [
+                    ...EU3_COUNTRIES.map((c) => ({ regionName: c, regionType: "COUNTRY" })),
+                    { regionName: "EUROPE", regionType: "WORLD_REGION" }
+                  ]
                 }
               }
             ]
