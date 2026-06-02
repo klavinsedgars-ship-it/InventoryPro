@@ -119,7 +119,17 @@ export class EbayApiService {
   private sandboxUrl = "https://api.sandbox.ebay.com";
   private tradingApiUrl = "https://api.ebay.com/ws/api.dll";
   private sandboxTradingApiUrl = "https://api.sandbox.ebay.com/ws/api.dll";
-  private siteId = "3"; // eBay UK site ID
+  // Marketplace config — env-driven so the same code lists to UK (site 3,
+  // GBP) or DE (site 77, EUR) etc. without code changes. Defaults keep
+  // the original UK behaviour when env vars are unset.
+  private siteId = process.env.EBAY_MARKETPLACE_SITE_ID || "3"; // 3=UK, 77=DE
+  private listingCurrency = process.env.EBAY_LISTING_CURRENCY || "GBP";
+  private listingCountry = process.env.EBAY_LISTING_COUNTRY || "LV";
+  private listingLocation = process.env.EBAY_LISTING_LOCATION || "Riga, Latvia";
+  private paymentProfileId =
+    process.env.EBAY_PAYMENT_PROFILE_ID || "209734844019";
+  private returnProfileId =
+    process.env.EBAY_RETURN_PROFILE_ID || "161272624019";
   private authToken?: EbayAuthToken;
   private isProduction = true; // Force production for OAuth token testing
 
@@ -354,6 +364,15 @@ export class EbayApiService {
         pictureURLs: listingDetails.pictureURLs || processedImageUrls,
         shippingPolicyId: shippingPolicyId,
         weight: product.weight,
+        // Item specifics — real product data, not the old hardcoded
+        // "Arduino A000066 Development Board". No brand field exists on
+        // the product, so default to Unbranded; MPN falls back to the
+        // supplier product id / SKU. eBay category specifics requirements
+        // are satisfied without mislabelling every component.
+        sku: product.sku,
+        mpn: product.supplierProductId || product.sku,
+        brand: (listingDetails as any).brand || "Unbranded",
+        itemSpecifics: (listingDetails as any).itemSpecifics,
         shippingDetails: listingDetails.shippingDetails || {
           shippingType: "Flat",
           shippingServiceCost: 5.99
@@ -541,46 +560,31 @@ export class EbayApiService {
 <VerifyAddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <Item>
     <Title>${this.escapeXml(listingData.title)}</Title>
-    <Description><![CDATA[${listingData.description}]]></Description>
+    <Description><![CDATA[${this.sanitizeCdata(listingData.description)}]]></Description>
     <PrimaryCategory>
       <CategoryID>${listingData.categoryId}</CategoryID>
     </PrimaryCategory>
-    <StartPrice currencyID="GBP">${listingData.startPrice}</StartPrice>
+    <StartPrice currencyID="${this.listingCurrency}">${listingData.startPrice}</StartPrice>
     <Quantity>${listingData.quantity}</Quantity>
     <ListingDuration>GTC</ListingDuration>
-    <Country>LV</Country>
-    <Currency>GBP</Currency>
-    <Location>Riga, Latvia</Location>
+    <Country>${this.listingCountry}</Country>
+    <Currency>${this.listingCurrency}</Currency>
+    <Location>${this.escapeXml(this.listingLocation)}</Location>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
-    <PictureDetails>
-      <PictureURL>${listingData.pictureURLs && listingData.pictureURLs.length > 0 ? this.escapeXml(listingData.pictureURLs[0]) : ""}</PictureURL>
-    </PictureDetails>
+    ${this.buildPictureDetailsXml(listingData.pictureURLs)}
     <SellerProfiles>
       <SellerShippingProfile>
         <ShippingProfileID>${listingData.shippingPolicyId}</ShippingProfileID>
       </SellerShippingProfile>
       <SellerPaymentProfile>
-        <PaymentProfileID>209734844019</PaymentProfileID>
+        <PaymentProfileID>${this.paymentProfileId}</PaymentProfileID>
       </SellerPaymentProfile>
       <SellerReturnProfile>
-        <ReturnProfileID>161272624019</ReturnProfileID>
+        <ReturnProfileID>${this.returnProfileId}</ReturnProfileID>
       </SellerReturnProfile>
     </SellerProfiles>
-    ${listingData.pictureURLs && listingData.pictureURLs.length > 0 ? `<ItemSpecifics>
-      <NameValueList>
-        <Name>Brand</Name>
-        <Value>Arduino</Value>
-      </NameValueList>
-      <NameValueList>
-        <Name>Type</Name>
-        <Value>Development Board</Value>
-      </NameValueList>
-      <NameValueList>
-        <Name>MPN</Name>
-        <Value>${listingData.sku || 'Arduino'}</Value>
-      </NameValueList>
-    </ItemSpecifics>` : ''}
+    ${this.buildItemSpecificsXml(listingData)}
   </Item>
 </VerifyAddFixedPriceItemRequest>`;
   }
@@ -593,53 +597,37 @@ export class EbayApiService {
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <Item>
     <Title>${this.escapeXml(listingData.title)}</Title>
-    <Description><![CDATA[${listingData.description}]]></Description>
+    <Description><![CDATA[${this.sanitizeCdata(listingData.description)}]]></Description>
     <PrimaryCategory>
       <CategoryID>${listingData.categoryId}</CategoryID>
     </PrimaryCategory>
-    <StartPrice currencyID="GBP">${listingData.startPrice}</StartPrice>
+    <StartPrice currencyID="${this.listingCurrency}">${listingData.startPrice}</StartPrice>
     <Quantity>${listingData.quantity}</Quantity>
     <ListingDuration>GTC</ListingDuration>
-    <Country>LV</Country>
-    <Currency>GBP</Currency>
-    <Location>Riga, Latvia</Location>
+    <Country>${this.listingCountry}</Country>
+    <Currency>${this.listingCurrency}</Currency>
+    <Location>${this.escapeXml(this.listingLocation)}</Location>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
-    <PictureDetails>
-      <PictureURL>${listingData.pictureURLs && listingData.pictureURLs.length > 0 ? this.escapeXml(listingData.pictureURLs[0]) : ""}</PictureURL>
-    </PictureDetails>
+    ${this.buildPictureDetailsXml(listingData.pictureURLs)}
     <SellerProfiles>
       <SellerShippingProfile>
         <ShippingProfileID>${listingData.shippingPolicyId}</ShippingProfileID>
       </SellerShippingProfile>
       <SellerPaymentProfile>
-        <PaymentProfileID>209734844019</PaymentProfileID>
+        <PaymentProfileID>${this.paymentProfileId}</PaymentProfileID>
       </SellerPaymentProfile>
       <SellerReturnProfile>
-        <ReturnProfileID>161272624019</ReturnProfileID>
+        <ReturnProfileID>${this.returnProfileId}</ReturnProfileID>
       </SellerReturnProfile>
     </SellerProfiles>
-    <ItemSpecifics>
-      <NameValueList>
-        <Name>Brand</Name>
-        <Value>Arduino</Value>
-      </NameValueList>
-      <NameValueList>
-        <Name>Type</Name>
-        <Value>Development Board</Value>
-      </NameValueList>
-      <NameValueList>
-        <Name>MPN</Name>
-        <Value>A000066</Value>
-      </NameValueList>
-    </ItemSpecifics>
-
+    ${this.buildItemSpecificsXml(listingData)}
   </Item>
 </AddFixedPriceItemRequest>`;
   }
 
   private escapeXml(text: string): string {
-    return text
+    return String(text ?? '')
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
@@ -647,14 +635,62 @@ export class EbayApiService {
       .replace(/'/g, '&#39;');
   }
 
+  // CDATA can't contain the literal sequence "]]>". Split it so the
+  // description survives even if a product description embeds it. Also cap
+  // length — eBay's Description limit is 500k chars.
+  private sanitizeCdata(text: string): string {
+    return String(text ?? '')
+      .replace(/]]>/g, ']]]]><![CDATA[>')
+      .slice(0, 500000);
+  }
+
+  // Emit one <PictureURL> per image (eBay allows up to 24). Falls back to
+  // an empty <PictureDetails/> when there are none.
+  private buildPictureDetailsXml(pictureURLs?: string[]): string {
+    if (!pictureURLs || pictureURLs.length === 0) {
+      return `<PictureDetails></PictureDetails>`;
+    }
+    const urls = pictureURLs
+      .slice(0, 24)
+      .map((url) => `      <PictureURL>${this.escapeXml(url)}</PictureURL>`)
+      .join('\n');
+    return `<PictureDetails>\n${urls}\n    </PictureDetails>`;
+  }
+
+  // Item specifics derived from the product, not hardcoded to Arduino.
+  // Uses whatever the caller provides on listingData.itemSpecifics
+  // (a record of name -> value); falls back to Brand=Unbranded and the
+  // product's SKU as MPN, which satisfies eBay's "required specifics"
+  // for most electronics categories without mislabelling everything as
+  // an Arduino dev board.
+  private buildItemSpecificsXml(listingData: any): string {
+    const specifics: Record<string, string> = {
+      Brand: listingData.brand || 'Unbranded',
+      ...(listingData.mpn || listingData.sku
+        ? { MPN: listingData.mpn || listingData.sku }
+        : {}),
+      ...(listingData.itemSpecifics || {}),
+    };
+
+    const entries = Object.entries(specifics).filter(
+      ([, v]) => v !== undefined && v !== null && String(v).trim() !== '',
+    );
+    if (entries.length === 0) return '';
+
+    const nameValueLists = entries
+      .map(
+        ([name, value]) => `      <NameValueList>
+        <Name>${this.escapeXml(name)}</Name>
+        <Value>${this.escapeXml(String(value))}</Value>
+      </NameValueList>`,
+      )
+      .join('\n');
+
+    return `<ItemSpecifics>\n${nameValueLists}\n    </ItemSpecifics>`;
+  }
+
   private createReviseItemXML(listingData: any): string {
-    const pictureURLs = listingData.pictureURLs || [];
-    
-    const pictureXML = pictureURLs.length > 0 ? `
-      <PictureDetails>
-        ${pictureURLs.map((url: string) => `<PictureURL>${this.escapeXml(url)}</PictureURL>`).join('')}
-      </PictureDetails>
-    ` : '';
+    const pictureXML = this.buildPictureDetailsXml(listingData.pictureURLs);
 
     console.log("createReviseItemXML - Using OAuth via header");
     console.log(`Shipping policy ID for revision: ${listingData.shippingPolicyId}`);
@@ -667,10 +703,10 @@ export class EbayApiService {
         <ShippingProfileID>${listingData.shippingPolicyId}</ShippingProfileID>
       </SellerShippingProfile>
       <SellerPaymentProfile>
-        <PaymentProfileID>209734844019</PaymentProfileID>
+        <PaymentProfileID>${this.paymentProfileId}</PaymentProfileID>
       </SellerPaymentProfile>
       <SellerReturnProfile>
-        <ReturnProfileID>161272624019</ReturnProfileID>
+        <ReturnProfileID>${this.returnProfileId}</ReturnProfileID>
       </SellerReturnProfile>
     </SellerProfiles>` : '';
 
@@ -679,16 +715,16 @@ export class EbayApiService {
   <Item>
     <ItemID>${listingData.itemId}</ItemID>
     <Title>${this.escapeXml(listingData.title)}</Title>
-    <Description><![CDATA[${listingData.description}]]></Description>
+    <Description><![CDATA[${this.sanitizeCdata(listingData.description)}]]></Description>
     <PrimaryCategory>
       <CategoryID>${listingData.categoryId}</CategoryID>
     </PrimaryCategory>
-    <StartPrice currencyID="GBP">${listingData.startPrice}</StartPrice>
+    <StartPrice currencyID="${this.listingCurrency}">${listingData.startPrice}</StartPrice>
     <Quantity>${listingData.quantity}</Quantity>
     <ListingDuration>GTC</ListingDuration>
-    <Country>LV</Country>
-    <Currency>GBP</Currency>
-    <Location>Riga, Latvia</Location>
+    <Country>${this.listingCountry}</Country>
+    <Currency>${this.listingCurrency}</Currency>
+    <Location>${this.escapeXml(this.listingLocation)}</Location>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
     ${pictureXML}${sellerProfilesXML}
@@ -817,7 +853,7 @@ export class EbayApiService {
       console.log('Fetching eBay categories... (using OAuth via header)');
       const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
 <GetCategoriesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <CategorySiteID>0</CategorySiteID>
+  <CategorySiteID>${this.siteId}</CategorySiteID>
   <DetailLevel>ReturnAll</DetailLevel>
   <LevelLimit>4</LevelLimit>
   <ViewAllNodes>true</ViewAllNodes>
@@ -1392,7 +1428,7 @@ export class EbayApiService {
         fields += `\n        <Quantity>${item.quantity}</Quantity>`;
       }
       if (item.price !== undefined) {
-        fields += `\n        <StartPrice currencyID="GBP">${item.price.toFixed(2)}</StartPrice>`;
+        fields += `\n        <StartPrice currencyID="${this.listingCurrency}">${item.price.toFixed(2)}</StartPrice>`;
       }
       return `<InventoryStatus>\n        ${fields}\n      </InventoryStatus>`;
     }).join('\n      ');

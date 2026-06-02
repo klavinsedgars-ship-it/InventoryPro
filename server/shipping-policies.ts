@@ -27,50 +27,65 @@ export interface ShippingPolicy {
   isDefault?: boolean;
 }
 
-// Shipping policy mapping based on weight ranges (in grams)
-// eBay policy IDs were created via Account API on 2025-12-03
+// Shipping policy mapping based on weight ranges (in grams).
+// The eBay fulfillment-policy IDs come from env vars so the same code
+// works across marketplaces (UK / DE / ...). The hardcoded fallbacks are
+// the original UK policy IDs, kept so existing UK behaviour is unchanged
+// when the env vars aren't set.
+//
+// DE policy IDs (created 2026-06 via /api/__bootstrap-de-policies) are
+// provided through:
+//   EBAY_SHIPPING_POLICY_0_99GR
+//   EBAY_SHIPPING_POLICY_100_499GR
+//   EBAY_SHIPPING_POLICY_500_999GR
+//   EBAY_SHIPPING_POLICY_1000_1999GR
+//
+// Weight bands use half-open intervals [min, max) so there is no gap at
+// the boundaries (the old code had a hole at 999.01–999.99g that fell
+// through to the default policy).
 export const SHIPPING_POLICIES: ShippingPolicy[] = [
   {
     id: "policy_0_99",
-    ebayPolicyId: "268493033019",
-    name: "0.01-99gr",
-    weightRange: { min: 0.01, max: 99 },
+    ebayPolicyId: process.env.EBAY_SHIPPING_POLICY_0_99GR || "268493033019",
+    name: "0-99gr",
+    weightRange: { min: 0, max: 100 },
     description: "Light items: SMD components, resistors, capacitors, small ICs",
-    price: "£3.99",
-    additionalItemPrice: "£1.00"
+    price: "4.99",
+    additionalItemPrice: "1.00"
   },
   {
     id: "policy_100_499",
-    ebayPolicyId: "268493034019",
-    name: "100-499gr", 
-    weightRange: { min: 100, max: 499 },
+    ebayPolicyId: process.env.EBAY_SHIPPING_POLICY_100_499GR || "268493034019",
+    name: "100-499gr",
+    weightRange: { min: 100, max: 500 },
     description: "Small items: sensors, modules, connectors, small boards",
-    price: "£4.99",
-    additionalItemPrice: "£1.00"
+    price: "6.99",
+    additionalItemPrice: "1.00"
   },
   {
     id: "policy_500_999",
-    ebayPolicyId: "268493035019",
+    ebayPolicyId: process.env.EBAY_SHIPPING_POLICY_500_999GR || "268493035019",
     name: "500-999gr",
-    weightRange: { min: 500, max: 999 },
+    weightRange: { min: 500, max: 1000 },
     description: "Medium items: development boards, larger modules, cables",
-    price: "£6.99",
-    additionalItemPrice: "£1.00"
+    price: "9.99",
+    additionalItemPrice: "2.00"
   },
   {
-    id: "policy_999_1999",
-    ebayPolicyId: "268493036019",
-    name: "999-1999gr",
-    weightRange: { min: 1000, max: 1999 },
+    id: "policy_1000_1999",
+    ebayPolicyId: process.env.EBAY_SHIPPING_POLICY_1000_1999GR || "268493036019",
+    name: "1000-1999gr",
+    weightRange: { min: 1000, max: 2000 },
     description: "Heavy items: power supplies, kits, bulk components",
-    price: "£9.99",
-    additionalItemPrice: "£5.00"
+    price: "14.99",
+    additionalItemPrice: "5.00"
   }
 ];
 
 // Default policy for items without weight or invalid weight (lightest policy)
-export const DEFAULT_SHIPPING_POLICY_ID = "268493033019";
-export const DEFAULT_SHIPPING_POLICY_NAME = "0.01-99gr";
+export const DEFAULT_SHIPPING_POLICY_ID =
+  process.env.EBAY_SHIPPING_POLICY_0_99GR || "268493033019";
+export const DEFAULT_SHIPPING_POLICY_NAME = "0-99gr";
 
 /**
  * Get eBay shipping policy ID based on product weight in grams
@@ -82,9 +97,9 @@ export function getShippingPolicyId(weightGrams: number | null | undefined): str
     return DEFAULT_SHIPPING_POLICY_ID;
   }
 
-  // Find matching policy based on weight
+  // Find matching policy based on weight (half-open intervals: min <= w < max)
   for (const policy of SHIPPING_POLICIES) {
-    if (weightGrams >= policy.weightRange.min && weightGrams <= policy.weightRange.max) {
+    if (weightGrams >= policy.weightRange.min && weightGrams < policy.weightRange.max) {
       console.log(`Weight ${weightGrams}g matched to policy: ${policy.name} (eBay ID: ${policy.ebayPolicyId})`);
       return policy.ebayPolicyId;
     }
