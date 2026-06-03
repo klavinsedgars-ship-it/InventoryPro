@@ -5357,8 +5357,10 @@ var EbayInventoryApiService = class {
     const title = filterBundleWords(product.name).slice(0, 80);
     const weightG = product.weight ? parseFloat(product.weight) : 0;
     const aspects = {
-      Brand: ["Unbranded"],
-      MPN: [product.supplierProductId || product.sku]
+      Marke: ["Markenlos"],
+      // DE: Brand = Unbranded
+      Herstellernummer: ["Nicht zutreffend"]
+      // DE: MPN = Does Not Apply
     };
     return {
       availability: { shipToLocationAvailability: { quantity: Math.max(0, stock) } },
@@ -5369,7 +5371,8 @@ var EbayInventoryApiService = class {
         // offer carries the rich HTML description
         aspects,
         imageUrls: images,
-        mpn: product.supplierProductId || product.sku
+        brand: "Markenlos",
+        mpn: "Nicht zutreffend"
       },
       packageWeightAndSize: weightG > 0 ? { weight: { value: weightG, unit: "GRAM" } } : void 0
     };

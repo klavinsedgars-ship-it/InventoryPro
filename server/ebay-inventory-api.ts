@@ -146,9 +146,12 @@ export class EbayInventoryApiService {
     const title = filterBundleWords(product.name).slice(0, 80);
     const weightG = product.weight ? parseFloat(product.weight) : 0;
 
+    // eBay rejects Brand=Unbranded combined with a real MPN ("BrandMPN"
+    // invalid). With no manufacturer data stored, use the accepted
+    // no-info combo: Brand=Unbranded + MPN="Does Not Apply".
     const aspects: Record<string, string[]> = {
-      Brand: ["Unbranded"],
-      MPN: [product.supplierProductId || product.sku],
+      Marke: ["Markenlos"],          // DE: Brand = Unbranded
+      Herstellernummer: ["Nicht zutreffend"], // DE: MPN = Does Not Apply
     };
 
     return {
@@ -159,7 +162,8 @@ export class EbayInventoryApiService {
         description: title, // offer carries the rich HTML description
         aspects,
         imageUrls: images,
-        mpn: product.supplierProductId || product.sku,
+        brand: "Markenlos",
+        mpn: "Nicht zutreffend",
       },
       packageWeightAndSize: weightG > 0 ? { weight: { value: weightG, unit: "GRAM" } } : undefined,
     };
