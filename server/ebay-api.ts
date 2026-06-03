@@ -300,18 +300,18 @@ export class EbayApiService {
           ? 'https:' + product.imageUrl
           : product.imageUrl;
 
-        // Watermark removal saves processed images to local disk and serves
-        // them via /api/images/processed/. On serverless (Vercel/Lambda)
-        // /tmp is per-invocation, so the file eBay tries to fetch later
-        // will not be on the same instance — eBay gets a 404 and the
-        // listing goes up with no image. Until we wire up persistent
-        // storage (Vercel Blob / S3), just send TME's original URL straight
-        // through. eBay will display it (with TME's watermark intact).
-        const isServerless = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+        // Try watermark removal. On Vercel that requires BLOB_READ_WRITE_TOKEN
+        // (the result lives in Vercel Blob and is served from a public URL
+        // eBay can fetch). Locally/dev it's saved to disk + served via
+        // /api/images/processed/. If neither persistent target is reachable
+        // we fall back to TME's URL (watermark visible, listing still has
+        // an image).
+        const hasBlob = !!process.env.BLOB_READ_WRITE_TOKEN;
         const publicBaseUrl = process.env.PUBLIC_BASE_URL || process.env.REPL_URL;
+        const canPersist = hasBlob || !!publicBaseUrl;
 
-        if (isServerless || !publicBaseUrl) {
-          console.log(`🖼️ Using original TME image URL (no persistent storage for processed images): ${fixedImageUrl}`);
+        if (!canPersist) {
+          console.log(`🖼️ No persistent image storage configured (BLOB_READ_WRITE_TOKEN or PUBLIC_BASE_URL); using original TME URL: ${fixedImageUrl}`);
           processedImageUrls = [fixedImageUrl];
         } else {
           try {

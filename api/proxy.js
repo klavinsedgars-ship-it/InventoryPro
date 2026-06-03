@@ -3660,6 +3660,43 @@ var ImageProcessingService = class {
     try {
       console.log(`\u{1F5BC}\uFE0F Processing image: ${imageUrl}`);
       const cacheKey = crypto2.createHash("md5").update(imageUrl).digest("hex");
+      const blobKey = `processed/${cacheKey}.jpg`;
+      const useBlob = !!process.env.BLOB_READ_WRITE_TOKEN;
+      if (useBlob) {
+        try {
+          const { head, put } = await import("@vercel/blob");
+          const existing = await head(blobKey).catch(() => null);
+          if (existing?.url) {
+            console.log(`\u2705 Blob cache hit: ${existing.url}`);
+            return {
+              success: true,
+              processedImageUrl: existing.url,
+              originalImageUrl: imageUrl,
+              processingTime: Date.now() - startTime
+            };
+          }
+          const imageBuffer2 = await this.downloadImage(imageUrl);
+          if (!imageBuffer2) throw new Error("Failed to download image");
+          const processedBuffer2 = await this.processImageBuffer(imageBuffer2);
+          const uploaded = await put(blobKey, processedBuffer2, {
+            access: "public",
+            contentType: "image/jpeg",
+            addRandomSuffix: false,
+            allowOverwrite: true,
+            cacheControlMaxAge: 60 * 60 * 24 * 30
+            // 30d at the edge
+          });
+          console.log(`\u2705 Watermark removed and uploaded to Blob: ${uploaded.url}`);
+          return {
+            success: true,
+            processedImageUrl: uploaded.url,
+            originalImageUrl: imageUrl,
+            processingTime: Date.now() - startTime
+          };
+        } catch (blobErr) {
+          console.error("Vercel Blob path failed, falling back to local disk:", blobErr);
+        }
+      }
       const processedImagePath = path.join(this.cacheDir, `${cacheKey}_processed.jpg`);
       try {
         await fs.access(processedImagePath);
@@ -3673,9 +3710,7 @@ var ImageProcessingService = class {
       } catch {
       }
       const imageBuffer = await this.downloadImage(imageUrl);
-      if (!imageBuffer) {
-        throw new Error("Failed to download image");
-      }
+      if (!imageBuffer) throw new Error("Failed to download image");
       const processedBuffer = await this.processImageBuffer(imageBuffer);
       await fs.writeFile(processedImagePath, processedBuffer);
       console.log(`\u2705 Watermark removed from ${imageUrl}`);
@@ -4070,10 +4105,11 @@ var EbayApiService = class {
       let processedImageUrls = [];
       if (product.imageUrl) {
         const fixedImageUrl = product.imageUrl.startsWith("//") ? "https:" + product.imageUrl : product.imageUrl;
-        const isServerless = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+        const hasBlob = !!process.env.BLOB_READ_WRITE_TOKEN;
         const publicBaseUrl = process.env.PUBLIC_BASE_URL || process.env.REPL_URL;
-        if (isServerless || !publicBaseUrl) {
-          console.log(`\u{1F5BC}\uFE0F Using original TME image URL (no persistent storage for processed images): ${fixedImageUrl}`);
+        const canPersist = hasBlob || !!publicBaseUrl;
+        if (!canPersist) {
+          console.log(`\u{1F5BC}\uFE0F No persistent image storage configured (BLOB_READ_WRITE_TOKEN or PUBLIC_BASE_URL); using original TME URL: ${fixedImageUrl}`);
           processedImageUrls = [fixedImageUrl];
         } else {
           try {
