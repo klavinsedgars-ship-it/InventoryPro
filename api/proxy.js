@@ -6585,6 +6585,106 @@ async function triggerManualSync() {
   return await runDailySync();
 }
 
+// server/sync-chunk.ts
+init_storage();
+init_tme_api();
+init_dynamic_pricing();
+function startOfToday() {
+  const d = /* @__PURE__ */ new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+async function runSyncChunk(limit = 50) {
+  const errors = [];
+  const today = startOfToday();
+  const all = await storage.getProducts();
+  const tmeProducts = all.filter((p) => p.supplier === "TME" && p.sku);
+  const total = tmeProducts.length;
+  const pending = tmeProducts.filter((p) => {
+    const t = p.lastSyncedAt ? new Date(p.lastSyncedAt).getTime() : 0;
+    return t < today;
+  }).sort((a, b) => {
+    const at = a.lastSyncedAt ? new Date(a.lastSyncedAt).getTime() : 0;
+    const bt = b.lastSyncedAt ? new Date(b.lastSyncedAt).getTime() : 0;
+    return at - bt;
+  });
+  const slice = pending.slice(0, limit);
+  if (slice.length === 0) {
+    return { total, remaining: 0, processedThisChunk: 0, changed: 0, ebayUpdated: 0, done: true, errors };
+  }
+  const symbols = slice.map((p) => p.supplierProductId || p.sku);
+  let enhanced = [];
+  try {
+    enhanced = await tmeApi.getEnhancedProductInfo(symbols);
+  } catch (e) {
+    errors.push(`TME fetch failed: ${e.message}`);
+  }
+  const bySymbol = new Map(enhanced.map((e) => [e.product?.Symbol, e]));
+  let changed = 0;
+  const ebayBatch = [];
+  const now = /* @__PURE__ */ new Date();
+  for (const product of slice) {
+    const sym = product.supplierProductId || product.sku;
+    const info = bySymbol.get(sym);
+    if (!info) {
+      await storage.updateProduct(product.id, { lastSyncedAt: now });
+      continue;
+    }
+    const moq = info.product?.MinAmount || product.moq || 1;
+    const multiples = info.product?.Multiples || product.multiples || 1;
+    const supplierPrice = getSupplierPriceForMoq(info.price?.PriceList, moq);
+    const stock = info.stock?.Amount ?? product.stock ?? 0;
+    const pricing = supplierPrice > 0 ? moq > 1 ? calculatePackagePrice(supplierPrice, moq, multiples) : calculateDynamicPrice(supplierPrice) : null;
+    const localSupplier = parseFloat(product.supplierPrice?.toString() || "0");
+    const priceChanged = supplierPrice > 0 && Math.abs(localSupplier - supplierPrice) > 0.01;
+    const stockChanged = (product.stock || 0) !== stock;
+    const update = { lastSyncedAt: now, stock };
+    if (supplierPrice > 0) update.supplierPrice = String(supplierPrice);
+    if (info.product?.MinAmount) update.moq = info.product.MinAmount;
+    if (info.product?.Multiples) update.multiples = info.product.Multiples;
+    if (pricing && product.useCalculatedPrice !== false) {
+      update.salePrice = String(pricing.finalPrice);
+      update.calculatedPrice = String(pricing.calculatedPrice);
+      update.marginTier = pricing.marginTier;
+      update.marginPercentage = String(pricing.marginPercentage);
+      update.priceUpdatedAt = now;
+    }
+    await storage.updateProduct(product.id, update);
+    if (priceChanged || stockChanged) {
+      changed++;
+      if (product.listedOnEbay && product.ebayItemId) {
+        const limited = product.useStockLimit && product.ebayStockLimit != null ? Math.min(stock, product.ebayStockLimit) : stock;
+        ebayBatch.push({
+          productId: product.id,
+          ebayItemId: product.ebayItemId,
+          quantity: Math.max(0, limited),
+          price: pricing ? Number(pricing.finalPrice) : void 0
+        });
+      }
+    }
+  }
+  let ebayUpdated = 0;
+  if (ebayBatch.length > 0) {
+    try {
+      const r = await ebayApi.bulkUpdateInventory(ebayBatch);
+      ebayUpdated = r.succeeded;
+      if (r.failed) errors.push(`eBay updates: ${r.failed} failed`);
+    } catch (e) {
+      errors.push(`eBay bulk update failed: ${e.message}`);
+    }
+  }
+  const remaining = Math.max(0, pending.length - slice.length);
+  return {
+    total,
+    remaining,
+    processedThisChunk: slice.length,
+    changed,
+    ebayUpdated,
+    done: remaining === 0,
+    errors
+  };
+}
+
 // server/ebay-orders-api.ts
 init_ebay_oauth();
 init_storage();
@@ -10076,6 +10176,62 @@ async function registerRoutes(app) {
       });
     }
   });
+  app.post("/api/sync/run", requireAuth, async (req, res) => {
+    try {
+      const limit = Math.min(Number(req.body?.limit) || 50, 100);
+      const result = await runSyncChunk(limit);
+      res.json({ success: true, ...result });
+    } catch (error) {
+      console.error("Sync chunk failed:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+  const cronHandler = async (req, res) => {
+    const auth = req.headers["authorization"] || "";
+    const cronSecret = process.env.CRON_SECRET;
+    const isVercelCron = cronSecret && auth === `Bearer ${cronSecret}`;
+    const isAuthed = !!req.session?.userId || process.env.BYPASS_AUTH === "true";
+    if (!isVercelCron && !isAuthed) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const budgetMs = 5e4;
+    const start = Date.now();
+    let chunks = 0;
+    let totalChanged = 0;
+    let totalEbay = 0;
+    let last = null;
+    const allErrors = [];
+    try {
+      do {
+        last = await runSyncChunk(50);
+        chunks++;
+        totalChanged += last.changed;
+        totalEbay += last.ebayUpdated;
+        allErrors.push(...last.errors);
+      } while (!last.done && Date.now() - start < budgetMs);
+      await storage.createSyncLog({
+        source: "tme",
+        operation: "cron_sync",
+        status: last?.done ? "success" : "partial",
+        message: `Cron sync: ${chunks} chunks, ${totalChanged} changed, ${totalEbay} eBay updated, ${last?.remaining ?? "?"} remaining`,
+        details: JSON.stringify({ chunks, totalChanged, totalEbay, remaining: last?.remaining, errors: allErrors.slice(0, 20) })
+      });
+      res.json({
+        success: true,
+        done: last?.done ?? false,
+        chunks,
+        totalChanged,
+        ebayUpdated: totalEbay,
+        remaining: last?.remaining ?? null,
+        elapsedMs: Date.now() - start
+      });
+    } catch (error) {
+      console.error("Cron sync failed:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  };
+  app.get("/api/cron/daily-sync", cronHandler);
+  app.post("/api/cron/daily-sync", cronHandler);
   app.post("/api/sync/trigger-daily", requireAuth, async (req, res) => {
     try {
       console.log("\u{1F527} Manual daily sync triggered via API");

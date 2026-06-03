@@ -32,6 +32,7 @@ import {
 import { calculateEbayStock, calculateBulkEbayStock, validateStockLimit, getRecommendedStockLimit } from "./stock-manager";
 import { imageProcessingService } from "./image-processing";
 import { triggerManualSync } from "./cron-jobs";
+import { runSyncChunk } from "./sync-chunk";
 import { ebayOrdersApi } from "./ebay-orders-api";
 import { ebayMessagesApi } from "./ebay-messages-api";
 import { autoMessageScheduler } from "./auto-message-scheduler";
@@ -3382,12 +3383,79 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Process ONE chunk of the stalest TME products. The frontend "Sync Now"
+  // button loops this until done:true, showing progress. Fits in the
+  // Vercel function timeout regardless of catalog size.
+  app.post("/api/sync/run", requireAuth, async (req, res) => {
+    try {
+      const limit = Math.min(Number(req.body?.limit) || 50, 100);
+      const result = await runSyncChunk(limit);
+      res.json({ success: true, ...result });
+    } catch (error) {
+      console.error("Sync chunk failed:", error);
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Vercel Cron entrypoint (configured in vercel.json). Runs chunks
+  // server-side within a time budget; whatever doesn't finish today is
+  // picked up by the next run. Secured by CRON_SECRET when set (Vercel
+  // sends it as a Bearer token); also allows authenticated UI calls.
+  const cronHandler = async (req: any, res: any) => {
+    const auth = req.headers["authorization"] || "";
+    const cronSecret = process.env.CRON_SECRET;
+    const isVercelCron = cronSecret && auth === `Bearer ${cronSecret}`;
+    const isAuthed = !!req.session?.userId || process.env.BYPASS_AUTH === "true";
+    if (!isVercelCron && !isAuthed) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const budgetMs = 50_000; // stay under the 60s function limit
+    const start = Date.now();
+    let chunks = 0;
+    let totalChanged = 0;
+    let totalEbay = 0;
+    let last: any = null;
+    const allErrors: string[] = [];
+    try {
+      do {
+        last = await runSyncChunk(50);
+        chunks++;
+        totalChanged += last.changed;
+        totalEbay += last.ebayUpdated;
+        allErrors.push(...last.errors);
+      } while (!last.done && Date.now() - start < budgetMs);
+
+      await storage.createSyncLog({
+        source: "tme",
+        operation: "cron_sync",
+        status: last?.done ? "success" : "partial",
+        message: `Cron sync: ${chunks} chunks, ${totalChanged} changed, ${totalEbay} eBay updated, ${last?.remaining ?? "?"} remaining`,
+        details: JSON.stringify({ chunks, totalChanged, totalEbay, remaining: last?.remaining, errors: allErrors.slice(0, 20) }),
+      });
+
+      res.json({
+        success: true,
+        done: last?.done ?? false,
+        chunks,
+        totalChanged,
+        ebayUpdated: totalEbay,
+        remaining: last?.remaining ?? null,
+        elapsedMs: Date.now() - start,
+      });
+    } catch (error) {
+      console.error("Cron sync failed:", error);
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  };
+  app.get("/api/cron/daily-sync", cronHandler);
+  app.post("/api/cron/daily-sync", cronHandler);
+
   app.post("/api/sync/trigger-daily", requireAuth, async (req, res) => {
     try {
       console.log('🔧 Manual daily sync triggered via API');
-      
+
       const result = await triggerManualSync();
-      
+
       res.json({
         success: true,
         message: 'Daily sync completed',
