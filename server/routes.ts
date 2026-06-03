@@ -697,6 +697,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Show what eBay suggests as the category for a query on the active
+  // site (DE). Use to sanity-check category resolution.
+  //   GET /api/__ebay-suggest-category?q=wheel%20robot
+  app.get("/api/__ebay-suggest-category", async (req, res) => {
+    const q = String(req.query.q || "");
+    if (!q) return res.status(400).json({ ok: false, message: "?q= required" });
+    try {
+      const suggested = await ebayApi.getSuggestedCategory(q);
+      res.json({ ok: !!suggested, query: q, suggested });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: (err as Error).message });
+    }
+  });
+
   // credentials and returns the raw response. No DB, no listing logic.
   // Reveals exact reason for "OAuth authentication fail" errors.
   app.get("/api/__ebay-check", async (_req, res) => {

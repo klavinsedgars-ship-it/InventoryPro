@@ -3984,6 +3984,10 @@ var EbayApiService = class {
   authToken;
   isProduction = true;
   // Force production for OAuth token testing
+  // Cache eBay category suggestions per query so we make at most one
+  // GetSuggestedCategories call per distinct product-type query, not per
+  // listing. Keyed by lowercased query string.
+  categorySuggestionCache = /* @__PURE__ */ new Map();
   constructor() {
     this.credentials = {
       appId: process.env.EBAY_APP_ID || "",
@@ -4095,12 +4099,23 @@ var EbayApiService = class {
         isLimited: stockInfo.isLimited,
         reason: stockInfo.limitReason
       });
-      const categoryMapping = findEbayCategoryForTMEProduct(product);
-      console.log(`Category mapping for ${product.name}:`, {
+      const staticMapping = findEbayCategoryForTMEProduct(product);
+      let resolvedCategoryId = staticMapping.categoryId;
+      let resolvedCategoryName = staticMapping.categoryName;
+      if (!listingDetails.categoryId) {
+        const query = [product.category, product.name].filter(Boolean).join(" ").replace(/[;|]/g, " ").slice(0, 80);
+        const suggested = await this.getSuggestedCategory(query);
+        if (suggested) {
+          resolvedCategoryId = suggested.id;
+          resolvedCategoryName = suggested.name;
+        }
+      }
+      const categoryMapping = { categoryId: resolvedCategoryId, categoryName: resolvedCategoryName, confidence: staticMapping.confidence };
+      console.log(`Category resolution for ${product.name}:`, {
         productCategory: product.category,
-        suggestedEbayCategory: categoryMapping.categoryId,
-        categoryName: categoryMapping.categoryName,
-        confidence: categoryMapping.confidence
+        resolvedEbayCategory: resolvedCategoryId,
+        categoryName: resolvedCategoryName,
+        source: listingDetails.categoryId ? "explicit" : "ebay-suggested-or-static"
       });
       let processedImageUrls = [];
       if (product.imageUrl) {
@@ -4543,6 +4558,38 @@ ${nameValueLists}
       failedCount,
       results
     };
+  }
+  /**
+   * Ask eBay for the best category for a free-text query on the configured
+   * site (DE=77). Result cached per query. Returns null on any failure so
+   * the caller can fall back to a default category.
+   */
+  async getSuggestedCategory(query) {
+    const key = query.trim().toLowerCase();
+    if (!key) return null;
+    if (this.categorySuggestionCache.has(key)) {
+      return this.categorySuggestionCache.get(key);
+    }
+    try {
+      const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetSuggestedCategoriesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Query>${this.escapeXml(query)}</Query>
+</GetSuggestedCategoriesRequest>`;
+      const resp = await this.makeTradingApiRequest(xml, "GetSuggestedCategories");
+      const block = resp.match(/<SuggestedCategory>[\s\S]*?<\/SuggestedCategory>/)?.[0];
+      const id = block?.match(/<CategoryID>(\d+)<\/CategoryID>/)?.[1];
+      const name = block?.match(/<CategoryName>(.*?)<\/CategoryName>/)?.[1] || "";
+      if (id) {
+        const result = { id, name };
+        this.categorySuggestionCache.set(key, result);
+        console.log(`\u{1F5C2}\uFE0F eBay suggested category for "${query}": ${id} (${name})`);
+        return result;
+      }
+      return null;
+    } catch (err) {
+      console.warn(`GetSuggestedCategories failed for "${query}":`, err.message);
+      return null;
+    }
   }
   async getEbayCategories() {
     try {
@@ -7803,6 +7850,16 @@ async function registerRoutes(app) {
       });
     } catch (err) {
       res.status(500).json({ ok: false, stage: "exception", have, error: err.message });
+    }
+  });
+  app.get("/api/__ebay-suggest-category", async (req, res) => {
+    const q = String(req.query.q || "");
+    if (!q) return res.status(400).json({ ok: false, message: "?q= required" });
+    try {
+      const suggested = await ebayApi.getSuggestedCategory(q);
+      res.json({ ok: !!suggested, query: q, suggested });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
     }
   });
   app.get("/api/__ebay-check", async (_req, res) => {

@@ -140,6 +140,10 @@ export class EbayApiService {
     process.env.EBAY_RETURN_PROFILE_ID || "161272624019";
   private authToken?: EbayAuthToken;
   private isProduction = true; // Force production for OAuth token testing
+  // Cache eBay category suggestions per query so we make at most one
+  // GetSuggestedCategories call per distinct product-type query, not per
+  // listing. Keyed by lowercased query string.
+  private categorySuggestionCache = new Map<string, { id: string; name: string }>();
 
   constructor() {
     this.credentials = {
@@ -283,13 +287,32 @@ export class EbayApiService {
         reason: stockInfo.limitReason
       });
 
-      // Automatically determine the best eBay category for this TME product
-      const categoryMapping = findEbayCategoryForTMEProduct(product);
-      console.log(`Category mapping for ${product.name}:`, {
+      // Determine the best eBay category. Prefer eBay's own
+      // GetSuggestedCategories on the active site (so we get a real DE
+      // category, not the old hardcoded UK 58277), cached per query.
+      // Fall back to the static keyword map only if the API yields nothing.
+      const staticMapping = findEbayCategoryForTMEProduct(product);
+      let resolvedCategoryId = staticMapping.categoryId;
+      let resolvedCategoryName = staticMapping.categoryName;
+      if (!listingDetails.categoryId) {
+        // Query built from the product's own words — most specific first.
+        const query = [product.category, product.name]
+          .filter(Boolean)
+          .join(" ")
+          .replace(/[;|]/g, " ")
+          .slice(0, 80);
+        const suggested = await this.getSuggestedCategory(query);
+        if (suggested) {
+          resolvedCategoryId = suggested.id;
+          resolvedCategoryName = suggested.name;
+        }
+      }
+      const categoryMapping = { categoryId: resolvedCategoryId, categoryName: resolvedCategoryName, confidence: staticMapping.confidence };
+      console.log(`Category resolution for ${product.name}:`, {
         productCategory: product.category,
-        suggestedEbayCategory: categoryMapping.categoryId,
-        categoryName: categoryMapping.categoryName,
-        confidence: categoryMapping.confidence
+        resolvedEbayCategory: resolvedCategoryId,
+        categoryName: resolvedCategoryName,
+        source: listingDetails.categoryId ? "explicit" : "ebay-suggested-or-static",
       });
 
       // Process images to remove TME watermarks
@@ -861,6 +884,39 @@ export class EbayApiService {
       failedCount,
       results
     };
+  }
+
+  /**
+   * Ask eBay for the best category for a free-text query on the configured
+   * site (DE=77). Result cached per query. Returns null on any failure so
+   * the caller can fall back to a default category.
+   */
+  async getSuggestedCategory(query: string): Promise<{ id: string; name: string } | null> {
+    const key = query.trim().toLowerCase();
+    if (!key) return null;
+    if (this.categorySuggestionCache.has(key)) {
+      return this.categorySuggestionCache.get(key)!;
+    }
+    try {
+      const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetSuggestedCategoriesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Query>${this.escapeXml(query)}</Query>
+</GetSuggestedCategoriesRequest>`;
+      const resp = await this.makeTradingApiRequest(xml, "GetSuggestedCategories");
+      const block = resp.match(/<SuggestedCategory>[\s\S]*?<\/SuggestedCategory>/)?.[0];
+      const id = block?.match(/<CategoryID>(\d+)<\/CategoryID>/)?.[1];
+      const name = block?.match(/<CategoryName>(.*?)<\/CategoryName>/)?.[1] || "";
+      if (id) {
+        const result = { id, name };
+        this.categorySuggestionCache.set(key, result);
+        console.log(`🗂️ eBay suggested category for "${query}": ${id} (${name})`);
+        return result;
+      }
+      return null;
+    } catch (err) {
+      console.warn(`GetSuggestedCategories failed for "${query}":`, (err as Error).message);
+      return null;
+    }
   }
 
   async getEbayCategories(): Promise<any[]> {
