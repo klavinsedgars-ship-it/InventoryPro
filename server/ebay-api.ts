@@ -901,23 +901,39 @@ export class EbayApiService {
       return this.categorySuggestionCache.get(key)!;
     }
     try {
-      const xml = `<?xml version="1.0" encoding="utf-8"?>
-<GetSuggestedCategoriesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <Query>${this.escapeXml(query)}</Query>
-</GetSuggestedCategoriesRequest>`;
-      const resp = await this.makeTradingApiRequest(xml, "GetSuggestedCategories");
-      const block = resp.match(/<SuggestedCategory>[\s\S]*?<\/SuggestedCategory>/)?.[0];
-      const id = block?.match(/<CategoryID>(\d+)<\/CategoryID>/)?.[1];
-      const name = block?.match(/<CategoryName>(.*?)<\/CategoryName>/)?.[1] || "";
+      // Modern Taxonomy REST API (the legacy Trading GetSuggestedCategories
+      // is blocked at eBay's edge). category_tree_id == site id for the
+      // major marketplaces (DE=77, UK=3, US=0).
+      const token = await ebayOAuth.getValidAccessToken();
+      const treeId = this.siteId;
+      const url =
+        `https://api.ebay.com/commerce/taxonomy/v1/category_tree/${treeId}` +
+        `/get_category_suggestions?q=${encodeURIComponent(query)}`;
+      const resp = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+          "Accept-Language": "de-DE",
+          "X-EBAY-C-MARKETPLACE-ID": this.marketplaceId,
+        },
+      });
+      if (!resp.ok) {
+        console.warn(`Taxonomy suggestions HTTP ${resp.status} for "${query}": ${(await resp.text()).slice(0, 200)}`);
+        return null;
+      }
+      const data = await resp.json();
+      const top = data?.categorySuggestions?.[0]?.category;
+      const id = top?.categoryId;
+      const name = top?.categoryName || "";
       if (id) {
-        const result = { id, name };
+        const result = { id: String(id), name };
         this.categorySuggestionCache.set(key, result);
         console.log(`🗂️ eBay suggested category for "${query}": ${id} (${name})`);
         return result;
       }
       return null;
     } catch (err) {
-      console.warn(`GetSuggestedCategories failed for "${query}":`, (err as Error).message);
+      console.warn(`Taxonomy get_category_suggestions failed for "${query}":`, (err as Error).message);
       return null;
     }
   }

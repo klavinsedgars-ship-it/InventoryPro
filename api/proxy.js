@@ -4572,23 +4572,34 @@ ${nameValueLists}
       return this.categorySuggestionCache.get(key);
     }
     try {
-      const xml = `<?xml version="1.0" encoding="utf-8"?>
-<GetSuggestedCategoriesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <Query>${this.escapeXml(query)}</Query>
-</GetSuggestedCategoriesRequest>`;
-      const resp = await this.makeTradingApiRequest(xml, "GetSuggestedCategories");
-      const block = resp.match(/<SuggestedCategory>[\s\S]*?<\/SuggestedCategory>/)?.[0];
-      const id = block?.match(/<CategoryID>(\d+)<\/CategoryID>/)?.[1];
-      const name = block?.match(/<CategoryName>(.*?)<\/CategoryName>/)?.[1] || "";
+      const token = await ebayOAuth.getValidAccessToken();
+      const treeId = this.siteId;
+      const url = `https://api.ebay.com/commerce/taxonomy/v1/category_tree/${treeId}/get_category_suggestions?q=${encodeURIComponent(query)}`;
+      const resp = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+          "Accept-Language": "de-DE",
+          "X-EBAY-C-MARKETPLACE-ID": this.marketplaceId
+        }
+      });
+      if (!resp.ok) {
+        console.warn(`Taxonomy suggestions HTTP ${resp.status} for "${query}": ${(await resp.text()).slice(0, 200)}`);
+        return null;
+      }
+      const data = await resp.json();
+      const top = data?.categorySuggestions?.[0]?.category;
+      const id = top?.categoryId;
+      const name = top?.categoryName || "";
       if (id) {
-        const result = { id, name };
+        const result = { id: String(id), name };
         this.categorySuggestionCache.set(key, result);
         console.log(`\u{1F5C2}\uFE0F eBay suggested category for "${query}": ${id} (${name})`);
         return result;
       }
       return null;
     } catch (err) {
-      console.warn(`GetSuggestedCategories failed for "${query}":`, err.message);
+      console.warn(`Taxonomy get_category_suggestions failed for "${query}":`, err.message);
       return null;
     }
   }
@@ -7858,35 +7869,35 @@ async function registerRoutes(app) {
     if (!q) return res.status(400).json({ ok: false, message: "?q= required" });
     try {
       const token = await ebayOAuth.getValidAccessToken();
-      const siteId = process.env.EBAY_MARKETPLACE_SITE_ID || "77";
-      const xml = `<?xml version="1.0" encoding="utf-8"?>
-<GetSuggestedCategoriesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <Query>${q.replace(/[<>&]/g, " ")}</Query>
-</GetSuggestedCategoriesRequest>`;
-      const resp = await fetch("https://api.ebay.com/ws/api.dll", {
-        method: "POST",
+      const treeId = process.env.EBAY_MARKETPLACE_SITE_ID || "77";
+      const marketplaceId = { "0": "EBAY_US", "3": "EBAY_GB", "77": "EBAY_DE" }[treeId] || "EBAY_DE";
+      const url = `https://api.ebay.com/commerce/taxonomy/v1/category_tree/${treeId}/get_category_suggestions?q=${encodeURIComponent(q)}`;
+      const resp = await fetch(url, {
         headers: {
-          "Content-Type": "text/xml; charset=utf-8",
-          "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
-          "X-EBAY-API-DEV-NAME": process.env.EBAY_DEV_ID || "",
-          "X-EBAY-API-APP-NAME": process.env.EBAY_APP_ID || "",
-          "X-EBAY-API-CERT-NAME": process.env.EBAY_CERT_ID || "",
-          "X-EBAY-API-CALL-NAME": "GetSuggestedCategories",
-          "X-EBAY-API-SITEID": siteId,
-          "X-EBAY-API-IAF-TOKEN": token
-        },
-        body: xml
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+          "Accept-Language": "de-DE",
+          "X-EBAY-C-MARKETPLACE-ID": marketplaceId
+        }
       });
       const text2 = await resp.text();
-      const ack = text2.match(/<Ack>(.*?)<\/Ack>/)?.[1];
-      const count2 = text2.match(/<CategoryCount>(\d+)<\/CategoryCount>/)?.[1];
+      let data = null;
+      try {
+        data = JSON.parse(text2);
+      } catch {
+      }
+      const suggestions = (data?.categorySuggestions || []).slice(0, 5).map((s) => ({
+        id: s.category?.categoryId,
+        name: s.category?.categoryName,
+        path: (s.categoryTreeNodeAncestors || []).map((a) => a.categoryName).reverse().join(" > ")
+      }));
       res.json({
-        ok: ack === "Success",
+        ok: resp.ok && suggestions.length > 0,
         query: q,
-        siteId,
-        ack,
-        categoryCount: count2,
-        raw: text2.slice(0, 1500)
+        treeId,
+        httpStatus: resp.status,
+        suggestions,
+        raw: suggestions.length ? void 0 : text2.slice(0, 800)
       });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
