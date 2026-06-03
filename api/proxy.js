@@ -4100,8 +4100,9 @@ var EbayApiService = class {
         reason: stockInfo.limitReason
       });
       const staticMapping = findEbayCategoryForTMEProduct(product);
-      let resolvedCategoryId = staticMapping.categoryId;
-      let resolvedCategoryName = staticMapping.categoryName;
+      const envDefault = process.env.EBAY_DEFAULT_CATEGORY_ID;
+      let resolvedCategoryId = envDefault || staticMapping.categoryId;
+      let resolvedCategoryName = envDefault ? "Default (env)" : staticMapping.categoryName;
       if (!listingDetails.categoryId) {
         const query = [product.category, product.name].filter(Boolean).join(" ").replace(/[;|]/g, " ").slice(0, 80);
         const suggested = await this.getSuggestedCategory(query);

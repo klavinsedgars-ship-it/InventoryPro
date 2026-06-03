@@ -292,8 +292,11 @@ export class EbayApiService {
       // category, not the old hardcoded UK 58277), cached per query.
       // Fall back to the static keyword map only if the API yields nothing.
       const staticMapping = findEbayCategoryForTMEProduct(product);
-      let resolvedCategoryId = staticMapping.categoryId;
-      let resolvedCategoryName = staticMapping.categoryName;
+      // Final fallback: an env-set DE catch-all category, NOT the static
+      // map's 58277 (a UK id that resolves to the wrong tree on eBay.de).
+      const envDefault = process.env.EBAY_DEFAULT_CATEGORY_ID;
+      let resolvedCategoryId = envDefault || staticMapping.categoryId;
+      let resolvedCategoryName = envDefault ? "Default (env)" : staticMapping.categoryName;
       if (!listingDetails.categoryId) {
         // Query built from the product's own words — most specific first.
         const query = [product.category, product.name]
