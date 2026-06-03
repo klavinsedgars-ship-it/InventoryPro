@@ -256,34 +256,33 @@ export function Products({ user }: ProductsProps) {
 
   const bulkListToEbayMutation = useMutation({
     mutationFn: async (productIds: number[]) => {
-      const response = await apiRequest("POST", "/api/ebay/bulk-list", { productIds });
+      // Inventory API pipeline (inventory item -> offer -> publish), 25/batch
+      const response = await apiRequest("POST", "/api/ebay/inventory-list-batch", { productIds });
       return response.json();
     },
     onSuccess: (data: any) => {
-      console.log("Bulk listing response:", data);
-      
-      if (data.success && data.jobId) {
-        // Start tracking the job
-        setCurrentJobId(data.jobId);
-        setBulkListingProgress({
-          id: data.jobId,
-          status: "processing",
-          total: data.total,
-          processed: 0,
-          succeeded: 0,
-          failed: 0,
-          currentProduct: null,
-          lastMessage: "Starting bulk listing...",
-          errorDetails: null,
-          createdAt: new Date().toISOString(),
-          completedAt: null
+      console.log("Inventory listing response:", data);
+
+      if (data.success) {
+        const failedDetails = (data.results || [])
+          .filter((r: any) => !r.ok)
+          .map((r: any) => `${r.sku}: ${r.error}`);
+        toast({
+          title: data.published > 0 ? "Listed on eBay" : "Listing finished",
+          description:
+            `${data.published}/${data.attempted} published` +
+            (data.failed ? `, ${data.failed} failed` : "") +
+            (data.limitHit ? " (eBay limit reached — resume later)" : ""),
+          variant: data.failed && !data.published ? "destructive" : undefined,
         });
-        setBulkListingModalOpen(true);
+        if (failedDetails.length) console.warn("Listing failures:\n" + failedDetails.join("\n"));
+        queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
         setSelectedProducts(new Set());
       } else {
         toast({
           title: "Bulk Listing Failed",
-          description: data.message || "Failed to start bulk listing job.",
+          description: data.error || data.message || "Failed to list on eBay.",
           variant: "destructive",
         });
       }
