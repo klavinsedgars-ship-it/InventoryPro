@@ -29,7 +29,7 @@ const BUNDLE_WORDS = [
   'variety', 'varieties'
 ];
 
-function filterBundleWords(text: string): string {
+export function filterBundleWords(text: string): string {
   if (!text) return text;
   
   let filtered = text;

@@ -5244,6 +5244,215 @@ ${nameValueLists}
 };
 var ebayApi = new EbayApiService();
 
+// server/ebay-inventory-api.ts
+init_ebay_oauth();
+init_shipping_policies();
+var INV_BASE = "https://api.ebay.com/sell/inventory/v1";
+function marketplaceId() {
+  const map = {
+    "0": "EBAY_US",
+    "3": "EBAY_GB",
+    "77": "EBAY_DE",
+    "71": "EBAY_FR",
+    "101": "EBAY_IT",
+    "186": "EBAY_ES"
+  };
+  return map[process.env.EBAY_MARKETPLACE_SITE_ID || "77"] || "EBAY_DE";
+}
+var EbayInventoryApiService = class {
+  currency = process.env.EBAY_LISTING_CURRENCY || "EUR";
+  merchantLocationKey = process.env.EBAY_MERCHANT_LOCATION_KEY || "default-location";
+  async headers() {
+    const token = await ebayOAuth.getValidAccessToken();
+    return {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "Content-Language": "de-DE",
+      "X-EBAY-C-MARKETPLACE-ID": marketplaceId()
+    };
+  }
+  async req(method, path2, body) {
+    const resp = await fetch(`${INV_BASE}${path2}`, {
+      method,
+      headers: await this.headers(),
+      body: body !== void 0 ? JSON.stringify(body) : void 0
+    });
+    const text2 = await resp.text();
+    let data = null;
+    try {
+      data = text2 ? JSON.parse(text2) : null;
+    } catch {
+    }
+    return { ok: resp.ok, status: resp.status, data, text: text2 };
+  }
+  firstEbayError(data, text2) {
+    const e = data?.errors?.[0];
+    if (e) return `${e.errorId ?? ""} ${e.message ?? ""} ${e.parameters ? JSON.stringify(e.parameters) : ""}`.trim();
+    return (text2 || "").slice(0, 400);
+  }
+  /**
+   * Ensure a merchant inventory location exists (required to publish
+   * offers). Idempotent: a 409/already-exists is treated as success.
+   */
+  async ensureMerchantLocation() {
+    const got = await this.req("GET", `/location/${this.merchantLocationKey}`);
+    if (got.ok) return { step: "location", ok: true, httpStatus: got.status, data: { existing: true } };
+    const body = {
+      location: {
+        address: {
+          addressLine1: process.env.EBAY_LOCATION_ADDRESS || "Riga",
+          city: process.env.EBAY_LOCATION_CITY || "Riga",
+          postalCode: process.env.EBAY_LOCATION_POSTAL || "LV-1001",
+          country: process.env.EBAY_LISTING_COUNTRY || "LV"
+        }
+      },
+      locationInstructions: "Ships from EU warehouse",
+      name: process.env.EBAY_LOCATION_NAME || "EU Warehouse",
+      merchantLocationStatus: "ENABLED",
+      locationTypes: ["WAREHOUSE"]
+    };
+    const created = await this.req("POST", `/location/${this.merchantLocationKey}`, body);
+    if (created.ok || created.status === 204) {
+      return { step: "location", ok: true, httpStatus: created.status, data: { created: true } };
+    }
+    if (created.status === 409) {
+      return { step: "location", ok: true, httpStatus: 409, data: { existing: true } };
+    }
+    return { step: "location", ok: false, httpStatus: created.status, error: this.firstEbayError(created.data, created.text) };
+  }
+  /** Resolve the image URL(s) for a product (Blob-processed when available). */
+  async resolveImages(product) {
+    if (!product.imageUrl) return [];
+    const fixed = product.imageUrl.startsWith("//") ? "https:" + product.imageUrl : product.imageUrl;
+    const hasBlob = !!process.env.BLOB_READ_WRITE_TOKEN;
+    const publicBaseUrl = process.env.PUBLIC_BASE_URL || process.env.REPL_URL;
+    if (!hasBlob && !publicBaseUrl) return [fixed];
+    try {
+      const r = await imageProcessingService.removeWatermark(fixed);
+      if (r.success && r.processedImageUrl) {
+        return [r.processedImageUrl.startsWith("http") ? r.processedImageUrl : `${publicBaseUrl}${r.processedImageUrl}`];
+      }
+    } catch {
+    }
+    return [fixed];
+  }
+  /** Build the inventory_item payload from a product. */
+  async buildInventoryItem(product) {
+    const stock = calculateEbayStock(product).ebayStock;
+    const images = await this.resolveImages(product);
+    const title = filterBundleWords(product.name).slice(0, 80);
+    const weightG = product.weight ? parseFloat(product.weight) : 0;
+    const aspects = {
+      Brand: ["Unbranded"],
+      MPN: [product.supplierProductId || product.sku]
+    };
+    return {
+      availability: { shipToLocationAvailability: { quantity: Math.max(0, stock) } },
+      condition: "NEW",
+      product: {
+        title,
+        description: title,
+        // offer carries the rich HTML description
+        aspects,
+        imageUrls: images,
+        mpn: product.supplierProductId || product.sku
+      },
+      packageWeightAndSize: weightG > 0 ? { weight: { value: weightG, unit: "GRAM" } } : void 0
+    };
+  }
+  async createOrReplaceInventoryItem(sku, product) {
+    const item = await this.buildInventoryItem(product);
+    const r = await this.req("PUT", `/inventory_item/${encodeURIComponent(sku)}`, item);
+    if (r.ok || r.status === 204) return { step: "inventory_item", ok: true, httpStatus: r.status };
+    return { step: "inventory_item", ok: false, httpStatus: r.status, error: this.firstEbayError(r.data, r.text) };
+  }
+  /** Build an offer payload (price/qty/policies/category) for a SKU. */
+  async buildOffer(product, categoryId) {
+    const stock = calculateEbayStock(product).ebayStock;
+    const price = parseFloat(product.salePrice) || 0;
+    const shippingPolicyId = getShippingPolicyId(product.weight ? parseFloat(product.weight) : void 0);
+    let description = product.description || product.name;
+    try {
+      const { generateUnifiedEbayTemplate: generateUnifiedEbayTemplate2 } = await Promise.resolve().then(() => (init_ebay_unified_template(), ebay_unified_template_exports));
+      const tpl = generateUnifiedEbayTemplate2(product);
+      description = tpl?.htmlDescription || tpl?.description || description;
+    } catch {
+    }
+    return {
+      sku: product.sku,
+      marketplaceId: marketplaceId(),
+      format: "FIXED_PRICE",
+      availableQuantity: Math.max(0, stock),
+      categoryId,
+      listingDescription: String(description).slice(0, 5e5),
+      listingPolicies: {
+        paymentPolicyId: process.env.EBAY_PAYMENT_PROFILE_ID,
+        returnPolicyId: process.env.EBAY_RETURN_PROFILE_ID,
+        fulfillmentPolicyId: shippingPolicyId
+      },
+      pricingSummary: { price: { value: price.toFixed(2), currency: this.currency } },
+      merchantLocationKey: this.merchantLocationKey
+    };
+  }
+  /** Create an offer; if one already exists for the SKU, reuse its id. */
+  async createOffer(product, categoryId) {
+    const payload = await this.buildOffer(product, categoryId);
+    const r = await this.req("POST", `/offer`, payload);
+    if (r.ok && r.data?.offerId) return { step: "offer", ok: true, httpStatus: r.status, offerId: r.data.offerId };
+    const existing = r.data?.errors?.find((e) => String(e.errorId) === "25002");
+    const offerIdParam = existing?.parameters?.find((p) => p.name === "offerId")?.value;
+    if (offerIdParam) {
+      await this.req("PUT", `/offer/${offerIdParam}`, payload);
+      return { step: "offer", ok: true, httpStatus: r.status, offerId: offerIdParam, data: { reused: true } };
+    }
+    return { step: "offer", ok: false, httpStatus: r.status, error: this.firstEbayError(r.data, r.text) };
+  }
+  async publishOffer(offerId) {
+    const r = await this.req("POST", `/offer/${offerId}/publish`, {});
+    if (r.ok && r.data?.listingId) return { step: "publish", ok: true, httpStatus: r.status, listingId: r.data.listingId };
+    return { step: "publish", ok: false, httpStatus: r.status, error: this.firstEbayError(r.data, r.text) };
+  }
+  /**
+   * Full single-SKU flow: location -> inventory item -> offer -> publish.
+   * Returns every step so failures are precisely visible. Used by the
+   * diagnostic and (later) the per-item listing path.
+   */
+  async listSingleProduct(productId, getProduct) {
+    const steps = [];
+    const product = await getProduct(productId);
+    if (!product) return { ok: false, steps: [{ step: "product", ok: false, error: "Product not found" }] };
+    const loc = await this.ensureMerchantLocation();
+    steps.push(loc);
+    if (!loc.ok) return { ok: false, sku: product.sku, steps };
+    let categoryId = "";
+    try {
+      const suggested = await ebayApi.getSuggestedCategory(`${product.category} ${product.name}`.slice(0, 80));
+      categoryId = suggested?.id || process.env.EBAY_DEFAULT_CATEGORY_ID || "";
+    } catch {
+      categoryId = process.env.EBAY_DEFAULT_CATEGORY_ID || "";
+    }
+    steps.push({ step: "category", ok: !!categoryId, data: { categoryId } });
+    if (!categoryId) return { ok: false, sku: product.sku, steps };
+    const inv = await this.createOrReplaceInventoryItem(product.sku, product);
+    steps.push(inv);
+    if (!inv.ok) return { ok: false, sku: product.sku, steps };
+    const offer = await this.createOffer(product, categoryId);
+    steps.push(offer);
+    if (!offer.ok || !offer.offerId) return { ok: false, sku: product.sku, steps };
+    const pub = await this.publishOffer(offer.offerId);
+    steps.push(pub);
+    return {
+      ok: pub.ok,
+      sku: product.sku,
+      offerId: offer.offerId,
+      listingId: pub.listingId,
+      steps
+    };
+  }
+};
+var ebayInventoryApi = new EbayInventoryApiService();
+
 // server/routes.ts
 init_ebay_oauth();
 
@@ -5312,8 +5521,8 @@ var EbayAccountApiService = class {
   // ==========================================
   // PAYMENT POLICIES
   // ==========================================
-  async getPaymentPolicies(marketplaceId) {
-    const marketplace = marketplaceId || this.defaultMarketplaceId;
+  async getPaymentPolicies(marketplaceId2) {
+    const marketplace = marketplaceId2 || this.defaultMarketplaceId;
     try {
       const response = await this.makeRequest(
         "GET",
@@ -5392,8 +5601,8 @@ var EbayAccountApiService = class {
   // ==========================================
   // FULFILLMENT (SHIPPING) POLICIES
   // ==========================================
-  async getFulfillmentPolicies(marketplaceId) {
-    const marketplace = marketplaceId || this.defaultMarketplaceId;
+  async getFulfillmentPolicies(marketplaceId2) {
+    const marketplace = marketplaceId2 || this.defaultMarketplaceId;
     try {
       const response = await this.makeRequest(
         "GET",
@@ -5493,8 +5702,8 @@ var EbayAccountApiService = class {
   // ==========================================
   // RETURN POLICIES
   // ==========================================
-  async getReturnPolicies(marketplaceId) {
-    const marketplace = marketplaceId || this.defaultMarketplaceId;
+  async getReturnPolicies(marketplaceId2) {
+    const marketplace = marketplaceId2 || this.defaultMarketplaceId;
     try {
       const response = await this.makeRequest(
         "GET",
@@ -5575,8 +5784,8 @@ var EbayAccountApiService = class {
   // ==========================================
   // SYNC ALL POLICIES FROM EBAY TO LOCAL DB
   // ==========================================
-  async syncAllPolicies(marketplaceId) {
-    const marketplace = marketplaceId || this.defaultMarketplaceId;
+  async syncAllPolicies(marketplaceId2) {
+    const marketplace = marketplaceId2 || this.defaultMarketplaceId;
     const results = {
       payment: { synced: 0, errors: 0 },
       fulfillment: { synced: 0, errors: 0 },
@@ -7964,20 +8173,36 @@ async function registerRoutes(app) {
       res.status(500).json({ ok: false, stage: "exception", have, error: err.message });
     }
   });
+  app.get("/api/__inventory-check", async (req, res) => {
+    const productId = Number(req.query.productId);
+    if (!productId) {
+      const products2 = await storage.getProducts();
+      const cand = products2.find((p) => p.supplier === "TME" && p.sku);
+      if (!cand) return res.status(400).json({ ok: false, message: "?productId= required (no TME product found)" });
+      const result = await ebayInventoryApi.listSingleProduct(cand.id, (id) => storage.getProduct(id));
+      return res.json({ pickedProductId: cand.id, ...result });
+    }
+    try {
+      const result = await ebayInventoryApi.listSingleProduct(productId, (id) => storage.getProduct(id));
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
   app.get("/api/__ebay-suggest-category", async (req, res) => {
     const q = String(req.query.q || "");
     if (!q) return res.status(400).json({ ok: false, message: "?q= required" });
     try {
       const token = await ebayOAuth.getValidAccessToken();
       const treeId = process.env.EBAY_MARKETPLACE_SITE_ID || "77";
-      const marketplaceId = { "0": "EBAY_US", "3": "EBAY_GB", "77": "EBAY_DE" }[treeId] || "EBAY_DE";
+      const marketplaceId2 = { "0": "EBAY_US", "3": "EBAY_GB", "77": "EBAY_DE" }[treeId] || "EBAY_DE";
       const url = `https://api.ebay.com/commerce/taxonomy/v1/category_tree/${treeId}/get_category_suggestions?q=${encodeURIComponent(q)}`;
       const resp = await fetch(url, {
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: "application/json",
           "Accept-Language": "de-DE",
-          "X-EBAY-C-MARKETPLACE-ID": marketplaceId
+          "X-EBAY-C-MARKETPLACE-ID": marketplaceId2
         }
       });
       const text2 = await resp.text();
@@ -8709,8 +8934,8 @@ async function registerRoutes(app) {
           message: "OAuth not configured. Set EBAY_OAUTH_CLIENT_ID, EBAY_OAUTH_CLIENT_SECRET, and EBAY_OAUTH_REFRESH_TOKEN environment variables."
         });
       }
-      const { marketplaceId } = req.body;
-      const result = await ebayAccountApi.syncAllPolicies(marketplaceId);
+      const { marketplaceId: marketplaceId2 } = req.body;
+      const result = await ebayAccountApi.syncAllPolicies(marketplaceId2);
       res.json({
         success: true,
         message: "Policies synced from eBay",
@@ -8790,12 +9015,12 @@ async function registerRoutes(app) {
   });
   app.post("/api/ebay/business-policies/payment", requireAuth, async (req, res) => {
     try {
-      const { name, description, marketplaceId, immediatePay, paymentMethods, createOnEbay } = req.body;
+      const { name, description, marketplaceId: marketplaceId2, immediatePay, paymentMethods, createOnEbay } = req.body;
       if (createOnEbay) {
         const ebayPolicy = await ebayAccountApi.createPaymentPolicy({
           name,
           description,
-          marketplaceId,
+          marketplaceId: marketplaceId2,
           immediatePay,
           paymentMethods: paymentMethods ? JSON.parse(paymentMethods) : void 0
         });
@@ -8818,7 +9043,7 @@ async function registerRoutes(app) {
           policyId: `local_${Date.now()}`,
           name,
           description,
-          marketplaceId: marketplaceId || "EBAY_DE",
+          marketplaceId: marketplaceId2 || "EBAY_DE",
           paymentMethods: paymentMethods || "[]",
           immediatePay: immediatePay ?? true,
           syncedFromEbay: false
@@ -8898,7 +9123,7 @@ async function registerRoutes(app) {
       const {
         name,
         description,
-        marketplaceId,
+        marketplaceId: marketplaceId2,
         handlingTime,
         shippingOptions,
         shipToLocations,
@@ -8912,7 +9137,7 @@ async function registerRoutes(app) {
         const ebayPolicy = await ebayAccountApi.createFulfillmentPolicy({
           name,
           description,
-          marketplaceId,
+          marketplaceId: marketplaceId2,
           handlingTime: handlingTime ? { value: handlingTime, unit: "DAY" } : void 0,
           shippingOptions: parsedShippingOptions,
           shipToLocations: parsedShipToLocations,
@@ -8940,7 +9165,7 @@ async function registerRoutes(app) {
           policyId: `local_${Date.now()}`,
           name,
           description,
-          marketplaceId: marketplaceId || "EBAY_DE",
+          marketplaceId: marketplaceId2 || "EBAY_DE",
           handlingTime: handlingTime || 1,
           shippingOptions: JSON.stringify(parsedShippingOptions || []),
           shipToLocations: JSON.stringify(parsedShipToLocations || {}),
@@ -9024,7 +9249,7 @@ async function registerRoutes(app) {
       const {
         name,
         description,
-        marketplaceId,
+        marketplaceId: marketplaceId2,
         returnsAccepted,
         returnPeriod,
         refundMethod,
@@ -9035,7 +9260,7 @@ async function registerRoutes(app) {
         const ebayPolicy = await ebayAccountApi.createReturnPolicy({
           name,
           description,
-          marketplaceId,
+          marketplaceId: marketplaceId2,
           returnsAccepted: returnsAccepted ?? true,
           returnPeriod: returnPeriod ? { value: returnPeriod, unit: "DAY" } : void 0,
           refundMethod,
@@ -9062,7 +9287,7 @@ async function registerRoutes(app) {
           policyId: `local_${Date.now()}`,
           name,
           description,
-          marketplaceId: marketplaceId || "EBAY_DE",
+          marketplaceId: marketplaceId2 || "EBAY_DE",
           returnsAccepted: returnsAccepted ?? true,
           returnPeriod: returnPeriod || 30,
           refundMethod: refundMethod || "MONEY_BACK",

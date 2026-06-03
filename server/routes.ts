@@ -14,6 +14,7 @@ import bcrypt from "bcryptjs";
 import { tmeApi } from "./tme-api";
 import { tmeApiOptimized } from "./tme-api-optimized";
 import { ebayApi } from "./ebay-api";
+import { ebayInventoryApi } from "./ebay-inventory-api";
 import { ebayOAuth } from "./ebay-oauth";
 import { ebayAccountApi } from "./ebay-account-api";
 import fs from 'fs';
@@ -695,6 +696,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (err) {
       res.status(500).json({ ok: false, stage: "exception", have, error: (err as Error).message });
+    }
+  });
+
+  // Inventory API end-to-end check on ONE product: location -> inventory
+  // item -> offer -> publish. Returns every step so we can see exactly
+  // what works / fails before wiring the bulk flow.
+  //   GET /api/__inventory-check?productId=123
+  app.get("/api/__inventory-check", async (req, res) => {
+    const productId = Number(req.query.productId);
+    if (!productId) {
+      // fall back to the first listed-able TME product
+      const products = await storage.getProducts();
+      const cand = products.find((p) => p.supplier === "TME" && p.sku);
+      if (!cand) return res.status(400).json({ ok: false, message: "?productId= required (no TME product found)" });
+      const result = await ebayInventoryApi.listSingleProduct(cand.id, (id) => storage.getProduct(id));
+      return res.json({ pickedProductId: cand.id, ...result });
+    }
+    try {
+      const result = await ebayInventoryApi.listSingleProduct(productId, (id) => storage.getProduct(id));
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ ok: false, error: (err as Error).message });
     }
   });
 
