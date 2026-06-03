@@ -32,6 +32,16 @@ function marketplaceId(): string {
   return map[process.env.EBAY_MARKETPLACE_SITE_ID || "77"] || "EBAY_DE";
 }
 
+// eBay validates Content-Language AND Accept-Language on Inventory API
+// calls; they must be a supported locale for the marketplace.
+function localeFor(): string {
+  const map: Record<string, string> = {
+    "0": "en-US", "3": "en-GB", "77": "de-DE",
+    "71": "fr-FR", "101": "it-IT", "186": "es-ES",
+  };
+  return map[process.env.EBAY_MARKETPLACE_SITE_ID || "77"] || "de-DE";
+}
+
 interface StepResult {
   step: string;
   ok: boolean;
@@ -46,11 +56,13 @@ export class EbayInventoryApiService {
 
   private async headers(): Promise<Record<string, string>> {
     const token = await ebayOAuth.getValidAccessToken();
+    const locale = localeFor();
     return {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
       Accept: "application/json",
-      "Content-Language": "de-DE",
+      "Content-Language": locale,
+      "Accept-Language": locale,
       "X-EBAY-C-MARKETPLACE-ID": marketplaceId(),
     };
   }

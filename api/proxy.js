@@ -5259,16 +5259,29 @@ function marketplaceId() {
   };
   return map[process.env.EBAY_MARKETPLACE_SITE_ID || "77"] || "EBAY_DE";
 }
+function localeFor() {
+  const map = {
+    "0": "en-US",
+    "3": "en-GB",
+    "77": "de-DE",
+    "71": "fr-FR",
+    "101": "it-IT",
+    "186": "es-ES"
+  };
+  return map[process.env.EBAY_MARKETPLACE_SITE_ID || "77"] || "de-DE";
+}
 var EbayInventoryApiService = class {
   currency = process.env.EBAY_LISTING_CURRENCY || "EUR";
   merchantLocationKey = process.env.EBAY_MERCHANT_LOCATION_KEY || "default-location";
   async headers() {
     const token = await ebayOAuth.getValidAccessToken();
+    const locale = localeFor();
     return {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
       Accept: "application/json",
-      "Content-Language": "de-DE",
+      "Content-Language": locale,
+      "Accept-Language": locale,
       "X-EBAY-C-MARKETPLACE-ID": marketplaceId()
     };
   }
