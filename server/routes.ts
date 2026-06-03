@@ -706,10 +706,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/__inventory-check", async (req, res) => {
     const productId = Number(req.query.productId);
     if (!productId) {
-      // fall back to the first listed-able TME product
+      // fall back to the first IN-STOCK TME product (publish needs qty > 0)
       const products = await storage.getProducts();
-      const cand = products.find((p) => p.supplier === "TME" && p.sku);
-      if (!cand) return res.status(400).json({ ok: false, message: "?productId= required (no TME product found)" });
+      const cand = products.find((p) => p.supplier === "TME" && p.sku && (p.stock ?? 0) > 0);
+      if (!cand) return res.status(400).json({ ok: false, message: "?productId= required (no in-stock TME product found)" });
       const result = await ebayInventoryApi.listSingleProduct(cand.id, (id) => storage.getProduct(id));
       return res.json({ pickedProductId: cand.id, ...result });
     }

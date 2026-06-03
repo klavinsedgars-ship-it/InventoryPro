@@ -5376,9 +5376,10 @@ var EbayInventoryApiService = class {
   }
   async createOrReplaceInventoryItem(sku, product) {
     const item = await this.buildInventoryItem(product);
+    const quantity = item.availability.shipToLocationAvailability.quantity;
     const r = await this.req("PUT", `/inventory_item/${encodeURIComponent(sku)}`, item);
-    if (r.ok || r.status === 204) return { step: "inventory_item", ok: true, httpStatus: r.status };
-    return { step: "inventory_item", ok: false, httpStatus: r.status, error: this.firstEbayError(r.data, r.text) };
+    if (r.ok || r.status === 204) return { step: "inventory_item", ok: true, httpStatus: r.status, quantity };
+    return { step: "inventory_item", ok: false, httpStatus: r.status, quantity, error: this.firstEbayError(r.data, r.text) };
   }
   /** Build an offer payload (price/qty/policies/category) for a SKU. */
   async buildOffer(product, categoryId) {
@@ -8190,8 +8191,8 @@ async function registerRoutes(app) {
     const productId = Number(req.query.productId);
     if (!productId) {
       const products2 = await storage.getProducts();
-      const cand = products2.find((p) => p.supplier === "TME" && p.sku);
-      if (!cand) return res.status(400).json({ ok: false, message: "?productId= required (no TME product found)" });
+      const cand = products2.find((p) => p.supplier === "TME" && p.sku && (p.stock ?? 0) > 0);
+      if (!cand) return res.status(400).json({ ok: false, message: "?productId= required (no in-stock TME product found)" });
       const result = await ebayInventoryApi.listSingleProduct(cand.id, (id) => storage.getProduct(id));
       return res.json({ pickedProductId: cand.id, ...result });
     }

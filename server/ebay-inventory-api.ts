@@ -165,11 +165,12 @@ export class EbayInventoryApiService {
     };
   }
 
-  async createOrReplaceInventoryItem(sku: string, product: Product): Promise<StepResult> {
+  async createOrReplaceInventoryItem(sku: string, product: Product): Promise<StepResult & { quantity?: number }> {
     const item = await this.buildInventoryItem(product);
+    const quantity = item.availability.shipToLocationAvailability.quantity;
     const r = await this.req("PUT", `/inventory_item/${encodeURIComponent(sku)}`, item);
-    if (r.ok || r.status === 204) return { step: "inventory_item", ok: true, httpStatus: r.status };
-    return { step: "inventory_item", ok: false, httpStatus: r.status, error: this.firstEbayError(r.data, r.text) };
+    if (r.ok || r.status === 204) return { step: "inventory_item", ok: true, httpStatus: r.status, quantity };
+    return { step: "inventory_item", ok: false, httpStatus: r.status, quantity, error: this.firstEbayError(r.data, r.text) };
   }
 
   /** Build an offer payload (price/qty/policies/category) for a SKU. */
