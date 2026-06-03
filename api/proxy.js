@@ -5484,6 +5484,15 @@ var EbayInventoryApiService = class {
     if (r.ok && r.data?.listingId) return { step: "publish", ok: true, httpStatus: r.status, listingId: r.data.listingId };
     return { step: "publish", ok: false, httpStatus: r.status, error: this.firstEbayError(r.data, r.text) };
   }
+  /** End a live listing by withdrawing its offer (keeps the inventory item). */
+  async withdrawOffer(offerId) {
+    const r = await this.req("POST", `/offer/${offerId}/withdraw`, {});
+    if (r.ok || r.status === 200 || r.status === 204) return { step: "withdraw", ok: true, httpStatus: r.status };
+    if (r.status === 400 && /not.*published|already|25710|withdraw/i.test(r.text)) {
+      return { step: "withdraw", ok: true, httpStatus: r.status, data: { note: "already ended" } };
+    }
+    return { step: "withdraw", ok: false, httpStatus: r.status, error: this.firstEbayError(r.data, r.text) };
+  }
   /**
    * Full single-SKU flow: location -> inventory item -> offer -> publish.
    * Returns every step so failures are precisely visible. Used by the
@@ -8259,6 +8268,16 @@ async function registerRoutes(app) {
       const categoryId = catStep?.data?.categoryId;
       const requiredAspects = categoryId ? await ebayInventoryApi.getRequiredAspects(categoryId) : [];
       res.json({ ...result, requiredAspects });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+  app.get("/api/__inventory-end", async (req, res) => {
+    const offerId = String(req.query.offerId || "");
+    if (!offerId) return res.status(400).json({ ok: false, message: "?offerId= required" });
+    try {
+      const r = await ebayInventoryApi.withdrawOffer(offerId);
+      res.json(r);
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }

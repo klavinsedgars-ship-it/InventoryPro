@@ -725,6 +725,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // End an Inventory-API listing by withdrawing its offer.
+  //   GET /api/__inventory-end?offerId=264031332018
+  app.get("/api/__inventory-end", async (req, res) => {
+    const offerId = String(req.query.offerId || "");
+    if (!offerId) return res.status(400).json({ ok: false, message: "?offerId= required" });
+    try {
+      const r = await ebayInventoryApi.withdrawOffer(offerId);
+      res.json(r);
+    } catch (err) {
+      res.status(500).json({ ok: false, error: (err as Error).message });
+    }
+  });
+
   // Show what eBay suggests as the category for a query on the active
   // site (DE). Returns the raw eBay XML so we can see the real structure /
   // any error. GET /api/__ebay-suggest-category?q=wheel%20robot
