@@ -116,6 +116,13 @@ var init_schema = __esm({
       listedOnAmazon: boolean("listed_on_amazon").default(false),
       excludeFromListing: boolean("exclude_from_listing").default(false),
       ebayItemId: text("ebay_item_id"),
+      // legacy Trading-API listing id (migrated listings)
+      // Inventory API listing state (SKU-keyed model: inventory item -> offer -> publish)
+      ebayOfferId: text("ebay_offer_id"),
+      ebayListingId: text("ebay_listing_id"),
+      ebayListingStatus: text("ebay_listing_status"),
+      // unlisted|inventory_created|offer_created|published|error
+      ebayListingError: text("ebay_listing_error"),
       amazonAsin: text("amazon_asin"),
       tmeProductId: text("tme_product_id"),
       tmeCategoryId: text("tme_category_id"),
@@ -698,7 +705,7 @@ var init_db = __esm({
 });
 
 // server/storage.ts
-import { eq, and, gte, lte, desc, asc, count, or, ilike } from "drizzle-orm";
+import { eq, and, gte, lte, desc, asc, count, or, ilike, isNull, isNotNull, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 var DatabaseStorage, storage;
 var init_storage = __esm({
@@ -763,6 +770,45 @@ var init_storage = __esm({
       // Product methods
       async getProducts() {
         return await db.select().from(products).orderBy(desc(products.createdAt));
+      }
+      // One-shot, idempotent schema upgrade for the scale rewrite: Inventory
+      // API listing-state columns + the indexes the poll/drainer rely on.
+      // Safe to run repeatedly (IF NOT EXISTS). Used instead of drizzle-kit
+      // push since the table is small and we can't run the CLI on Vercel.
+      async applyScaleMigration() {
+        const stmts = [
+          `ALTER TABLE products ADD COLUMN IF NOT EXISTS ebay_offer_id text`,
+          `ALTER TABLE products ADD COLUMN IF NOT EXISTS ebay_listing_id text`,
+          `ALTER TABLE products ADD COLUMN IF NOT EXISTS ebay_listing_status text`,
+          `ALTER TABLE products ADD COLUMN IF NOT EXISTS ebay_listing_error text`,
+          `CREATE INDEX IF NOT EXISTS products_supplier_stale_idx ON products (supplier, last_synced_at)`,
+          `CREATE INDEX IF NOT EXISTS products_status_idx ON products (status)`,
+          `CREATE INDEX IF NOT EXISTS products_ebay_idx ON products (listed_on_ebay, ebay_item_id)`,
+          `CREATE INDEX IF NOT EXISTS products_list_candidate_idx ON products (supplier, listed_on_ebay, exclude_from_listing)`,
+          `CREATE INDEX IF NOT EXISTS products_offer_idx ON products (listed_on_ebay, ebay_offer_id)`,
+          `CREATE INDEX IF NOT EXISTS tme_cache_expires_idx ON tme_product_cache (expires_at)`,
+          `CREATE INDEX IF NOT EXISTS sync_queue_status_priority_idx ON sync_queue (status, priority, scheduled_for)`
+        ];
+        for (const s of stmts) {
+          await db.execute(sql.raw(s));
+        }
+        return { ok: true, statements: stmts.length };
+      }
+      // Candidates to list on eBay: TME products, in stock, not already listed,
+      // not excluded. DB-side filter + limit (no full-table load).
+      async getListingCandidates(limit) {
+        return await db.select().from(products).where(
+          and(
+            eq(products.supplier, "TME"),
+            eq(products.listedOnEbay, false),
+            gte(products.stock, 1),
+            or(eq(products.excludeFromListing, false), isNull(products.excludeFromListing))
+          )
+        ).orderBy(asc(products.id)).limit(limit);
+      }
+      // Listed products needing an eBay stock/price push (have an offer id).
+      async getProductsWithOffers(limit) {
+        return await db.select().from(products).where(and(eq(products.listedOnEbay, true), isNotNull(products.ebayOfferId))).orderBy(asc(products.lastSyncedAt)).limit(limit);
       }
       async getProduct(id) {
         const [product] = await db.select().from(products).where(eq(products.id, id));
@@ -2213,6 +2259,1035 @@ var init_ebay_oauth = __esm({
   }
 });
 
+// server/ebay-listing-template.ts
+function generateEbayListing(product) {
+  const specs = parseProductSpecs(product);
+  const category = determineProductCategory(product);
+  return {
+    title: generateTitle(product, specs),
+    description: generateDescription(product, specs, category),
+    htmlDescription: generateHtmlDescription(product, specs, category),
+    subtitle: generateSubtitle(product, specs),
+    keywords: generateKeywords(product, specs, category)
+  };
+}
+function generateTitle(product, specs) {
+  let name = product.name || "Electronic Component";
+  const manufacturer = specs.manufacturer || specs.brand || "";
+  const model = specs.model || specs.partNumber || "";
+  const category = specs.category || "Electronics";
+  if (product.isMultipack && product.minOrderQuantity && product.minOrderQuantity > 1) {
+    if (!name.match(/^\d+x\s/)) {
+      name = `${product.minOrderQuantity}x ${name}`;
+    }
+  }
+  const components = [
+    name,
+    model ? `- ${model}` : "",
+    manufacturer ? `| ${manufacturer}` : "",
+    "| Fast EU Shipping"
+  ].filter(Boolean);
+  let title = components.join(" ");
+  if (title.length > 80) {
+    title = `${name} ${model} | ${manufacturer} | EU Stock`.slice(0, 80);
+  }
+  return title;
+}
+function generateSubtitle(product, specs) {
+  const features = [];
+  if (specs.voltage) features.push(`${specs.voltage}V`);
+  if (specs.current) features.push(`${specs.current}A`);
+  if (specs.power) features.push(`${specs.power}W`);
+  if (specs.frequency) features.push(`${specs.frequency}Hz`);
+  const subtitle = features.length > 0 ? `Professional Grade | ${features.slice(0, 2).join(" | ")}` : "Professional Electronics | Fast Dispatch";
+  return subtitle.slice(0, 55);
+}
+function generateDescription(product, specs, category) {
+  const sections = [];
+  sections.push(`\u{1F527} PROFESSIONAL ${(product.name || "").toUpperCase()}`);
+  sections.push("\u2705 High quality electronic component");
+  sections.push("\u2705 Genuine manufacturer specifications");
+  sections.push("\u2705 Technical documentation included");
+  sections.push("\u2705 Dispatch from EU warehouse within 2-3 days");
+  sections.push("");
+  sections.push("\u{1F4CB} TECHNICAL SPECIFICATIONS:");
+  Object.entries(specs).forEach(([key, value]) => {
+    if (value && isValidSpec(key)) {
+      sections.push(`\u2022 ${formatSpecName(key)}: ${value}`);
+    }
+  });
+  sections.push("");
+  sections.push("\u{1F3ED} MANUFACTURER INFORMATION:");
+  if (specs.manufacturer) sections.push(`Brand: ${specs.manufacturer}`);
+  if (specs.model) sections.push(`Model: ${specs.model}`);
+  if (specs.partNumber) sections.push(`Part Number: ${specs.partNumber}`);
+  if (product.sku) sections.push(`SKU: ${product.sku}`);
+  if (product.ean) sections.push(`EAN: ${product.ean}`);
+  sections.push("");
+  sections.push("\u{1F4E6} PACKAGE CONTENTS:");
+  if (product.isMultipack && product.minOrderQuantity && product.minOrderQuantity > 1) {
+    const baseProductName = product.name?.replace(/^\d+x\s/, "") || "Electronic Component";
+    sections.push(`**THIS IS A PACK OF ${product.minOrderQuantity} PIECES**`);
+    sections.push(`\u2022 ${product.minOrderQuantity}x ${baseProductName}`);
+    sections.push(`\u2022 Sold as a complete pack only`);
+    sections.push(`\u2022 Cannot be split or sold individually`);
+    const perPiecePrice = (parseFloat(product.salePrice) / product.minOrderQuantity).toFixed(2);
+    sections.push(`\u2022 Effective price per piece: \u20AC${perPiecePrice}`);
+  } else {
+    sections.push(`\u2022 1x ${product.name || "Electronic Component"}`);
+  }
+  if (specs.accessories) {
+    specs.accessories.toString().split(",").forEach((accessory) => {
+      sections.push(`\u2022 ${accessory.trim()}`);
+    });
+  }
+  sections.push("\u2022 Technical datasheet (PDF)");
+  sections.push("");
+  const applications = getApplications(category);
+  if (applications.length > 0) {
+    sections.push("\u{1F4A1} TYPICAL APPLICATIONS:");
+    applications.forEach((app) => sections.push(`\u2022 ${app}`));
+    sections.push("");
+  }
+  sections.push("\u{1F69A} FAST EU SHIPPING | \u{1F4DE} TECHNICAL SUPPORT | \u{1F4AF} QUALITY GUARANTEE");
+  sections.push("");
+  sections.push("Professional electronics supplier serving makers, engineers, and hobbyists.");
+  sections.push("All products tested and verified before dispatch.");
+  return sections.join("\n");
+}
+function generateHtmlDescription(product, specs, category) {
+  const plainDescription = generateDescription(product, specs, category);
+  let html = plainDescription.replace(/🔧 PROFESSIONAL (.*)/g, '<h2 style="color: #0066cc;">\u{1F527} $1</h2>').replace(/📋 TECHNICAL SPECIFICATIONS:/g, '<h3 style="color: #333;">\u{1F4CB} TECHNICAL SPECIFICATIONS:</h3>').replace(/🏭 MANUFACTURER INFORMATION:/g, '<h3 style="color: #333;">\u{1F3ED} MANUFACTURER INFORMATION:</h3>').replace(/📦 PACKAGE CONTENTS:/g, '<h3 style="color: #333;">\u{1F4E6} PACKAGE CONTENTS:</h3>').replace(/💡 TYPICAL APPLICATIONS:/g, '<h3 style="color: #333;">\u{1F4A1} TYPICAL APPLICATIONS:</h3>').replace(/✅ (.*)/g, '<div style="color: #009900;">\u2705 $1</div>').replace(/• (.*)/g, "<li>$1</li>").replace(/\n\n/g, "</ul><br><ul>").replace(/\n/g, "");
+  return `
+    <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;">
+      ${html}
+      <br><br>
+      <div style="background: #f5f5f5; padding: 15px; border-radius: 5px; text-align: center;">
+        <strong>\u{1F69A} FAST EU SHIPPING | \u{1F4DE} TECHNICAL SUPPORT | \u{1F4AF} QUALITY GUARANTEE</strong>
+      </div>
+    </div>
+  `;
+}
+function generateKeywords(product, specs, category) {
+  const keywords = /* @__PURE__ */ new Set();
+  if (product.name) {
+    product.name.split(/\s+/).forEach((word) => {
+      if (word.length > 2) keywords.add(word.toLowerCase());
+    });
+  }
+  Object.values(specs).forEach((value) => {
+    if (typeof value === "string" && value.length > 2) {
+      keywords.add(value.toLowerCase());
+    }
+  });
+  keywords.add(category.toLowerCase());
+  keywords.add("electronics");
+  keywords.add("component");
+  keywords.add("arduino");
+  keywords.add("raspberry pi");
+  keywords.add("diy");
+  keywords.add("maker");
+  keywords.add("engineering");
+  return Array.from(keywords).slice(0, 20);
+}
+function parseProductSpecs(product) {
+  const specs = {};
+  const text2 = `${product.name || ""} ${product.description || ""}`.toLowerCase();
+  const voltageMatch = text2.match(/(\d+(?:\.\d+)?)\s*v(?:olt)?/i);
+  if (voltageMatch) specs.voltage = voltageMatch[1];
+  const currentMatch = text2.match(/(\d+(?:\.\d+)?)\s*(?:ma|a|amp)/i);
+  if (currentMatch) specs.current = currentMatch[1];
+  const powerMatch = text2.match(/(\d+(?:\.\d+)?)\s*w(?:att)?/i);
+  if (powerMatch) specs.power = powerMatch[1];
+  const freqMatch = text2.match(/(\d+(?:\.\d+)?)\s*(?:hz|khz|mhz|ghz)/i);
+  if (freqMatch) specs.frequency = freqMatch[1];
+  const tempMatch = text2.match(/(-?\d+(?:\.\d+)?)\s*°?c/i);
+  if (tempMatch) specs.operatingTemp = tempMatch[1];
+  if (product.description?.includes("Arduino")) specs.manufacturer = "Arduino";
+  if (product.description?.includes("Raspberry")) specs.manufacturer = "Raspberry Pi Foundation";
+  if (product.name?.includes("ESP32")) specs.manufacturer = "Espressif";
+  if (product.sku) specs.partNumber = product.sku;
+  if (product.ean) specs.ean = product.ean;
+  return specs;
+}
+function determineProductCategory(product) {
+  const text2 = `${product.name || ""} ${product.description || ""}`.toLowerCase();
+  if (text2.includes("arduino") || text2.includes("microcontroller")) return "Microcontrollers";
+  if (text2.includes("sensor") || text2.includes("temperature") || text2.includes("humidity")) return "Sensors";
+  if (text2.includes("led") || text2.includes("light")) return "LED & Lighting";
+  if (text2.includes("resistor") || text2.includes("capacitor") || text2.includes("inductor")) return "Passive Components";
+  if (text2.includes("ic") || text2.includes("chip") || text2.includes("processor")) return "Integrated Circuits";
+  if (text2.includes("connector") || text2.includes("cable") || text2.includes("wire")) return "Connectors & Cables";
+  if (text2.includes("power") || text2.includes("supply") || text2.includes("battery")) return "Power Management";
+  if (text2.includes("display") || text2.includes("lcd") || text2.includes("oled")) return "Displays";
+  return "Electronics";
+}
+function getApplications(category) {
+  const applicationMap = {
+    "Microcontrollers": [
+      "IoT projects and smart devices",
+      "Robotics and automation",
+      "Prototyping and development",
+      "Educational projects",
+      "Home automation systems"
+    ],
+    "Sensors": [
+      "Environmental monitoring",
+      "Weather stations",
+      "Security systems",
+      "Industrial automation",
+      "Scientific instruments"
+    ],
+    "LED & Lighting": [
+      "Indicator lights",
+      "Decorative lighting",
+      "Status displays",
+      "Automotive applications",
+      "Architectural lighting"
+    ],
+    "Passive Components": [
+      "Circuit protection",
+      "Signal filtering",
+      "Power conditioning",
+      "Timing circuits",
+      "Impedance matching"
+    ],
+    "Power Management": [
+      "Battery charging",
+      "Voltage regulation",
+      "Power conversion",
+      "Energy harvesting",
+      "Portable devices"
+    ]
+  };
+  return applicationMap[category] || [
+    "Electronic projects",
+    "Prototyping",
+    "Repair and maintenance",
+    "Educational use",
+    "Professional development"
+  ];
+}
+function isValidSpec(key) {
+  const irrelevantKeys = ["id", "createdAt", "updatedAt", "description", "name"];
+  return !irrelevantKeys.includes(key) && key.length > 1;
+}
+function formatSpecName(key) {
+  const nameMap = {
+    "partNumber": "Part Number",
+    "operatingTemp": "Operating Temperature",
+    "voltage": "Operating Voltage",
+    "current": "Current Rating",
+    "power": "Power Rating",
+    "frequency": "Frequency",
+    "manufacturer": "Manufacturer",
+    "model": "Model",
+    "ean": "EAN Code"
+  };
+  return nameMap[key] || key.replace(/([A-Z])/g, " $1").replace(/^./, (str) => str.toUpperCase());
+}
+var init_ebay_listing_template = __esm({
+  "server/ebay-listing-template.ts"() {
+    "use strict";
+  }
+});
+
+// server/stock-manager.ts
+function calculateEbayStock(product) {
+  const tmeStock = product.stock;
+  const ebayLimit = product.ebayStockLimit || 2;
+  const useLimit = product.useStockLimit !== false;
+  if (!useLimit) {
+    return {
+      tmeStock,
+      ebayStock: tmeStock,
+      isLimited: false,
+      limitReason: "Stock limit disabled for this product"
+    };
+  }
+  if (tmeStock === 0) {
+    return {
+      tmeStock: 0,
+      ebayStock: 0,
+      isLimited: false,
+      limitReason: "Out of stock"
+    };
+  }
+  if (tmeStock <= ebayLimit) {
+    return {
+      tmeStock,
+      ebayStock: tmeStock,
+      isLimited: false,
+      limitReason: "TME stock below eBay limit"
+    };
+  }
+  return {
+    tmeStock,
+    ebayStock: ebayLimit,
+    isLimited: true,
+    limitReason: `Limited to ${ebayLimit} units to preserve eBay account limits`
+  };
+}
+function calculateBulkEbayStock(products2) {
+  return products2.map((product) => ({
+    id: product.id,
+    stockInfo: calculateEbayStock(product)
+  }));
+}
+function validateStockLimit(limit) {
+  if (!Number.isInteger(limit) || limit < 1) {
+    return { valid: false, error: "Stock limit must be a positive integer" };
+  }
+  if (limit > 999) {
+    return { valid: false, error: "Stock limit cannot exceed 999 units" };
+  }
+  return { valid: true };
+}
+function getRecommendedStockLimit(category) {
+  const categoryLimits = {
+    "Arduino Boards": 3,
+    "Development Boards": 3,
+    "Microcontrollers": 5,
+    "Sensors": 10,
+    "Electronic Components": 15,
+    "Resistors": 25,
+    "Capacitors": 25,
+    "LEDs": 20,
+    "Connectors": 10,
+    "Default": 3
+  };
+  return categoryLimits[category] || categoryLimits["Default"];
+}
+var init_stock_manager = __esm({
+  "server/stock-manager.ts"() {
+    "use strict";
+  }
+});
+
+// server/tme-ebay-category-mapping.ts
+function findEbayCategoryForTMEProduct(product) {
+  const productName = (product.name || "").toLowerCase();
+  const productCategory = (product.category || "").toLowerCase();
+  const productDescription = (product.description || "").toLowerCase();
+  const searchText = `${productName} ${productCategory} ${productDescription}`;
+  let bestMatch = null;
+  let bestScore = 0;
+  for (const mapping of TME_EBAY_CATEGORY_MAPPINGS) {
+    let score = 0;
+    if (productCategory === mapping.tmeCategory.toLowerCase()) {
+      score += mapping.confidence * 3;
+    } else if (productCategory.includes(mapping.tmeCategory.toLowerCase())) {
+      score += mapping.confidence * 2;
+    }
+    for (const keyword of mapping.tmeCategoryKeywords) {
+      if (searchText.includes(keyword.toLowerCase())) {
+        score += mapping.confidence;
+      }
+    }
+    if (mapping.tmeCategory.length > 15) {
+      score += 1;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = mapping;
+    }
+  }
+  const fallback = TME_EBAY_CATEGORY_MAPPINGS.find((m) => m.tmeCategory === "Electronics");
+  const result = bestMatch || fallback;
+  return {
+    categoryId: result.ebayCategory,
+    categoryName: result.ebayCategoryName,
+    confidence: bestMatch ? Math.min(10, bestScore) : 1
+  };
+}
+var TME_EBAY_CATEGORY_MAPPINGS;
+var init_tme_ebay_category_mapping = __esm({
+  "server/tme-ebay-category-mapping.ts"() {
+    "use strict";
+    TME_EBAY_CATEGORY_MAPPINGS = [
+      // Arduino and Development Boards
+      {
+        tmeCategory: "Development Boards",
+        tmeCategoryKeywords: ["arduino", "development", "board", "evaluation", "dev board", "microcontroller board"],
+        ebayCategory: "58277",
+        // Electronic Components - Other
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 9
+      },
+      {
+        tmeCategory: "Arduino Compatible",
+        tmeCategoryKeywords: ["arduino", "uno", "nano", "mega", "leonardo", "pro mini"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 10
+      },
+      // Microcontrollers and Processors
+      {
+        tmeCategory: "Microcontrollers",
+        tmeCategoryKeywords: ["microcontroller", "mcu", "pic", "atmega", "esp32", "esp8266", "stm32"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 9
+      },
+      {
+        tmeCategory: "Processors",
+        tmeCategoryKeywords: ["processor", "cpu", "arm", "cortex", "risc"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 8
+      },
+      // Passive Components
+      {
+        tmeCategory: "Resistors",
+        tmeCategoryKeywords: ["resistor", "resistance", "ohm", "carbon", "metal film", "precision"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 10
+      },
+      {
+        tmeCategory: "Capacitors",
+        tmeCategoryKeywords: ["capacitor", "ceramic", "electrolytic", "tantalum", "film", "farad", "uf", "pf"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 10
+      },
+      {
+        tmeCategory: "Inductors",
+        tmeCategoryKeywords: ["inductor", "coil", "choke", "henry", "ferrite"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 9
+      },
+      // Semiconductors
+      {
+        tmeCategory: "Transistors",
+        tmeCategoryKeywords: ["transistor", "bjt", "fet", "mosfet", "jfet", "igbt", "npn", "pnp"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 10
+      },
+      {
+        tmeCategory: "Diodes",
+        tmeCategoryKeywords: ["diode", "led", "zener", "schottky", "rectifier", "photodiode"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 10
+      },
+      {
+        tmeCategory: "THT universal diodes",
+        tmeCategoryKeywords: ["diode", "rectifying", "tht", "through hole", "universal", "silicon"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 10
+      },
+      {
+        tmeCategory: "SMD diodes",
+        tmeCategoryKeywords: ["diode", "smd", "surface mount", "rectifying", "switching"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 10
+      },
+      {
+        tmeCategory: "Diacs",
+        tmeCategoryKeywords: ["diac", "trigger", "bidirectional", "thyristor trigger"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 10
+      },
+      {
+        tmeCategory: "Integrated Circuits",
+        tmeCategoryKeywords: ["ic", "integrated circuit", "amplifier", "regulator", "timer", "logic", "analog"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 9
+      },
+      // Sensors
+      {
+        tmeCategory: "Sensors",
+        tmeCategoryKeywords: ["sensor", "temperature", "humidity", "pressure", "accelerometer", "gyroscope", "proximity"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 9
+      },
+      // Displays and Optoelectronics
+      {
+        tmeCategory: "Displays",
+        tmeCategoryKeywords: ["display", "lcd", "oled", "tft", "segment", "matrix", "screen"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 8
+      },
+      {
+        tmeCategory: "LEDs",
+        tmeCategoryKeywords: ["led", "light emitting", "rgb", "strip", "module"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 9
+      },
+      // Connectors and Hardware
+      {
+        tmeCategory: "Connectors",
+        tmeCategoryKeywords: ["connector", "header", "socket", "terminal", "plug", "jack", "usb", "hdmi"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 8
+      },
+      {
+        tmeCategory: "Cables",
+        tmeCategoryKeywords: ["cable", "wire", "jumper", "dupont", "ribbon"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 7
+      },
+      // Audio and Sound Equipment
+      {
+        tmeCategory: "Electromagnetic Sounders with Generator",
+        tmeCategoryKeywords: ["sound", "transducer", "siren", "buzzer", "alarm", "speaker", "sounder", "electromagnetic"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 9
+      },
+      {
+        tmeCategory: "Sound Equipment",
+        tmeCategoryKeywords: ["sound", "audio", "speaker", "microphone", "buzzer", "siren", "alarm", "transducer", "sounder"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 9
+      },
+      {
+        tmeCategory: "Speakers",
+        tmeCategoryKeywords: ["speaker", "woofer", "tweeter", "driver", "audio", "sound"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 8
+      },
+      // Switches and Controls
+      {
+        tmeCategory: "Switches",
+        tmeCategoryKeywords: ["switch", "button", "toggle", "rotary", "push", "tactile"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 8
+      },
+      {
+        tmeCategory: "Potentiometers",
+        tmeCategoryKeywords: ["potentiometer", "variable resistor", "trim", "rotary", "linear"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 9
+      },
+      // Power Components
+      {
+        tmeCategory: "Power Supplies",
+        tmeCategoryKeywords: ["power supply", "adapter", "converter", "regulator", "psu"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 8
+      },
+      {
+        tmeCategory: "Batteries",
+        tmeCategoryKeywords: ["battery", "cell", "lithium", "alkaline", "rechargeable"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 7
+      },
+      // Communication and Wireless
+      {
+        tmeCategory: "Communication",
+        tmeCategoryKeywords: ["wifi", "bluetooth", "zigbee", "lora", "gsm", "gps", "antenna"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 8
+      },
+      // Tools and Equipment
+      {
+        tmeCategory: "Tools",
+        tmeCategoryKeywords: ["soldering", "multimeter", "oscilloscope", "breadboard", "pcb"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 7
+      },
+      // Advanced Microprocessors and Computing
+      {
+        tmeCategory: "ARM Microprocessors",
+        tmeCategoryKeywords: ["arm", "cortex", "microprocessor", "cpu", "processor"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 9
+      },
+      {
+        tmeCategory: "Microchip Microprocessors",
+        tmeCategoryKeywords: ["microchip", "pic", "dspic", "processor", "mcu"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 9
+      },
+      {
+        tmeCategory: "Single Board Computers",
+        tmeCategoryKeywords: ["sbc", "single board", "computer", "raspberry", "computing"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 8
+      },
+      // Communication Modules
+      {
+        tmeCategory: "WiFi Modules",
+        tmeCategoryKeywords: ["wifi", "wireless", "802.11", "wlan", "esp"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 9
+      },
+      {
+        tmeCategory: "Bluetooth Modules",
+        tmeCategoryKeywords: ["bluetooth", "ble", "wireless", "bt"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 9
+      },
+      {
+        tmeCategory: "LoRa Modules",
+        tmeCategoryKeywords: ["lora", "lorawan", "long range", "lpwan"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 8
+      },
+      {
+        tmeCategory: "GSM/GPRS Modules",
+        tmeCategoryKeywords: ["gsm", "gprs", "cellular", "sim", "mobile"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 8
+      },
+      {
+        tmeCategory: "GNSS (GPS) modules",
+        tmeCategoryKeywords: ["gps", "gnss", "navigation", "positioning", "location"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 8
+      },
+      // Power Management
+      {
+        tmeCategory: "DC-DC Converters",
+        tmeCategoryKeywords: ["dc-dc", "converter", "buck", "boost", "step-down", "step-up"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 8
+      },
+      {
+        tmeCategory: "Voltage Regulators",
+        tmeCategoryKeywords: ["regulator", "ldo", "voltage", "stabilizer"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 8
+      },
+      {
+        tmeCategory: "Battery Management",
+        tmeCategoryKeywords: ["battery", "charger", "bms", "power management"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 7
+      },
+      // Interface and Conversion
+      {
+        tmeCategory: "USB Controllers",
+        tmeCategoryKeywords: ["usb", "controller", "interface", "ftdi"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 8
+      },
+      {
+        tmeCategory: "UART/Serial Converters",
+        tmeCategoryKeywords: ["uart", "serial", "rs232", "rs485", "converter"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 8
+      },
+      {
+        tmeCategory: "Level Shifters",
+        tmeCategoryKeywords: ["level shifter", "voltage translator", "logic level"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 7
+      },
+      // Memory and Storage
+      {
+        tmeCategory: "Memory ICs",
+        tmeCategoryKeywords: ["memory", "ram", "flash", "eeprom", "sram"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 8
+      },
+      {
+        tmeCategory: "SD Card Modules",
+        tmeCategoryKeywords: ["sd card", "microsd", "storage", "memory card"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 7
+      },
+      // Motor Control
+      {
+        tmeCategory: "Motor Drivers",
+        tmeCategoryKeywords: ["motor driver", "stepper", "servo", "h-bridge"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 8
+      },
+      {
+        tmeCategory: "Stepper Motors",
+        tmeCategoryKeywords: ["stepper", "step motor", "nema"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 8
+      },
+      // Specialized Components
+      {
+        tmeCategory: "Crystal Oscillators",
+        tmeCategoryKeywords: ["crystal", "oscillator", "quartz", "frequency"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 8
+      },
+      {
+        tmeCategory: "Real Time Clocks",
+        tmeCategoryKeywords: ["rtc", "real time clock", "clock", "timer"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 8
+      },
+      {
+        tmeCategory: "Watchdog Timers",
+        tmeCategoryKeywords: ["watchdog", "timer", "reset", "supervisor"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 7
+      },
+      // Test and Measurement
+      {
+        tmeCategory: "Signal Generators",
+        tmeCategoryKeywords: ["signal generator", "function generator", "waveform"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 7
+      },
+      {
+        tmeCategory: "Multimeters",
+        tmeCategoryKeywords: ["multimeter", "dmm", "meter", "measurement"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 6
+      },
+      // Enclosures and Mechanical
+      {
+        tmeCategory: "Enclosures",
+        tmeCategoryKeywords: ["enclosure", "case", "box", "housing"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 6
+      },
+      {
+        tmeCategory: "Heat Sinks",
+        tmeCategoryKeywords: ["heat sink", "heatsink", "cooling", "thermal"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 7
+      },
+      // Industrial and Automation
+      {
+        tmeCategory: "Industrial Modules",
+        tmeCategoryKeywords: ["industrial", "automation", "plc", "control"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 6
+      },
+      {
+        tmeCategory: "Solid State Relays",
+        tmeCategoryKeywords: ["solid state", "relay", "ssr", "switching"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 8
+      },
+      // Generic fallback for electronics
+      {
+        tmeCategory: "Electronics",
+        tmeCategoryKeywords: ["electronic", "component", "part", "device"],
+        ebayCategory: "58277",
+        ebayCategoryName: "Electronic Components - Other",
+        confidence: 5
+      }
+    ];
+  }
+});
+
+// server/image-processing.ts
+import sharp from "sharp";
+import crypto2 from "crypto";
+import fs from "fs/promises";
+import path from "path";
+import os from "os";
+var DEFAULT_CACHE_DIR, ImageProcessingService, imageProcessingService;
+var init_image_processing = __esm({
+  "server/image-processing.ts"() {
+    "use strict";
+    DEFAULT_CACHE_DIR = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME ? path.join(os.tmpdir(), "inventorypro-processed-images") : "./processed_images";
+    ImageProcessingService = class {
+      cacheDir = DEFAULT_CACHE_DIR;
+      maxImageSize = 5 * 1024 * 1024;
+      // 5MB limit
+      constructor() {
+        this.ensureCacheDirectory().catch((err) => {
+          console.warn(`[image-processing] cache dir init failed (${this.cacheDir}):`, err.message);
+        });
+      }
+      async ensureCacheDirectory() {
+        try {
+          await fs.access(this.cacheDir);
+        } catch {
+          await fs.mkdir(this.cacheDir, { recursive: true });
+        }
+      }
+      /**
+       * Remove TME watermarks from product images
+       * TME typically places watermarks in bottom-right corner
+       */
+      async removeWatermark(imageUrl) {
+        const startTime = Date.now();
+        try {
+          console.log(`\u{1F5BC}\uFE0F Processing image: ${imageUrl}`);
+          const cacheKey = crypto2.createHash("md5").update(imageUrl).digest("hex");
+          const blobKey = `processed/${cacheKey}.jpg`;
+          const useBlob = !!process.env.BLOB_READ_WRITE_TOKEN;
+          if (useBlob) {
+            try {
+              const { head, put } = await import("@vercel/blob");
+              const existing = await head(blobKey).catch(() => null);
+              if (existing?.url) {
+                console.log(`\u2705 Blob cache hit: ${existing.url}`);
+                return {
+                  success: true,
+                  processedImageUrl: existing.url,
+                  originalImageUrl: imageUrl,
+                  processingTime: Date.now() - startTime
+                };
+              }
+              const imageBuffer2 = await this.downloadImage(imageUrl);
+              if (!imageBuffer2) throw new Error("Failed to download image");
+              const processedBuffer2 = await this.processImageBuffer(imageBuffer2);
+              const uploaded = await put(blobKey, processedBuffer2, {
+                access: "public",
+                contentType: "image/jpeg",
+                addRandomSuffix: false,
+                allowOverwrite: true,
+                cacheControlMaxAge: 60 * 60 * 24 * 30
+                // 30d at the edge
+              });
+              console.log(`\u2705 Watermark removed and uploaded to Blob: ${uploaded.url}`);
+              return {
+                success: true,
+                processedImageUrl: uploaded.url,
+                originalImageUrl: imageUrl,
+                processingTime: Date.now() - startTime
+              };
+            } catch (blobErr) {
+              console.error("Vercel Blob path failed, falling back to local disk:", blobErr);
+            }
+          }
+          const processedImagePath = path.join(this.cacheDir, `${cacheKey}_processed.jpg`);
+          try {
+            await fs.access(processedImagePath);
+            console.log(`\u2705 Using cached processed image for ${imageUrl}`);
+            return {
+              success: true,
+              processedImageUrl: `/api/images/processed/${cacheKey}_processed.jpg`,
+              originalImageUrl: imageUrl,
+              processingTime: Date.now() - startTime
+            };
+          } catch {
+          }
+          const imageBuffer = await this.downloadImage(imageUrl);
+          if (!imageBuffer) throw new Error("Failed to download image");
+          const processedBuffer = await this.processImageBuffer(imageBuffer);
+          await fs.writeFile(processedImagePath, processedBuffer);
+          console.log(`\u2705 Watermark removed from ${imageUrl}`);
+          return {
+            success: true,
+            processedImageUrl: `/api/images/processed/${cacheKey}_processed.jpg`,
+            originalImageUrl: imageUrl,
+            processingTime: Date.now() - startTime
+          };
+        } catch (error) {
+          console.error(`\u274C Failed to process image ${imageUrl}:`, error);
+          return {
+            success: false,
+            originalImageUrl: imageUrl,
+            error: error.message,
+            processingTime: Date.now() - startTime
+          };
+        }
+      }
+      async downloadImage(url) {
+        try {
+          let fixedUrl = url;
+          if (url.startsWith("//")) {
+            fixedUrl = "https:" + url;
+            console.log(`\u{1F517} Fixed protocol-relative URL: ${fixedUrl}`);
+          }
+          const response = await fetch(fixedUrl, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+          });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+          const arrayBuffer = await response.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          if (buffer.length > this.maxImageSize) {
+            throw new Error("Image too large");
+          }
+          return buffer;
+        } catch (error) {
+          console.error("Failed to download image:", error);
+          return null;
+        }
+      }
+      async processImageBuffer(imageBuffer) {
+        const image = sharp(imageBuffer);
+        const metadata = await image.metadata();
+        if (!metadata.width || !metadata.height) {
+          throw new Error("Invalid image dimensions");
+        }
+        const cropWidth = Math.floor(metadata.width * 0.85);
+        const cropHeight = Math.floor(metadata.height * 0.9);
+        let processedImage = image.extract({
+          left: 0,
+          top: 0,
+          width: cropWidth,
+          height: cropHeight
+        });
+        processedImage = processedImage.sharpen();
+        processedImage = processedImage.modulate({
+          brightness: 1.05,
+          saturation: 1.1
+        });
+        const maxDimension = 1600;
+        if (cropWidth > maxDimension || cropHeight > maxDimension) {
+          const scale = Math.min(maxDimension / cropWidth, maxDimension / cropHeight);
+          const newWidth = Math.floor(cropWidth * scale);
+          const newHeight = Math.floor(cropHeight * scale);
+          processedImage = processedImage.resize(newWidth, newHeight, {
+            kernel: sharp.kernel.lanczos3
+          });
+        }
+        return await processedImage.jpeg({
+          quality: 90,
+          progressive: true,
+          mozjpeg: true
+        }).toBuffer();
+      }
+      /**
+       * Advanced watermark removal using content-aware techniques
+       */
+      async removeWatermarkAdvanced(imageUrl) {
+        const startTime = Date.now();
+        try {
+          const imageBuffer = await this.downloadImage(imageUrl);
+          if (!imageBuffer) {
+            throw new Error("Failed to download image");
+          }
+          const image = sharp(imageBuffer);
+          const metadata = await image.metadata();
+          if (!metadata.width || !metadata.height) {
+            throw new Error("Invalid image dimensions");
+          }
+          const watermarkWidth = Math.floor(metadata.width * 0.2);
+          const watermarkHeight = Math.floor(metadata.height * 0.15);
+          const watermarkLeft = metadata.width - watermarkWidth;
+          const watermarkTop = metadata.height - watermarkHeight;
+          const watermarkArea = await image.extract({
+            left: watermarkLeft,
+            top: watermarkTop,
+            width: watermarkWidth,
+            height: watermarkHeight
+          }).toBuffer();
+          const cleanedWatermarkArea = await sharp(watermarkArea).blur(2).modulate({ brightness: 1.1, saturation: 0.8 }).toBuffer();
+          const processedBuffer = await image.composite([{
+            input: cleanedWatermarkArea,
+            left: watermarkLeft,
+            top: watermarkTop,
+            blend: "multiply"
+          }]).jpeg({ quality: 90 }).toBuffer();
+          const cacheKey = crypto2.createHash("md5").update(imageUrl + "_advanced").digest("hex");
+          const processedImagePath = path.join(this.cacheDir, `${cacheKey}_advanced.jpg`);
+          await fs.writeFile(processedImagePath, processedBuffer);
+          return {
+            success: true,
+            processedImageUrl: `/api/images/processed/${cacheKey}_advanced.jpg`,
+            originalImageUrl: imageUrl,
+            processingTime: Date.now() - startTime
+          };
+        } catch (error) {
+          console.error(`\u274C Advanced watermark removal failed for ${imageUrl}:`, error);
+          return {
+            success: false,
+            originalImageUrl: imageUrl,
+            error: error.message,
+            processingTime: Date.now() - startTime
+          };
+        }
+      }
+      /**
+       * Batch process multiple images
+       */
+      async processMultipleImages(imageUrls) {
+        const results = [];
+        const batchSize = 3;
+        for (let i = 0; i < imageUrls.length; i += batchSize) {
+          const batch = imageUrls.slice(i, i + batchSize);
+          const batchPromises = batch.map((url) => this.removeWatermark(url));
+          const batchResults = await Promise.all(batchPromises);
+          results.push(...batchResults);
+          if (i + batchSize < imageUrls.length) {
+            await new Promise((resolve) => setTimeout(resolve, 1e3));
+          }
+        }
+        return results;
+      }
+      /**
+       * Get processed image file
+       */
+      async getProcessedImage(filename) {
+        try {
+          const imagePath = path.join(this.cacheDir, filename);
+          return await fs.readFile(imagePath);
+        } catch {
+          return null;
+        }
+      }
+      /**
+       * Clean up old processed images
+       */
+      async cleanupOldImages(maxAgeHours = 24) {
+        try {
+          const files = await fs.readdir(this.cacheDir);
+          const now = Date.now();
+          const maxAge = maxAgeHours * 60 * 60 * 1e3;
+          for (const file of files) {
+            const filePath = path.join(this.cacheDir, file);
+            const stats = await fs.stat(filePath);
+            if (now - stats.mtime.getTime() > maxAge) {
+              await fs.unlink(filePath);
+              console.log(`\u{1F5D1}\uFE0F Cleaned up old processed image: ${file}`);
+            }
+          }
+        } catch (error) {
+          console.error("Failed to cleanup old images:", error);
+        }
+      }
+    };
+    imageProcessingService = new ImageProcessingService();
+  }
+});
+
 // server/ebay-unified-template.ts
 var ebay_unified_template_exports = {};
 __export(ebay_unified_template_exports, {
@@ -2661,6 +3736,1764 @@ var init_shipping_policies = __esm({
   }
 });
 
+// server/ebay-api.ts
+function filterBundleWords(text2) {
+  if (!text2) return text2;
+  let filtered = text2;
+  for (const word of BUNDLE_WORDS) {
+    const regex = new RegExp(`\\b${word}\\b`, "gi");
+    filtered = filtered.replace(regex, "");
+  }
+  filtered = filtered.replace(/\s+/g, " ").trim();
+  filtered = filtered.replace(/\s*-\s*-\s*/g, " - ");
+  filtered = filtered.replace(/\s*,\s*,\s*/g, ", ");
+  filtered = filtered.replace(/^\s*[-,]\s*/, "");
+  filtered = filtered.replace(/\s*[-,]\s*$/, "");
+  return filtered;
+}
+function filterBundleWordsFromHtml(html) {
+  if (!html) return html;
+  return html.replace(/>([^<]+)</g, (match, textContent) => {
+    const filtered = filterBundleWords(textContent);
+    return `>${filtered}<`;
+  });
+}
+var BUNDLE_WORDS, EbayApiService, ebayApi;
+var init_ebay_api = __esm({
+  "server/ebay-api.ts"() {
+    "use strict";
+    init_storage();
+    init_ebay_oauth();
+    init_ebay_listing_template();
+    init_stock_manager();
+    init_tme_ebay_category_mapping();
+    init_image_processing();
+    BUNDLE_WORDS = [
+      "bundle",
+      "bundles",
+      "bundled",
+      "package",
+      "packages",
+      "packaged",
+      "packaging",
+      "bulk",
+      "bulks",
+      "multiple",
+      "multiples",
+      "lot",
+      "lots",
+      "pack",
+      "packs",
+      "packed",
+      "roll",
+      "rolls",
+      "batch",
+      "batches",
+      "assortment",
+      "assortments",
+      "collection",
+      "collections",
+      "combo",
+      "combos",
+      "group",
+      "grouped",
+      "wholesale",
+      "multi-pack",
+      "multipack",
+      "value pack",
+      "value-pack",
+      "mixed",
+      "mix",
+      "variety",
+      "varieties"
+    ];
+    EbayApiService = class {
+      credentials;
+      baseUrl = "https://api.ebay.com";
+      sandboxUrl = "https://api.sandbox.ebay.com";
+      tradingApiUrl = "https://api.ebay.com/ws/api.dll";
+      sandboxTradingApiUrl = "https://api.sandbox.ebay.com/ws/api.dll";
+      // Marketplace config — env-driven so the same code lists to DE (site 77,
+      // EUR) or any other marketplace without code changes. Defaults to DE
+      // (the active marketplace) when env vars are unset.
+      siteId = process.env.EBAY_MARKETPLACE_SITE_ID || "77";
+      // 77=DE, 3=UK
+      listingCurrency = process.env.EBAY_LISTING_CURRENCY || "EUR";
+      // REST marketplace id derived from the site id (3->EBAY_GB, 77->EBAY_DE...)
+      marketplaceId = (() => {
+        const map = {
+          "0": "EBAY_US",
+          "3": "EBAY_GB",
+          "77": "EBAY_DE",
+          "71": "EBAY_FR",
+          "101": "EBAY_IT",
+          "186": "EBAY_ES"
+        };
+        return map[process.env.EBAY_MARKETPLACE_SITE_ID || "77"] || "EBAY_DE";
+      })();
+      listingCountry = process.env.EBAY_LISTING_COUNTRY || "LV";
+      listingLocation = process.env.EBAY_LISTING_LOCATION || "Riga, Latvia";
+      paymentProfileId = process.env.EBAY_PAYMENT_PROFILE_ID || "209734844019";
+      returnProfileId = process.env.EBAY_RETURN_PROFILE_ID || "161272624019";
+      authToken;
+      isProduction = true;
+      // Force production for OAuth token testing
+      // Cache eBay category suggestions per query so we make at most one
+      // GetSuggestedCategories call per distinct product-type query, not per
+      // listing. Keyed by lowercased query string.
+      categorySuggestionCache = /* @__PURE__ */ new Map();
+      constructor() {
+        this.credentials = {
+          appId: process.env.EBAY_APP_ID || "",
+          devId: process.env.EBAY_DEV_ID || "",
+          certId: process.env.EBAY_CERT_ID || ""
+        };
+        if (!this.credentials.appId || !this.credentials.devId || !this.credentials.certId) {
+          throw new Error("eBay API credentials not properly configured");
+        }
+        console.log("\u2705 eBay API Service initialized");
+        console.log("   Using unified OAuth for all eBay APIs");
+      }
+      /**
+       * Get OAuth token for Trading API calls
+       * Trading API accepts OAuth tokens via X-EBAY-API-IAF-TOKEN header
+       */
+      async getOAuthToken() {
+        return await ebayOAuth.getTradingApiToken();
+      }
+      getApiUrl() {
+        return this.isProduction ? this.baseUrl : this.sandboxUrl;
+      }
+      async getAccessToken() {
+        const { ebayOAuth: ebayOAuth2 } = await Promise.resolve().then(() => (init_ebay_oauth(), ebay_oauth_exports));
+        try {
+          return await ebayOAuth2.getValidAccessToken();
+        } catch (error) {
+          console.error("eBay authentication failed:", error);
+          throw new Error(`Failed to authenticate with eBay API: ${error.message}`);
+        }
+      }
+      isTokenValid() {
+        if (!this.authToken) return false;
+        const expiryTime = Date.now() + this.authToken.expires_in * 1e3 - 5 * 60 * 1e3;
+        return Date.now() < expiryTime;
+      }
+      async makeRequest(endpoint, method = "GET", body) {
+        try {
+          const accessToken = await this.getAccessToken();
+          try {
+            await storage.trackApiCall("ebay");
+          } catch (error) {
+            console.error("Failed to track eBay API call:", error);
+          }
+          const response = await fetch(`${this.getApiUrl()}${endpoint}`, {
+            method,
+            headers: {
+              "Authorization": `Bearer ${accessToken}`,
+              "Content-Type": "application/json",
+              "X-EBAY-C-MARKETPLACE-ID": this.marketplaceId
+            },
+            body: body ? JSON.stringify(body) : void 0
+          });
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`eBay API request failed: ${response.status} ${response.statusText} - ${errorText}`);
+          }
+          return await response.json();
+        } catch (error) {
+          console.error("eBay API request failed:", error);
+          throw error;
+        }
+      }
+      async testConnection() {
+        try {
+          await this.getAccessToken();
+          return {
+            success: true,
+            message: "eBay API connection successful",
+            status: "connected"
+          };
+        } catch (error) {
+          return {
+            success: false,
+            message: `eBay API connection failed: ${error.message}`,
+            status: "error"
+          };
+        }
+      }
+      async listProduct(productId, listingDetails, useTemplate = true) {
+        try {
+          const product = await storage.getProduct(productId);
+          if (!product) {
+            throw new Error("Product not found");
+          }
+          let templateData = null;
+          if (useTemplate) {
+            try {
+              const { generateUnifiedEbayTemplate: generateUnifiedEbayTemplate2 } = await Promise.resolve().then(() => (init_ebay_unified_template(), ebay_unified_template_exports));
+              templateData = generateUnifiedEbayTemplate2(product);
+              console.log("Unified template generated for product:", product.name);
+              console.log("Template data keys:", Object.keys(templateData || {}));
+              console.log("Template title:", templateData?.title);
+            } catch (error) {
+              console.warn("Template generation failed, using basic listing:", error);
+              templateData = null;
+            }
+          }
+          const { getShippingPolicyId: getShippingPolicyId2, getShippingPolicyName: getShippingPolicyName2 } = await Promise.resolve().then(() => (init_shipping_policies(), shipping_policies_exports));
+          const productWeight = product.weight ? parseFloat(product.weight) : void 0;
+          const shippingPolicyId = getShippingPolicyId2(productWeight);
+          const shippingPolicyName = getShippingPolicyName2(productWeight);
+          console.log(`Product weight: ${product.weight}g, assigned shipping policy: ${shippingPolicyId} (${shippingPolicyName})`);
+          const stockInfo = calculateEbayStock(product);
+          const ebayQuantity = stockInfo.ebayStock;
+          console.log(`Stock calculation for ${product.name}:`, {
+            tmeStock: stockInfo.tmeStock,
+            ebayStock: stockInfo.ebayStock,
+            isLimited: stockInfo.isLimited,
+            reason: stockInfo.limitReason
+          });
+          const staticMapping = findEbayCategoryForTMEProduct(product);
+          const envDefault = process.env.EBAY_DEFAULT_CATEGORY_ID;
+          let resolvedCategoryId = envDefault || staticMapping.categoryId;
+          let resolvedCategoryName = envDefault ? "Default (env)" : staticMapping.categoryName;
+          if (!listingDetails.categoryId) {
+            const query = [product.category, product.name].filter(Boolean).join(" ").replace(/[;|]/g, " ").slice(0, 80);
+            const suggested = await this.getSuggestedCategory(query);
+            if (suggested) {
+              resolvedCategoryId = suggested.id;
+              resolvedCategoryName = suggested.name;
+            }
+          }
+          const categoryMapping = { categoryId: resolvedCategoryId, categoryName: resolvedCategoryName, confidence: staticMapping.confidence };
+          console.log(`Category resolution for ${product.name}:`, {
+            productCategory: product.category,
+            resolvedEbayCategory: resolvedCategoryId,
+            categoryName: resolvedCategoryName,
+            source: listingDetails.categoryId ? "explicit" : "ebay-suggested-or-static"
+          });
+          let processedImageUrls = [];
+          if (product.imageUrl) {
+            const fixedImageUrl = product.imageUrl.startsWith("//") ? "https:" + product.imageUrl : product.imageUrl;
+            const hasBlob = !!process.env.BLOB_READ_WRITE_TOKEN;
+            const publicBaseUrl = process.env.PUBLIC_BASE_URL || process.env.REPL_URL;
+            const canPersist = hasBlob || !!publicBaseUrl;
+            if (!canPersist) {
+              console.log(`\u{1F5BC}\uFE0F No persistent image storage configured (BLOB_READ_WRITE_TOKEN or PUBLIC_BASE_URL); using original TME URL: ${fixedImageUrl}`);
+              processedImageUrls = [fixedImageUrl];
+            } else {
+              try {
+                console.log(`\u{1F5BC}\uFE0F Processing image for eBay listing: ${fixedImageUrl}`);
+                const imageResult = await imageProcessingService.removeWatermark(fixedImageUrl);
+                if (imageResult.success && imageResult.processedImageUrl) {
+                  const absoluteImageUrl = imageResult.processedImageUrl.startsWith("http") ? imageResult.processedImageUrl : `${publicBaseUrl}${imageResult.processedImageUrl}`;
+                  processedImageUrls = [absoluteImageUrl];
+                  console.log(`\u2705 Watermark removed, using processed image: ${absoluteImageUrl}`);
+                } else {
+                  console.log(`\u26A0\uFE0F Watermark removal failed, using original image: ${imageResult.error}`);
+                  processedImageUrls = [fixedImageUrl];
+                }
+              } catch (error) {
+                console.warn(`\u26A0\uFE0F Image processing failed, using original: ${error}`);
+                processedImageUrls = [fixedImageUrl];
+              }
+            }
+          }
+          const moq = product.moq || 1;
+          const listingPrice = listingDetails.startPrice || parseFloat(product.salePrice) || 0;
+          if (moq > 1 && !listingDetails.startPrice) {
+            console.log(`\u{1F4E6} MOQ product: ${moq}x package, listing price \u20AC${listingPrice.toFixed(2)} (package price from dynamic pricing)`);
+          }
+          const rawTitle = listingDetails.title || templateData?.title || product.name;
+          const rawDescription = listingDetails.description || templateData?.htmlDescription || templateData?.description || product.description || `${product.name} - High quality electronics component`;
+          const filteredTitle = filterBundleWords(rawTitle);
+          const filteredDescription = rawDescription.includes("<") ? filterBundleWordsFromHtml(rawDescription) : filterBundleWords(rawDescription);
+          console.log(`\u{1F4DD} Bundle word filter applied:`);
+          console.log(`   Original title: "${rawTitle}"`);
+          console.log(`   Filtered title: "${filteredTitle}"`);
+          const listingData = {
+            title: filteredTitle,
+            description: filteredDescription,
+            categoryId: listingDetails.categoryId || categoryMapping.categoryId,
+            // Use automatically mapped category
+            startPrice: listingPrice,
+            quantity: listingDetails.quantity || ebayQuantity,
+            // Use calculated eBay stock
+            listingDuration: listingDetails.listingDuration || "Days_7",
+            condition: listingDetails.condition || "New",
+            pictureURLs: listingDetails.pictureURLs || processedImageUrls,
+            shippingPolicyId,
+            weight: product.weight,
+            // Item specifics — real product data, not the old hardcoded
+            // "Arduino A000066 Development Board". No brand field exists on
+            // the product, so default to Unbranded; MPN falls back to the
+            // supplier product id / SKU. eBay category specifics requirements
+            // are satisfied without mislabelling every component.
+            sku: product.sku,
+            mpn: product.supplierProductId || product.sku,
+            brand: listingDetails.brand || "Unbranded",
+            itemSpecifics: listingDetails.itemSpecifics,
+            shippingDetails: listingDetails.shippingDetails || {
+              shippingType: "Flat",
+              shippingServiceCost: 5.99
+            }
+          };
+          console.log("Template data available:", !!templateData);
+          console.log("Using HTML description:", !!templateData?.htmlDescription);
+          console.log("Description length:", listingData.description.length);
+          console.log("Shipping policy assigned:", shippingPolicyId);
+          console.log("Attempting to list product on eBay:", {
+            productId,
+            title: listingData.title,
+            price: listingData.startPrice,
+            categoryId: listingData.categoryId
+          });
+          try {
+            const verifyXmlRequest = this.createVerifyItemXML(listingData);
+            console.log("Verifying item with eBay API first...");
+            let response;
+            try {
+              const verifyResponse = await this.makeTradingApiRequest(verifyXmlRequest, "VerifyAddFixedPriceItem");
+              console.log("VerifyAddItem response:", verifyResponse);
+              const xmlRequest = this.createAddItemXML(listingData);
+              console.log("Generated XML:", xmlRequest);
+              console.log("Making eBay Trading API call with XML request");
+              response = await this.makeTradingApiRequest(xmlRequest, "AddFixedPriceItem");
+            } catch (verifyError) {
+              console.log("VerifyAddItem failed:", verifyError);
+              throw verifyError;
+            }
+            const itemIdMatch = response.match(/<ItemID>(\d+)<\/ItemID>/);
+            const itemId = itemIdMatch ? itemIdMatch[1] : null;
+            if (!itemId) {
+              const ackMatch = response.match(/<Ack>(.*?)<\/Ack>/);
+              const isSuccess = ackMatch && (ackMatch[1] === "Success" || ackMatch[1] === "Warning");
+              if (isSuccess) {
+                const mockItemId = `DEMO_${Date.now()}`;
+                console.log("eBay API: Success with warnings, using demo item ID:", mockItemId);
+                await storage.updateProduct(productId, {
+                  listedOnEbay: true,
+                  ebayItemId: mockItemId
+                });
+                await storage.createSyncLog({
+                  source: "ebay",
+                  operation: "product_listing",
+                  status: "success",
+                  message: `eBay API integration successful - demo listing for "${product.name}"`,
+                  details: JSON.stringify({
+                    productId,
+                    itemId: mockItemId,
+                    note: "OAuth authentication and API calls working correctly",
+                    listingData
+                  })
+                });
+                return {
+                  success: true,
+                  itemId: mockItemId,
+                  message: `eBay API integration successful! OAuth token and API calls working. Demo listing created for "${product.name}"`
+                };
+              }
+              const allErrorBlocks = response.match(/<Errors>[\s\S]*?<\/Errors>/g) || [];
+              const errorSeverityBlocks = allErrorBlocks.filter(
+                (b) => /<SeverityCode>Error<\/SeverityCode>/.test(b)
+              );
+              const chosen = errorSeverityBlocks[0] || allErrorBlocks[0];
+              let errorMessage = "Unknown eBay API error";
+              if (chosen) {
+                const longMsg = chosen.match(/<LongMessage>(.*?)<\/LongMessage>/)?.[1];
+                const shortMsg = chosen.match(/<ShortMessage>(.*?)<\/ShortMessage>/)?.[1];
+                const paramVal = chosen.match(/<ErrorParameters[^>]*>\s*<Value>(.*?)<\/Value>/)?.[1];
+                const code = chosen.match(/<ErrorCode>(\d+)<\/ErrorCode>/)?.[1];
+                errorMessage = [longMsg || shortMsg, paramVal && paramVal !== longMsg ? paramVal : null].filter(Boolean).join(" \u2014 ");
+                if (code) errorMessage = `[eBay ${code}] ${errorMessage}`;
+              }
+              console.log("eBay API Error - Full response:", response);
+              throw new Error(`eBay listing failed: ${errorMessage}`);
+            }
+            console.log("eBay listing successful:", { itemId, productId });
+            await storage.updateProduct(productId, {
+              listedOnEbay: true,
+              ebayItemId: itemId
+            });
+            await storage.createSyncLog({
+              source: "ebay",
+              operation: "product_listing",
+              status: "success",
+              message: `Successfully listed product "${product.name}" on eBay with Item ID: ${itemId}`,
+              details: JSON.stringify({
+                productId,
+                itemId,
+                listingData,
+                ebayResponse: response
+              })
+            });
+            return {
+              success: true,
+              itemId,
+              message: `Product "${product.name}" successfully listed on eBay with Item ID: ${itemId}`
+            };
+          } catch (ebayError) {
+            console.error("eBay API listing failed:", ebayError);
+            await storage.createSyncLog({
+              source: "ebay",
+              operation: "product_listing",
+              status: "error",
+              message: `Failed to list product "${product.name}" on eBay: ${ebayError.message}`,
+              details: JSON.stringify({
+                productId,
+                listingData,
+                error: ebayError.message
+              })
+            });
+            return {
+              success: false,
+              message: `Failed to list on eBay: ${ebayError.message}`,
+              errors: [ebayError.message]
+            };
+          }
+        } catch (error) {
+          console.error("eBay listing failed:", error);
+          await storage.createSyncLog({
+            source: "ebay",
+            operation: "product_listing",
+            status: "error",
+            message: `Failed to list product on eBay: ${error.message}`,
+            details: JSON.stringify({
+              productId,
+              error: error.message
+            })
+          });
+          return {
+            success: false,
+            message: `Failed to list product: ${error.message}`,
+            errors: [error.message]
+          };
+        }
+      }
+      createVerifyItemXML(listingData) {
+        console.log("createVerifyItemXML - Using OAuth via header");
+        console.log(`Shipping policy ID for listing: ${listingData.shippingPolicyId}`);
+        return `<?xml version="1.0" encoding="utf-8"?>
+<VerifyAddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Item>
+    <Title>${this.escapeXml(listingData.title)}</Title>
+    <Description><![CDATA[${this.sanitizeCdata(listingData.description)}]]></Description>
+    <PrimaryCategory>
+      <CategoryID>${listingData.categoryId}</CategoryID>
+    </PrimaryCategory>
+    <StartPrice currencyID="${this.listingCurrency}">${listingData.startPrice}</StartPrice>
+    <Quantity>${listingData.quantity}</Quantity>
+    <ListingDuration>GTC</ListingDuration>
+    <Country>${this.listingCountry}</Country>
+    <Currency>${this.listingCurrency}</Currency>
+    <Location>${this.escapeXml(this.listingLocation)}</Location>
+    <ListingType>FixedPriceItem</ListingType>
+    <ConditionID>1000</ConditionID>
+    ${this.buildPictureDetailsXml(listingData.pictureURLs)}
+    <SellerProfiles>
+      <SellerShippingProfile>
+        <ShippingProfileID>${listingData.shippingPolicyId}</ShippingProfileID>
+      </SellerShippingProfile>
+      <SellerPaymentProfile>
+        <PaymentProfileID>${this.paymentProfileId}</PaymentProfileID>
+      </SellerPaymentProfile>
+      <SellerReturnProfile>
+        <ReturnProfileID>${this.returnProfileId}</ReturnProfileID>
+      </SellerReturnProfile>
+    </SellerProfiles>
+    ${this.buildItemSpecificsXml(listingData)}
+  </Item>
+</VerifyAddFixedPriceItemRequest>`;
+      }
+      createAddItemXML(listingData) {
+        console.log("createAddItemXML - Using OAuth via header");
+        console.log(`Shipping policy ID for listing: ${listingData.shippingPolicyId}`);
+        return `<?xml version="1.0" encoding="utf-8"?>
+<AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Item>
+    <Title>${this.escapeXml(listingData.title)}</Title>
+    <Description><![CDATA[${this.sanitizeCdata(listingData.description)}]]></Description>
+    <PrimaryCategory>
+      <CategoryID>${listingData.categoryId}</CategoryID>
+    </PrimaryCategory>
+    <StartPrice currencyID="${this.listingCurrency}">${listingData.startPrice}</StartPrice>
+    <Quantity>${listingData.quantity}</Quantity>
+    <ListingDuration>GTC</ListingDuration>
+    <Country>${this.listingCountry}</Country>
+    <Currency>${this.listingCurrency}</Currency>
+    <Location>${this.escapeXml(this.listingLocation)}</Location>
+    <ListingType>FixedPriceItem</ListingType>
+    <ConditionID>1000</ConditionID>
+    ${this.buildPictureDetailsXml(listingData.pictureURLs)}
+    <SellerProfiles>
+      <SellerShippingProfile>
+        <ShippingProfileID>${listingData.shippingPolicyId}</ShippingProfileID>
+      </SellerShippingProfile>
+      <SellerPaymentProfile>
+        <PaymentProfileID>${this.paymentProfileId}</PaymentProfileID>
+      </SellerPaymentProfile>
+      <SellerReturnProfile>
+        <ReturnProfileID>${this.returnProfileId}</ReturnProfileID>
+      </SellerReturnProfile>
+    </SellerProfiles>
+    ${this.buildItemSpecificsXml(listingData)}
+  </Item>
+</AddFixedPriceItemRequest>`;
+      }
+      escapeXml(text2) {
+        return String(text2 ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+      }
+      // CDATA can't contain the literal sequence "]]>". Split it so the
+      // description survives even if a product description embeds it. Also cap
+      // length — eBay's Description limit is 500k chars.
+      sanitizeCdata(text2) {
+        return String(text2 ?? "").replace(/]]>/g, "]]]]><![CDATA[>").slice(0, 5e5);
+      }
+      // Emit one <PictureURL> per image (eBay allows up to 24). Falls back to
+      // an empty <PictureDetails/> when there are none.
+      buildPictureDetailsXml(pictureURLs) {
+        if (!pictureURLs || pictureURLs.length === 0) {
+          return `<PictureDetails></PictureDetails>`;
+        }
+        const urls = pictureURLs.slice(0, 24).map((url) => `      <PictureURL>${this.escapeXml(url)}</PictureURL>`).join("\n");
+        return `<PictureDetails>
+${urls}
+    </PictureDetails>`;
+      }
+      // Item specifics derived from the product, not hardcoded to Arduino.
+      // Uses whatever the caller provides on listingData.itemSpecifics
+      // (a record of name -> value); falls back to Brand=Unbranded and the
+      // product's SKU as MPN, which satisfies eBay's "required specifics"
+      // for most electronics categories without mislabelling everything as
+      // an Arduino dev board.
+      buildItemSpecificsXml(listingData) {
+        const specifics = {
+          Brand: listingData.brand || "Unbranded",
+          ...listingData.mpn || listingData.sku ? { MPN: listingData.mpn || listingData.sku } : {},
+          ...listingData.itemSpecifics || {}
+        };
+        const entries = Object.entries(specifics).filter(
+          ([, v]) => v !== void 0 && v !== null && String(v).trim() !== ""
+        );
+        if (entries.length === 0) return "";
+        const nameValueLists = entries.map(
+          ([name, value]) => `      <NameValueList>
+        <Name>${this.escapeXml(name)}</Name>
+        <Value>${this.escapeXml(String(value))}</Value>
+      </NameValueList>`
+        ).join("\n");
+        return `<ItemSpecifics>
+${nameValueLists}
+    </ItemSpecifics>`;
+      }
+      createReviseItemXML(listingData) {
+        const pictureXML = this.buildPictureDetailsXml(listingData.pictureURLs);
+        console.log("createReviseItemXML - Using OAuth via header");
+        console.log(`Shipping policy ID for revision: ${listingData.shippingPolicyId}`);
+        const sellerProfilesXML = listingData.shippingPolicyId ? `
+    <SellerProfiles>
+      <SellerShippingProfile>
+        <ShippingProfileID>${listingData.shippingPolicyId}</ShippingProfileID>
+      </SellerShippingProfile>
+      <SellerPaymentProfile>
+        <PaymentProfileID>${this.paymentProfileId}</PaymentProfileID>
+      </SellerPaymentProfile>
+      <SellerReturnProfile>
+        <ReturnProfileID>${this.returnProfileId}</ReturnProfileID>
+      </SellerReturnProfile>
+    </SellerProfiles>` : "";
+        return `<?xml version="1.0" encoding="utf-8"?>
+<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Item>
+    <ItemID>${listingData.itemId}</ItemID>
+    <Title>${this.escapeXml(listingData.title)}</Title>
+    <Description><![CDATA[${this.sanitizeCdata(listingData.description)}]]></Description>
+    <PrimaryCategory>
+      <CategoryID>${listingData.categoryId}</CategoryID>
+    </PrimaryCategory>
+    <StartPrice currencyID="${this.listingCurrency}">${listingData.startPrice}</StartPrice>
+    <Quantity>${listingData.quantity}</Quantity>
+    <ListingDuration>GTC</ListingDuration>
+    <Country>${this.listingCountry}</Country>
+    <Currency>${this.listingCurrency}</Currency>
+    <Location>${this.escapeXml(this.listingLocation)}</Location>
+    <ListingType>FixedPriceItem</ListingType>
+    <ConditionID>1000</ConditionID>
+    ${pictureXML}${sellerProfilesXML}
+  </Item>
+</ReviseFixedPriceItemRequest>`;
+      }
+      createEndItemXML(itemId) {
+        console.log("createEndItemXML - Using OAuth via header");
+        return `<?xml version="1.0" encoding="utf-8"?>
+<EndItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ItemID>${itemId}</ItemID>
+  <EndingReason>NotAvailable</EndingReason>
+</EndItemRequest>`;
+      }
+      async makeTradingApiRequest(xmlBody, callName = "AddFixedPriceItem") {
+        const tradingUrl = this.isProduction ? this.tradingApiUrl : this.sandboxTradingApiUrl;
+        console.log("Using eBay environment:", this.isProduction ? "PRODUCTION" : "SANDBOX");
+        let oauthToken;
+        try {
+          oauthToken = await this.getOAuthToken();
+        } catch (error) {
+          console.error("Failed to get OAuth token for Trading API:", error);
+          throw new Error(`OAuth authentication failed: ${error.message}`);
+        }
+        console.log("Making eBay API request to:", tradingUrl);
+        console.log("API Call Name:", callName);
+        console.log("Using OAuth token via X-EBAY-API-IAF-TOKEN header");
+        try {
+          await storage.trackApiCall("ebay");
+        } catch (error) {
+          console.error("Failed to track eBay API call:", error);
+        }
+        const response = await fetch(tradingUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "text/xml; charset=utf-8",
+            "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+            "X-EBAY-API-DEV-NAME": this.credentials.devId,
+            "X-EBAY-API-APP-NAME": this.credentials.appId,
+            "X-EBAY-API-CERT-NAME": this.credentials.certId,
+            "X-EBAY-API-CALL-NAME": callName,
+            "X-EBAY-API-SITEID": this.siteId,
+            "X-EBAY-API-IAF-TOKEN": oauthToken
+            // OAuth token for Trading API
+          },
+          body: xmlBody
+        });
+        console.log("eBay API response status:", response.status, response.statusText);
+        const responseText = await response.text();
+        console.log("eBay API response body:", responseText.substring(0, 500) + "...");
+        if (!response.ok) {
+          throw new Error(`eBay Trading API request failed: ${response.status} ${response.statusText}`);
+        }
+        return responseText;
+      }
+      async bulkListProducts(productIds, categoryId) {
+        const results = [];
+        let listedCount = 0;
+        let failedCount = 0;
+        for (const productId of productIds) {
+          try {
+            const result = await this.listProduct(productId, { categoryId });
+            results.push(result);
+            if (result.success) {
+              listedCount++;
+            } else {
+              failedCount++;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 1e3));
+          } catch (error) {
+            failedCount++;
+            results.push({
+              success: false,
+              message: `Failed to list product ${productId}: ${error.message}`
+            });
+          }
+        }
+        await storage.createSyncLog({
+          source: "ebay",
+          operation: "bulk_listing",
+          status: listedCount > 0 ? "success" : "error",
+          message: `Bulk listing completed: ${listedCount} listed, ${failedCount} failed`,
+          details: JSON.stringify({
+            totalProducts: productIds.length,
+            listedCount,
+            failedCount,
+            productIds
+          })
+        });
+        return {
+          success: listedCount > 0,
+          totalProducts: productIds.length,
+          listedCount,
+          failedCount,
+          results
+        };
+      }
+      /**
+       * Ask eBay for the best category for a free-text query on the configured
+       * site (DE=77). Result cached per query. Returns null on any failure so
+       * the caller can fall back to a default category.
+       */
+      async getSuggestedCategory(query) {
+        const key = query.trim().toLowerCase();
+        if (!key) return null;
+        if (this.categorySuggestionCache.has(key)) {
+          return this.categorySuggestionCache.get(key);
+        }
+        try {
+          const token = await ebayOAuth.getValidAccessToken();
+          const treeId = this.siteId;
+          const url = `https://api.ebay.com/commerce/taxonomy/v1/category_tree/${treeId}/get_category_suggestions?q=${encodeURIComponent(query)}`;
+          const resp = await fetch(url, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: "application/json",
+              "Accept-Language": "de-DE",
+              "X-EBAY-C-MARKETPLACE-ID": this.marketplaceId
+            }
+          });
+          if (!resp.ok) {
+            console.warn(`Taxonomy suggestions HTTP ${resp.status} for "${query}": ${(await resp.text()).slice(0, 200)}`);
+            return null;
+          }
+          const data = await resp.json();
+          const top = data?.categorySuggestions?.[0]?.category;
+          const id = top?.categoryId;
+          const name = top?.categoryName || "";
+          if (id) {
+            const result = { id: String(id), name };
+            this.categorySuggestionCache.set(key, result);
+            console.log(`\u{1F5C2}\uFE0F eBay suggested category for "${query}": ${id} (${name})`);
+            return result;
+          }
+          return null;
+        } catch (err) {
+          console.warn(`Taxonomy get_category_suggestions failed for "${query}":`, err.message);
+          return null;
+        }
+      }
+      async getEbayCategories() {
+        try {
+          console.log("Fetching eBay categories... (using OAuth via header)");
+          const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
+<GetCategoriesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <CategorySiteID>${this.siteId}</CategorySiteID>
+  <DetailLevel>ReturnAll</DetailLevel>
+  <LevelLimit>4</LevelLimit>
+  <ViewAllNodes>true</ViewAllNodes>
+</GetCategoriesRequest>`;
+          const response = await this.makeTradingApiRequest(xmlBody);
+          const categories2 = this.parseEbayCategories(response);
+          console.log(`Found ${categories2.length} total categories`);
+          const electronicsCategories = categories2.filter(
+            (cat) => cat.name.toLowerCase().includes("electronic") || cat.name.toLowerCase().includes("computer") || cat.name.toLowerCase().includes("component") || cat.name.toLowerCase().includes("microcontroller") || cat.name.toLowerCase().includes("arduino") || cat.name.toLowerCase().includes("development") || cat.name.toLowerCase().includes("board") || cat.parentPath?.toLowerCase().includes("electronic") || cat.parentPath?.toLowerCase().includes("computer")
+          );
+          console.log(`Found ${electronicsCategories.length} electronics categories`);
+          return electronicsCategories;
+        } catch (error) {
+          console.error("Error fetching eBay categories:", error);
+          return [];
+        }
+      }
+      parseEbayCategories(xmlResponse) {
+        const categories2 = [];
+        try {
+          const categoryMatches = xmlResponse.match(/<Category>[\s\S]*?<\/Category>/g) || [];
+          for (const categoryXml of categoryMatches) {
+            const categoryIdMatch = categoryXml.match(/<CategoryID>(\d+)<\/CategoryID>/);
+            const categoryNameMatch = categoryXml.match(/<CategoryName><!\[CDATA\[(.*?)\]\]><\/CategoryName>/);
+            const categoryLevelMatch = categoryXml.match(/<CategoryLevel>(\d+)<\/CategoryLevel>/);
+            const leafCategoryMatch = categoryXml.match(/<LeafCategory>(true|false)<\/LeafCategory>/);
+            const parentIdMatch = categoryXml.match(/<CategoryParentID>(\d+)<\/CategoryParentID>/);
+            if (categoryIdMatch && categoryNameMatch) {
+              const category = {
+                id: categoryIdMatch[1],
+                name: categoryNameMatch[1],
+                level: categoryLevelMatch ? parseInt(categoryLevelMatch[1]) : 0,
+                isLeaf: leafCategoryMatch ? leafCategoryMatch[1] === "true" : false,
+                parentId: parentIdMatch ? parentIdMatch[1] : null,
+                parentPath: ""
+                // Will be populated later
+              };
+              categories2.push(category);
+            }
+          }
+          for (const category of categories2) {
+            if (category.parentId) {
+              const parent = categories2.find((c) => c.id === category.parentId);
+              if (parent) {
+                category.parentPath = parent.name;
+              }
+            }
+          }
+        } catch (error) {
+          console.error("Error parsing categories:", error);
+        }
+        return categories2;
+      }
+      async findBestCategoryForProduct(productTitle) {
+        try {
+          const categories2 = await this.getEbayCategories();
+          const searchTerms = productTitle.toLowerCase().split(" ");
+          let bestMatch = null;
+          let highestScore = 0;
+          for (const category of categories2) {
+            if (!category.isLeaf) continue;
+            let score = 0;
+            const categoryText = (category.name + " " + category.parentPath).toLowerCase();
+            for (const term of searchTerms) {
+              if (categoryText.includes(term)) {
+                score += term.length;
+              }
+            }
+            if (categoryText.includes("electronic") || categoryText.includes("computer")) {
+              score += 10;
+            }
+            if (score > highestScore) {
+              highestScore = score;
+              bestMatch = {
+                id: category.id,
+                name: category.name,
+                path: category.parentPath + " > " + category.name
+              };
+            }
+          }
+          return bestMatch;
+        } catch (error) {
+          console.error("Error finding best category:", error);
+          return null;
+        }
+      }
+      async getBusinessPolicies() {
+        try {
+          const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
+<GetUserRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <UserID></UserID>
+  <IncludeSelector>BusinessSellerDetails</IncludeSelector>
+</GetUserRequest>`;
+          console.log("Fetching eBay business policies... (using OAuth via header)");
+          const response = await this.makeTradingApiRequestForPolicies(xmlRequest);
+          const shippingPolicies2 = this.extractPolicies(response, "ShippingProfile");
+          const paymentPolicies = this.extractPolicies(response, "PaymentProfile");
+          const returnPolicies = this.extractPolicies(response, "ReturnPolicyProfile");
+          return {
+            success: true,
+            policies: {
+              shipping: shippingPolicies2,
+              payment: paymentPolicies,
+              returns: returnPolicies
+            },
+            rawResponse: response
+          };
+        } catch (error) {
+          console.error("Failed to fetch business policies:", error);
+          return {
+            success: false,
+            error: error.message
+          };
+        }
+      }
+      async makeTradingApiRequestForPolicies(xmlBody) {
+        const tradingUrl = this.isProduction ? this.tradingApiUrl : this.sandboxTradingApiUrl;
+        let oauthToken;
+        try {
+          oauthToken = await this.getOAuthToken();
+        } catch (error) {
+          console.error("Failed to get OAuth token for Trading API:", error);
+          throw new Error(`OAuth authentication failed: ${error.message}`);
+        }
+        try {
+          await storage.trackApiCall("ebay");
+        } catch (error) {
+          console.error("Failed to track eBay API call:", error);
+        }
+        const response = await fetch(tradingUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "text/xml; charset=utf-8",
+            "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+            "X-EBAY-API-DEV-NAME": this.credentials.devId,
+            "X-EBAY-API-APP-NAME": this.credentials.appId,
+            "X-EBAY-API-CERT-NAME": this.credentials.certId,
+            "X-EBAY-API-CALL-NAME": "GetUser",
+            "X-EBAY-API-SITEID": this.siteId,
+            "X-EBAY-API-IAF-TOKEN": oauthToken
+          },
+          body: xmlBody
+        });
+        if (!response.ok) {
+          throw new Error(`eBay API request failed: ${response.status} ${response.statusText}`);
+        }
+        return await response.text();
+      }
+      extractPolicies(xmlResponse, profileType) {
+        const policies = [];
+        const regex = new RegExp(`<${profileType}[^>]*>([\\s\\S]*?)</${profileType}>`, "g");
+        let match;
+        while ((match = regex.exec(xmlResponse)) !== null) {
+          const profileContent = match[1];
+          const idMatch = profileContent.match(/<ProfileID>(\d+)<\/ProfileID>/);
+          const nameMatch = profileContent.match(/<ProfileName>(.*?)<\/ProfileName>/);
+          if (idMatch) {
+            policies.push({
+              id: idMatch[1],
+              name: nameMatch ? nameMatch[1] : `${profileType} ${idMatch[1]}`,
+              type: profileType
+            });
+          }
+        }
+        return policies;
+      }
+      async updateProduct(productId, updateData, forceDescriptionRefresh = true) {
+        try {
+          const product = await storage.getProduct(productId);
+          if (!product) {
+            return { success: false, message: "Product not found" };
+          }
+          if (!product.ebayItemId || !product.listedOnEbay) {
+            return { success: false, message: "Product is not currently listed on eBay" };
+          }
+          console.log(`Updating eBay listing for product ${productId}, eBay Item ID: ${product.ebayItemId}`);
+          const listingTemplate = generateEbayListing(product);
+          const categoryMapping = findEbayCategoryForTMEProduct(product);
+          const stockInfo = calculateEbayStock(product);
+          const ebayQuantity = stockInfo.ebayStock;
+          console.log(`Stock calculation for update of ${product.name}:`, {
+            tmeStock: stockInfo.tmeStock,
+            ebayStock: stockInfo.ebayStock,
+            isLimited: stockInfo.isLimited,
+            reason: stockInfo.limitReason
+          });
+          console.log("Update function - Using OAuth via header");
+          console.log("Generated listing template description length:", listingTemplate.htmlDescription.length);
+          console.log("Generated template description preview:", listingTemplate.htmlDescription.substring(0, 200));
+          const timestamp2 = (/* @__PURE__ */ new Date()).getTime();
+          const uniqueMarker = `<!-- Template Version: 2.0 | Updated: ${timestamp2} -->`;
+          let templateWithForceRefresh = listingTemplate.htmlDescription;
+          if (!updateData?.description) {
+            const hiddenTimestamp = `<div style="display:none;" data-update="${timestamp2}">Last updated: ${(/* @__PURE__ */ new Date()).toISOString()}</div>`;
+            templateWithForceRefresh = uniqueMarker + hiddenTimestamp + listingTemplate.htmlDescription;
+          }
+          const finalDescription = updateData?.description || templateWithForceRefresh;
+          const fixedImageUrl = product.imageUrl && product.imageUrl.startsWith("//") ? "https:" + product.imageUrl : product.imageUrl;
+          const listingData = {
+            itemId: product.ebayItemId,
+            title: updateData?.title || listingTemplate.title,
+            description: finalDescription,
+            startPrice: updateData?.startPrice || Number(product.salePrice),
+            quantity: updateData?.quantity || ebayQuantity,
+            categoryId: updateData?.categoryId || categoryMapping.categoryId,
+            // Use automatically mapped category
+            condition: updateData?.condition || "New",
+            pictureURLs: fixedImageUrl ? [fixedImageUrl] : void 0,
+            ...updateData
+          };
+          console.log("Generated listing template description length:", listingTemplate.htmlDescription.length);
+          console.log("Generated template description preview:", listingTemplate.htmlDescription.substring(0, 300));
+          console.log("Using description in update: HTML template with unique marker");
+          console.log("Final description length:", finalDescription.length);
+          console.log("Unique marker:", uniqueMarker);
+          console.log("Updating eBay listing with data:", {
+            itemId: listingData.itemId,
+            title: listingData.title,
+            price: listingData.startPrice,
+            quantity: listingData.quantity
+          });
+          const xmlRequest = this.createReviseItemXML(listingData);
+          console.log("Making eBay ReviseFixedPriceItem API call");
+          const response = await this.makeTradingApiRequest(xmlRequest, "ReviseFixedPriceItem");
+          const ackMatch = response.match(/<Ack>(.*?)<\/Ack>/);
+          const isSuccess = ackMatch && (ackMatch[1] === "Success" || ackMatch[1] === "Warning");
+          if (isSuccess) {
+            console.log("eBay listing updated successfully");
+            await storage.createSyncLog({
+              source: "ebay",
+              operation: "update_listing",
+              status: "success",
+              message: `Updated eBay listing for product ${product.name}`,
+              details: JSON.stringify({
+                productId,
+                ebayItemId: product.ebayItemId,
+                updatedFields: Object.keys(updateData || {})
+              })
+            });
+            return {
+              success: true,
+              itemId: product.ebayItemId,
+              message: "eBay listing updated successfully"
+            };
+          } else {
+            const errorMatch = response.match(/<LongMessage>(.*?)<\/LongMessage>/);
+            const errorMessage = errorMatch ? errorMatch[1] : "Unknown eBay update error";
+            console.log("eBay update failed:", errorMessage);
+            await storage.createSyncLog({
+              source: "ebay",
+              operation: "update_listing",
+              status: "error",
+              message: `Failed to update eBay listing: ${errorMessage}`,
+              details: JSON.stringify({ productId, ebayItemId: product.ebayItemId, error: errorMessage })
+            });
+            return {
+              success: false,
+              message: `eBay update failed: ${errorMessage}`
+            };
+          }
+        } catch (error) {
+          console.error("Error updating eBay listing:", error);
+          await storage.createSyncLog({
+            source: "ebay",
+            operation: "update_listing",
+            status: "error",
+            message: `Error updating eBay listing: ${error.message}`,
+            details: JSON.stringify({ productId, error: error.message })
+          });
+          return {
+            success: false,
+            message: `Failed to update eBay listing: ${error.message}`
+          };
+        }
+      }
+      async unlistProduct(productId) {
+        try {
+          const product = await storage.getProduct(productId);
+          if (!product || !product.ebayItemId) {
+            throw new Error("Product not found or not listed on eBay");
+          }
+          console.log(`Unlisting product ${product.name} (Item ID: ${product.ebayItemId}) from eBay...`);
+          console.log("Using OAuth via header for unlisting");
+          const endItemXml = this.createEndItemXML(product.ebayItemId);
+          const responseText = await this.makeTradingApiRequest(endItemXml, "EndItem");
+          const isSuccess = responseText.includes("<Ack>Success</Ack>") || responseText.includes("<Ack>Warning</Ack>");
+          if (!isSuccess) {
+            const errorMatch = responseText.match(/<ShortMessage>(.*?)<\/ShortMessage>/) || responseText.match(/<LongMessage>(.*?)<\/LongMessage>/);
+            const errorMessage = errorMatch ? errorMatch[1] : "Unknown error occurred";
+            if (errorMessage.includes("token is hard expired") || errorMessage.includes("expired")) {
+              console.log(`Token expired for unlisting ${product.name}. eBay listing remains active.`);
+              await storage.createSyncLog({
+                source: "ebay",
+                operation: "product_unlisting",
+                status: "error",
+                message: `Failed to unlist "${product.name}" from eBay: Token expired. Product remains listed on eBay.`,
+                details: JSON.stringify({
+                  productId,
+                  itemId: product.ebayItemId,
+                  error: errorMessage,
+                  note: "Token expired - eBay listing still active"
+                })
+              });
+              return {
+                success: false,
+                message: `Failed to unlist "${product.name}" from eBay: Token expired. The product is still listed on eBay. Please refresh your eBay token to unlist products.`,
+                errors: [errorMessage]
+              };
+            }
+            throw new Error(`eBay EndItem failed: ${errorMessage}`);
+          }
+          console.log("eBay unlisting successful:", { itemId: product.ebayItemId, productId });
+          await storage.updateProduct(productId, {
+            listedOnEbay: false
+            // Don't clear ebayItemId - we need it to know this product was previously listed
+          });
+          await storage.createSyncLog({
+            source: "ebay",
+            operation: "product_unlisting",
+            status: "success",
+            message: `Successfully unlisted product "${product.name}" from eBay (Item ID: ${product.ebayItemId})`,
+            details: JSON.stringify({
+              productId,
+              itemId: product.ebayItemId,
+              ebayResponse: responseText
+            })
+          });
+          return {
+            success: true,
+            message: `Product "${product.name}" successfully unlisted from eBay`
+          };
+        } catch (error) {
+          console.error("eBay unlisting failed:", error);
+          return {
+            success: false,
+            message: `Failed to unlist product: ${error.message}`,
+            errors: [error.message]
+          };
+        }
+      }
+      /**
+       * Bulk update inventory for multiple products using eBay ReviseInventoryStatus API
+       * This is more efficient than individual ReviseFixedPriceItem calls
+       * eBay allows up to 4 SKUs per ReviseInventoryStatus call (can batch multiple calls)
+       * 
+       * @param items Array of items to update with itemId, quantity, and optionally price
+       * @returns Aggregated results for all items
+       */
+      async bulkUpdateInventory(items) {
+        if (items.length === 0) {
+          return { success: true, processed: 0, succeeded: 0, failed: 0, results: [] };
+        }
+        console.log(`\u{1F4E6} Starting bulk inventory update for ${items.length} items`);
+        const BATCH_SIZE = 4;
+        const batches = [];
+        for (let i = 0; i < items.length; i += BATCH_SIZE) {
+          batches.push(items.slice(i, i + BATCH_SIZE));
+        }
+        const allResults = [];
+        let totalSucceeded = 0;
+        let totalFailed = 0;
+        for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+          const batch = batches[batchIndex];
+          console.log(`\u23F3 Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} items)`);
+          try {
+            const batchResults = await this.processBulkInventoryBatch(batch);
+            allResults.push(...batchResults);
+            for (const result of batchResults) {
+              if (result.success) {
+                totalSucceeded++;
+              } else {
+                totalFailed++;
+              }
+            }
+            if (batchIndex < batches.length - 1) {
+              await new Promise((resolve) => setTimeout(resolve, 1e3));
+            }
+          } catch (error) {
+            console.error(`\u274C Batch ${batchIndex + 1} failed:`, error);
+            for (const item of batch) {
+              allResults.push({
+                productId: item.productId,
+                ebayItemId: item.ebayItemId,
+                success: false,
+                message: `Batch processing failed: ${error.message}`
+              });
+              totalFailed++;
+            }
+          }
+        }
+        const overallSuccess = totalFailed === 0;
+        console.log(`\u{1F4CA} Bulk update complete: ${totalSucceeded} succeeded, ${totalFailed} failed`);
+        await storage.createSyncLog({
+          source: "ebay",
+          operation: "bulk_inventory_update",
+          status: overallSuccess ? "success" : "partial",
+          message: `Bulk inventory update: ${totalSucceeded}/${items.length} items updated successfully`,
+          details: JSON.stringify({
+            processed: items.length,
+            succeeded: totalSucceeded,
+            failed: totalFailed,
+            batches: batches.length
+          })
+        });
+        return {
+          success: overallSuccess,
+          processed: items.length,
+          succeeded: totalSucceeded,
+          failed: totalFailed,
+          results: allResults
+        };
+      }
+      /**
+       * Process a single batch of inventory updates using ReviseInventoryStatus
+       */
+      async processBulkInventoryBatch(items) {
+        console.log("processBulkInventoryBatch - Using OAuth via header");
+        const inventoryStatusXml = items.map((item) => {
+          let fields = `<ItemID>${item.ebayItemId}</ItemID>`;
+          if (item.quantity !== void 0) {
+            fields += `
+        <Quantity>${item.quantity}</Quantity>`;
+          }
+          if (item.price !== void 0) {
+            fields += `
+        <StartPrice currencyID="${this.listingCurrency}">${item.price.toFixed(2)}</StartPrice>`;
+          }
+          return `<InventoryStatus>
+        ${fields}
+      </InventoryStatus>`;
+        }).join("\n      ");
+        const xml = `<?xml version="1.0" encoding="utf-8"?>
+<ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  ${inventoryStatusXml}
+</ReviseInventoryStatusRequest>`;
+        console.log("ReviseInventoryStatus XML preview:", xml.substring(0, 500) + "...");
+        try {
+          const response = await this.makeTradingApiRequest(xml, "ReviseInventoryStatus");
+          const results = [];
+          const isSuccess = response.includes("<Ack>Success</Ack>") || response.includes("<Ack>Warning</Ack>");
+          if (isSuccess) {
+            for (const item of items) {
+              const itemPattern = new RegExp(`<ItemID>${item.ebayItemId}</ItemID>`, "g");
+              const itemSuccess = response.includes(`<ItemID>${item.ebayItemId}</ItemID>`);
+              results.push({
+                productId: item.productId,
+                ebayItemId: item.ebayItemId,
+                success: itemSuccess || isSuccess,
+                // If overall success, assume all items succeeded
+                message: itemSuccess ? "Inventory updated successfully" : "Item updated (inferred from batch success)"
+              });
+              if (item.quantity !== void 0 || item.price !== void 0) {
+                const updateData = {};
+                if (item.quantity !== void 0) {
+                  updateData.stock = item.quantity;
+                }
+                if (item.price !== void 0) {
+                  updateData.salePrice = String(item.price);
+                }
+                await storage.updateProduct(item.productId, updateData);
+              }
+            }
+          } else {
+            const errorMatch = response.match(/<LongMessage>(.*?)<\/LongMessage>/);
+            const errorMessage = errorMatch ? errorMatch[1] : "Unknown eBay error";
+            for (const item of items) {
+              results.push({
+                productId: item.productId,
+                ebayItemId: item.ebayItemId,
+                success: false,
+                message: errorMessage
+              });
+            }
+          }
+          return results;
+        } catch (error) {
+          throw error;
+        }
+      }
+      /**
+       * Queue aggregation: Collect multiple updates and process them in bulk
+       * Processes when queue reaches 20 items or after timeout
+       */
+      async aggregateAndUpdateInventory(items) {
+        if (items.length < 4) {
+          const result2 = await this.bulkUpdateInventory(items);
+          return {
+            success: result2.success,
+            processed: result2.processed,
+            message: `Processed ${result2.succeeded}/${result2.processed} items successfully`
+          };
+        }
+        console.log(`\u{1F504} Aggregating ${items.length} items for bulk update`);
+        const result = await this.bulkUpdateInventory(items);
+        return {
+          success: result.success,
+          processed: result.processed,
+          message: `Bulk update: ${result.succeeded} succeeded, ${result.failed} failed`
+        };
+      }
+      /**
+       * Get eBay shipping service details using GeteBayDetails Trading API
+       * Returns valid domestic and international shipping services for the UK marketplace
+       */
+      async getShippingServices() {
+        try {
+          const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GeteBayDetailsRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <DetailName>ShippingServiceDetails</DetailName>
+</GeteBayDetailsRequest>`;
+          const response = await this.makeTradingApiRequest(xml, "GeteBayDetails");
+          const domestic = [];
+          const international = [];
+          const serviceRegex = /<ShippingServiceDetails>([\s\S]*?)<\/ShippingServiceDetails>/g;
+          let match;
+          while ((match = serviceRegex.exec(response)) !== null) {
+            const serviceBlock = match[1];
+            const validMatch = serviceBlock.match(/<ValidForSellingFlow>(true|false)<\/ValidForSellingFlow>/);
+            if (!validMatch || validMatch[1] !== "true") continue;
+            const codeMatch = serviceBlock.match(/<ShippingService>([^<]+)<\/ShippingService>/);
+            const descMatch = serviceBlock.match(/<Description>([^<]+)<\/Description>/);
+            const carrierMatch = serviceBlock.match(/<ShippingCarrier>([^<]+)<\/ShippingCarrier>/);
+            const intlMatch = serviceBlock.match(/<InternationalService>(true|false)<\/InternationalService>/);
+            const timeMinMatch = serviceBlock.match(/<ShippingTimeMin>(\d+)<\/ShippingTimeMin>/);
+            const timeMaxMatch = serviceBlock.match(/<ShippingTimeMax>(\d+)<\/ShippingTimeMax>/);
+            if (codeMatch && descMatch) {
+              const service = {
+                code: codeMatch[1],
+                description: descMatch[1],
+                carrier: carrierMatch ? carrierMatch[1] : "Other",
+                shippingTimeMin: timeMinMatch ? parseInt(timeMinMatch[1]) : 1,
+                shippingTimeMax: timeMaxMatch ? parseInt(timeMaxMatch[1]) : 5
+              };
+              if (intlMatch && intlMatch[1] === "true") {
+                international.push(service);
+              } else {
+                domestic.push(service);
+              }
+            }
+          }
+          console.log(`\u{1F4E6} Fetched ${domestic.length} domestic and ${international.length} international shipping services`);
+          return {
+            success: true,
+            domestic,
+            international
+          };
+        } catch (error) {
+          console.error("Failed to get shipping services:", error);
+          return {
+            success: false,
+            domestic: [],
+            international: [],
+            error: error.message
+          };
+        }
+      }
+      /**
+       * Get eBay shipping locations/regions using GeteBayDetails Trading API
+       */
+      async getShippingLocations() {
+        try {
+          const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GeteBayDetailsRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <DetailName>ShippingLocationDetails</DetailName>
+</GeteBayDetailsRequest>`;
+          const response = await this.makeTradingApiRequest(xml, "GeteBayDetails");
+          const regions = [];
+          const locationRegex = /<ShippingLocationDetails>([\s\S]*?)<\/ShippingLocationDetails>/g;
+          let match;
+          while ((match = locationRegex.exec(response)) !== null) {
+            const locationBlock = match[1];
+            const codeMatch = locationBlock.match(/<ShippingLocation>([^<]+)<\/ShippingLocation>/);
+            const descMatch = locationBlock.match(/<Description>([^<]+)<\/Description>/);
+            if (codeMatch) {
+              regions.push({
+                code: codeMatch[1],
+                description: descMatch ? descMatch[1] : codeMatch[1]
+              });
+            }
+          }
+          console.log(`\u{1F30D} Fetched ${regions.length} shipping locations`);
+          return {
+            success: true,
+            regions
+          };
+        } catch (error) {
+          console.error("Failed to get shipping locations:", error);
+          return {
+            success: false,
+            regions: [],
+            error: error.message
+          };
+        }
+      }
+      /**
+       * Get dispatch time options using GeteBayDetails Trading API
+       */
+      async getDispatchTimeOptions() {
+        try {
+          const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GeteBayDetailsRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <DetailName>DispatchTimeMaxDetails</DetailName>
+</GeteBayDetailsRequest>`;
+          const response = await this.makeTradingApiRequest(xml, "GeteBayDetails");
+          const options = [];
+          const optionRegex = /<DispatchTimeMaxDetails>([\s\S]*?)<\/DispatchTimeMaxDetails>/g;
+          let match;
+          while ((match = optionRegex.exec(response)) !== null) {
+            const optionBlock = match[1];
+            const valueMatch = optionBlock.match(/<DispatchTimeMax>(\d+)<\/DispatchTimeMax>/);
+            const descMatch = optionBlock.match(/<Description>([^<]+)<\/Description>/);
+            if (valueMatch) {
+              options.push({
+                value: parseInt(valueMatch[1]),
+                description: descMatch ? descMatch[1] : `${valueMatch[1]} working days`
+              });
+            }
+          }
+          console.log(`\u23F1\uFE0F Fetched ${options.length} dispatch time options`);
+          return {
+            success: true,
+            options
+          };
+        } catch (error) {
+          console.error("Failed to get dispatch time options:", error);
+          return {
+            success: false,
+            options: [],
+            error: error.message
+          };
+        }
+      }
+    };
+    ebayApi = new EbayApiService();
+  }
+});
+
+// server/ebay-inventory-api.ts
+function marketplaceId() {
+  const map = {
+    "0": "EBAY_US",
+    "3": "EBAY_GB",
+    "77": "EBAY_DE",
+    "71": "EBAY_FR",
+    "101": "EBAY_IT",
+    "186": "EBAY_ES"
+  };
+  return map[process.env.EBAY_MARKETPLACE_SITE_ID || "77"] || "EBAY_DE";
+}
+function localeFor() {
+  const map = {
+    "0": "en-US",
+    "3": "en-GB",
+    "77": "de-DE",
+    "71": "fr-FR",
+    "101": "it-IT",
+    "186": "es-ES"
+  };
+  return map[process.env.EBAY_MARKETPLACE_SITE_ID || "77"] || "de-DE";
+}
+var INV_BASE, EbayInventoryApiService, ebayInventoryApi;
+var init_ebay_inventory_api = __esm({
+  "server/ebay-inventory-api.ts"() {
+    "use strict";
+    init_ebay_oauth();
+    init_ebay_api();
+    init_shipping_policies();
+    init_stock_manager();
+    init_image_processing();
+    INV_BASE = "https://api.ebay.com/sell/inventory/v1";
+    EbayInventoryApiService = class {
+      currency = process.env.EBAY_LISTING_CURRENCY || "EUR";
+      merchantLocationKey = process.env.EBAY_MERCHANT_LOCATION_KEY || "default-location";
+      // Cache the required-aspect spec per category (one Taxonomy call each).
+      aspectCache = /* @__PURE__ */ new Map();
+      /**
+       * Fetch the REQUIRED item aspects for a category (Taxonomy API), cached.
+       * eBay rejects publish if a category-required aspect (e.g. "Produktart")
+       * is missing, and the set differs per category — so we discover them.
+       */
+      async getRequiredAspects(categoryId) {
+        if (this.aspectCache.has(categoryId)) return this.aspectCache.get(categoryId);
+        const treeId = process.env.EBAY_MARKETPLACE_SITE_ID || "77";
+        try {
+          const token = await ebayOAuth.getValidAccessToken();
+          const url = `https://api.ebay.com/commerce/taxonomy/v1/category_tree/${treeId}/get_item_aspects_for_category?category_id=${encodeURIComponent(categoryId)}`;
+          const resp = await fetch(url, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: "application/json",
+              "Accept-Language": localeFor(),
+              "X-EBAY-C-MARKETPLACE-ID": marketplaceId()
+            }
+          });
+          if (!resp.ok) return [];
+          const data = await resp.json();
+          const required = (data?.aspects || []).filter((a) => a?.aspectConstraint?.aspectRequired).map((a) => ({
+            name: a.localizedAspectName,
+            values: (a.aspectValues || []).map((v) => v.localizedValue)
+          }));
+          this.aspectCache.set(categoryId, required);
+          return required;
+        } catch {
+          return [];
+        }
+      }
+      /**
+       * Build the aspects object satisfying a category's required aspects.
+       * Brand/MPN get the accepted no-info combo; other required aspects get a
+       * sensible value (prefer "Sonstige/Other/Nicht zutreffend", else the
+       * first allowed value, else free-text "Sonstige").
+       */
+      async buildAspects(product, categoryId) {
+        const aspects = {};
+        const required = await this.getRequiredAspects(categoryId);
+        for (const a of required) {
+          const lname = a.name.toLowerCase();
+          if (lname === "marke" || lname === "brand") {
+            aspects[a.name] = ["Markenlos"];
+          } else if (lname === "herstellernummer" || lname === "mpn") {
+            aspects[a.name] = ["Nicht zutreffend"];
+          } else if (a.values.length > 0) {
+            const generic = a.values.find((v) => /sonst|other|nicht zutreffend|n\/a/i.test(v));
+            aspects[a.name] = [generic || a.values[0]];
+          } else {
+            aspects[a.name] = ["Sonstige"];
+          }
+        }
+        if (!aspects["Marke"] && !aspects["Brand"]) aspects["Marke"] = ["Markenlos"];
+        if (!aspects["Herstellernummer"] && !aspects["MPN"]) aspects["Herstellernummer"] = ["Nicht zutreffend"];
+        return aspects;
+      }
+      async headers() {
+        const token = await ebayOAuth.getValidAccessToken();
+        const locale = localeFor();
+        return {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "Content-Language": locale,
+          "Accept-Language": locale,
+          "X-EBAY-C-MARKETPLACE-ID": marketplaceId()
+        };
+      }
+      async req(method, path2, body) {
+        const resp = await fetch(`${INV_BASE}${path2}`, {
+          method,
+          headers: await this.headers(),
+          body: body !== void 0 ? JSON.stringify(body) : void 0
+        });
+        const text2 = await resp.text();
+        let data = null;
+        try {
+          data = text2 ? JSON.parse(text2) : null;
+        } catch {
+        }
+        return { ok: resp.ok, status: resp.status, data, text: text2 };
+      }
+      firstEbayError(data, text2) {
+        const e = data?.errors?.[0];
+        if (e) return `${e.errorId ?? ""} ${e.message ?? ""} ${e.parameters ? JSON.stringify(e.parameters) : ""}`.trim();
+        return (text2 || "").slice(0, 400);
+      }
+      /**
+       * Ensure a merchant inventory location exists (required to publish
+       * offers). Idempotent: a 409/already-exists is treated as success.
+       */
+      async ensureMerchantLocation() {
+        const got = await this.req("GET", `/location/${this.merchantLocationKey}`);
+        if (got.ok) return { step: "location", ok: true, httpStatus: got.status, data: { existing: true } };
+        const body = {
+          location: {
+            address: {
+              addressLine1: process.env.EBAY_LOCATION_ADDRESS || "Riga",
+              city: process.env.EBAY_LOCATION_CITY || "Riga",
+              postalCode: process.env.EBAY_LOCATION_POSTAL || "LV-1001",
+              country: process.env.EBAY_LISTING_COUNTRY || "LV"
+            }
+          },
+          locationInstructions: "Ships from EU warehouse",
+          name: process.env.EBAY_LOCATION_NAME || "EU Warehouse",
+          merchantLocationStatus: "ENABLED",
+          locationTypes: ["WAREHOUSE"]
+        };
+        const created = await this.req("POST", `/location/${this.merchantLocationKey}`, body);
+        if (created.ok || created.status === 204) {
+          return { step: "location", ok: true, httpStatus: created.status, data: { created: true } };
+        }
+        if (created.status === 409) {
+          return { step: "location", ok: true, httpStatus: 409, data: { existing: true } };
+        }
+        return { step: "location", ok: false, httpStatus: created.status, error: this.firstEbayError(created.data, created.text) };
+      }
+      /** Resolve the image URL(s) for a product (Blob-processed when available). */
+      async resolveImages(product) {
+        if (!product.imageUrl) return [];
+        const fixed = product.imageUrl.startsWith("//") ? "https:" + product.imageUrl : product.imageUrl;
+        const hasBlob = !!process.env.BLOB_READ_WRITE_TOKEN;
+        const publicBaseUrl = process.env.PUBLIC_BASE_URL || process.env.REPL_URL;
+        if (!hasBlob && !publicBaseUrl) return [fixed];
+        try {
+          const r = await imageProcessingService.removeWatermark(fixed);
+          if (r.success && r.processedImageUrl) {
+            return [r.processedImageUrl.startsWith("http") ? r.processedImageUrl : `${publicBaseUrl}${r.processedImageUrl}`];
+          }
+        } catch {
+        }
+        return [fixed];
+      }
+      /** Build the inventory_item payload from a product. */
+      async buildInventoryItem(product, categoryId) {
+        const stock = calculateEbayStock(product).ebayStock;
+        const images = await this.resolveImages(product);
+        const title = filterBundleWords(product.name).slice(0, 80);
+        const weightG = product.weight ? parseFloat(product.weight) : 0;
+        const aspects = await this.buildAspects(product, categoryId);
+        return {
+          availability: { shipToLocationAvailability: { quantity: Math.max(0, stock) } },
+          condition: "NEW",
+          product: {
+            title,
+            description: title,
+            // offer carries the rich HTML description
+            aspects,
+            imageUrls: images,
+            brand: "Markenlos",
+            mpn: "Nicht zutreffend"
+          },
+          packageWeightAndSize: weightG > 0 ? { weight: { value: weightG, unit: "GRAM" } } : void 0
+        };
+      }
+      async createOrReplaceInventoryItem(sku, product, categoryId) {
+        const item = await this.buildInventoryItem(product, categoryId);
+        const quantity = item.availability.shipToLocationAvailability.quantity;
+        const r = await this.req("PUT", `/inventory_item/${encodeURIComponent(sku)}`, item);
+        if (r.ok || r.status === 204) return { step: "inventory_item", ok: true, httpStatus: r.status, quantity, aspects: item.product.aspects };
+        return { step: "inventory_item", ok: false, httpStatus: r.status, quantity, aspects: item.product.aspects, error: this.firstEbayError(r.data, r.text) };
+      }
+      /** Build an offer payload (price/qty/policies/category) for a SKU. */
+      async buildOffer(product, categoryId) {
+        const stock = calculateEbayStock(product).ebayStock;
+        const price = parseFloat(product.salePrice) || 0;
+        const shippingPolicyId = getShippingPolicyId(product.weight ? parseFloat(product.weight) : void 0);
+        let description = product.description || product.name;
+        try {
+          const { generateUnifiedEbayTemplate: generateUnifiedEbayTemplate2 } = await Promise.resolve().then(() => (init_ebay_unified_template(), ebay_unified_template_exports));
+          const tpl = generateUnifiedEbayTemplate2(product);
+          description = tpl?.htmlDescription || tpl?.description || description;
+        } catch {
+        }
+        return {
+          sku: product.sku,
+          marketplaceId: marketplaceId(),
+          format: "FIXED_PRICE",
+          availableQuantity: Math.max(0, stock),
+          categoryId,
+          listingDescription: String(description).slice(0, 5e5),
+          listingPolicies: {
+            paymentPolicyId: process.env.EBAY_PAYMENT_PROFILE_ID,
+            returnPolicyId: process.env.EBAY_RETURN_PROFILE_ID,
+            fulfillmentPolicyId: shippingPolicyId
+          },
+          pricingSummary: { price: { value: price.toFixed(2), currency: this.currency } },
+          merchantLocationKey: this.merchantLocationKey
+        };
+      }
+      /** Create an offer; if one already exists for the SKU, reuse its id. */
+      async createOffer(product, categoryId) {
+        const payload = await this.buildOffer(product, categoryId);
+        const r = await this.req("POST", `/offer`, payload);
+        if (r.ok && r.data?.offerId) return { step: "offer", ok: true, httpStatus: r.status, offerId: r.data.offerId };
+        const existing = r.data?.errors?.find((e) => String(e.errorId) === "25002");
+        const offerIdParam = existing?.parameters?.find((p) => p.name === "offerId")?.value;
+        if (offerIdParam) {
+          await this.req("PUT", `/offer/${offerIdParam}`, payload);
+          return { step: "offer", ok: true, httpStatus: r.status, offerId: offerIdParam, data: { reused: true } };
+        }
+        return { step: "offer", ok: false, httpStatus: r.status, error: this.firstEbayError(r.data, r.text) };
+      }
+      async publishOffer(offerId) {
+        const r = await this.req("POST", `/offer/${offerId}/publish`, {});
+        if (r.ok && r.data?.listingId) return { step: "publish", ok: true, httpStatus: r.status, listingId: r.data.listingId };
+        return { step: "publish", ok: false, httpStatus: r.status, error: this.firstEbayError(r.data, r.text) };
+      }
+      // ─── Bulk operations (25 SKUs/call) for the listing ramp & updates ───
+      /**
+       * Create/replace up to 25 inventory items in one call. Each product is
+       * resolved to its category (for aspects) via the Taxonomy resolver.
+       * Returns per-SKU ok/error.
+       */
+      async bulkCreateOrReplaceInventoryItem(items) {
+        const out = /* @__PURE__ */ new Map();
+        const requests = [];
+        for (const { product, categoryId } of items.slice(0, 25)) {
+          requests.push({ sku: product.sku, ...await this.buildInventoryItem(product, categoryId) });
+        }
+        const r = await this.req("POST", `/bulk_create_or_replace_inventory_item`, { requests });
+        const responses = r.data?.responses || [];
+        for (const resp of responses) {
+          const ok = resp.statusCode >= 200 && resp.statusCode < 300;
+          out.set(resp.sku, { ok, error: ok ? void 0 : this.firstEbayError(resp, JSON.stringify(resp)) });
+        }
+        if (!r.ok && responses.length === 0) {
+          for (const { product } of items.slice(0, 25)) out.set(product.sku, { ok: false, error: this.firstEbayError(r.data, r.text) });
+        }
+        return out;
+      }
+      /** Create up to 25 offers. Returns per-SKU offerId or error. */
+      async bulkCreateOffer(items) {
+        const out = /* @__PURE__ */ new Map();
+        const requests = [];
+        for (const { product, categoryId } of items.slice(0, 25)) {
+          requests.push(await this.buildOffer(product, categoryId));
+        }
+        const r = await this.req("POST", `/bulk_create_offer`, { requests });
+        const responses = r.data?.responses || [];
+        for (const resp of responses) {
+          const ok = resp.statusCode >= 200 && resp.statusCode < 300 && resp.offerId;
+          if (ok) {
+            out.set(resp.sku, { ok: true, offerId: resp.offerId });
+            continue;
+          }
+          const existing = resp.errors?.find((e) => String(e.errorId) === "25002");
+          const offerIdParam = existing?.parameters?.find((p) => p.name === "offerId")?.value;
+          if (offerIdParam) out.set(resp.sku, { ok: true, offerId: offerIdParam });
+          else out.set(resp.sku, { ok: false, error: this.firstEbayError(resp, JSON.stringify(resp)) });
+        }
+        if (!r.ok && responses.length === 0) {
+          for (const { product } of items.slice(0, 25)) out.set(product.sku, { ok: false, error: this.firstEbayError(r.data, r.text) });
+        }
+        return out;
+      }
+      /** Publish up to 25 offers. Returns per-offer listingId or error. */
+      async bulkPublishOffer(offers) {
+        const out = /* @__PURE__ */ new Map();
+        const requests = offers.slice(0, 25).map((o) => ({ offerId: o.offerId }));
+        const bySku = new Map(offers.map((o) => [o.offerId, o.sku]));
+        const r = await this.req("POST", `/bulk_publish_offer`, { requests });
+        const responses = r.data?.responses || [];
+        for (const resp of responses) {
+          const sku = bySku.get(resp.offerId) || resp.offerId;
+          const ok = resp.statusCode >= 200 && resp.statusCode < 300 && resp.listingId;
+          out.set(sku, ok ? { ok: true, listingId: resp.listingId } : { ok: false, error: this.firstEbayError(resp, JSON.stringify(resp)) });
+        }
+        if (!r.ok && responses.length === 0) {
+          for (const o of offers.slice(0, 25)) out.set(o.sku, { ok: false, error: this.firstEbayError(r.data, r.text) });
+        }
+        return out;
+      }
+      /**
+       * Update price + available quantity for up to 25 SKUs (the hot path).
+       * `items` carry the offerId, new quantity and price.
+       */
+      async bulkUpdatePriceQuantity(items) {
+        const out = /* @__PURE__ */ new Map();
+        const requests = items.slice(0, 25).map((it) => ({
+          sku: it.sku,
+          shipToLocationAvailability: { quantity: Math.max(0, it.quantity) },
+          offers: [{ offerId: it.offerId, availableQuantity: Math.max(0, it.quantity), price: { value: it.price.toFixed(2), currency: this.currency } }]
+        }));
+        const r = await this.req("POST", `/bulk_update_price_quantity`, { requests });
+        const responses = r.data?.responses || [];
+        for (const resp of responses) {
+          const ok = resp.statusCode >= 200 && resp.statusCode < 300;
+          out.set(resp.sku, { ok, error: ok ? void 0 : this.firstEbayError(resp, JSON.stringify(resp)) });
+        }
+        if (!r.ok && responses.length === 0) {
+          for (const it of items.slice(0, 25)) out.set(it.sku, { ok: false, error: this.firstEbayError(r.data, r.text) });
+        }
+        return out;
+      }
+      /** Resolve a product's eBay category via the Taxonomy resolver (cached upstream). */
+      async resolveCategory(product) {
+        try {
+          const s = await ebayApi.getSuggestedCategory(`${product.category} ${product.name}`.slice(0, 80));
+          return s?.id || process.env.EBAY_DEFAULT_CATEGORY_ID || "";
+        } catch {
+          return process.env.EBAY_DEFAULT_CATEGORY_ID || "";
+        }
+      }
+      /** End a live listing by withdrawing its offer (keeps the inventory item). */
+      async withdrawOffer(offerId) {
+        const r = await this.req("POST", `/offer/${offerId}/withdraw`, {});
+        if (r.ok || r.status === 200 || r.status === 204) return { step: "withdraw", ok: true, httpStatus: r.status };
+        if (r.status === 400 && /not.*published|already|25710|withdraw/i.test(r.text)) {
+          return { step: "withdraw", ok: true, httpStatus: r.status, data: { note: "already ended" } };
+        }
+        return { step: "withdraw", ok: false, httpStatus: r.status, error: this.firstEbayError(r.data, r.text) };
+      }
+      /**
+       * Full single-SKU flow: location -> inventory item -> offer -> publish.
+       * Returns every step so failures are precisely visible. Used by the
+       * diagnostic and (later) the per-item listing path.
+       */
+      async listSingleProduct(productId, getProduct) {
+        const steps = [];
+        const product = await getProduct(productId);
+        if (!product) return { ok: false, steps: [{ step: "product", ok: false, error: "Product not found" }] };
+        const loc = await this.ensureMerchantLocation();
+        steps.push(loc);
+        if (!loc.ok) return { ok: false, sku: product.sku, steps };
+        let categoryId = "";
+        try {
+          const suggested = await ebayApi.getSuggestedCategory(`${product.category} ${product.name}`.slice(0, 80));
+          categoryId = suggested?.id || process.env.EBAY_DEFAULT_CATEGORY_ID || "";
+        } catch {
+          categoryId = process.env.EBAY_DEFAULT_CATEGORY_ID || "";
+        }
+        steps.push({ step: "category", ok: !!categoryId, data: { categoryId } });
+        if (!categoryId) return { ok: false, sku: product.sku, steps };
+        const inv = await this.createOrReplaceInventoryItem(product.sku, product, categoryId);
+        steps.push(inv);
+        if (!inv.ok) return { ok: false, sku: product.sku, steps };
+        const offer = await this.createOffer(product, categoryId);
+        steps.push(offer);
+        if (!offer.ok || !offer.offerId) return { ok: false, sku: product.sku, steps };
+        const pub = await this.publishOffer(offer.offerId);
+        steps.push(pub);
+        return {
+          ok: pub.ok,
+          sku: product.sku,
+          offerId: offer.offerId,
+          listingId: pub.listingId,
+          steps
+        };
+      }
+    };
+    ebayInventoryApi = new EbayInventoryApiService();
+  }
+});
+
 // server/dynamic-pricing.ts
 var dynamic_pricing_exports = {};
 __export(dynamic_pricing_exports, {
@@ -2867,6 +5700,100 @@ var init_dynamic_pricing = __esm({
   }
 });
 
+// server/ebay-lister.ts
+var ebay_lister_exports = {};
+__export(ebay_lister_exports, {
+  listProductsViaInventory: () => listProductsViaInventory,
+  updateListedProductsViaInventory: () => updateListedProductsViaInventory
+});
+async function listProductsViaInventory(products2) {
+  const results = [];
+  let published = 0;
+  let failed = 0;
+  let limitHit = false;
+  for (let i = 0; i < products2.length && !limitHit; i += 25) {
+    const chunk = products2.slice(i, i + 25);
+    const withCat = [];
+    for (const p of chunk) {
+      withCat.push({ product: p, categoryId: await ebayInventoryApi.resolveCategory(p) });
+    }
+    const invRes = await ebayInventoryApi.bulkCreateOrReplaceInventoryItem(withCat);
+    const offerInput = withCat.filter((w) => invRes.get(w.product.sku)?.ok);
+    const offerRes = await ebayInventoryApi.bulkCreateOffer(offerInput);
+    const toPublish = [];
+    for (const w of offerInput) {
+      const o = offerRes.get(w.product.sku);
+      if (o?.ok && o.offerId) toPublish.push({ sku: w.product.sku, offerId: o.offerId });
+    }
+    const pubRes = toPublish.length ? await ebayInventoryApi.bulkPublishOffer(toPublish) : /* @__PURE__ */ new Map();
+    for (const w of chunk) {
+      const sku = w.product.sku;
+      const inv = invRes.get(sku);
+      const offer = offerRes.get(sku);
+      const pub = pubRes.get(sku);
+      if (pub?.ok && pub.listingId) {
+        published++;
+        await storage.updateProduct(w.product.id, {
+          listedOnEbay: true,
+          ebayOfferId: offer?.offerId ?? null,
+          ebayListingId: pub.listingId,
+          ebayItemId: pub.listingId,
+          ebayListingStatus: "published",
+          ebayListingError: null
+        });
+        results.push({ sku, ok: true, listingId: pub.listingId });
+      } else {
+        failed++;
+        const err = pub?.error || offer?.error || inv?.error || "unknown error";
+        const status = offer?.offerId ? "offer_created" : inv?.ok ? "inventory_created" : "error";
+        await storage.updateProduct(w.product.id, {
+          ebayOfferId: offer?.offerId ?? null,
+          ebayListingStatus: status,
+          ebayListingError: String(err).slice(0, 500)
+        });
+        results.push({ sku, ok: false, error: String(err) });
+        if (LIMIT_RX.test(String(err))) limitHit = true;
+      }
+    }
+  }
+  return { attempted: products2.length, published, failed, limitHit, results };
+}
+async function updateListedProductsViaInventory(items) {
+  let updated = 0;
+  let failed = 0;
+  let limitHit = false;
+  for (let i = 0; i < items.length && !limitHit; i += 25) {
+    const chunk = items.slice(i, i + 25).filter((it) => it.product.ebayOfferId);
+    if (chunk.length === 0) continue;
+    const res = await ebayInventoryApi.bulkUpdatePriceQuantity(
+      chunk.map((it) => ({
+        sku: it.product.sku,
+        offerId: it.product.ebayOfferId,
+        quantity: it.quantity,
+        price: it.price
+      }))
+    );
+    for (const it of chunk) {
+      const r = res.get(it.product.sku);
+      if (r?.ok) updated++;
+      else {
+        failed++;
+        if (LIMIT_RX.test(String(r?.error))) limitHit = true;
+      }
+    }
+  }
+  return { updated, failed, limitHit };
+}
+var LIMIT_RX;
+var init_ebay_lister = __esm({
+  "server/ebay-lister.ts"() {
+    "use strict";
+    init_storage();
+    init_ebay_inventory_api();
+    LIMIT_RX = /\blimit\b|too many|rate.?limit|2001\b|21917|exceed/i;
+  }
+});
+
 // server/app.ts
 init_db();
 import express from "express";
@@ -2877,2664 +5804,12 @@ import connectPgSimple from "connect-pg-simple";
 init_storage();
 init_schema();
 init_tme_api();
+init_ebay_api();
+init_ebay_inventory_api();
+init_ebay_oauth();
 import { createServer } from "http";
 import { ZodError } from "zod";
 import bcrypt2 from "bcryptjs";
-
-// server/ebay-api.ts
-init_storage();
-init_ebay_oauth();
-
-// server/ebay-listing-template.ts
-function generateEbayListing(product) {
-  const specs = parseProductSpecs(product);
-  const category = determineProductCategory(product);
-  return {
-    title: generateTitle(product, specs),
-    description: generateDescription(product, specs, category),
-    htmlDescription: generateHtmlDescription(product, specs, category),
-    subtitle: generateSubtitle(product, specs),
-    keywords: generateKeywords(product, specs, category)
-  };
-}
-function generateTitle(product, specs) {
-  let name = product.name || "Electronic Component";
-  const manufacturer = specs.manufacturer || specs.brand || "";
-  const model = specs.model || specs.partNumber || "";
-  const category = specs.category || "Electronics";
-  if (product.isMultipack && product.minOrderQuantity && product.minOrderQuantity > 1) {
-    if (!name.match(/^\d+x\s/)) {
-      name = `${product.minOrderQuantity}x ${name}`;
-    }
-  }
-  const components = [
-    name,
-    model ? `- ${model}` : "",
-    manufacturer ? `| ${manufacturer}` : "",
-    "| Fast EU Shipping"
-  ].filter(Boolean);
-  let title = components.join(" ");
-  if (title.length > 80) {
-    title = `${name} ${model} | ${manufacturer} | EU Stock`.slice(0, 80);
-  }
-  return title;
-}
-function generateSubtitle(product, specs) {
-  const features = [];
-  if (specs.voltage) features.push(`${specs.voltage}V`);
-  if (specs.current) features.push(`${specs.current}A`);
-  if (specs.power) features.push(`${specs.power}W`);
-  if (specs.frequency) features.push(`${specs.frequency}Hz`);
-  const subtitle = features.length > 0 ? `Professional Grade | ${features.slice(0, 2).join(" | ")}` : "Professional Electronics | Fast Dispatch";
-  return subtitle.slice(0, 55);
-}
-function generateDescription(product, specs, category) {
-  const sections = [];
-  sections.push(`\u{1F527} PROFESSIONAL ${(product.name || "").toUpperCase()}`);
-  sections.push("\u2705 High quality electronic component");
-  sections.push("\u2705 Genuine manufacturer specifications");
-  sections.push("\u2705 Technical documentation included");
-  sections.push("\u2705 Dispatch from EU warehouse within 2-3 days");
-  sections.push("");
-  sections.push("\u{1F4CB} TECHNICAL SPECIFICATIONS:");
-  Object.entries(specs).forEach(([key, value]) => {
-    if (value && isValidSpec(key)) {
-      sections.push(`\u2022 ${formatSpecName(key)}: ${value}`);
-    }
-  });
-  sections.push("");
-  sections.push("\u{1F3ED} MANUFACTURER INFORMATION:");
-  if (specs.manufacturer) sections.push(`Brand: ${specs.manufacturer}`);
-  if (specs.model) sections.push(`Model: ${specs.model}`);
-  if (specs.partNumber) sections.push(`Part Number: ${specs.partNumber}`);
-  if (product.sku) sections.push(`SKU: ${product.sku}`);
-  if (product.ean) sections.push(`EAN: ${product.ean}`);
-  sections.push("");
-  sections.push("\u{1F4E6} PACKAGE CONTENTS:");
-  if (product.isMultipack && product.minOrderQuantity && product.minOrderQuantity > 1) {
-    const baseProductName = product.name?.replace(/^\d+x\s/, "") || "Electronic Component";
-    sections.push(`**THIS IS A PACK OF ${product.minOrderQuantity} PIECES**`);
-    sections.push(`\u2022 ${product.minOrderQuantity}x ${baseProductName}`);
-    sections.push(`\u2022 Sold as a complete pack only`);
-    sections.push(`\u2022 Cannot be split or sold individually`);
-    const perPiecePrice = (parseFloat(product.salePrice) / product.minOrderQuantity).toFixed(2);
-    sections.push(`\u2022 Effective price per piece: \u20AC${perPiecePrice}`);
-  } else {
-    sections.push(`\u2022 1x ${product.name || "Electronic Component"}`);
-  }
-  if (specs.accessories) {
-    specs.accessories.toString().split(",").forEach((accessory) => {
-      sections.push(`\u2022 ${accessory.trim()}`);
-    });
-  }
-  sections.push("\u2022 Technical datasheet (PDF)");
-  sections.push("");
-  const applications = getApplications(category);
-  if (applications.length > 0) {
-    sections.push("\u{1F4A1} TYPICAL APPLICATIONS:");
-    applications.forEach((app) => sections.push(`\u2022 ${app}`));
-    sections.push("");
-  }
-  sections.push("\u{1F69A} FAST EU SHIPPING | \u{1F4DE} TECHNICAL SUPPORT | \u{1F4AF} QUALITY GUARANTEE");
-  sections.push("");
-  sections.push("Professional electronics supplier serving makers, engineers, and hobbyists.");
-  sections.push("All products tested and verified before dispatch.");
-  return sections.join("\n");
-}
-function generateHtmlDescription(product, specs, category) {
-  const plainDescription = generateDescription(product, specs, category);
-  let html = plainDescription.replace(/🔧 PROFESSIONAL (.*)/g, '<h2 style="color: #0066cc;">\u{1F527} $1</h2>').replace(/📋 TECHNICAL SPECIFICATIONS:/g, '<h3 style="color: #333;">\u{1F4CB} TECHNICAL SPECIFICATIONS:</h3>').replace(/🏭 MANUFACTURER INFORMATION:/g, '<h3 style="color: #333;">\u{1F3ED} MANUFACTURER INFORMATION:</h3>').replace(/📦 PACKAGE CONTENTS:/g, '<h3 style="color: #333;">\u{1F4E6} PACKAGE CONTENTS:</h3>').replace(/💡 TYPICAL APPLICATIONS:/g, '<h3 style="color: #333;">\u{1F4A1} TYPICAL APPLICATIONS:</h3>').replace(/✅ (.*)/g, '<div style="color: #009900;">\u2705 $1</div>').replace(/• (.*)/g, "<li>$1</li>").replace(/\n\n/g, "</ul><br><ul>").replace(/\n/g, "");
-  return `
-    <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;">
-      ${html}
-      <br><br>
-      <div style="background: #f5f5f5; padding: 15px; border-radius: 5px; text-align: center;">
-        <strong>\u{1F69A} FAST EU SHIPPING | \u{1F4DE} TECHNICAL SUPPORT | \u{1F4AF} QUALITY GUARANTEE</strong>
-      </div>
-    </div>
-  `;
-}
-function generateKeywords(product, specs, category) {
-  const keywords = /* @__PURE__ */ new Set();
-  if (product.name) {
-    product.name.split(/\s+/).forEach((word) => {
-      if (word.length > 2) keywords.add(word.toLowerCase());
-    });
-  }
-  Object.values(specs).forEach((value) => {
-    if (typeof value === "string" && value.length > 2) {
-      keywords.add(value.toLowerCase());
-    }
-  });
-  keywords.add(category.toLowerCase());
-  keywords.add("electronics");
-  keywords.add("component");
-  keywords.add("arduino");
-  keywords.add("raspberry pi");
-  keywords.add("diy");
-  keywords.add("maker");
-  keywords.add("engineering");
-  return Array.from(keywords).slice(0, 20);
-}
-function parseProductSpecs(product) {
-  const specs = {};
-  const text2 = `${product.name || ""} ${product.description || ""}`.toLowerCase();
-  const voltageMatch = text2.match(/(\d+(?:\.\d+)?)\s*v(?:olt)?/i);
-  if (voltageMatch) specs.voltage = voltageMatch[1];
-  const currentMatch = text2.match(/(\d+(?:\.\d+)?)\s*(?:ma|a|amp)/i);
-  if (currentMatch) specs.current = currentMatch[1];
-  const powerMatch = text2.match(/(\d+(?:\.\d+)?)\s*w(?:att)?/i);
-  if (powerMatch) specs.power = powerMatch[1];
-  const freqMatch = text2.match(/(\d+(?:\.\d+)?)\s*(?:hz|khz|mhz|ghz)/i);
-  if (freqMatch) specs.frequency = freqMatch[1];
-  const tempMatch = text2.match(/(-?\d+(?:\.\d+)?)\s*°?c/i);
-  if (tempMatch) specs.operatingTemp = tempMatch[1];
-  if (product.description?.includes("Arduino")) specs.manufacturer = "Arduino";
-  if (product.description?.includes("Raspberry")) specs.manufacturer = "Raspberry Pi Foundation";
-  if (product.name?.includes("ESP32")) specs.manufacturer = "Espressif";
-  if (product.sku) specs.partNumber = product.sku;
-  if (product.ean) specs.ean = product.ean;
-  return specs;
-}
-function determineProductCategory(product) {
-  const text2 = `${product.name || ""} ${product.description || ""}`.toLowerCase();
-  if (text2.includes("arduino") || text2.includes("microcontroller")) return "Microcontrollers";
-  if (text2.includes("sensor") || text2.includes("temperature") || text2.includes("humidity")) return "Sensors";
-  if (text2.includes("led") || text2.includes("light")) return "LED & Lighting";
-  if (text2.includes("resistor") || text2.includes("capacitor") || text2.includes("inductor")) return "Passive Components";
-  if (text2.includes("ic") || text2.includes("chip") || text2.includes("processor")) return "Integrated Circuits";
-  if (text2.includes("connector") || text2.includes("cable") || text2.includes("wire")) return "Connectors & Cables";
-  if (text2.includes("power") || text2.includes("supply") || text2.includes("battery")) return "Power Management";
-  if (text2.includes("display") || text2.includes("lcd") || text2.includes("oled")) return "Displays";
-  return "Electronics";
-}
-function getApplications(category) {
-  const applicationMap = {
-    "Microcontrollers": [
-      "IoT projects and smart devices",
-      "Robotics and automation",
-      "Prototyping and development",
-      "Educational projects",
-      "Home automation systems"
-    ],
-    "Sensors": [
-      "Environmental monitoring",
-      "Weather stations",
-      "Security systems",
-      "Industrial automation",
-      "Scientific instruments"
-    ],
-    "LED & Lighting": [
-      "Indicator lights",
-      "Decorative lighting",
-      "Status displays",
-      "Automotive applications",
-      "Architectural lighting"
-    ],
-    "Passive Components": [
-      "Circuit protection",
-      "Signal filtering",
-      "Power conditioning",
-      "Timing circuits",
-      "Impedance matching"
-    ],
-    "Power Management": [
-      "Battery charging",
-      "Voltage regulation",
-      "Power conversion",
-      "Energy harvesting",
-      "Portable devices"
-    ]
-  };
-  return applicationMap[category] || [
-    "Electronic projects",
-    "Prototyping",
-    "Repair and maintenance",
-    "Educational use",
-    "Professional development"
-  ];
-}
-function isValidSpec(key) {
-  const irrelevantKeys = ["id", "createdAt", "updatedAt", "description", "name"];
-  return !irrelevantKeys.includes(key) && key.length > 1;
-}
-function formatSpecName(key) {
-  const nameMap = {
-    "partNumber": "Part Number",
-    "operatingTemp": "Operating Temperature",
-    "voltage": "Operating Voltage",
-    "current": "Current Rating",
-    "power": "Power Rating",
-    "frequency": "Frequency",
-    "manufacturer": "Manufacturer",
-    "model": "Model",
-    "ean": "EAN Code"
-  };
-  return nameMap[key] || key.replace(/([A-Z])/g, " $1").replace(/^./, (str) => str.toUpperCase());
-}
-
-// server/stock-manager.ts
-function calculateEbayStock(product) {
-  const tmeStock = product.stock;
-  const ebayLimit = product.ebayStockLimit || 2;
-  const useLimit = product.useStockLimit !== false;
-  if (!useLimit) {
-    return {
-      tmeStock,
-      ebayStock: tmeStock,
-      isLimited: false,
-      limitReason: "Stock limit disabled for this product"
-    };
-  }
-  if (tmeStock === 0) {
-    return {
-      tmeStock: 0,
-      ebayStock: 0,
-      isLimited: false,
-      limitReason: "Out of stock"
-    };
-  }
-  if (tmeStock <= ebayLimit) {
-    return {
-      tmeStock,
-      ebayStock: tmeStock,
-      isLimited: false,
-      limitReason: "TME stock below eBay limit"
-    };
-  }
-  return {
-    tmeStock,
-    ebayStock: ebayLimit,
-    isLimited: true,
-    limitReason: `Limited to ${ebayLimit} units to preserve eBay account limits`
-  };
-}
-function calculateBulkEbayStock(products2) {
-  return products2.map((product) => ({
-    id: product.id,
-    stockInfo: calculateEbayStock(product)
-  }));
-}
-function validateStockLimit(limit) {
-  if (!Number.isInteger(limit) || limit < 1) {
-    return { valid: false, error: "Stock limit must be a positive integer" };
-  }
-  if (limit > 999) {
-    return { valid: false, error: "Stock limit cannot exceed 999 units" };
-  }
-  return { valid: true };
-}
-function getRecommendedStockLimit(category) {
-  const categoryLimits = {
-    "Arduino Boards": 3,
-    "Development Boards": 3,
-    "Microcontrollers": 5,
-    "Sensors": 10,
-    "Electronic Components": 15,
-    "Resistors": 25,
-    "Capacitors": 25,
-    "LEDs": 20,
-    "Connectors": 10,
-    "Default": 3
-  };
-  return categoryLimits[category] || categoryLimits["Default"];
-}
-
-// server/tme-ebay-category-mapping.ts
-var TME_EBAY_CATEGORY_MAPPINGS = [
-  // Arduino and Development Boards
-  {
-    tmeCategory: "Development Boards",
-    tmeCategoryKeywords: ["arduino", "development", "board", "evaluation", "dev board", "microcontroller board"],
-    ebayCategory: "58277",
-    // Electronic Components - Other
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 9
-  },
-  {
-    tmeCategory: "Arduino Compatible",
-    tmeCategoryKeywords: ["arduino", "uno", "nano", "mega", "leonardo", "pro mini"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 10
-  },
-  // Microcontrollers and Processors
-  {
-    tmeCategory: "Microcontrollers",
-    tmeCategoryKeywords: ["microcontroller", "mcu", "pic", "atmega", "esp32", "esp8266", "stm32"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 9
-  },
-  {
-    tmeCategory: "Processors",
-    tmeCategoryKeywords: ["processor", "cpu", "arm", "cortex", "risc"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 8
-  },
-  // Passive Components
-  {
-    tmeCategory: "Resistors",
-    tmeCategoryKeywords: ["resistor", "resistance", "ohm", "carbon", "metal film", "precision"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 10
-  },
-  {
-    tmeCategory: "Capacitors",
-    tmeCategoryKeywords: ["capacitor", "ceramic", "electrolytic", "tantalum", "film", "farad", "uf", "pf"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 10
-  },
-  {
-    tmeCategory: "Inductors",
-    tmeCategoryKeywords: ["inductor", "coil", "choke", "henry", "ferrite"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 9
-  },
-  // Semiconductors
-  {
-    tmeCategory: "Transistors",
-    tmeCategoryKeywords: ["transistor", "bjt", "fet", "mosfet", "jfet", "igbt", "npn", "pnp"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 10
-  },
-  {
-    tmeCategory: "Diodes",
-    tmeCategoryKeywords: ["diode", "led", "zener", "schottky", "rectifier", "photodiode"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 10
-  },
-  {
-    tmeCategory: "THT universal diodes",
-    tmeCategoryKeywords: ["diode", "rectifying", "tht", "through hole", "universal", "silicon"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 10
-  },
-  {
-    tmeCategory: "SMD diodes",
-    tmeCategoryKeywords: ["diode", "smd", "surface mount", "rectifying", "switching"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 10
-  },
-  {
-    tmeCategory: "Diacs",
-    tmeCategoryKeywords: ["diac", "trigger", "bidirectional", "thyristor trigger"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 10
-  },
-  {
-    tmeCategory: "Integrated Circuits",
-    tmeCategoryKeywords: ["ic", "integrated circuit", "amplifier", "regulator", "timer", "logic", "analog"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 9
-  },
-  // Sensors
-  {
-    tmeCategory: "Sensors",
-    tmeCategoryKeywords: ["sensor", "temperature", "humidity", "pressure", "accelerometer", "gyroscope", "proximity"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 9
-  },
-  // Displays and Optoelectronics
-  {
-    tmeCategory: "Displays",
-    tmeCategoryKeywords: ["display", "lcd", "oled", "tft", "segment", "matrix", "screen"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 8
-  },
-  {
-    tmeCategory: "LEDs",
-    tmeCategoryKeywords: ["led", "light emitting", "rgb", "strip", "module"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 9
-  },
-  // Connectors and Hardware
-  {
-    tmeCategory: "Connectors",
-    tmeCategoryKeywords: ["connector", "header", "socket", "terminal", "plug", "jack", "usb", "hdmi"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 8
-  },
-  {
-    tmeCategory: "Cables",
-    tmeCategoryKeywords: ["cable", "wire", "jumper", "dupont", "ribbon"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 7
-  },
-  // Audio and Sound Equipment
-  {
-    tmeCategory: "Electromagnetic Sounders with Generator",
-    tmeCategoryKeywords: ["sound", "transducer", "siren", "buzzer", "alarm", "speaker", "sounder", "electromagnetic"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 9
-  },
-  {
-    tmeCategory: "Sound Equipment",
-    tmeCategoryKeywords: ["sound", "audio", "speaker", "microphone", "buzzer", "siren", "alarm", "transducer", "sounder"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 9
-  },
-  {
-    tmeCategory: "Speakers",
-    tmeCategoryKeywords: ["speaker", "woofer", "tweeter", "driver", "audio", "sound"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 8
-  },
-  // Switches and Controls
-  {
-    tmeCategory: "Switches",
-    tmeCategoryKeywords: ["switch", "button", "toggle", "rotary", "push", "tactile"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 8
-  },
-  {
-    tmeCategory: "Potentiometers",
-    tmeCategoryKeywords: ["potentiometer", "variable resistor", "trim", "rotary", "linear"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 9
-  },
-  // Power Components
-  {
-    tmeCategory: "Power Supplies",
-    tmeCategoryKeywords: ["power supply", "adapter", "converter", "regulator", "psu"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 8
-  },
-  {
-    tmeCategory: "Batteries",
-    tmeCategoryKeywords: ["battery", "cell", "lithium", "alkaline", "rechargeable"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 7
-  },
-  // Communication and Wireless
-  {
-    tmeCategory: "Communication",
-    tmeCategoryKeywords: ["wifi", "bluetooth", "zigbee", "lora", "gsm", "gps", "antenna"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 8
-  },
-  // Tools and Equipment
-  {
-    tmeCategory: "Tools",
-    tmeCategoryKeywords: ["soldering", "multimeter", "oscilloscope", "breadboard", "pcb"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 7
-  },
-  // Advanced Microprocessors and Computing
-  {
-    tmeCategory: "ARM Microprocessors",
-    tmeCategoryKeywords: ["arm", "cortex", "microprocessor", "cpu", "processor"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 9
-  },
-  {
-    tmeCategory: "Microchip Microprocessors",
-    tmeCategoryKeywords: ["microchip", "pic", "dspic", "processor", "mcu"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 9
-  },
-  {
-    tmeCategory: "Single Board Computers",
-    tmeCategoryKeywords: ["sbc", "single board", "computer", "raspberry", "computing"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 8
-  },
-  // Communication Modules
-  {
-    tmeCategory: "WiFi Modules",
-    tmeCategoryKeywords: ["wifi", "wireless", "802.11", "wlan", "esp"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 9
-  },
-  {
-    tmeCategory: "Bluetooth Modules",
-    tmeCategoryKeywords: ["bluetooth", "ble", "wireless", "bt"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 9
-  },
-  {
-    tmeCategory: "LoRa Modules",
-    tmeCategoryKeywords: ["lora", "lorawan", "long range", "lpwan"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 8
-  },
-  {
-    tmeCategory: "GSM/GPRS Modules",
-    tmeCategoryKeywords: ["gsm", "gprs", "cellular", "sim", "mobile"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 8
-  },
-  {
-    tmeCategory: "GNSS (GPS) modules",
-    tmeCategoryKeywords: ["gps", "gnss", "navigation", "positioning", "location"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 8
-  },
-  // Power Management
-  {
-    tmeCategory: "DC-DC Converters",
-    tmeCategoryKeywords: ["dc-dc", "converter", "buck", "boost", "step-down", "step-up"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 8
-  },
-  {
-    tmeCategory: "Voltage Regulators",
-    tmeCategoryKeywords: ["regulator", "ldo", "voltage", "stabilizer"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 8
-  },
-  {
-    tmeCategory: "Battery Management",
-    tmeCategoryKeywords: ["battery", "charger", "bms", "power management"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 7
-  },
-  // Interface and Conversion
-  {
-    tmeCategory: "USB Controllers",
-    tmeCategoryKeywords: ["usb", "controller", "interface", "ftdi"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 8
-  },
-  {
-    tmeCategory: "UART/Serial Converters",
-    tmeCategoryKeywords: ["uart", "serial", "rs232", "rs485", "converter"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 8
-  },
-  {
-    tmeCategory: "Level Shifters",
-    tmeCategoryKeywords: ["level shifter", "voltage translator", "logic level"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 7
-  },
-  // Memory and Storage
-  {
-    tmeCategory: "Memory ICs",
-    tmeCategoryKeywords: ["memory", "ram", "flash", "eeprom", "sram"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 8
-  },
-  {
-    tmeCategory: "SD Card Modules",
-    tmeCategoryKeywords: ["sd card", "microsd", "storage", "memory card"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 7
-  },
-  // Motor Control
-  {
-    tmeCategory: "Motor Drivers",
-    tmeCategoryKeywords: ["motor driver", "stepper", "servo", "h-bridge"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 8
-  },
-  {
-    tmeCategory: "Stepper Motors",
-    tmeCategoryKeywords: ["stepper", "step motor", "nema"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 8
-  },
-  // Specialized Components
-  {
-    tmeCategory: "Crystal Oscillators",
-    tmeCategoryKeywords: ["crystal", "oscillator", "quartz", "frequency"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 8
-  },
-  {
-    tmeCategory: "Real Time Clocks",
-    tmeCategoryKeywords: ["rtc", "real time clock", "clock", "timer"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 8
-  },
-  {
-    tmeCategory: "Watchdog Timers",
-    tmeCategoryKeywords: ["watchdog", "timer", "reset", "supervisor"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 7
-  },
-  // Test and Measurement
-  {
-    tmeCategory: "Signal Generators",
-    tmeCategoryKeywords: ["signal generator", "function generator", "waveform"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 7
-  },
-  {
-    tmeCategory: "Multimeters",
-    tmeCategoryKeywords: ["multimeter", "dmm", "meter", "measurement"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 6
-  },
-  // Enclosures and Mechanical
-  {
-    tmeCategory: "Enclosures",
-    tmeCategoryKeywords: ["enclosure", "case", "box", "housing"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 6
-  },
-  {
-    tmeCategory: "Heat Sinks",
-    tmeCategoryKeywords: ["heat sink", "heatsink", "cooling", "thermal"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 7
-  },
-  // Industrial and Automation
-  {
-    tmeCategory: "Industrial Modules",
-    tmeCategoryKeywords: ["industrial", "automation", "plc", "control"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 6
-  },
-  {
-    tmeCategory: "Solid State Relays",
-    tmeCategoryKeywords: ["solid state", "relay", "ssr", "switching"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 8
-  },
-  // Generic fallback for electronics
-  {
-    tmeCategory: "Electronics",
-    tmeCategoryKeywords: ["electronic", "component", "part", "device"],
-    ebayCategory: "58277",
-    ebayCategoryName: "Electronic Components - Other",
-    confidence: 5
-  }
-];
-function findEbayCategoryForTMEProduct(product) {
-  const productName = (product.name || "").toLowerCase();
-  const productCategory = (product.category || "").toLowerCase();
-  const productDescription = (product.description || "").toLowerCase();
-  const searchText = `${productName} ${productCategory} ${productDescription}`;
-  let bestMatch = null;
-  let bestScore = 0;
-  for (const mapping of TME_EBAY_CATEGORY_MAPPINGS) {
-    let score = 0;
-    if (productCategory === mapping.tmeCategory.toLowerCase()) {
-      score += mapping.confidence * 3;
-    } else if (productCategory.includes(mapping.tmeCategory.toLowerCase())) {
-      score += mapping.confidence * 2;
-    }
-    for (const keyword of mapping.tmeCategoryKeywords) {
-      if (searchText.includes(keyword.toLowerCase())) {
-        score += mapping.confidence;
-      }
-    }
-    if (mapping.tmeCategory.length > 15) {
-      score += 1;
-    }
-    if (score > bestScore) {
-      bestScore = score;
-      bestMatch = mapping;
-    }
-  }
-  const fallback = TME_EBAY_CATEGORY_MAPPINGS.find((m) => m.tmeCategory === "Electronics");
-  const result = bestMatch || fallback;
-  return {
-    categoryId: result.ebayCategory,
-    categoryName: result.ebayCategoryName,
-    confidence: bestMatch ? Math.min(10, bestScore) : 1
-  };
-}
-
-// server/image-processing.ts
-import sharp from "sharp";
-import crypto2 from "crypto";
-import fs from "fs/promises";
-import path from "path";
-import os from "os";
-var DEFAULT_CACHE_DIR = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME ? path.join(os.tmpdir(), "inventorypro-processed-images") : "./processed_images";
-var ImageProcessingService = class {
-  cacheDir = DEFAULT_CACHE_DIR;
-  maxImageSize = 5 * 1024 * 1024;
-  // 5MB limit
-  constructor() {
-    this.ensureCacheDirectory().catch((err) => {
-      console.warn(`[image-processing] cache dir init failed (${this.cacheDir}):`, err.message);
-    });
-  }
-  async ensureCacheDirectory() {
-    try {
-      await fs.access(this.cacheDir);
-    } catch {
-      await fs.mkdir(this.cacheDir, { recursive: true });
-    }
-  }
-  /**
-   * Remove TME watermarks from product images
-   * TME typically places watermarks in bottom-right corner
-   */
-  async removeWatermark(imageUrl) {
-    const startTime = Date.now();
-    try {
-      console.log(`\u{1F5BC}\uFE0F Processing image: ${imageUrl}`);
-      const cacheKey = crypto2.createHash("md5").update(imageUrl).digest("hex");
-      const blobKey = `processed/${cacheKey}.jpg`;
-      const useBlob = !!process.env.BLOB_READ_WRITE_TOKEN;
-      if (useBlob) {
-        try {
-          const { head, put } = await import("@vercel/blob");
-          const existing = await head(blobKey).catch(() => null);
-          if (existing?.url) {
-            console.log(`\u2705 Blob cache hit: ${existing.url}`);
-            return {
-              success: true,
-              processedImageUrl: existing.url,
-              originalImageUrl: imageUrl,
-              processingTime: Date.now() - startTime
-            };
-          }
-          const imageBuffer2 = await this.downloadImage(imageUrl);
-          if (!imageBuffer2) throw new Error("Failed to download image");
-          const processedBuffer2 = await this.processImageBuffer(imageBuffer2);
-          const uploaded = await put(blobKey, processedBuffer2, {
-            access: "public",
-            contentType: "image/jpeg",
-            addRandomSuffix: false,
-            allowOverwrite: true,
-            cacheControlMaxAge: 60 * 60 * 24 * 30
-            // 30d at the edge
-          });
-          console.log(`\u2705 Watermark removed and uploaded to Blob: ${uploaded.url}`);
-          return {
-            success: true,
-            processedImageUrl: uploaded.url,
-            originalImageUrl: imageUrl,
-            processingTime: Date.now() - startTime
-          };
-        } catch (blobErr) {
-          console.error("Vercel Blob path failed, falling back to local disk:", blobErr);
-        }
-      }
-      const processedImagePath = path.join(this.cacheDir, `${cacheKey}_processed.jpg`);
-      try {
-        await fs.access(processedImagePath);
-        console.log(`\u2705 Using cached processed image for ${imageUrl}`);
-        return {
-          success: true,
-          processedImageUrl: `/api/images/processed/${cacheKey}_processed.jpg`,
-          originalImageUrl: imageUrl,
-          processingTime: Date.now() - startTime
-        };
-      } catch {
-      }
-      const imageBuffer = await this.downloadImage(imageUrl);
-      if (!imageBuffer) throw new Error("Failed to download image");
-      const processedBuffer = await this.processImageBuffer(imageBuffer);
-      await fs.writeFile(processedImagePath, processedBuffer);
-      console.log(`\u2705 Watermark removed from ${imageUrl}`);
-      return {
-        success: true,
-        processedImageUrl: `/api/images/processed/${cacheKey}_processed.jpg`,
-        originalImageUrl: imageUrl,
-        processingTime: Date.now() - startTime
-      };
-    } catch (error) {
-      console.error(`\u274C Failed to process image ${imageUrl}:`, error);
-      return {
-        success: false,
-        originalImageUrl: imageUrl,
-        error: error.message,
-        processingTime: Date.now() - startTime
-      };
-    }
-  }
-  async downloadImage(url) {
-    try {
-      let fixedUrl = url;
-      if (url.startsWith("//")) {
-        fixedUrl = "https:" + url;
-        console.log(`\u{1F517} Fixed protocol-relative URL: ${fixedUrl}`);
-      }
-      const response = await fetch(fixedUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      const arrayBuffer = await response.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      if (buffer.length > this.maxImageSize) {
-        throw new Error("Image too large");
-      }
-      return buffer;
-    } catch (error) {
-      console.error("Failed to download image:", error);
-      return null;
-    }
-  }
-  async processImageBuffer(imageBuffer) {
-    const image = sharp(imageBuffer);
-    const metadata = await image.metadata();
-    if (!metadata.width || !metadata.height) {
-      throw new Error("Invalid image dimensions");
-    }
-    const cropWidth = Math.floor(metadata.width * 0.85);
-    const cropHeight = Math.floor(metadata.height * 0.9);
-    let processedImage = image.extract({
-      left: 0,
-      top: 0,
-      width: cropWidth,
-      height: cropHeight
-    });
-    processedImage = processedImage.sharpen();
-    processedImage = processedImage.modulate({
-      brightness: 1.05,
-      saturation: 1.1
-    });
-    const maxDimension = 1600;
-    if (cropWidth > maxDimension || cropHeight > maxDimension) {
-      const scale = Math.min(maxDimension / cropWidth, maxDimension / cropHeight);
-      const newWidth = Math.floor(cropWidth * scale);
-      const newHeight = Math.floor(cropHeight * scale);
-      processedImage = processedImage.resize(newWidth, newHeight, {
-        kernel: sharp.kernel.lanczos3
-      });
-    }
-    return await processedImage.jpeg({
-      quality: 90,
-      progressive: true,
-      mozjpeg: true
-    }).toBuffer();
-  }
-  /**
-   * Advanced watermark removal using content-aware techniques
-   */
-  async removeWatermarkAdvanced(imageUrl) {
-    const startTime = Date.now();
-    try {
-      const imageBuffer = await this.downloadImage(imageUrl);
-      if (!imageBuffer) {
-        throw new Error("Failed to download image");
-      }
-      const image = sharp(imageBuffer);
-      const metadata = await image.metadata();
-      if (!metadata.width || !metadata.height) {
-        throw new Error("Invalid image dimensions");
-      }
-      const watermarkWidth = Math.floor(metadata.width * 0.2);
-      const watermarkHeight = Math.floor(metadata.height * 0.15);
-      const watermarkLeft = metadata.width - watermarkWidth;
-      const watermarkTop = metadata.height - watermarkHeight;
-      const watermarkArea = await image.extract({
-        left: watermarkLeft,
-        top: watermarkTop,
-        width: watermarkWidth,
-        height: watermarkHeight
-      }).toBuffer();
-      const cleanedWatermarkArea = await sharp(watermarkArea).blur(2).modulate({ brightness: 1.1, saturation: 0.8 }).toBuffer();
-      const processedBuffer = await image.composite([{
-        input: cleanedWatermarkArea,
-        left: watermarkLeft,
-        top: watermarkTop,
-        blend: "multiply"
-      }]).jpeg({ quality: 90 }).toBuffer();
-      const cacheKey = crypto2.createHash("md5").update(imageUrl + "_advanced").digest("hex");
-      const processedImagePath = path.join(this.cacheDir, `${cacheKey}_advanced.jpg`);
-      await fs.writeFile(processedImagePath, processedBuffer);
-      return {
-        success: true,
-        processedImageUrl: `/api/images/processed/${cacheKey}_advanced.jpg`,
-        originalImageUrl: imageUrl,
-        processingTime: Date.now() - startTime
-      };
-    } catch (error) {
-      console.error(`\u274C Advanced watermark removal failed for ${imageUrl}:`, error);
-      return {
-        success: false,
-        originalImageUrl: imageUrl,
-        error: error.message,
-        processingTime: Date.now() - startTime
-      };
-    }
-  }
-  /**
-   * Batch process multiple images
-   */
-  async processMultipleImages(imageUrls) {
-    const results = [];
-    const batchSize = 3;
-    for (let i = 0; i < imageUrls.length; i += batchSize) {
-      const batch = imageUrls.slice(i, i + batchSize);
-      const batchPromises = batch.map((url) => this.removeWatermark(url));
-      const batchResults = await Promise.all(batchPromises);
-      results.push(...batchResults);
-      if (i + batchSize < imageUrls.length) {
-        await new Promise((resolve) => setTimeout(resolve, 1e3));
-      }
-    }
-    return results;
-  }
-  /**
-   * Get processed image file
-   */
-  async getProcessedImage(filename) {
-    try {
-      const imagePath = path.join(this.cacheDir, filename);
-      return await fs.readFile(imagePath);
-    } catch {
-      return null;
-    }
-  }
-  /**
-   * Clean up old processed images
-   */
-  async cleanupOldImages(maxAgeHours = 24) {
-    try {
-      const files = await fs.readdir(this.cacheDir);
-      const now = Date.now();
-      const maxAge = maxAgeHours * 60 * 60 * 1e3;
-      for (const file of files) {
-        const filePath = path.join(this.cacheDir, file);
-        const stats = await fs.stat(filePath);
-        if (now - stats.mtime.getTime() > maxAge) {
-          await fs.unlink(filePath);
-          console.log(`\u{1F5D1}\uFE0F Cleaned up old processed image: ${file}`);
-        }
-      }
-    } catch (error) {
-      console.error("Failed to cleanup old images:", error);
-    }
-  }
-};
-var imageProcessingService = new ImageProcessingService();
-
-// server/ebay-api.ts
-var BUNDLE_WORDS = [
-  "bundle",
-  "bundles",
-  "bundled",
-  "package",
-  "packages",
-  "packaged",
-  "packaging",
-  "bulk",
-  "bulks",
-  "multiple",
-  "multiples",
-  "lot",
-  "lots",
-  "pack",
-  "packs",
-  "packed",
-  "roll",
-  "rolls",
-  "batch",
-  "batches",
-  "assortment",
-  "assortments",
-  "collection",
-  "collections",
-  "combo",
-  "combos",
-  "group",
-  "grouped",
-  "wholesale",
-  "multi-pack",
-  "multipack",
-  "value pack",
-  "value-pack",
-  "mixed",
-  "mix",
-  "variety",
-  "varieties"
-];
-function filterBundleWords(text2) {
-  if (!text2) return text2;
-  let filtered = text2;
-  for (const word of BUNDLE_WORDS) {
-    const regex = new RegExp(`\\b${word}\\b`, "gi");
-    filtered = filtered.replace(regex, "");
-  }
-  filtered = filtered.replace(/\s+/g, " ").trim();
-  filtered = filtered.replace(/\s*-\s*-\s*/g, " - ");
-  filtered = filtered.replace(/\s*,\s*,\s*/g, ", ");
-  filtered = filtered.replace(/^\s*[-,]\s*/, "");
-  filtered = filtered.replace(/\s*[-,]\s*$/, "");
-  return filtered;
-}
-function filterBundleWordsFromHtml(html) {
-  if (!html) return html;
-  return html.replace(/>([^<]+)</g, (match, textContent) => {
-    const filtered = filterBundleWords(textContent);
-    return `>${filtered}<`;
-  });
-}
-var EbayApiService = class {
-  credentials;
-  baseUrl = "https://api.ebay.com";
-  sandboxUrl = "https://api.sandbox.ebay.com";
-  tradingApiUrl = "https://api.ebay.com/ws/api.dll";
-  sandboxTradingApiUrl = "https://api.sandbox.ebay.com/ws/api.dll";
-  // Marketplace config — env-driven so the same code lists to DE (site 77,
-  // EUR) or any other marketplace without code changes. Defaults to DE
-  // (the active marketplace) when env vars are unset.
-  siteId = process.env.EBAY_MARKETPLACE_SITE_ID || "77";
-  // 77=DE, 3=UK
-  listingCurrency = process.env.EBAY_LISTING_CURRENCY || "EUR";
-  // REST marketplace id derived from the site id (3->EBAY_GB, 77->EBAY_DE...)
-  marketplaceId = (() => {
-    const map = {
-      "0": "EBAY_US",
-      "3": "EBAY_GB",
-      "77": "EBAY_DE",
-      "71": "EBAY_FR",
-      "101": "EBAY_IT",
-      "186": "EBAY_ES"
-    };
-    return map[process.env.EBAY_MARKETPLACE_SITE_ID || "77"] || "EBAY_DE";
-  })();
-  listingCountry = process.env.EBAY_LISTING_COUNTRY || "LV";
-  listingLocation = process.env.EBAY_LISTING_LOCATION || "Riga, Latvia";
-  paymentProfileId = process.env.EBAY_PAYMENT_PROFILE_ID || "209734844019";
-  returnProfileId = process.env.EBAY_RETURN_PROFILE_ID || "161272624019";
-  authToken;
-  isProduction = true;
-  // Force production for OAuth token testing
-  // Cache eBay category suggestions per query so we make at most one
-  // GetSuggestedCategories call per distinct product-type query, not per
-  // listing. Keyed by lowercased query string.
-  categorySuggestionCache = /* @__PURE__ */ new Map();
-  constructor() {
-    this.credentials = {
-      appId: process.env.EBAY_APP_ID || "",
-      devId: process.env.EBAY_DEV_ID || "",
-      certId: process.env.EBAY_CERT_ID || ""
-    };
-    if (!this.credentials.appId || !this.credentials.devId || !this.credentials.certId) {
-      throw new Error("eBay API credentials not properly configured");
-    }
-    console.log("\u2705 eBay API Service initialized");
-    console.log("   Using unified OAuth for all eBay APIs");
-  }
-  /**
-   * Get OAuth token for Trading API calls
-   * Trading API accepts OAuth tokens via X-EBAY-API-IAF-TOKEN header
-   */
-  async getOAuthToken() {
-    return await ebayOAuth.getTradingApiToken();
-  }
-  getApiUrl() {
-    return this.isProduction ? this.baseUrl : this.sandboxUrl;
-  }
-  async getAccessToken() {
-    const { ebayOAuth: ebayOAuth2 } = await Promise.resolve().then(() => (init_ebay_oauth(), ebay_oauth_exports));
-    try {
-      return await ebayOAuth2.getValidAccessToken();
-    } catch (error) {
-      console.error("eBay authentication failed:", error);
-      throw new Error(`Failed to authenticate with eBay API: ${error.message}`);
-    }
-  }
-  isTokenValid() {
-    if (!this.authToken) return false;
-    const expiryTime = Date.now() + this.authToken.expires_in * 1e3 - 5 * 60 * 1e3;
-    return Date.now() < expiryTime;
-  }
-  async makeRequest(endpoint, method = "GET", body) {
-    try {
-      const accessToken = await this.getAccessToken();
-      try {
-        await storage.trackApiCall("ebay");
-      } catch (error) {
-        console.error("Failed to track eBay API call:", error);
-      }
-      const response = await fetch(`${this.getApiUrl()}${endpoint}`, {
-        method,
-        headers: {
-          "Authorization": `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-          "X-EBAY-C-MARKETPLACE-ID": this.marketplaceId
-        },
-        body: body ? JSON.stringify(body) : void 0
-      });
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`eBay API request failed: ${response.status} ${response.statusText} - ${errorText}`);
-      }
-      return await response.json();
-    } catch (error) {
-      console.error("eBay API request failed:", error);
-      throw error;
-    }
-  }
-  async testConnection() {
-    try {
-      await this.getAccessToken();
-      return {
-        success: true,
-        message: "eBay API connection successful",
-        status: "connected"
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: `eBay API connection failed: ${error.message}`,
-        status: "error"
-      };
-    }
-  }
-  async listProduct(productId, listingDetails, useTemplate = true) {
-    try {
-      const product = await storage.getProduct(productId);
-      if (!product) {
-        throw new Error("Product not found");
-      }
-      let templateData = null;
-      if (useTemplate) {
-        try {
-          const { generateUnifiedEbayTemplate: generateUnifiedEbayTemplate2 } = await Promise.resolve().then(() => (init_ebay_unified_template(), ebay_unified_template_exports));
-          templateData = generateUnifiedEbayTemplate2(product);
-          console.log("Unified template generated for product:", product.name);
-          console.log("Template data keys:", Object.keys(templateData || {}));
-          console.log("Template title:", templateData?.title);
-        } catch (error) {
-          console.warn("Template generation failed, using basic listing:", error);
-          templateData = null;
-        }
-      }
-      const { getShippingPolicyId: getShippingPolicyId2, getShippingPolicyName: getShippingPolicyName2 } = await Promise.resolve().then(() => (init_shipping_policies(), shipping_policies_exports));
-      const productWeight = product.weight ? parseFloat(product.weight) : void 0;
-      const shippingPolicyId = getShippingPolicyId2(productWeight);
-      const shippingPolicyName = getShippingPolicyName2(productWeight);
-      console.log(`Product weight: ${product.weight}g, assigned shipping policy: ${shippingPolicyId} (${shippingPolicyName})`);
-      const stockInfo = calculateEbayStock(product);
-      const ebayQuantity = stockInfo.ebayStock;
-      console.log(`Stock calculation for ${product.name}:`, {
-        tmeStock: stockInfo.tmeStock,
-        ebayStock: stockInfo.ebayStock,
-        isLimited: stockInfo.isLimited,
-        reason: stockInfo.limitReason
-      });
-      const staticMapping = findEbayCategoryForTMEProduct(product);
-      const envDefault = process.env.EBAY_DEFAULT_CATEGORY_ID;
-      let resolvedCategoryId = envDefault || staticMapping.categoryId;
-      let resolvedCategoryName = envDefault ? "Default (env)" : staticMapping.categoryName;
-      if (!listingDetails.categoryId) {
-        const query = [product.category, product.name].filter(Boolean).join(" ").replace(/[;|]/g, " ").slice(0, 80);
-        const suggested = await this.getSuggestedCategory(query);
-        if (suggested) {
-          resolvedCategoryId = suggested.id;
-          resolvedCategoryName = suggested.name;
-        }
-      }
-      const categoryMapping = { categoryId: resolvedCategoryId, categoryName: resolvedCategoryName, confidence: staticMapping.confidence };
-      console.log(`Category resolution for ${product.name}:`, {
-        productCategory: product.category,
-        resolvedEbayCategory: resolvedCategoryId,
-        categoryName: resolvedCategoryName,
-        source: listingDetails.categoryId ? "explicit" : "ebay-suggested-or-static"
-      });
-      let processedImageUrls = [];
-      if (product.imageUrl) {
-        const fixedImageUrl = product.imageUrl.startsWith("//") ? "https:" + product.imageUrl : product.imageUrl;
-        const hasBlob = !!process.env.BLOB_READ_WRITE_TOKEN;
-        const publicBaseUrl = process.env.PUBLIC_BASE_URL || process.env.REPL_URL;
-        const canPersist = hasBlob || !!publicBaseUrl;
-        if (!canPersist) {
-          console.log(`\u{1F5BC}\uFE0F No persistent image storage configured (BLOB_READ_WRITE_TOKEN or PUBLIC_BASE_URL); using original TME URL: ${fixedImageUrl}`);
-          processedImageUrls = [fixedImageUrl];
-        } else {
-          try {
-            console.log(`\u{1F5BC}\uFE0F Processing image for eBay listing: ${fixedImageUrl}`);
-            const imageResult = await imageProcessingService.removeWatermark(fixedImageUrl);
-            if (imageResult.success && imageResult.processedImageUrl) {
-              const absoluteImageUrl = imageResult.processedImageUrl.startsWith("http") ? imageResult.processedImageUrl : `${publicBaseUrl}${imageResult.processedImageUrl}`;
-              processedImageUrls = [absoluteImageUrl];
-              console.log(`\u2705 Watermark removed, using processed image: ${absoluteImageUrl}`);
-            } else {
-              console.log(`\u26A0\uFE0F Watermark removal failed, using original image: ${imageResult.error}`);
-              processedImageUrls = [fixedImageUrl];
-            }
-          } catch (error) {
-            console.warn(`\u26A0\uFE0F Image processing failed, using original: ${error}`);
-            processedImageUrls = [fixedImageUrl];
-          }
-        }
-      }
-      const moq = product.moq || 1;
-      const listingPrice = listingDetails.startPrice || parseFloat(product.salePrice) || 0;
-      if (moq > 1 && !listingDetails.startPrice) {
-        console.log(`\u{1F4E6} MOQ product: ${moq}x package, listing price \u20AC${listingPrice.toFixed(2)} (package price from dynamic pricing)`);
-      }
-      const rawTitle = listingDetails.title || templateData?.title || product.name;
-      const rawDescription = listingDetails.description || templateData?.htmlDescription || templateData?.description || product.description || `${product.name} - High quality electronics component`;
-      const filteredTitle = filterBundleWords(rawTitle);
-      const filteredDescription = rawDescription.includes("<") ? filterBundleWordsFromHtml(rawDescription) : filterBundleWords(rawDescription);
-      console.log(`\u{1F4DD} Bundle word filter applied:`);
-      console.log(`   Original title: "${rawTitle}"`);
-      console.log(`   Filtered title: "${filteredTitle}"`);
-      const listingData = {
-        title: filteredTitle,
-        description: filteredDescription,
-        categoryId: listingDetails.categoryId || categoryMapping.categoryId,
-        // Use automatically mapped category
-        startPrice: listingPrice,
-        quantity: listingDetails.quantity || ebayQuantity,
-        // Use calculated eBay stock
-        listingDuration: listingDetails.listingDuration || "Days_7",
-        condition: listingDetails.condition || "New",
-        pictureURLs: listingDetails.pictureURLs || processedImageUrls,
-        shippingPolicyId,
-        weight: product.weight,
-        // Item specifics — real product data, not the old hardcoded
-        // "Arduino A000066 Development Board". No brand field exists on
-        // the product, so default to Unbranded; MPN falls back to the
-        // supplier product id / SKU. eBay category specifics requirements
-        // are satisfied without mislabelling every component.
-        sku: product.sku,
-        mpn: product.supplierProductId || product.sku,
-        brand: listingDetails.brand || "Unbranded",
-        itemSpecifics: listingDetails.itemSpecifics,
-        shippingDetails: listingDetails.shippingDetails || {
-          shippingType: "Flat",
-          shippingServiceCost: 5.99
-        }
-      };
-      console.log("Template data available:", !!templateData);
-      console.log("Using HTML description:", !!templateData?.htmlDescription);
-      console.log("Description length:", listingData.description.length);
-      console.log("Shipping policy assigned:", shippingPolicyId);
-      console.log("Attempting to list product on eBay:", {
-        productId,
-        title: listingData.title,
-        price: listingData.startPrice,
-        categoryId: listingData.categoryId
-      });
-      try {
-        const verifyXmlRequest = this.createVerifyItemXML(listingData);
-        console.log("Verifying item with eBay API first...");
-        let response;
-        try {
-          const verifyResponse = await this.makeTradingApiRequest(verifyXmlRequest, "VerifyAddFixedPriceItem");
-          console.log("VerifyAddItem response:", verifyResponse);
-          const xmlRequest = this.createAddItemXML(listingData);
-          console.log("Generated XML:", xmlRequest);
-          console.log("Making eBay Trading API call with XML request");
-          response = await this.makeTradingApiRequest(xmlRequest, "AddFixedPriceItem");
-        } catch (verifyError) {
-          console.log("VerifyAddItem failed:", verifyError);
-          throw verifyError;
-        }
-        const itemIdMatch = response.match(/<ItemID>(\d+)<\/ItemID>/);
-        const itemId = itemIdMatch ? itemIdMatch[1] : null;
-        if (!itemId) {
-          const ackMatch = response.match(/<Ack>(.*?)<\/Ack>/);
-          const isSuccess = ackMatch && (ackMatch[1] === "Success" || ackMatch[1] === "Warning");
-          if (isSuccess) {
-            const mockItemId = `DEMO_${Date.now()}`;
-            console.log("eBay API: Success with warnings, using demo item ID:", mockItemId);
-            await storage.updateProduct(productId, {
-              listedOnEbay: true,
-              ebayItemId: mockItemId
-            });
-            await storage.createSyncLog({
-              source: "ebay",
-              operation: "product_listing",
-              status: "success",
-              message: `eBay API integration successful - demo listing for "${product.name}"`,
-              details: JSON.stringify({
-                productId,
-                itemId: mockItemId,
-                note: "OAuth authentication and API calls working correctly",
-                listingData
-              })
-            });
-            return {
-              success: true,
-              itemId: mockItemId,
-              message: `eBay API integration successful! OAuth token and API calls working. Demo listing created for "${product.name}"`
-            };
-          }
-          const allErrorBlocks = response.match(/<Errors>[\s\S]*?<\/Errors>/g) || [];
-          const errorSeverityBlocks = allErrorBlocks.filter(
-            (b) => /<SeverityCode>Error<\/SeverityCode>/.test(b)
-          );
-          const chosen = errorSeverityBlocks[0] || allErrorBlocks[0];
-          let errorMessage = "Unknown eBay API error";
-          if (chosen) {
-            const longMsg = chosen.match(/<LongMessage>(.*?)<\/LongMessage>/)?.[1];
-            const shortMsg = chosen.match(/<ShortMessage>(.*?)<\/ShortMessage>/)?.[1];
-            const paramVal = chosen.match(/<ErrorParameters[^>]*>\s*<Value>(.*?)<\/Value>/)?.[1];
-            const code = chosen.match(/<ErrorCode>(\d+)<\/ErrorCode>/)?.[1];
-            errorMessage = [longMsg || shortMsg, paramVal && paramVal !== longMsg ? paramVal : null].filter(Boolean).join(" \u2014 ");
-            if (code) errorMessage = `[eBay ${code}] ${errorMessage}`;
-          }
-          console.log("eBay API Error - Full response:", response);
-          throw new Error(`eBay listing failed: ${errorMessage}`);
-        }
-        console.log("eBay listing successful:", { itemId, productId });
-        await storage.updateProduct(productId, {
-          listedOnEbay: true,
-          ebayItemId: itemId
-        });
-        await storage.createSyncLog({
-          source: "ebay",
-          operation: "product_listing",
-          status: "success",
-          message: `Successfully listed product "${product.name}" on eBay with Item ID: ${itemId}`,
-          details: JSON.stringify({
-            productId,
-            itemId,
-            listingData,
-            ebayResponse: response
-          })
-        });
-        return {
-          success: true,
-          itemId,
-          message: `Product "${product.name}" successfully listed on eBay with Item ID: ${itemId}`
-        };
-      } catch (ebayError) {
-        console.error("eBay API listing failed:", ebayError);
-        await storage.createSyncLog({
-          source: "ebay",
-          operation: "product_listing",
-          status: "error",
-          message: `Failed to list product "${product.name}" on eBay: ${ebayError.message}`,
-          details: JSON.stringify({
-            productId,
-            listingData,
-            error: ebayError.message
-          })
-        });
-        return {
-          success: false,
-          message: `Failed to list on eBay: ${ebayError.message}`,
-          errors: [ebayError.message]
-        };
-      }
-    } catch (error) {
-      console.error("eBay listing failed:", error);
-      await storage.createSyncLog({
-        source: "ebay",
-        operation: "product_listing",
-        status: "error",
-        message: `Failed to list product on eBay: ${error.message}`,
-        details: JSON.stringify({
-          productId,
-          error: error.message
-        })
-      });
-      return {
-        success: false,
-        message: `Failed to list product: ${error.message}`,
-        errors: [error.message]
-      };
-    }
-  }
-  createVerifyItemXML(listingData) {
-    console.log("createVerifyItemXML - Using OAuth via header");
-    console.log(`Shipping policy ID for listing: ${listingData.shippingPolicyId}`);
-    return `<?xml version="1.0" encoding="utf-8"?>
-<VerifyAddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <Item>
-    <Title>${this.escapeXml(listingData.title)}</Title>
-    <Description><![CDATA[${this.sanitizeCdata(listingData.description)}]]></Description>
-    <PrimaryCategory>
-      <CategoryID>${listingData.categoryId}</CategoryID>
-    </PrimaryCategory>
-    <StartPrice currencyID="${this.listingCurrency}">${listingData.startPrice}</StartPrice>
-    <Quantity>${listingData.quantity}</Quantity>
-    <ListingDuration>GTC</ListingDuration>
-    <Country>${this.listingCountry}</Country>
-    <Currency>${this.listingCurrency}</Currency>
-    <Location>${this.escapeXml(this.listingLocation)}</Location>
-    <ListingType>FixedPriceItem</ListingType>
-    <ConditionID>1000</ConditionID>
-    ${this.buildPictureDetailsXml(listingData.pictureURLs)}
-    <SellerProfiles>
-      <SellerShippingProfile>
-        <ShippingProfileID>${listingData.shippingPolicyId}</ShippingProfileID>
-      </SellerShippingProfile>
-      <SellerPaymentProfile>
-        <PaymentProfileID>${this.paymentProfileId}</PaymentProfileID>
-      </SellerPaymentProfile>
-      <SellerReturnProfile>
-        <ReturnProfileID>${this.returnProfileId}</ReturnProfileID>
-      </SellerReturnProfile>
-    </SellerProfiles>
-    ${this.buildItemSpecificsXml(listingData)}
-  </Item>
-</VerifyAddFixedPriceItemRequest>`;
-  }
-  createAddItemXML(listingData) {
-    console.log("createAddItemXML - Using OAuth via header");
-    console.log(`Shipping policy ID for listing: ${listingData.shippingPolicyId}`);
-    return `<?xml version="1.0" encoding="utf-8"?>
-<AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <Item>
-    <Title>${this.escapeXml(listingData.title)}</Title>
-    <Description><![CDATA[${this.sanitizeCdata(listingData.description)}]]></Description>
-    <PrimaryCategory>
-      <CategoryID>${listingData.categoryId}</CategoryID>
-    </PrimaryCategory>
-    <StartPrice currencyID="${this.listingCurrency}">${listingData.startPrice}</StartPrice>
-    <Quantity>${listingData.quantity}</Quantity>
-    <ListingDuration>GTC</ListingDuration>
-    <Country>${this.listingCountry}</Country>
-    <Currency>${this.listingCurrency}</Currency>
-    <Location>${this.escapeXml(this.listingLocation)}</Location>
-    <ListingType>FixedPriceItem</ListingType>
-    <ConditionID>1000</ConditionID>
-    ${this.buildPictureDetailsXml(listingData.pictureURLs)}
-    <SellerProfiles>
-      <SellerShippingProfile>
-        <ShippingProfileID>${listingData.shippingPolicyId}</ShippingProfileID>
-      </SellerShippingProfile>
-      <SellerPaymentProfile>
-        <PaymentProfileID>${this.paymentProfileId}</PaymentProfileID>
-      </SellerPaymentProfile>
-      <SellerReturnProfile>
-        <ReturnProfileID>${this.returnProfileId}</ReturnProfileID>
-      </SellerReturnProfile>
-    </SellerProfiles>
-    ${this.buildItemSpecificsXml(listingData)}
-  </Item>
-</AddFixedPriceItemRequest>`;
-  }
-  escapeXml(text2) {
-    return String(text2 ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-  }
-  // CDATA can't contain the literal sequence "]]>". Split it so the
-  // description survives even if a product description embeds it. Also cap
-  // length — eBay's Description limit is 500k chars.
-  sanitizeCdata(text2) {
-    return String(text2 ?? "").replace(/]]>/g, "]]]]><![CDATA[>").slice(0, 5e5);
-  }
-  // Emit one <PictureURL> per image (eBay allows up to 24). Falls back to
-  // an empty <PictureDetails/> when there are none.
-  buildPictureDetailsXml(pictureURLs) {
-    if (!pictureURLs || pictureURLs.length === 0) {
-      return `<PictureDetails></PictureDetails>`;
-    }
-    const urls = pictureURLs.slice(0, 24).map((url) => `      <PictureURL>${this.escapeXml(url)}</PictureURL>`).join("\n");
-    return `<PictureDetails>
-${urls}
-    </PictureDetails>`;
-  }
-  // Item specifics derived from the product, not hardcoded to Arduino.
-  // Uses whatever the caller provides on listingData.itemSpecifics
-  // (a record of name -> value); falls back to Brand=Unbranded and the
-  // product's SKU as MPN, which satisfies eBay's "required specifics"
-  // for most electronics categories without mislabelling everything as
-  // an Arduino dev board.
-  buildItemSpecificsXml(listingData) {
-    const specifics = {
-      Brand: listingData.brand || "Unbranded",
-      ...listingData.mpn || listingData.sku ? { MPN: listingData.mpn || listingData.sku } : {},
-      ...listingData.itemSpecifics || {}
-    };
-    const entries = Object.entries(specifics).filter(
-      ([, v]) => v !== void 0 && v !== null && String(v).trim() !== ""
-    );
-    if (entries.length === 0) return "";
-    const nameValueLists = entries.map(
-      ([name, value]) => `      <NameValueList>
-        <Name>${this.escapeXml(name)}</Name>
-        <Value>${this.escapeXml(String(value))}</Value>
-      </NameValueList>`
-    ).join("\n");
-    return `<ItemSpecifics>
-${nameValueLists}
-    </ItemSpecifics>`;
-  }
-  createReviseItemXML(listingData) {
-    const pictureXML = this.buildPictureDetailsXml(listingData.pictureURLs);
-    console.log("createReviseItemXML - Using OAuth via header");
-    console.log(`Shipping policy ID for revision: ${listingData.shippingPolicyId}`);
-    const sellerProfilesXML = listingData.shippingPolicyId ? `
-    <SellerProfiles>
-      <SellerShippingProfile>
-        <ShippingProfileID>${listingData.shippingPolicyId}</ShippingProfileID>
-      </SellerShippingProfile>
-      <SellerPaymentProfile>
-        <PaymentProfileID>${this.paymentProfileId}</PaymentProfileID>
-      </SellerPaymentProfile>
-      <SellerReturnProfile>
-        <ReturnProfileID>${this.returnProfileId}</ReturnProfileID>
-      </SellerReturnProfile>
-    </SellerProfiles>` : "";
-    return `<?xml version="1.0" encoding="utf-8"?>
-<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <Item>
-    <ItemID>${listingData.itemId}</ItemID>
-    <Title>${this.escapeXml(listingData.title)}</Title>
-    <Description><![CDATA[${this.sanitizeCdata(listingData.description)}]]></Description>
-    <PrimaryCategory>
-      <CategoryID>${listingData.categoryId}</CategoryID>
-    </PrimaryCategory>
-    <StartPrice currencyID="${this.listingCurrency}">${listingData.startPrice}</StartPrice>
-    <Quantity>${listingData.quantity}</Quantity>
-    <ListingDuration>GTC</ListingDuration>
-    <Country>${this.listingCountry}</Country>
-    <Currency>${this.listingCurrency}</Currency>
-    <Location>${this.escapeXml(this.listingLocation)}</Location>
-    <ListingType>FixedPriceItem</ListingType>
-    <ConditionID>1000</ConditionID>
-    ${pictureXML}${sellerProfilesXML}
-  </Item>
-</ReviseFixedPriceItemRequest>`;
-  }
-  createEndItemXML(itemId) {
-    console.log("createEndItemXML - Using OAuth via header");
-    return `<?xml version="1.0" encoding="utf-8"?>
-<EndItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <ItemID>${itemId}</ItemID>
-  <EndingReason>NotAvailable</EndingReason>
-</EndItemRequest>`;
-  }
-  async makeTradingApiRequest(xmlBody, callName = "AddFixedPriceItem") {
-    const tradingUrl = this.isProduction ? this.tradingApiUrl : this.sandboxTradingApiUrl;
-    console.log("Using eBay environment:", this.isProduction ? "PRODUCTION" : "SANDBOX");
-    let oauthToken;
-    try {
-      oauthToken = await this.getOAuthToken();
-    } catch (error) {
-      console.error("Failed to get OAuth token for Trading API:", error);
-      throw new Error(`OAuth authentication failed: ${error.message}`);
-    }
-    console.log("Making eBay API request to:", tradingUrl);
-    console.log("API Call Name:", callName);
-    console.log("Using OAuth token via X-EBAY-API-IAF-TOKEN header");
-    try {
-      await storage.trackApiCall("ebay");
-    } catch (error) {
-      console.error("Failed to track eBay API call:", error);
-    }
-    const response = await fetch(tradingUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "text/xml; charset=utf-8",
-        "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
-        "X-EBAY-API-DEV-NAME": this.credentials.devId,
-        "X-EBAY-API-APP-NAME": this.credentials.appId,
-        "X-EBAY-API-CERT-NAME": this.credentials.certId,
-        "X-EBAY-API-CALL-NAME": callName,
-        "X-EBAY-API-SITEID": this.siteId,
-        "X-EBAY-API-IAF-TOKEN": oauthToken
-        // OAuth token for Trading API
-      },
-      body: xmlBody
-    });
-    console.log("eBay API response status:", response.status, response.statusText);
-    const responseText = await response.text();
-    console.log("eBay API response body:", responseText.substring(0, 500) + "...");
-    if (!response.ok) {
-      throw new Error(`eBay Trading API request failed: ${response.status} ${response.statusText}`);
-    }
-    return responseText;
-  }
-  async bulkListProducts(productIds, categoryId) {
-    const results = [];
-    let listedCount = 0;
-    let failedCount = 0;
-    for (const productId of productIds) {
-      try {
-        const result = await this.listProduct(productId, { categoryId });
-        results.push(result);
-        if (result.success) {
-          listedCount++;
-        } else {
-          failedCount++;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 1e3));
-      } catch (error) {
-        failedCount++;
-        results.push({
-          success: false,
-          message: `Failed to list product ${productId}: ${error.message}`
-        });
-      }
-    }
-    await storage.createSyncLog({
-      source: "ebay",
-      operation: "bulk_listing",
-      status: listedCount > 0 ? "success" : "error",
-      message: `Bulk listing completed: ${listedCount} listed, ${failedCount} failed`,
-      details: JSON.stringify({
-        totalProducts: productIds.length,
-        listedCount,
-        failedCount,
-        productIds
-      })
-    });
-    return {
-      success: listedCount > 0,
-      totalProducts: productIds.length,
-      listedCount,
-      failedCount,
-      results
-    };
-  }
-  /**
-   * Ask eBay for the best category for a free-text query on the configured
-   * site (DE=77). Result cached per query. Returns null on any failure so
-   * the caller can fall back to a default category.
-   */
-  async getSuggestedCategory(query) {
-    const key = query.trim().toLowerCase();
-    if (!key) return null;
-    if (this.categorySuggestionCache.has(key)) {
-      return this.categorySuggestionCache.get(key);
-    }
-    try {
-      const token = await ebayOAuth.getValidAccessToken();
-      const treeId = this.siteId;
-      const url = `https://api.ebay.com/commerce/taxonomy/v1/category_tree/${treeId}/get_category_suggestions?q=${encodeURIComponent(query)}`;
-      const resp = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/json",
-          "Accept-Language": "de-DE",
-          "X-EBAY-C-MARKETPLACE-ID": this.marketplaceId
-        }
-      });
-      if (!resp.ok) {
-        console.warn(`Taxonomy suggestions HTTP ${resp.status} for "${query}": ${(await resp.text()).slice(0, 200)}`);
-        return null;
-      }
-      const data = await resp.json();
-      const top = data?.categorySuggestions?.[0]?.category;
-      const id = top?.categoryId;
-      const name = top?.categoryName || "";
-      if (id) {
-        const result = { id: String(id), name };
-        this.categorySuggestionCache.set(key, result);
-        console.log(`\u{1F5C2}\uFE0F eBay suggested category for "${query}": ${id} (${name})`);
-        return result;
-      }
-      return null;
-    } catch (err) {
-      console.warn(`Taxonomy get_category_suggestions failed for "${query}":`, err.message);
-      return null;
-    }
-  }
-  async getEbayCategories() {
-    try {
-      console.log("Fetching eBay categories... (using OAuth via header)");
-      const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
-<GetCategoriesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <CategorySiteID>${this.siteId}</CategorySiteID>
-  <DetailLevel>ReturnAll</DetailLevel>
-  <LevelLimit>4</LevelLimit>
-  <ViewAllNodes>true</ViewAllNodes>
-</GetCategoriesRequest>`;
-      const response = await this.makeTradingApiRequest(xmlBody);
-      const categories2 = this.parseEbayCategories(response);
-      console.log(`Found ${categories2.length} total categories`);
-      const electronicsCategories = categories2.filter(
-        (cat) => cat.name.toLowerCase().includes("electronic") || cat.name.toLowerCase().includes("computer") || cat.name.toLowerCase().includes("component") || cat.name.toLowerCase().includes("microcontroller") || cat.name.toLowerCase().includes("arduino") || cat.name.toLowerCase().includes("development") || cat.name.toLowerCase().includes("board") || cat.parentPath?.toLowerCase().includes("electronic") || cat.parentPath?.toLowerCase().includes("computer")
-      );
-      console.log(`Found ${electronicsCategories.length} electronics categories`);
-      return electronicsCategories;
-    } catch (error) {
-      console.error("Error fetching eBay categories:", error);
-      return [];
-    }
-  }
-  parseEbayCategories(xmlResponse) {
-    const categories2 = [];
-    try {
-      const categoryMatches = xmlResponse.match(/<Category>[\s\S]*?<\/Category>/g) || [];
-      for (const categoryXml of categoryMatches) {
-        const categoryIdMatch = categoryXml.match(/<CategoryID>(\d+)<\/CategoryID>/);
-        const categoryNameMatch = categoryXml.match(/<CategoryName><!\[CDATA\[(.*?)\]\]><\/CategoryName>/);
-        const categoryLevelMatch = categoryXml.match(/<CategoryLevel>(\d+)<\/CategoryLevel>/);
-        const leafCategoryMatch = categoryXml.match(/<LeafCategory>(true|false)<\/LeafCategory>/);
-        const parentIdMatch = categoryXml.match(/<CategoryParentID>(\d+)<\/CategoryParentID>/);
-        if (categoryIdMatch && categoryNameMatch) {
-          const category = {
-            id: categoryIdMatch[1],
-            name: categoryNameMatch[1],
-            level: categoryLevelMatch ? parseInt(categoryLevelMatch[1]) : 0,
-            isLeaf: leafCategoryMatch ? leafCategoryMatch[1] === "true" : false,
-            parentId: parentIdMatch ? parentIdMatch[1] : null,
-            parentPath: ""
-            // Will be populated later
-          };
-          categories2.push(category);
-        }
-      }
-      for (const category of categories2) {
-        if (category.parentId) {
-          const parent = categories2.find((c) => c.id === category.parentId);
-          if (parent) {
-            category.parentPath = parent.name;
-          }
-        }
-      }
-    } catch (error) {
-      console.error("Error parsing categories:", error);
-    }
-    return categories2;
-  }
-  async findBestCategoryForProduct(productTitle) {
-    try {
-      const categories2 = await this.getEbayCategories();
-      const searchTerms = productTitle.toLowerCase().split(" ");
-      let bestMatch = null;
-      let highestScore = 0;
-      for (const category of categories2) {
-        if (!category.isLeaf) continue;
-        let score = 0;
-        const categoryText = (category.name + " " + category.parentPath).toLowerCase();
-        for (const term of searchTerms) {
-          if (categoryText.includes(term)) {
-            score += term.length;
-          }
-        }
-        if (categoryText.includes("electronic") || categoryText.includes("computer")) {
-          score += 10;
-        }
-        if (score > highestScore) {
-          highestScore = score;
-          bestMatch = {
-            id: category.id,
-            name: category.name,
-            path: category.parentPath + " > " + category.name
-          };
-        }
-      }
-      return bestMatch;
-    } catch (error) {
-      console.error("Error finding best category:", error);
-      return null;
-    }
-  }
-  async getBusinessPolicies() {
-    try {
-      const xmlRequest = `<?xml version="1.0" encoding="utf-8"?>
-<GetUserRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <UserID></UserID>
-  <IncludeSelector>BusinessSellerDetails</IncludeSelector>
-</GetUserRequest>`;
-      console.log("Fetching eBay business policies... (using OAuth via header)");
-      const response = await this.makeTradingApiRequestForPolicies(xmlRequest);
-      const shippingPolicies2 = this.extractPolicies(response, "ShippingProfile");
-      const paymentPolicies = this.extractPolicies(response, "PaymentProfile");
-      const returnPolicies = this.extractPolicies(response, "ReturnPolicyProfile");
-      return {
-        success: true,
-        policies: {
-          shipping: shippingPolicies2,
-          payment: paymentPolicies,
-          returns: returnPolicies
-        },
-        rawResponse: response
-      };
-    } catch (error) {
-      console.error("Failed to fetch business policies:", error);
-      return {
-        success: false,
-        error: error.message
-      };
-    }
-  }
-  async makeTradingApiRequestForPolicies(xmlBody) {
-    const tradingUrl = this.isProduction ? this.tradingApiUrl : this.sandboxTradingApiUrl;
-    let oauthToken;
-    try {
-      oauthToken = await this.getOAuthToken();
-    } catch (error) {
-      console.error("Failed to get OAuth token for Trading API:", error);
-      throw new Error(`OAuth authentication failed: ${error.message}`);
-    }
-    try {
-      await storage.trackApiCall("ebay");
-    } catch (error) {
-      console.error("Failed to track eBay API call:", error);
-    }
-    const response = await fetch(tradingUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "text/xml; charset=utf-8",
-        "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
-        "X-EBAY-API-DEV-NAME": this.credentials.devId,
-        "X-EBAY-API-APP-NAME": this.credentials.appId,
-        "X-EBAY-API-CERT-NAME": this.credentials.certId,
-        "X-EBAY-API-CALL-NAME": "GetUser",
-        "X-EBAY-API-SITEID": this.siteId,
-        "X-EBAY-API-IAF-TOKEN": oauthToken
-      },
-      body: xmlBody
-    });
-    if (!response.ok) {
-      throw new Error(`eBay API request failed: ${response.status} ${response.statusText}`);
-    }
-    return await response.text();
-  }
-  extractPolicies(xmlResponse, profileType) {
-    const policies = [];
-    const regex = new RegExp(`<${profileType}[^>]*>([\\s\\S]*?)</${profileType}>`, "g");
-    let match;
-    while ((match = regex.exec(xmlResponse)) !== null) {
-      const profileContent = match[1];
-      const idMatch = profileContent.match(/<ProfileID>(\d+)<\/ProfileID>/);
-      const nameMatch = profileContent.match(/<ProfileName>(.*?)<\/ProfileName>/);
-      if (idMatch) {
-        policies.push({
-          id: idMatch[1],
-          name: nameMatch ? nameMatch[1] : `${profileType} ${idMatch[1]}`,
-          type: profileType
-        });
-      }
-    }
-    return policies;
-  }
-  async updateProduct(productId, updateData, forceDescriptionRefresh = true) {
-    try {
-      const product = await storage.getProduct(productId);
-      if (!product) {
-        return { success: false, message: "Product not found" };
-      }
-      if (!product.ebayItemId || !product.listedOnEbay) {
-        return { success: false, message: "Product is not currently listed on eBay" };
-      }
-      console.log(`Updating eBay listing for product ${productId}, eBay Item ID: ${product.ebayItemId}`);
-      const listingTemplate = generateEbayListing(product);
-      const categoryMapping = findEbayCategoryForTMEProduct(product);
-      const stockInfo = calculateEbayStock(product);
-      const ebayQuantity = stockInfo.ebayStock;
-      console.log(`Stock calculation for update of ${product.name}:`, {
-        tmeStock: stockInfo.tmeStock,
-        ebayStock: stockInfo.ebayStock,
-        isLimited: stockInfo.isLimited,
-        reason: stockInfo.limitReason
-      });
-      console.log("Update function - Using OAuth via header");
-      console.log("Generated listing template description length:", listingTemplate.htmlDescription.length);
-      console.log("Generated template description preview:", listingTemplate.htmlDescription.substring(0, 200));
-      const timestamp2 = (/* @__PURE__ */ new Date()).getTime();
-      const uniqueMarker = `<!-- Template Version: 2.0 | Updated: ${timestamp2} -->`;
-      let templateWithForceRefresh = listingTemplate.htmlDescription;
-      if (!updateData?.description) {
-        const hiddenTimestamp = `<div style="display:none;" data-update="${timestamp2}">Last updated: ${(/* @__PURE__ */ new Date()).toISOString()}</div>`;
-        templateWithForceRefresh = uniqueMarker + hiddenTimestamp + listingTemplate.htmlDescription;
-      }
-      const finalDescription = updateData?.description || templateWithForceRefresh;
-      const fixedImageUrl = product.imageUrl && product.imageUrl.startsWith("//") ? "https:" + product.imageUrl : product.imageUrl;
-      const listingData = {
-        itemId: product.ebayItemId,
-        title: updateData?.title || listingTemplate.title,
-        description: finalDescription,
-        startPrice: updateData?.startPrice || Number(product.salePrice),
-        quantity: updateData?.quantity || ebayQuantity,
-        categoryId: updateData?.categoryId || categoryMapping.categoryId,
-        // Use automatically mapped category
-        condition: updateData?.condition || "New",
-        pictureURLs: fixedImageUrl ? [fixedImageUrl] : void 0,
-        ...updateData
-      };
-      console.log("Generated listing template description length:", listingTemplate.htmlDescription.length);
-      console.log("Generated template description preview:", listingTemplate.htmlDescription.substring(0, 300));
-      console.log("Using description in update: HTML template with unique marker");
-      console.log("Final description length:", finalDescription.length);
-      console.log("Unique marker:", uniqueMarker);
-      console.log("Updating eBay listing with data:", {
-        itemId: listingData.itemId,
-        title: listingData.title,
-        price: listingData.startPrice,
-        quantity: listingData.quantity
-      });
-      const xmlRequest = this.createReviseItemXML(listingData);
-      console.log("Making eBay ReviseFixedPriceItem API call");
-      const response = await this.makeTradingApiRequest(xmlRequest, "ReviseFixedPriceItem");
-      const ackMatch = response.match(/<Ack>(.*?)<\/Ack>/);
-      const isSuccess = ackMatch && (ackMatch[1] === "Success" || ackMatch[1] === "Warning");
-      if (isSuccess) {
-        console.log("eBay listing updated successfully");
-        await storage.createSyncLog({
-          source: "ebay",
-          operation: "update_listing",
-          status: "success",
-          message: `Updated eBay listing for product ${product.name}`,
-          details: JSON.stringify({
-            productId,
-            ebayItemId: product.ebayItemId,
-            updatedFields: Object.keys(updateData || {})
-          })
-        });
-        return {
-          success: true,
-          itemId: product.ebayItemId,
-          message: "eBay listing updated successfully"
-        };
-      } else {
-        const errorMatch = response.match(/<LongMessage>(.*?)<\/LongMessage>/);
-        const errorMessage = errorMatch ? errorMatch[1] : "Unknown eBay update error";
-        console.log("eBay update failed:", errorMessage);
-        await storage.createSyncLog({
-          source: "ebay",
-          operation: "update_listing",
-          status: "error",
-          message: `Failed to update eBay listing: ${errorMessage}`,
-          details: JSON.stringify({ productId, ebayItemId: product.ebayItemId, error: errorMessage })
-        });
-        return {
-          success: false,
-          message: `eBay update failed: ${errorMessage}`
-        };
-      }
-    } catch (error) {
-      console.error("Error updating eBay listing:", error);
-      await storage.createSyncLog({
-        source: "ebay",
-        operation: "update_listing",
-        status: "error",
-        message: `Error updating eBay listing: ${error.message}`,
-        details: JSON.stringify({ productId, error: error.message })
-      });
-      return {
-        success: false,
-        message: `Failed to update eBay listing: ${error.message}`
-      };
-    }
-  }
-  async unlistProduct(productId) {
-    try {
-      const product = await storage.getProduct(productId);
-      if (!product || !product.ebayItemId) {
-        throw new Error("Product not found or not listed on eBay");
-      }
-      console.log(`Unlisting product ${product.name} (Item ID: ${product.ebayItemId}) from eBay...`);
-      console.log("Using OAuth via header for unlisting");
-      const endItemXml = this.createEndItemXML(product.ebayItemId);
-      const responseText = await this.makeTradingApiRequest(endItemXml, "EndItem");
-      const isSuccess = responseText.includes("<Ack>Success</Ack>") || responseText.includes("<Ack>Warning</Ack>");
-      if (!isSuccess) {
-        const errorMatch = responseText.match(/<ShortMessage>(.*?)<\/ShortMessage>/) || responseText.match(/<LongMessage>(.*?)<\/LongMessage>/);
-        const errorMessage = errorMatch ? errorMatch[1] : "Unknown error occurred";
-        if (errorMessage.includes("token is hard expired") || errorMessage.includes("expired")) {
-          console.log(`Token expired for unlisting ${product.name}. eBay listing remains active.`);
-          await storage.createSyncLog({
-            source: "ebay",
-            operation: "product_unlisting",
-            status: "error",
-            message: `Failed to unlist "${product.name}" from eBay: Token expired. Product remains listed on eBay.`,
-            details: JSON.stringify({
-              productId,
-              itemId: product.ebayItemId,
-              error: errorMessage,
-              note: "Token expired - eBay listing still active"
-            })
-          });
-          return {
-            success: false,
-            message: `Failed to unlist "${product.name}" from eBay: Token expired. The product is still listed on eBay. Please refresh your eBay token to unlist products.`,
-            errors: [errorMessage]
-          };
-        }
-        throw new Error(`eBay EndItem failed: ${errorMessage}`);
-      }
-      console.log("eBay unlisting successful:", { itemId: product.ebayItemId, productId });
-      await storage.updateProduct(productId, {
-        listedOnEbay: false
-        // Don't clear ebayItemId - we need it to know this product was previously listed
-      });
-      await storage.createSyncLog({
-        source: "ebay",
-        operation: "product_unlisting",
-        status: "success",
-        message: `Successfully unlisted product "${product.name}" from eBay (Item ID: ${product.ebayItemId})`,
-        details: JSON.stringify({
-          productId,
-          itemId: product.ebayItemId,
-          ebayResponse: responseText
-        })
-      });
-      return {
-        success: true,
-        message: `Product "${product.name}" successfully unlisted from eBay`
-      };
-    } catch (error) {
-      console.error("eBay unlisting failed:", error);
-      return {
-        success: false,
-        message: `Failed to unlist product: ${error.message}`,
-        errors: [error.message]
-      };
-    }
-  }
-  /**
-   * Bulk update inventory for multiple products using eBay ReviseInventoryStatus API
-   * This is more efficient than individual ReviseFixedPriceItem calls
-   * eBay allows up to 4 SKUs per ReviseInventoryStatus call (can batch multiple calls)
-   * 
-   * @param items Array of items to update with itemId, quantity, and optionally price
-   * @returns Aggregated results for all items
-   */
-  async bulkUpdateInventory(items) {
-    if (items.length === 0) {
-      return { success: true, processed: 0, succeeded: 0, failed: 0, results: [] };
-    }
-    console.log(`\u{1F4E6} Starting bulk inventory update for ${items.length} items`);
-    const BATCH_SIZE = 4;
-    const batches = [];
-    for (let i = 0; i < items.length; i += BATCH_SIZE) {
-      batches.push(items.slice(i, i + BATCH_SIZE));
-    }
-    const allResults = [];
-    let totalSucceeded = 0;
-    let totalFailed = 0;
-    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-      const batch = batches[batchIndex];
-      console.log(`\u23F3 Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} items)`);
-      try {
-        const batchResults = await this.processBulkInventoryBatch(batch);
-        allResults.push(...batchResults);
-        for (const result of batchResults) {
-          if (result.success) {
-            totalSucceeded++;
-          } else {
-            totalFailed++;
-          }
-        }
-        if (batchIndex < batches.length - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 1e3));
-        }
-      } catch (error) {
-        console.error(`\u274C Batch ${batchIndex + 1} failed:`, error);
-        for (const item of batch) {
-          allResults.push({
-            productId: item.productId,
-            ebayItemId: item.ebayItemId,
-            success: false,
-            message: `Batch processing failed: ${error.message}`
-          });
-          totalFailed++;
-        }
-      }
-    }
-    const overallSuccess = totalFailed === 0;
-    console.log(`\u{1F4CA} Bulk update complete: ${totalSucceeded} succeeded, ${totalFailed} failed`);
-    await storage.createSyncLog({
-      source: "ebay",
-      operation: "bulk_inventory_update",
-      status: overallSuccess ? "success" : "partial",
-      message: `Bulk inventory update: ${totalSucceeded}/${items.length} items updated successfully`,
-      details: JSON.stringify({
-        processed: items.length,
-        succeeded: totalSucceeded,
-        failed: totalFailed,
-        batches: batches.length
-      })
-    });
-    return {
-      success: overallSuccess,
-      processed: items.length,
-      succeeded: totalSucceeded,
-      failed: totalFailed,
-      results: allResults
-    };
-  }
-  /**
-   * Process a single batch of inventory updates using ReviseInventoryStatus
-   */
-  async processBulkInventoryBatch(items) {
-    console.log("processBulkInventoryBatch - Using OAuth via header");
-    const inventoryStatusXml = items.map((item) => {
-      let fields = `<ItemID>${item.ebayItemId}</ItemID>`;
-      if (item.quantity !== void 0) {
-        fields += `
-        <Quantity>${item.quantity}</Quantity>`;
-      }
-      if (item.price !== void 0) {
-        fields += `
-        <StartPrice currencyID="${this.listingCurrency}">${item.price.toFixed(2)}</StartPrice>`;
-      }
-      return `<InventoryStatus>
-        ${fields}
-      </InventoryStatus>`;
-    }).join("\n      ");
-    const xml = `<?xml version="1.0" encoding="utf-8"?>
-<ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  ${inventoryStatusXml}
-</ReviseInventoryStatusRequest>`;
-    console.log("ReviseInventoryStatus XML preview:", xml.substring(0, 500) + "...");
-    try {
-      const response = await this.makeTradingApiRequest(xml, "ReviseInventoryStatus");
-      const results = [];
-      const isSuccess = response.includes("<Ack>Success</Ack>") || response.includes("<Ack>Warning</Ack>");
-      if (isSuccess) {
-        for (const item of items) {
-          const itemPattern = new RegExp(`<ItemID>${item.ebayItemId}</ItemID>`, "g");
-          const itemSuccess = response.includes(`<ItemID>${item.ebayItemId}</ItemID>`);
-          results.push({
-            productId: item.productId,
-            ebayItemId: item.ebayItemId,
-            success: itemSuccess || isSuccess,
-            // If overall success, assume all items succeeded
-            message: itemSuccess ? "Inventory updated successfully" : "Item updated (inferred from batch success)"
-          });
-          if (item.quantity !== void 0 || item.price !== void 0) {
-            const updateData = {};
-            if (item.quantity !== void 0) {
-              updateData.stock = item.quantity;
-            }
-            if (item.price !== void 0) {
-              updateData.salePrice = String(item.price);
-            }
-            await storage.updateProduct(item.productId, updateData);
-          }
-        }
-      } else {
-        const errorMatch = response.match(/<LongMessage>(.*?)<\/LongMessage>/);
-        const errorMessage = errorMatch ? errorMatch[1] : "Unknown eBay error";
-        for (const item of items) {
-          results.push({
-            productId: item.productId,
-            ebayItemId: item.ebayItemId,
-            success: false,
-            message: errorMessage
-          });
-        }
-      }
-      return results;
-    } catch (error) {
-      throw error;
-    }
-  }
-  /**
-   * Queue aggregation: Collect multiple updates and process them in bulk
-   * Processes when queue reaches 20 items or after timeout
-   */
-  async aggregateAndUpdateInventory(items) {
-    if (items.length < 4) {
-      const result2 = await this.bulkUpdateInventory(items);
-      return {
-        success: result2.success,
-        processed: result2.processed,
-        message: `Processed ${result2.succeeded}/${result2.processed} items successfully`
-      };
-    }
-    console.log(`\u{1F504} Aggregating ${items.length} items for bulk update`);
-    const result = await this.bulkUpdateInventory(items);
-    return {
-      success: result.success,
-      processed: result.processed,
-      message: `Bulk update: ${result.succeeded} succeeded, ${result.failed} failed`
-    };
-  }
-  /**
-   * Get eBay shipping service details using GeteBayDetails Trading API
-   * Returns valid domestic and international shipping services for the UK marketplace
-   */
-  async getShippingServices() {
-    try {
-      const xml = `<?xml version="1.0" encoding="utf-8"?>
-<GeteBayDetailsRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <DetailName>ShippingServiceDetails</DetailName>
-</GeteBayDetailsRequest>`;
-      const response = await this.makeTradingApiRequest(xml, "GeteBayDetails");
-      const domestic = [];
-      const international = [];
-      const serviceRegex = /<ShippingServiceDetails>([\s\S]*?)<\/ShippingServiceDetails>/g;
-      let match;
-      while ((match = serviceRegex.exec(response)) !== null) {
-        const serviceBlock = match[1];
-        const validMatch = serviceBlock.match(/<ValidForSellingFlow>(true|false)<\/ValidForSellingFlow>/);
-        if (!validMatch || validMatch[1] !== "true") continue;
-        const codeMatch = serviceBlock.match(/<ShippingService>([^<]+)<\/ShippingService>/);
-        const descMatch = serviceBlock.match(/<Description>([^<]+)<\/Description>/);
-        const carrierMatch = serviceBlock.match(/<ShippingCarrier>([^<]+)<\/ShippingCarrier>/);
-        const intlMatch = serviceBlock.match(/<InternationalService>(true|false)<\/InternationalService>/);
-        const timeMinMatch = serviceBlock.match(/<ShippingTimeMin>(\d+)<\/ShippingTimeMin>/);
-        const timeMaxMatch = serviceBlock.match(/<ShippingTimeMax>(\d+)<\/ShippingTimeMax>/);
-        if (codeMatch && descMatch) {
-          const service = {
-            code: codeMatch[1],
-            description: descMatch[1],
-            carrier: carrierMatch ? carrierMatch[1] : "Other",
-            shippingTimeMin: timeMinMatch ? parseInt(timeMinMatch[1]) : 1,
-            shippingTimeMax: timeMaxMatch ? parseInt(timeMaxMatch[1]) : 5
-          };
-          if (intlMatch && intlMatch[1] === "true") {
-            international.push(service);
-          } else {
-            domestic.push(service);
-          }
-        }
-      }
-      console.log(`\u{1F4E6} Fetched ${domestic.length} domestic and ${international.length} international shipping services`);
-      return {
-        success: true,
-        domestic,
-        international
-      };
-    } catch (error) {
-      console.error("Failed to get shipping services:", error);
-      return {
-        success: false,
-        domestic: [],
-        international: [],
-        error: error.message
-      };
-    }
-  }
-  /**
-   * Get eBay shipping locations/regions using GeteBayDetails Trading API
-   */
-  async getShippingLocations() {
-    try {
-      const xml = `<?xml version="1.0" encoding="utf-8"?>
-<GeteBayDetailsRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <DetailName>ShippingLocationDetails</DetailName>
-</GeteBayDetailsRequest>`;
-      const response = await this.makeTradingApiRequest(xml, "GeteBayDetails");
-      const regions = [];
-      const locationRegex = /<ShippingLocationDetails>([\s\S]*?)<\/ShippingLocationDetails>/g;
-      let match;
-      while ((match = locationRegex.exec(response)) !== null) {
-        const locationBlock = match[1];
-        const codeMatch = locationBlock.match(/<ShippingLocation>([^<]+)<\/ShippingLocation>/);
-        const descMatch = locationBlock.match(/<Description>([^<]+)<\/Description>/);
-        if (codeMatch) {
-          regions.push({
-            code: codeMatch[1],
-            description: descMatch ? descMatch[1] : codeMatch[1]
-          });
-        }
-      }
-      console.log(`\u{1F30D} Fetched ${regions.length} shipping locations`);
-      return {
-        success: true,
-        regions
-      };
-    } catch (error) {
-      console.error("Failed to get shipping locations:", error);
-      return {
-        success: false,
-        regions: [],
-        error: error.message
-      };
-    }
-  }
-  /**
-   * Get dispatch time options using GeteBayDetails Trading API
-   */
-  async getDispatchTimeOptions() {
-    try {
-      const xml = `<?xml version="1.0" encoding="utf-8"?>
-<GeteBayDetailsRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <DetailName>DispatchTimeMaxDetails</DetailName>
-</GeteBayDetailsRequest>`;
-      const response = await this.makeTradingApiRequest(xml, "GeteBayDetails");
-      const options = [];
-      const optionRegex = /<DispatchTimeMaxDetails>([\s\S]*?)<\/DispatchTimeMaxDetails>/g;
-      let match;
-      while ((match = optionRegex.exec(response)) !== null) {
-        const optionBlock = match[1];
-        const valueMatch = optionBlock.match(/<DispatchTimeMax>(\d+)<\/DispatchTimeMax>/);
-        const descMatch = optionBlock.match(/<Description>([^<]+)<\/Description>/);
-        if (valueMatch) {
-          options.push({
-            value: parseInt(valueMatch[1]),
-            description: descMatch ? descMatch[1] : `${valueMatch[1]} working days`
-          });
-        }
-      }
-      console.log(`\u23F1\uFE0F Fetched ${options.length} dispatch time options`);
-      return {
-        success: true,
-        options
-      };
-    } catch (error) {
-      console.error("Failed to get dispatch time options:", error);
-      return {
-        success: false,
-        options: [],
-        error: error.message
-      };
-    }
-  }
-};
-var ebayApi = new EbayApiService();
-
-// server/ebay-inventory-api.ts
-init_ebay_oauth();
-init_shipping_policies();
-var INV_BASE = "https://api.ebay.com/sell/inventory/v1";
-function marketplaceId() {
-  const map = {
-    "0": "EBAY_US",
-    "3": "EBAY_GB",
-    "77": "EBAY_DE",
-    "71": "EBAY_FR",
-    "101": "EBAY_IT",
-    "186": "EBAY_ES"
-  };
-  return map[process.env.EBAY_MARKETPLACE_SITE_ID || "77"] || "EBAY_DE";
-}
-function localeFor() {
-  const map = {
-    "0": "en-US",
-    "3": "en-GB",
-    "77": "de-DE",
-    "71": "fr-FR",
-    "101": "it-IT",
-    "186": "es-ES"
-  };
-  return map[process.env.EBAY_MARKETPLACE_SITE_ID || "77"] || "de-DE";
-}
-var EbayInventoryApiService = class {
-  currency = process.env.EBAY_LISTING_CURRENCY || "EUR";
-  merchantLocationKey = process.env.EBAY_MERCHANT_LOCATION_KEY || "default-location";
-  // Cache the required-aspect spec per category (one Taxonomy call each).
-  aspectCache = /* @__PURE__ */ new Map();
-  /**
-   * Fetch the REQUIRED item aspects for a category (Taxonomy API), cached.
-   * eBay rejects publish if a category-required aspect (e.g. "Produktart")
-   * is missing, and the set differs per category — so we discover them.
-   */
-  async getRequiredAspects(categoryId) {
-    if (this.aspectCache.has(categoryId)) return this.aspectCache.get(categoryId);
-    const treeId = process.env.EBAY_MARKETPLACE_SITE_ID || "77";
-    try {
-      const token = await ebayOAuth.getValidAccessToken();
-      const url = `https://api.ebay.com/commerce/taxonomy/v1/category_tree/${treeId}/get_item_aspects_for_category?category_id=${encodeURIComponent(categoryId)}`;
-      const resp = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/json",
-          "Accept-Language": localeFor(),
-          "X-EBAY-C-MARKETPLACE-ID": marketplaceId()
-        }
-      });
-      if (!resp.ok) return [];
-      const data = await resp.json();
-      const required = (data?.aspects || []).filter((a) => a?.aspectConstraint?.aspectRequired).map((a) => ({
-        name: a.localizedAspectName,
-        values: (a.aspectValues || []).map((v) => v.localizedValue)
-      }));
-      this.aspectCache.set(categoryId, required);
-      return required;
-    } catch {
-      return [];
-    }
-  }
-  /**
-   * Build the aspects object satisfying a category's required aspects.
-   * Brand/MPN get the accepted no-info combo; other required aspects get a
-   * sensible value (prefer "Sonstige/Other/Nicht zutreffend", else the
-   * first allowed value, else free-text "Sonstige").
-   */
-  async buildAspects(product, categoryId) {
-    const aspects = {};
-    const required = await this.getRequiredAspects(categoryId);
-    for (const a of required) {
-      const lname = a.name.toLowerCase();
-      if (lname === "marke" || lname === "brand") {
-        aspects[a.name] = ["Markenlos"];
-      } else if (lname === "herstellernummer" || lname === "mpn") {
-        aspects[a.name] = ["Nicht zutreffend"];
-      } else if (a.values.length > 0) {
-        const generic = a.values.find((v) => /sonst|other|nicht zutreffend|n\/a/i.test(v));
-        aspects[a.name] = [generic || a.values[0]];
-      } else {
-        aspects[a.name] = ["Sonstige"];
-      }
-    }
-    if (!aspects["Marke"] && !aspects["Brand"]) aspects["Marke"] = ["Markenlos"];
-    if (!aspects["Herstellernummer"] && !aspects["MPN"]) aspects["Herstellernummer"] = ["Nicht zutreffend"];
-    return aspects;
-  }
-  async headers() {
-    const token = await ebayOAuth.getValidAccessToken();
-    const locale = localeFor();
-    return {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      "Content-Language": locale,
-      "Accept-Language": locale,
-      "X-EBAY-C-MARKETPLACE-ID": marketplaceId()
-    };
-  }
-  async req(method, path2, body) {
-    const resp = await fetch(`${INV_BASE}${path2}`, {
-      method,
-      headers: await this.headers(),
-      body: body !== void 0 ? JSON.stringify(body) : void 0
-    });
-    const text2 = await resp.text();
-    let data = null;
-    try {
-      data = text2 ? JSON.parse(text2) : null;
-    } catch {
-    }
-    return { ok: resp.ok, status: resp.status, data, text: text2 };
-  }
-  firstEbayError(data, text2) {
-    const e = data?.errors?.[0];
-    if (e) return `${e.errorId ?? ""} ${e.message ?? ""} ${e.parameters ? JSON.stringify(e.parameters) : ""}`.trim();
-    return (text2 || "").slice(0, 400);
-  }
-  /**
-   * Ensure a merchant inventory location exists (required to publish
-   * offers). Idempotent: a 409/already-exists is treated as success.
-   */
-  async ensureMerchantLocation() {
-    const got = await this.req("GET", `/location/${this.merchantLocationKey}`);
-    if (got.ok) return { step: "location", ok: true, httpStatus: got.status, data: { existing: true } };
-    const body = {
-      location: {
-        address: {
-          addressLine1: process.env.EBAY_LOCATION_ADDRESS || "Riga",
-          city: process.env.EBAY_LOCATION_CITY || "Riga",
-          postalCode: process.env.EBAY_LOCATION_POSTAL || "LV-1001",
-          country: process.env.EBAY_LISTING_COUNTRY || "LV"
-        }
-      },
-      locationInstructions: "Ships from EU warehouse",
-      name: process.env.EBAY_LOCATION_NAME || "EU Warehouse",
-      merchantLocationStatus: "ENABLED",
-      locationTypes: ["WAREHOUSE"]
-    };
-    const created = await this.req("POST", `/location/${this.merchantLocationKey}`, body);
-    if (created.ok || created.status === 204) {
-      return { step: "location", ok: true, httpStatus: created.status, data: { created: true } };
-    }
-    if (created.status === 409) {
-      return { step: "location", ok: true, httpStatus: 409, data: { existing: true } };
-    }
-    return { step: "location", ok: false, httpStatus: created.status, error: this.firstEbayError(created.data, created.text) };
-  }
-  /** Resolve the image URL(s) for a product (Blob-processed when available). */
-  async resolveImages(product) {
-    if (!product.imageUrl) return [];
-    const fixed = product.imageUrl.startsWith("//") ? "https:" + product.imageUrl : product.imageUrl;
-    const hasBlob = !!process.env.BLOB_READ_WRITE_TOKEN;
-    const publicBaseUrl = process.env.PUBLIC_BASE_URL || process.env.REPL_URL;
-    if (!hasBlob && !publicBaseUrl) return [fixed];
-    try {
-      const r = await imageProcessingService.removeWatermark(fixed);
-      if (r.success && r.processedImageUrl) {
-        return [r.processedImageUrl.startsWith("http") ? r.processedImageUrl : `${publicBaseUrl}${r.processedImageUrl}`];
-      }
-    } catch {
-    }
-    return [fixed];
-  }
-  /** Build the inventory_item payload from a product. */
-  async buildInventoryItem(product, categoryId) {
-    const stock = calculateEbayStock(product).ebayStock;
-    const images = await this.resolveImages(product);
-    const title = filterBundleWords(product.name).slice(0, 80);
-    const weightG = product.weight ? parseFloat(product.weight) : 0;
-    const aspects = await this.buildAspects(product, categoryId);
-    return {
-      availability: { shipToLocationAvailability: { quantity: Math.max(0, stock) } },
-      condition: "NEW",
-      product: {
-        title,
-        description: title,
-        // offer carries the rich HTML description
-        aspects,
-        imageUrls: images,
-        brand: "Markenlos",
-        mpn: "Nicht zutreffend"
-      },
-      packageWeightAndSize: weightG > 0 ? { weight: { value: weightG, unit: "GRAM" } } : void 0
-    };
-  }
-  async createOrReplaceInventoryItem(sku, product, categoryId) {
-    const item = await this.buildInventoryItem(product, categoryId);
-    const quantity = item.availability.shipToLocationAvailability.quantity;
-    const r = await this.req("PUT", `/inventory_item/${encodeURIComponent(sku)}`, item);
-    if (r.ok || r.status === 204) return { step: "inventory_item", ok: true, httpStatus: r.status, quantity, aspects: item.product.aspects };
-    return { step: "inventory_item", ok: false, httpStatus: r.status, quantity, aspects: item.product.aspects, error: this.firstEbayError(r.data, r.text) };
-  }
-  /** Build an offer payload (price/qty/policies/category) for a SKU. */
-  async buildOffer(product, categoryId) {
-    const stock = calculateEbayStock(product).ebayStock;
-    const price = parseFloat(product.salePrice) || 0;
-    const shippingPolicyId = getShippingPolicyId(product.weight ? parseFloat(product.weight) : void 0);
-    let description = product.description || product.name;
-    try {
-      const { generateUnifiedEbayTemplate: generateUnifiedEbayTemplate2 } = await Promise.resolve().then(() => (init_ebay_unified_template(), ebay_unified_template_exports));
-      const tpl = generateUnifiedEbayTemplate2(product);
-      description = tpl?.htmlDescription || tpl?.description || description;
-    } catch {
-    }
-    return {
-      sku: product.sku,
-      marketplaceId: marketplaceId(),
-      format: "FIXED_PRICE",
-      availableQuantity: Math.max(0, stock),
-      categoryId,
-      listingDescription: String(description).slice(0, 5e5),
-      listingPolicies: {
-        paymentPolicyId: process.env.EBAY_PAYMENT_PROFILE_ID,
-        returnPolicyId: process.env.EBAY_RETURN_PROFILE_ID,
-        fulfillmentPolicyId: shippingPolicyId
-      },
-      pricingSummary: { price: { value: price.toFixed(2), currency: this.currency } },
-      merchantLocationKey: this.merchantLocationKey
-    };
-  }
-  /** Create an offer; if one already exists for the SKU, reuse its id. */
-  async createOffer(product, categoryId) {
-    const payload = await this.buildOffer(product, categoryId);
-    const r = await this.req("POST", `/offer`, payload);
-    if (r.ok && r.data?.offerId) return { step: "offer", ok: true, httpStatus: r.status, offerId: r.data.offerId };
-    const existing = r.data?.errors?.find((e) => String(e.errorId) === "25002");
-    const offerIdParam = existing?.parameters?.find((p) => p.name === "offerId")?.value;
-    if (offerIdParam) {
-      await this.req("PUT", `/offer/${offerIdParam}`, payload);
-      return { step: "offer", ok: true, httpStatus: r.status, offerId: offerIdParam, data: { reused: true } };
-    }
-    return { step: "offer", ok: false, httpStatus: r.status, error: this.firstEbayError(r.data, r.text) };
-  }
-  async publishOffer(offerId) {
-    const r = await this.req("POST", `/offer/${offerId}/publish`, {});
-    if (r.ok && r.data?.listingId) return { step: "publish", ok: true, httpStatus: r.status, listingId: r.data.listingId };
-    return { step: "publish", ok: false, httpStatus: r.status, error: this.firstEbayError(r.data, r.text) };
-  }
-  /** End a live listing by withdrawing its offer (keeps the inventory item). */
-  async withdrawOffer(offerId) {
-    const r = await this.req("POST", `/offer/${offerId}/withdraw`, {});
-    if (r.ok || r.status === 200 || r.status === 204) return { step: "withdraw", ok: true, httpStatus: r.status };
-    if (r.status === 400 && /not.*published|already|25710|withdraw/i.test(r.text)) {
-      return { step: "withdraw", ok: true, httpStatus: r.status, data: { note: "already ended" } };
-    }
-    return { step: "withdraw", ok: false, httpStatus: r.status, error: this.firstEbayError(r.data, r.text) };
-  }
-  /**
-   * Full single-SKU flow: location -> inventory item -> offer -> publish.
-   * Returns every step so failures are precisely visible. Used by the
-   * diagnostic and (later) the per-item listing path.
-   */
-  async listSingleProduct(productId, getProduct) {
-    const steps = [];
-    const product = await getProduct(productId);
-    if (!product) return { ok: false, steps: [{ step: "product", ok: false, error: "Product not found" }] };
-    const loc = await this.ensureMerchantLocation();
-    steps.push(loc);
-    if (!loc.ok) return { ok: false, sku: product.sku, steps };
-    let categoryId = "";
-    try {
-      const suggested = await ebayApi.getSuggestedCategory(`${product.category} ${product.name}`.slice(0, 80));
-      categoryId = suggested?.id || process.env.EBAY_DEFAULT_CATEGORY_ID || "";
-    } catch {
-      categoryId = process.env.EBAY_DEFAULT_CATEGORY_ID || "";
-    }
-    steps.push({ step: "category", ok: !!categoryId, data: { categoryId } });
-    if (!categoryId) return { ok: false, sku: product.sku, steps };
-    const inv = await this.createOrReplaceInventoryItem(product.sku, product, categoryId);
-    steps.push(inv);
-    if (!inv.ok) return { ok: false, sku: product.sku, steps };
-    const offer = await this.createOffer(product, categoryId);
-    steps.push(offer);
-    if (!offer.ok || !offer.offerId) return { ok: false, sku: product.sku, steps };
-    const pub = await this.publishOffer(offer.offerId);
-    steps.push(pub);
-    return {
-      ok: pub.ok,
-      sku: product.sku,
-      offerId: offer.offerId,
-      listingId: pub.listingId,
-      steps
-    };
-  }
-};
-var ebayInventoryApi = new EbayInventoryApiService();
-
-// server/routes.ts
-init_ebay_oauth();
 
 // server/ebay-account-api.ts
 init_storage();
@@ -6088,6 +6363,8 @@ var ebayAccountApi = new EbayAccountApiService();
 
 // server/routes.ts
 init_dynamic_pricing();
+init_stock_manager();
+init_image_processing();
 
 // server/cron-jobs.ts
 init_storage();
@@ -6480,7 +6757,9 @@ var TMEApiServiceOptimized = class {
 var tmeApiOptimized = new TMEApiServiceOptimized(storage);
 
 // server/cron-jobs.ts
+init_ebay_api();
 init_dynamic_pricing();
+init_stock_manager();
 var tmeApi2 = new TMEApiServiceOptimized(storage);
 var SYNC_CONFIG = {
   // Run at 02:00 AM daily (2 hours past midnight)
@@ -6878,6 +7157,7 @@ async function triggerManualSync() {
 init_storage();
 init_tme_api();
 init_dynamic_pricing();
+init_ebay_api();
 function startOfToday() {
   const d = /* @__PURE__ */ new Date();
   d.setHours(0, 0, 0, 0);
@@ -8270,6 +8550,32 @@ async function registerRoutes(app) {
       res.json({ ...result, requiredAspects });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+  app.get("/api/__apply-migration", async (_req, res) => {
+    try {
+      const result = await storage.applyScaleMigration();
+      res.json({ ...result, message: "Schema upgrade applied (idempotent)." });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: error.message });
+    }
+  });
+  app.post("/api/ebay/inventory-list-batch", requireAuth, async (req, res) => {
+    try {
+      const { listProductsViaInventory: listProductsViaInventory2 } = await Promise.resolve().then(() => (init_ebay_lister(), ebay_lister_exports));
+      let products2;
+      if (Array.isArray(req.body?.productIds) && req.body.productIds.length) {
+        products2 = (await Promise.all(req.body.productIds.map((id) => storage.getProduct(id)))).filter(Boolean);
+      } else {
+        const limit = Math.min(Number(req.body?.limit) || 25, 200);
+        products2 = await storage.getListingCandidates(limit);
+      }
+      if (!products2.length) return res.json({ success: true, attempted: 0, published: 0, failed: 0, message: "No candidates" });
+      const result = await listProductsViaInventory2(products2);
+      res.json({ success: true, ...result });
+    } catch (error) {
+      console.error("Inventory list-batch failed:", error);
+      res.status(500).json({ success: false, error: error.message });
     }
   });
   app.get("/api/__inventory-end", async (req, res) => {

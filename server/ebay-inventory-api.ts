@@ -289,6 +289,115 @@ export class EbayInventoryApiService {
     return { step: "publish", ok: false, httpStatus: r.status, error: this.firstEbayError(r.data, r.text) };
   }
 
+  // ─── Bulk operations (25 SKUs/call) for the listing ramp & updates ───
+
+  /**
+   * Create/replace up to 25 inventory items in one call. Each product is
+   * resolved to its category (for aspects) via the Taxonomy resolver.
+   * Returns per-SKU ok/error.
+   */
+  async bulkCreateOrReplaceInventoryItem(
+    items: Array<{ product: Product; categoryId: string }>,
+  ): Promise<Map<string, { ok: boolean; error?: string }>> {
+    const out = new Map<string, { ok: boolean; error?: string }>();
+    const requests = [];
+    for (const { product, categoryId } of items.slice(0, 25)) {
+      requests.push({ sku: product.sku, ...(await this.buildInventoryItem(product, categoryId)) });
+    }
+    const r = await this.req("POST", `/bulk_create_or_replace_inventory_item`, { requests });
+    const responses = r.data?.responses || [];
+    for (const resp of responses) {
+      const ok = resp.statusCode >= 200 && resp.statusCode < 300;
+      out.set(resp.sku, { ok, error: ok ? undefined : this.firstEbayError(resp, JSON.stringify(resp)) });
+    }
+    // If the envelope itself failed, mark all as failed
+    if (!r.ok && responses.length === 0) {
+      for (const { product } of items.slice(0, 25)) out.set(product.sku, { ok: false, error: this.firstEbayError(r.data, r.text) });
+    }
+    return out;
+  }
+
+  /** Create up to 25 offers. Returns per-SKU offerId or error. */
+  async bulkCreateOffer(
+    items: Array<{ product: Product; categoryId: string }>,
+  ): Promise<Map<string, { ok: boolean; offerId?: string; error?: string }>> {
+    const out = new Map<string, { ok: boolean; offerId?: string; error?: string }>();
+    const requests = [];
+    for (const { product, categoryId } of items.slice(0, 25)) {
+      requests.push(await this.buildOffer(product, categoryId));
+    }
+    const r = await this.req("POST", `/bulk_create_offer`, { requests });
+    const responses = r.data?.responses || [];
+    for (const resp of responses) {
+      const ok = (resp.statusCode >= 200 && resp.statusCode < 300) && resp.offerId;
+      if (ok) { out.set(resp.sku, { ok: true, offerId: resp.offerId }); continue; }
+      // reuse existing offer (25002 with offerId param)
+      const existing = resp.errors?.find((e: any) => String(e.errorId) === "25002");
+      const offerIdParam = existing?.parameters?.find((p: any) => p.name === "offerId")?.value;
+      if (offerIdParam) out.set(resp.sku, { ok: true, offerId: offerIdParam });
+      else out.set(resp.sku, { ok: false, error: this.firstEbayError(resp, JSON.stringify(resp)) });
+    }
+    if (!r.ok && responses.length === 0) {
+      for (const { product } of items.slice(0, 25)) out.set(product.sku, { ok: false, error: this.firstEbayError(r.data, r.text) });
+    }
+    return out;
+  }
+
+  /** Publish up to 25 offers. Returns per-offer listingId or error. */
+  async bulkPublishOffer(
+    offers: Array<{ sku: string; offerId: string }>,
+  ): Promise<Map<string, { ok: boolean; listingId?: string; error?: string }>> {
+    const out = new Map<string, { ok: boolean; listingId?: string; error?: string }>();
+    const requests = offers.slice(0, 25).map((o) => ({ offerId: o.offerId }));
+    const bySku = new Map(offers.map((o) => [o.offerId, o.sku]));
+    const r = await this.req("POST", `/bulk_publish_offer`, { requests });
+    const responses = r.data?.responses || [];
+    for (const resp of responses) {
+      const sku = bySku.get(resp.offerId) || resp.offerId;
+      const ok = (resp.statusCode >= 200 && resp.statusCode < 300) && resp.listingId;
+      out.set(sku, ok ? { ok: true, listingId: resp.listingId } : { ok: false, error: this.firstEbayError(resp, JSON.stringify(resp)) });
+    }
+    if (!r.ok && responses.length === 0) {
+      for (const o of offers.slice(0, 25)) out.set(o.sku, { ok: false, error: this.firstEbayError(r.data, r.text) });
+    }
+    return out;
+  }
+
+  /**
+   * Update price + available quantity for up to 25 SKUs (the hot path).
+   * `items` carry the offerId, new quantity and price.
+   */
+  async bulkUpdatePriceQuantity(
+    items: Array<{ sku: string; offerId: string; quantity: number; price: number }>,
+  ): Promise<Map<string, { ok: boolean; error?: string }>> {
+    const out = new Map<string, { ok: boolean; error?: string }>();
+    const requests = items.slice(0, 25).map((it) => ({
+      sku: it.sku,
+      shipToLocationAvailability: { quantity: Math.max(0, it.quantity) },
+      offers: [{ offerId: it.offerId, availableQuantity: Math.max(0, it.quantity), price: { value: it.price.toFixed(2), currency: this.currency } }],
+    }));
+    const r = await this.req("POST", `/bulk_update_price_quantity`, { requests });
+    const responses = r.data?.responses || [];
+    for (const resp of responses) {
+      const ok = resp.statusCode >= 200 && resp.statusCode < 300;
+      out.set(resp.sku, { ok, error: ok ? undefined : this.firstEbayError(resp, JSON.stringify(resp)) });
+    }
+    if (!r.ok && responses.length === 0) {
+      for (const it of items.slice(0, 25)) out.set(it.sku, { ok: false, error: this.firstEbayError(r.data, r.text) });
+    }
+    return out;
+  }
+
+  /** Resolve a product's eBay category via the Taxonomy resolver (cached upstream). */
+  async resolveCategory(product: Product): Promise<string> {
+    try {
+      const s = await ebayApi.getSuggestedCategory(`${product.category} ${product.name}`.slice(0, 80));
+      return s?.id || process.env.EBAY_DEFAULT_CATEGORY_ID || "";
+    } catch {
+      return process.env.EBAY_DEFAULT_CATEGORY_ID || "";
+    }
+  }
+
   /** End a live listing by withdrawing its offer (keeps the inventory item). */
   async withdrawOffer(offerId: string): Promise<StepResult> {
     const r = await this.req("POST", `/offer/${offerId}/withdraw`, {});

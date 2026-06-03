@@ -725,6 +725,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // One-shot idempotent schema upgrade (inventory columns + scale indexes).
+  // Hit once after deploying the scale rewrite. Safe to re-run.
+  app.get("/api/__apply-migration", async (_req, res) => {
+    try {
+      const result = await storage.applyScaleMigration();
+      res.json({ ...result, message: "Schema upgrade applied (idempotent)." });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  });
+
+  // List a batch of candidate products on eBay via the Inventory API.
+  // Body: { limit } (default 25) lists the next N unlisted in-stock TME
+  // products; or { productIds: [...] } to list specific ones.
+  app.post("/api/ebay/inventory-list-batch", requireAuth, async (req, res) => {
+    try {
+      const { listProductsViaInventory } = await import("./ebay-lister");
+      let products;
+      if (Array.isArray(req.body?.productIds) && req.body.productIds.length) {
+        products = (await Promise.all(req.body.productIds.map((id: number) => storage.getProduct(id)))).filter(Boolean);
+      } else {
+        const limit = Math.min(Number(req.body?.limit) || 25, 200);
+        products = await storage.getListingCandidates(limit);
+      }
+      if (!products.length) return res.json({ success: true, attempted: 0, published: 0, failed: 0, message: "No candidates" });
+      const result = await listProductsViaInventory(products as any);
+      res.json({ success: true, ...result });
+    } catch (error) {
+      console.error("Inventory list-batch failed:", error);
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
   // End an Inventory-API listing by withdrawing its offer.
   //   GET /api/__inventory-end?offerId=264031332018
   app.get("/api/__inventory-end", async (req, res) => {

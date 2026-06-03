@@ -70,7 +70,7 @@ import {
   type InsertScheduledMessage
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, gte, lte, desc, asc, count, or, ilike } from "drizzle-orm";
+import { eq, and, gte, lte, desc, asc, count, or, ilike, isNull, isNotNull, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 
 export interface IStorage {
@@ -334,6 +334,58 @@ export class DatabaseStorage implements IStorage {
   // Product methods
   async getProducts(): Promise<Product[]> {
     return await db.select().from(products).orderBy(desc(products.createdAt));
+  }
+
+  // One-shot, idempotent schema upgrade for the scale rewrite: Inventory
+  // API listing-state columns + the indexes the poll/drainer rely on.
+  // Safe to run repeatedly (IF NOT EXISTS). Used instead of drizzle-kit
+  // push since the table is small and we can't run the CLI on Vercel.
+  async applyScaleMigration(): Promise<{ ok: boolean; statements: number }> {
+    const stmts = [
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS ebay_offer_id text`,
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS ebay_listing_id text`,
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS ebay_listing_status text`,
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS ebay_listing_error text`,
+      `CREATE INDEX IF NOT EXISTS products_supplier_stale_idx ON products (supplier, last_synced_at)`,
+      `CREATE INDEX IF NOT EXISTS products_status_idx ON products (status)`,
+      `CREATE INDEX IF NOT EXISTS products_ebay_idx ON products (listed_on_ebay, ebay_item_id)`,
+      `CREATE INDEX IF NOT EXISTS products_list_candidate_idx ON products (supplier, listed_on_ebay, exclude_from_listing)`,
+      `CREATE INDEX IF NOT EXISTS products_offer_idx ON products (listed_on_ebay, ebay_offer_id)`,
+      `CREATE INDEX IF NOT EXISTS tme_cache_expires_idx ON tme_product_cache (expires_at)`,
+      `CREATE INDEX IF NOT EXISTS sync_queue_status_priority_idx ON sync_queue (status, priority, scheduled_for)`,
+    ];
+    for (const s of stmts) {
+      await db.execute(sql.raw(s));
+    }
+    return { ok: true, statements: stmts.length };
+  }
+
+  // Candidates to list on eBay: TME products, in stock, not already listed,
+  // not excluded. DB-side filter + limit (no full-table load).
+  async getListingCandidates(limit: number): Promise<Product[]> {
+    return await db
+      .select()
+      .from(products)
+      .where(
+        and(
+          eq(products.supplier, "TME"),
+          eq(products.listedOnEbay, false),
+          gte(products.stock, 1),
+          or(eq(products.excludeFromListing, false), isNull(products.excludeFromListing)),
+        ),
+      )
+      .orderBy(asc(products.id))
+      .limit(limit);
+  }
+
+  // Listed products needing an eBay stock/price push (have an offer id).
+  async getProductsWithOffers(limit: number): Promise<Product[]> {
+    return await db
+      .select()
+      .from(products)
+      .where(and(eq(products.listedOnEbay, true), isNotNull(products.ebayOfferId)))
+      .orderBy(asc(products.lastSyncedAt))
+      .limit(limit);
   }
 
   async getProduct(id: number): Promise<Product | undefined> {
