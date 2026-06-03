@@ -409,27 +409,32 @@ export class EbayInventoryApiService {
     return { step: "withdraw", ok: false, httpStatus: r.status, error: this.firstEbayError(r.data, r.text) };
   }
 
+  private locationEnsured = false;
+
   /**
-   * Full single-SKU flow: location -> inventory item -> offer -> publish.
-   * Returns every step so failures are precisely visible. Used by the
-   * diagnostic and (later) the per-item listing path.
+   * Full single-product flow: location -> category -> inventory item ->
+   * offer -> publish. One product is independent, so a failure here never
+   * blocks others (unlike a bulk batch which rejects all on one bad item).
+   * This is the proven path used for both the diagnostic and the ramp.
    */
-  async listSingleProduct(productId: number, getProduct: (id: number) => Promise<Product | undefined>): Promise<{
+  async listOneProduct(product: Product): Promise<{
     ok: boolean;
-    sku?: string;
+    sku: string;
     offerId?: string;
     listingId?: string;
+    failedStep?: string;
+    error?: string;
     steps: StepResult[];
   }> {
     const steps: StepResult[] = [];
-    const product = await getProduct(productId);
-    if (!product) return { ok: false, steps: [{ step: "product", ok: false, error: "Product not found" }] };
 
-    const loc = await this.ensureMerchantLocation();
-    steps.push(loc);
-    if (!loc.ok) return { ok: false, sku: product.sku, steps };
+    if (!this.locationEnsured) {
+      const loc = await this.ensureMerchantLocation();
+      steps.push(loc);
+      if (!loc.ok) return { ok: false, sku: product.sku, failedStep: "location", error: loc.error, steps };
+      this.locationEnsured = true;
+    }
 
-    // Category via the existing Taxonomy resolver
     let categoryId = "";
     try {
       const suggested = await ebayApi.getSuggestedCategory(`${product.category} ${product.name}`.slice(0, 80));
@@ -437,16 +442,15 @@ export class EbayInventoryApiService {
     } catch {
       categoryId = process.env.EBAY_DEFAULT_CATEGORY_ID || "";
     }
-    steps.push({ step: "category", ok: !!categoryId, data: { categoryId } });
-    if (!categoryId) return { ok: false, sku: product.sku, steps };
+    if (!categoryId) return { ok: false, sku: product.sku, failedStep: "category", error: "no category resolved", steps };
 
     const inv = await this.createOrReplaceInventoryItem(product.sku, product, categoryId);
     steps.push(inv);
-    if (!inv.ok) return { ok: false, sku: product.sku, steps };
+    if (!inv.ok) return { ok: false, sku: product.sku, failedStep: "inventory_item", error: inv.error, steps };
 
     const offer = await this.createOffer(product, categoryId);
     steps.push(offer);
-    if (!offer.ok || !offer.offerId) return { ok: false, sku: product.sku, steps };
+    if (!offer.ok || !offer.offerId) return { ok: false, sku: product.sku, failedStep: "offer", error: offer.error, steps };
 
     const pub = await this.publishOffer(offer.offerId);
     steps.push(pub);
@@ -455,8 +459,17 @@ export class EbayInventoryApiService {
       sku: product.sku,
       offerId: offer.offerId,
       listingId: pub.listingId,
+      failedStep: pub.ok ? undefined : "publish",
+      error: pub.error,
       steps,
     };
+  }
+
+  /** Diagnostic wrapper: list a single product by id. */
+  async listSingleProduct(productId: number, getProduct: (id: number) => Promise<Product | undefined>) {
+    const product = await getProduct(productId);
+    if (!product) return { ok: false, steps: [{ step: "product", ok: false, error: "Product not found" }] };
+    return this.listOneProduct(product);
   }
 }
 

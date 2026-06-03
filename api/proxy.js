@@ -5460,18 +5460,21 @@ var init_ebay_inventory_api = __esm({
         }
         return { step: "withdraw", ok: false, httpStatus: r.status, error: this.firstEbayError(r.data, r.text) };
       }
+      locationEnsured = false;
       /**
-       * Full single-SKU flow: location -> inventory item -> offer -> publish.
-       * Returns every step so failures are precisely visible. Used by the
-       * diagnostic and (later) the per-item listing path.
+       * Full single-product flow: location -> category -> inventory item ->
+       * offer -> publish. One product is independent, so a failure here never
+       * blocks others (unlike a bulk batch which rejects all on one bad item).
+       * This is the proven path used for both the diagnostic and the ramp.
        */
-      async listSingleProduct(productId, getProduct) {
+      async listOneProduct(product) {
         const steps = [];
-        const product = await getProduct(productId);
-        if (!product) return { ok: false, steps: [{ step: "product", ok: false, error: "Product not found" }] };
-        const loc = await this.ensureMerchantLocation();
-        steps.push(loc);
-        if (!loc.ok) return { ok: false, sku: product.sku, steps };
+        if (!this.locationEnsured) {
+          const loc = await this.ensureMerchantLocation();
+          steps.push(loc);
+          if (!loc.ok) return { ok: false, sku: product.sku, failedStep: "location", error: loc.error, steps };
+          this.locationEnsured = true;
+        }
         let categoryId = "";
         try {
           const suggested = await ebayApi.getSuggestedCategory(`${product.category} ${product.name}`.slice(0, 80));
@@ -5479,14 +5482,13 @@ var init_ebay_inventory_api = __esm({
         } catch {
           categoryId = process.env.EBAY_DEFAULT_CATEGORY_ID || "";
         }
-        steps.push({ step: "category", ok: !!categoryId, data: { categoryId } });
-        if (!categoryId) return { ok: false, sku: product.sku, steps };
+        if (!categoryId) return { ok: false, sku: product.sku, failedStep: "category", error: "no category resolved", steps };
         const inv = await this.createOrReplaceInventoryItem(product.sku, product, categoryId);
         steps.push(inv);
-        if (!inv.ok) return { ok: false, sku: product.sku, steps };
+        if (!inv.ok) return { ok: false, sku: product.sku, failedStep: "inventory_item", error: inv.error, steps };
         const offer = await this.createOffer(product, categoryId);
         steps.push(offer);
-        if (!offer.ok || !offer.offerId) return { ok: false, sku: product.sku, steps };
+        if (!offer.ok || !offer.offerId) return { ok: false, sku: product.sku, failedStep: "offer", error: offer.error, steps };
         const pub = await this.publishOffer(offer.offerId);
         steps.push(pub);
         return {
@@ -5494,8 +5496,16 @@ var init_ebay_inventory_api = __esm({
           sku: product.sku,
           offerId: offer.offerId,
           listingId: pub.listingId,
+          failedStep: pub.ok ? void 0 : "publish",
+          error: pub.error,
           steps
         };
+      }
+      /** Diagnostic wrapper: list a single product by id. */
+      async listSingleProduct(productId, getProduct) {
+        const product = await getProduct(productId);
+        if (!product) return { ok: false, steps: [{ step: "product", ok: false, error: "Product not found" }] };
+        return this.listOneProduct(product);
       }
     };
     ebayInventoryApi = new EbayInventoryApiService();
@@ -5724,49 +5734,31 @@ async function listProductsViaInventory(allProducts) {
   for (const p of allProducts.filter((p2) => (p2.stock ?? 0) <= 0)) {
     results.push({ sku: p.sku, ok: false, error: "skipped: out of stock" });
   }
-  for (let i = 0; i < products2.length && !limitHit; i += 25) {
-    const chunk = products2.slice(i, i + 25);
-    const withCat = [];
-    for (const p of chunk) {
-      withCat.push({ product: p, categoryId: await ebayInventoryApi.resolveCategory(p) });
-    }
-    const invRes = await ebayInventoryApi.bulkCreateOrReplaceInventoryItem(withCat);
-    const offerInput = withCat.filter((w) => invRes.get(w.product.sku)?.ok);
-    const offerRes = await ebayInventoryApi.bulkCreateOffer(offerInput);
-    const toPublish = [];
-    for (const w of offerInput) {
-      const o = offerRes.get(w.product.sku);
-      if (o?.ok && o.offerId) toPublish.push({ sku: w.product.sku, offerId: o.offerId });
-    }
-    const pubRes = toPublish.length ? await ebayInventoryApi.bulkPublishOffer(toPublish) : /* @__PURE__ */ new Map();
-    for (const prod of chunk) {
-      const sku = prod.sku;
-      const inv = invRes.get(sku);
-      const offer = offerRes.get(sku);
-      const pub = pubRes.get(sku);
-      if (pub?.ok && pub.listingId) {
-        published++;
-        await storage.updateProduct(prod.id, {
-          listedOnEbay: true,
-          ebayOfferId: offer?.offerId ?? null,
-          ebayListingId: pub.listingId,
-          ebayItemId: pub.listingId,
-          ebayListingStatus: "published",
-          ebayListingError: null
-        });
-        results.push({ sku, ok: true, listingId: pub.listingId });
-      } else {
-        failed++;
-        const err = pub?.error || offer?.error || inv?.error || "unknown error";
-        const status = offer?.offerId ? "offer_created" : inv?.ok ? "inventory_created" : "error";
-        await storage.updateProduct(prod.id, {
-          ebayOfferId: offer?.offerId ?? null,
-          ebayListingStatus: status,
-          ebayListingError: String(err).slice(0, 500)
-        });
-        results.push({ sku, ok: false, error: String(err) });
-        if (LIMIT_RX.test(String(err))) limitHit = true;
-      }
+  for (const prod of products2) {
+    if (limitHit) break;
+    const r = await ebayInventoryApi.listOneProduct(prod);
+    if (r.ok && r.listingId) {
+      published++;
+      await storage.updateProduct(prod.id, {
+        listedOnEbay: true,
+        ebayOfferId: r.offerId ?? null,
+        ebayListingId: r.listingId,
+        ebayItemId: r.listingId,
+        ebayListingStatus: "published",
+        ebayListingError: null
+      });
+      results.push({ sku: prod.sku, ok: true, listingId: r.listingId });
+    } else {
+      failed++;
+      const err = r.error || "unknown error";
+      const status = r.offerId ? "offer_created" : r.failedStep === "inventory_item" ? "error" : "error";
+      await storage.updateProduct(prod.id, {
+        ebayOfferId: r.offerId ?? null,
+        ebayListingStatus: status,
+        ebayListingError: String(err).slice(0, 500)
+      });
+      results.push({ sku: prod.sku, ok: false, error: `${r.failedStep || ""}: ${err}`.trim() });
+      if (LIMIT_RX.test(String(err))) limitHit = true;
     }
   }
   return { attempted: allProducts.length, published, failed, limitHit, skipped, results };
