@@ -8611,6 +8611,55 @@ async function registerRoutes(app) {
       res.status(500).json({ success: false, error: error.message });
     }
   });
+  app.get("/api/__inventory-update-check", async (req, res) => {
+    try {
+      const productId = Number(req.query.productId);
+      if (!productId) return res.status(400).json({ ok: false, message: "?productId= required" });
+      const product = await storage.getProduct(productId);
+      if (!product) return res.status(404).json({ ok: false, message: "Product not found" });
+      if (!product.ebayOfferId) {
+        return res.status(400).json({ ok: false, message: "Product has no ebayOfferId (not listed via Inventory API)", sku: product.sku, listingStatus: product.ebayListingStatus });
+      }
+      const qty = req.query.qty !== void 0 ? Number(req.query.qty) : product.stock ?? 1;
+      const price = req.query.price !== void 0 ? Number(req.query.price) : parseFloat(product.salePrice) || 0;
+      const result = await ebayInventoryApi.bulkUpdatePriceQuantity([
+        { sku: product.sku, offerId: product.ebayOfferId, quantity: qty, price }
+      ]);
+      const r = result.get(product.sku);
+      res.json({
+        ok: !!r?.ok,
+        sku: product.sku,
+        offerId: product.ebayOfferId,
+        listingId: product.ebayListingId,
+        sentQuantity: qty,
+        sentPrice: price,
+        error: r?.error,
+        verifyUrl: product.ebayListingId ? `https://www.ebay.de/itm/${product.ebayListingId}` : void 0
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+  app.get("/api/__listed-products", async (_req, res) => {
+    try {
+      const listed = await storage.getProductsWithOffers(20);
+      res.json({
+        count: listed.length,
+        products: listed.map((p) => ({
+          id: p.id,
+          sku: p.sku,
+          name: p.name,
+          stock: p.stock,
+          salePrice: p.salePrice,
+          ebayOfferId: p.ebayOfferId,
+          ebayListingId: p.ebayListingId,
+          url: p.ebayListingId ? `https://www.ebay.de/itm/${p.ebayListingId}` : void 0
+        }))
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
   app.get("/api/__inventory-end", async (req, res) => {
     const offerId = String(req.query.offerId || "");
     if (!offerId) return res.status(400).json({ ok: false, message: "?offerId= required" });

@@ -758,6 +758,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Test the stock/price update path: push a quantity (and optional price)
+  // to a listed product's Inventory offer via bulkUpdatePriceQuantity.
+  // Verify on the eBay listing that the quantity/price changed.
+  //   GET /api/__inventory-update-check?productId=123&qty=1&price=9.99
+  app.get("/api/__inventory-update-check", async (req, res) => {
+    try {
+      const productId = Number(req.query.productId);
+      if (!productId) return res.status(400).json({ ok: false, message: "?productId= required" });
+      const product = await storage.getProduct(productId);
+      if (!product) return res.status(404).json({ ok: false, message: "Product not found" });
+      if (!product.ebayOfferId) {
+        return res.status(400).json({ ok: false, message: "Product has no ebayOfferId (not listed via Inventory API)", sku: product.sku, listingStatus: product.ebayListingStatus });
+      }
+      const qty = req.query.qty !== undefined ? Number(req.query.qty) : (product.stock ?? 1);
+      const price = req.query.price !== undefined ? Number(req.query.price) : (parseFloat(product.salePrice) || 0);
+
+      const result = await ebayInventoryApi.bulkUpdatePriceQuantity([
+        { sku: product.sku, offerId: product.ebayOfferId, quantity: qty, price },
+      ]);
+      const r = result.get(product.sku);
+      res.json({
+        ok: !!r?.ok,
+        sku: product.sku,
+        offerId: product.ebayOfferId,
+        listingId: product.ebayListingId,
+        sentQuantity: qty,
+        sentPrice: price,
+        error: r?.error,
+        verifyUrl: product.ebayListingId ? `https://www.ebay.de/itm/${product.ebayListingId}` : undefined,
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: (err as Error).message });
+    }
+  });
+
+  // List currently-listed Inventory products (id, sku, qty, offer, listing)
+  // to pick one for the update test. GET /api/__listed-products
+  app.get("/api/__listed-products", async (_req, res) => {
+    try {
+      const listed = await storage.getProductsWithOffers(20);
+      res.json({
+        count: listed.length,
+        products: listed.map((p) => ({
+          id: p.id, sku: p.sku, name: p.name, stock: p.stock,
+          salePrice: p.salePrice, ebayOfferId: p.ebayOfferId, ebayListingId: p.ebayListingId,
+          url: p.ebayListingId ? `https://www.ebay.de/itm/${p.ebayListingId}` : undefined,
+        })),
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: (err as Error).message });
+    }
+  });
+
   // End an Inventory-API listing by withdrawing its offer.
   //   GET /api/__inventory-end?offerId=264031332018
   app.get("/api/__inventory-end", async (req, res) => {
