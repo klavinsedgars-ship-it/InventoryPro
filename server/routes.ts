@@ -3556,7 +3556,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!isVercelCron && !isAuthed) {
       return res.status(401).json({ message: "Unauthorized" });
     }
-    const budgetMs = 50_000; // stay under the 60s function limit
+    const budgetMs = 270_000; // Vercel Pro maxDuration is 300s
     const start = Date.now();
     let chunks = 0;
     let totalChanged = 0;
@@ -3579,6 +3579,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         message: `Cron sync: ${chunks} chunks, ${totalChanged} changed, ${totalEbay} eBay updated, ${last?.remaining ?? "?"} remaining`,
         details: JSON.stringify({ chunks, totalChanged, totalEbay, remaining: last?.remaining, errors: allErrors.slice(0, 20) }),
       });
+
+      // Self-chain: if stale products remain, fire the next invocation
+      // (fresh 300s budget) so a big catalog is fully covered without
+      // waiting for the next scheduled cron. Fire-and-forget.
+      if (!last?.done) {
+        const base = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
+        const secret = process.env.CRON_SECRET;
+        fetch(`${base}/api/cron/daily-sync`, {
+          method: "POST",
+          headers: secret ? { authorization: `Bearer ${secret}` } : {},
+        }).catch(() => {});
+      }
 
       res.json({
         success: true,

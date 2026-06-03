@@ -3,11 +3,14 @@
   "buildCommand": "npm run vercel-build",
   "outputDirectory": "dist/public",
   "framework": null,
+  "functions": {
+    "api/proxy.js": { "maxDuration": 300 }
+  },
   "rewrites": [
     { "source": "/api/(.+)", "destination": "/api/proxy?_origPath=$1" },
     { "source": "/((?!api/|__build).*)", "destination": "/index.html" }
   ],
   "crons": [
-    { "path": "/api/cron/daily-sync", "schedule": "0 2 * * *" }
+    { "path": "/api/cron/daily-sync", "schedule": "0 */3 * * *" }
   ]
 }

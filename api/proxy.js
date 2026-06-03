@@ -7200,15 +7200,13 @@ async function triggerManualSync() {
 init_storage();
 init_tme_api();
 init_dynamic_pricing();
-function startOfToday() {
-  const d = /* @__PURE__ */ new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
+function staleCutoff() {
+  const hours = Number(process.env.SYNC_STALE_HOURS) || 6;
+  return new Date(Date.now() - hours * 3600 * 1e3);
 }
 async function runSyncChunk(limit = 50) {
   const errors = [];
-  const today = startOfToday();
-  const staleBefore = new Date(today);
+  const staleBefore = staleCutoff();
   const total = await storage.getTmeProductCount();
   const slice = (await storage.getStaleTmeProducts(limit, staleBefore)).filter((p) => p.sku);
   if (slice.length === 0) {
@@ -10904,7 +10902,7 @@ async function registerRoutes(app) {
     if (!isVercelCron && !isAuthed) {
       return res.status(401).json({ message: "Unauthorized" });
     }
-    const budgetMs = 5e4;
+    const budgetMs = 27e4;
     const start = Date.now();
     let chunks = 0;
     let totalChanged = 0;
@@ -10926,6 +10924,15 @@ async function registerRoutes(app) {
         message: `Cron sync: ${chunks} chunks, ${totalChanged} changed, ${totalEbay} eBay updated, ${last?.remaining ?? "?"} remaining`,
         details: JSON.stringify({ chunks, totalChanged, totalEbay, remaining: last?.remaining, errors: allErrors.slice(0, 20) })
       });
+      if (!last?.done) {
+        const base = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
+        const secret = process.env.CRON_SECRET;
+        fetch(`${base}/api/cron/daily-sync`, {
+          method: "POST",
+          headers: secret ? { authorization: `Bearer ${secret}` } : {}
+        }).catch(() => {
+        });
+      }
       res.json({
         success: true,
         done: last?.done ?? false,

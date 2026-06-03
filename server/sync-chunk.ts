@@ -30,19 +30,20 @@ export interface SyncChunkResult {
   errors: string[];
 }
 
-function startOfToday(): number {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
+// A product is "stale" if it hasn't been synced within this many hours.
+// Default 6h -> each product refreshes ~4x/day. Tune via SYNC_STALE_HOURS
+// (raise toward 24 to cut TME calls as the catalog grows to 100k).
+function staleCutoff(): Date {
+  const hours = Number(process.env.SYNC_STALE_HOURS) || 6;
+  return new Date(Date.now() - hours * 3600 * 1000);
 }
 
 export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
   const errors: string[] = [];
-  const today = startOfToday();
 
   // DB-side: load only the next `limit` stalest TME products (indexed),
-  // not the whole table. todayStart is the staleness cutoff.
-  const staleBefore = new Date(today);
+  // not the whole table.
+  const staleBefore = staleCutoff();
   const total = await storage.getTmeProductCount();
   const slice = (await storage.getStaleTmeProducts(limit, staleBefore)).filter((p) => p.sku);
   if (slice.length === 0) {
