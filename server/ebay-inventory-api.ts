@@ -53,6 +53,72 @@ interface StepResult {
 export class EbayInventoryApiService {
   private currency = process.env.EBAY_LISTING_CURRENCY || "EUR";
   private merchantLocationKey = process.env.EBAY_MERCHANT_LOCATION_KEY || "default-location";
+  // Cache the required-aspect spec per category (one Taxonomy call each).
+  private aspectCache = new Map<string, { name: string; values: string[] }[]>();
+
+  /**
+   * Fetch the REQUIRED item aspects for a category (Taxonomy API), cached.
+   * eBay rejects publish if a category-required aspect (e.g. "Produktart")
+   * is missing, and the set differs per category — so we discover them.
+   */
+  private async getRequiredAspects(categoryId: string): Promise<{ name: string; values: string[] }[]> {
+    if (this.aspectCache.has(categoryId)) return this.aspectCache.get(categoryId)!;
+    const treeId = process.env.EBAY_MARKETPLACE_SITE_ID || "77";
+    try {
+      const token = await ebayOAuth.getValidAccessToken();
+      const url =
+        `https://api.ebay.com/commerce/taxonomy/v1/category_tree/${treeId}` +
+        `/get_item_aspects_for_category?category_id=${encodeURIComponent(categoryId)}`;
+      const resp = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+          "Accept-Language": localeFor(),
+          "X-EBAY-C-MARKETPLACE-ID": marketplaceId(),
+        },
+      });
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      const required = (data?.aspects || [])
+        .filter((a: any) => a?.aspectConstraint?.aspectRequired)
+        .map((a: any) => ({
+          name: a.localizedAspectName as string,
+          values: (a.aspectValues || []).map((v: any) => v.localizedValue as string),
+        }));
+      this.aspectCache.set(categoryId, required);
+      return required;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Build the aspects object satisfying a category's required aspects.
+   * Brand/MPN get the accepted no-info combo; other required aspects get a
+   * sensible value (prefer "Sonstige/Other/Nicht zutreffend", else the
+   * first allowed value, else free-text "Sonstige").
+   */
+  private async buildAspects(product: Product, categoryId: string): Promise<Record<string, string[]>> {
+    const aspects: Record<string, string[]> = {};
+    const required = await this.getRequiredAspects(categoryId);
+    for (const a of required) {
+      const lname = a.name.toLowerCase();
+      if (lname === "marke" || lname === "brand") {
+        aspects[a.name] = ["Markenlos"];
+      } else if (lname === "herstellernummer" || lname === "mpn") {
+        aspects[a.name] = ["Nicht zutreffend"];
+      } else if (a.values.length > 0) {
+        const generic = a.values.find((v) => /sonst|other|nicht zutreffend|n\/a/i.test(v));
+        aspects[a.name] = [generic || a.values[0]];
+      } else {
+        aspects[a.name] = ["Sonstige"];
+      }
+    }
+    // Always ensure Brand/MPN present even if not flagged required
+    if (!aspects["Marke"] && !aspects["Brand"]) aspects["Marke"] = ["Markenlos"];
+    if (!aspects["Herstellernummer"] && !aspects["MPN"]) aspects["Herstellernummer"] = ["Nicht zutreffend"];
+    return aspects;
+  }
 
   private async headers(): Promise<Record<string, string>> {
     const token = await ebayOAuth.getValidAccessToken();
@@ -140,19 +206,12 @@ export class EbayInventoryApiService {
   }
 
   /** Build the inventory_item payload from a product. */
-  private async buildInventoryItem(product: Product) {
+  private async buildInventoryItem(product: Product, categoryId: string) {
     const stock = calculateEbayStock(product).ebayStock;
     const images = await this.resolveImages(product);
     const title = filterBundleWords(product.name).slice(0, 80);
     const weightG = product.weight ? parseFloat(product.weight) : 0;
-
-    // eBay rejects Brand=Unbranded combined with a real MPN ("BrandMPN"
-    // invalid). With no manufacturer data stored, use the accepted
-    // no-info combo: Brand=Unbranded + MPN="Does Not Apply".
-    const aspects: Record<string, string[]> = {
-      Marke: ["Markenlos"],          // DE: Brand = Unbranded
-      Herstellernummer: ["Nicht zutreffend"], // DE: MPN = Does Not Apply
-    };
+    const aspects = await this.buildAspects(product, categoryId);
 
     return {
       availability: { shipToLocationAvailability: { quantity: Math.max(0, stock) } },
@@ -169,12 +228,12 @@ export class EbayInventoryApiService {
     };
   }
 
-  async createOrReplaceInventoryItem(sku: string, product: Product): Promise<StepResult & { quantity?: number }> {
-    const item = await this.buildInventoryItem(product);
+  async createOrReplaceInventoryItem(sku: string, product: Product, categoryId: string): Promise<StepResult & { quantity?: number; aspects?: any }> {
+    const item = await this.buildInventoryItem(product, categoryId);
     const quantity = item.availability.shipToLocationAvailability.quantity;
     const r = await this.req("PUT", `/inventory_item/${encodeURIComponent(sku)}`, item);
-    if (r.ok || r.status === 204) return { step: "inventory_item", ok: true, httpStatus: r.status, quantity };
-    return { step: "inventory_item", ok: false, httpStatus: r.status, quantity, error: this.firstEbayError(r.data, r.text) };
+    if (r.ok || r.status === 204) return { step: "inventory_item", ok: true, httpStatus: r.status, quantity, aspects: item.product.aspects };
+    return { step: "inventory_item", ok: false, httpStatus: r.status, quantity, aspects: item.product.aspects, error: this.firstEbayError(r.data, r.text) };
   }
 
   /** Build an offer payload (price/qty/policies/category) for a SKU. */
@@ -261,7 +320,7 @@ export class EbayInventoryApiService {
     steps.push({ step: "category", ok: !!categoryId, data: { categoryId } });
     if (!categoryId) return { ok: false, sku: product.sku, steps };
 
-    const inv = await this.createOrReplaceInventoryItem(product.sku, product);
+    const inv = await this.createOrReplaceInventoryItem(product.sku, product, categoryId);
     steps.push(inv);
     if (!inv.ok) return { ok: false, sku: product.sku, steps };
 
