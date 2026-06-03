@@ -794,6 +794,14 @@ var init_storage = __esm({
         }
         return { ok: true, statements: stmts.length };
       }
+      // Clear all eBay listing state locally (use after ending every listing
+      // on eBay, to resync the green-E flags). Returns rows affected.
+      async resetAllEbayListingState() {
+        const r = await db.execute(sql.raw(
+          `UPDATE products SET listed_on_ebay = false, ebay_offer_id = NULL, ebay_listing_id = NULL, ebay_item_id = NULL, ebay_listing_status = 'unlisted', ebay_listing_error = NULL WHERE listed_on_ebay = true OR ebay_offer_id IS NOT NULL OR ebay_item_id IS NOT NULL`
+        ));
+        return r.rowCount ?? 0;
+      }
       // Candidates to list on eBay: TME products, in stock, not already listed,
       // not excluded. DB-side filter + limit (no full-table load).
       async getListingCandidates(limit) {
@@ -5706,11 +5714,16 @@ __export(ebay_lister_exports, {
   listProductsViaInventory: () => listProductsViaInventory,
   updateListedProductsViaInventory: () => updateListedProductsViaInventory
 });
-async function listProductsViaInventory(products2) {
+async function listProductsViaInventory(allProducts) {
   const results = [];
   let published = 0;
   let failed = 0;
   let limitHit = false;
+  const products2 = allProducts.filter((p) => (p.stock ?? 0) > 0);
+  const skipped = allProducts.length - products2.length;
+  for (const p of allProducts.filter((p2) => (p2.stock ?? 0) <= 0)) {
+    results.push({ sku: p.sku, ok: false, error: "skipped: out of stock" });
+  }
   for (let i = 0; i < products2.length && !limitHit; i += 25) {
     const chunk = products2.slice(i, i + 25);
     const withCat = [];
@@ -5756,7 +5769,7 @@ async function listProductsViaInventory(products2) {
       }
     }
   }
-  return { attempted: products2.length, published, failed, limitHit, results };
+  return { attempted: allProducts.length, published, failed, limitHit, skipped, results };
 }
 async function updateListedProductsViaInventory(items) {
   let updated = 0;
@@ -9178,8 +9191,34 @@ async function registerRoutes(app) {
   app.post("/api/ebay/unlist", requireAuth, async (req, res) => {
     try {
       const { productId } = req.body;
-      const result = await ebayApi.unlistProduct(productId);
-      res.json(result);
+      const product = await storage.getProduct(productId);
+      let withdrawn = false;
+      let message = "";
+      if (product?.ebayOfferId) {
+        const w = await ebayInventoryApi.withdrawOffer(product.ebayOfferId);
+        withdrawn = w.ok;
+        message = w.ok ? "Offer withdrawn" : w.error || "Withdraw failed";
+      } else if (product?.ebayItemId) {
+        try {
+          await ebayApi.unlistProduct(productId);
+          withdrawn = true;
+          message = "Listing ended";
+        } catch (e) {
+          message = e.message;
+        }
+      } else {
+        message = "No eBay listing on record";
+        withdrawn = true;
+      }
+      await storage.updateProduct(productId, {
+        listedOnEbay: false,
+        ebayOfferId: null,
+        ebayListingId: null,
+        ebayItemId: null,
+        ebayListingStatus: "unlisted",
+        ebayListingError: null
+      });
+      res.json({ success: true, withdrawn, message });
     } catch (error) {
       console.error("eBay unlisting failed:", error);
       res.json({
@@ -9187,6 +9226,14 @@ async function registerRoutes(app) {
         message: `Failed to unlist product: ${error.message}`,
         errors: [error.message]
       });
+    }
+  });
+  app.get("/api/__reset-ebay-flags", async (_req, res) => {
+    try {
+      const cleared = await storage.resetAllEbayListingState();
+      res.json({ ok: true, cleared, message: `Cleared eBay listing state on ${cleared} products.` });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: error.message });
     }
   });
   app.post("/api/ebay/bulk-sync-template", requireAuth, async (req, res) => {

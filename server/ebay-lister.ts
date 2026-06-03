@@ -18,11 +18,19 @@ export interface ListBatchResult {
 
 const LIMIT_RX = /\blimit\b|too many|rate.?limit|2001\b|21917|exceed/i;
 
-export async function listProductsViaInventory(products: Product[]): Promise<ListBatchResult> {
+export async function listProductsViaInventory(allProducts: Product[]): Promise<ListBatchResult & { skipped: number }> {
   const results: ListBatchResult["results"] = [];
   let published = 0;
   let failed = 0;
   let limitHit = false;
+
+  // Never list out-of-stock items (eBay won't publish a 0-qty offer, and
+  // it's an oversell risk). Report them as skipped.
+  const products = allProducts.filter((p) => (p.stock ?? 0) > 0);
+  const skipped = allProducts.length - products.length;
+  for (const p of allProducts.filter((p) => (p.stock ?? 0) <= 0)) {
+    results.push({ sku: p.sku, ok: false, error: "skipped: out of stock" });
+  }
 
   for (let i = 0; i < products.length && !limitHit; i += 25) {
     const chunk = products.slice(i, i + 25);
@@ -78,7 +86,7 @@ export async function listProductsViaInventory(products: Product[]): Promise<Lis
     }
   }
 
-  return { attempted: products.length, published, failed, limitHit, results };
+  return { attempted: allProducts.length, published, failed, limitHit, skipped, results };
 }
 
 /** Push stock/price updates for already-listed products (25-SKU bulk). */

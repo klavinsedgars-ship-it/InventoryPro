@@ -1488,15 +1488,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/ebay/unlist", requireAuth, async (req, res) => {
     try {
       const { productId } = req.body;
-      const result = await ebayApi.unlistProduct(productId);
-      res.json(result);
+      const product = await storage.getProduct(productId);
+      let withdrawn = false;
+      let message = "";
+
+      if (product?.ebayOfferId) {
+        // Inventory-model listing -> withdraw the offer
+        const w = await ebayInventoryApi.withdrawOffer(product.ebayOfferId);
+        withdrawn = w.ok;
+        message = w.ok ? "Offer withdrawn" : (w.error || "Withdraw failed");
+      } else if (product?.ebayItemId) {
+        // Legacy Trading listing -> EndItem
+        try {
+          await ebayApi.unlistProduct(productId);
+          withdrawn = true;
+          message = "Listing ended";
+        } catch (e) {
+          message = (e as Error).message;
+        }
+      } else {
+        message = "No eBay listing on record";
+        withdrawn = true;
+      }
+
+      // ALWAYS clear local listing state so the green-E icon reflects reality.
+      await storage.updateProduct(productId, {
+        listedOnEbay: false,
+        ebayOfferId: null,
+        ebayListingId: null,
+        ebayItemId: null,
+        ebayListingStatus: "unlisted",
+        ebayListingError: null,
+      });
+
+      res.json({ success: true, withdrawn, message });
     } catch (error) {
       console.error("eBay unlisting failed:", error);
-      res.json({ 
-        success: false, 
+      res.json({
+        success: false,
         message: `Failed to unlist product: ${(error as Error).message}`,
-        errors: [(error as Error).message]
+        errors: [(error as Error).message],
       });
+    }
+  });
+
+  // Reset ALL local eBay listing flags (green-E). Use after ending every
+  // listing on eBay so the CRM matches reality. GET /api/__reset-ebay-flags
+  app.get("/api/__reset-ebay-flags", async (_req, res) => {
+    try {
+      const cleared = await storage.resetAllEbayListingState();
+      res.json({ ok: true, cleared, message: `Cleared eBay listing state on ${cleared} products.` });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
     }
   });
 

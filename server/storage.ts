@@ -360,6 +360,15 @@ export class DatabaseStorage implements IStorage {
     return { ok: true, statements: stmts.length };
   }
 
+  // Clear all eBay listing state locally (use after ending every listing
+  // on eBay, to resync the green-E flags). Returns rows affected.
+  async resetAllEbayListingState(): Promise<number> {
+    const r: any = await db.execute(sql.raw(
+      `UPDATE products SET listed_on_ebay = false, ebay_offer_id = NULL, ebay_listing_id = NULL, ebay_item_id = NULL, ebay_listing_status = 'unlisted', ebay_listing_error = NULL WHERE listed_on_ebay = true OR ebay_offer_id IS NOT NULL OR ebay_item_id IS NOT NULL`,
+    ));
+    return r.rowCount ?? 0;
+  }
+
   // Candidates to list on eBay: TME products, in stock, not already listed,
   // not excluded. DB-side filter + limit (no full-table load).
   async getListingCandidates(limit: number): Promise<Product[]> {

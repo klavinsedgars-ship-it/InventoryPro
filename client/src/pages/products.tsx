@@ -273,6 +273,7 @@ export function Products({ user }: ProductsProps) {
           description:
             `${data.published}/${data.attempted} published` +
             (data.failed ? `, ${data.failed} failed` : "") +
+            (data.skipped ? `, ${data.skipped} skipped (out of stock)` : "") +
             (data.limitHit ? " (eBay limit reached — resume later)" : ""),
           variant: data.failed && !data.published ? "destructive" : undefined,
         });
@@ -340,7 +341,7 @@ export function Products({ user }: ProductsProps) {
       // Filter to only products that are actually listed on eBay
       const listedProductIds = productIds.filter(id => {
         const product = products.find(p => p.id === id);
-        return product?.listedOnEbay && product?.ebayItemId;
+        return product?.listedOnEbay && (product?.ebayItemId || (product as any)?.ebayOfferId);
       });
       
       // If no products are listed, return early
