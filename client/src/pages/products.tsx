@@ -258,9 +258,9 @@ export function Products({ user }: ProductsProps) {
 
   const bulkListToEbayMutation = useMutation({
     mutationFn: async (productIds: number[]) => {
-      // List in small chunks so the progress bar advances live. Each chunk
-      // runs the Inventory pipeline (inventory item -> offer -> publish).
-      const CHUNK = 10;
+      // List one product per request so the progress bar advances per item
+      // (total time is the same — the eBay calls dominate — but it moves).
+      const CHUNK = 1;
       let published = 0, failed = 0, skipped = 0, done = 0, limitHit = false;
       const failures: string[] = [];
       setListProgress({ done: 0, total: productIds.length, published: 0, failed: 0 });
