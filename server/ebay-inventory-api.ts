@@ -61,7 +61,7 @@ export class EbayInventoryApiService {
    * eBay rejects publish if a category-required aspect (e.g. "Produktart")
    * is missing, and the set differs per category — so we discover them.
    */
-  private async getRequiredAspects(categoryId: string): Promise<{ name: string; values: string[] }[]> {
+  async getRequiredAspects(categoryId: string): Promise<{ name: string; values: string[] }[]> {
     if (this.aspectCache.has(categoryId)) return this.aspectCache.get(categoryId)!;
     const treeId = process.env.EBAY_MARKETPLACE_SITE_ID || "77";
     try {

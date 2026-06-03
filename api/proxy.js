@@ -8255,7 +8255,10 @@ async function registerRoutes(app) {
     }
     try {
       const result = await ebayInventoryApi.listSingleProduct(productId, (id) => storage.getProduct(id));
-      res.json(result);
+      const catStep = result.steps.find((s) => s.step === "category");
+      const categoryId = catStep?.data?.categoryId;
+      const requiredAspects = categoryId ? await ebayInventoryApi.getRequiredAspects(categoryId) : [];
+      res.json({ ...result, requiredAspects });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
