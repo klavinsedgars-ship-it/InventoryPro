@@ -118,7 +118,7 @@ export function QueueManagement({ user }: { user: any }) {
   const stats = queueData?.stats;
 
   // Calculate processing percentage
-  const dailyUsagePercent = status ? (status.callsToday / status.dailyLimit) * 100 : 0;
+  const dailyUsagePercent = status?.dailyLimit ? (status.callsToday / status.dailyLimit) * 100 : 0;
   const remainingPercent = stats ? (stats.remaining / (stats.remaining + stats.processed)) * 100 : 0;
 
   return (
@@ -197,8 +197,8 @@ export function QueueManagement({ user }: { user: any }) {
               <CardContent>
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
-                    <span>Used: {status?.callsToday || 0}</span>
-                    <span>Limit: {status?.dailyLimit || 4500}</span>
+                    <span>Used today: {status?.callsToday || 0}</span>
+                    <span>{status?.dailyLimit ? `Limit: ${status.dailyLimit}` : "No limit set"}</span>
                   </div>
                   <Progress value={dailyUsagePercent} className="h-3" />
                   <div className="text-xs text-gray-500">

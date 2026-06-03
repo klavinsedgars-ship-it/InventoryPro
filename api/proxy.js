@@ -9289,54 +9289,24 @@ async function registerRoutes(app) {
     try {
       const apiUsage = await storage.getApiUsage("tme");
       const callsToday = apiUsage?.callsToday || 0;
-      const dailyLimit = apiUsage?.dailyLimit || 1e4;
-      const usagePercentage = Math.round(callsToday / dailyLimit * 100);
-      const remainingDaily = dailyLimit - callsToday;
-      const minuteUsage = tmeApi.getApiUsage();
-      const rateLimitPerMinute = 60;
-      const safeRateLimit = 55;
-      const callsThisMinute = minuteUsage.callsThisMinute || 0;
-      const remainingThisMinute = Math.max(0, safeRateLimit - callsThisMinute);
-      const status = callsToday >= dailyLimit ? "LIMIT_EXCEEDED" : callsThisMinute >= safeRateLimit ? "RATE_LIMITED" : usagePercentage >= 80 ? "WARNING" : "NORMAL";
+      const dailyLimit = process.env.TME_DAILY_LIMIT ? Number(process.env.TME_DAILY_LIMIT) : null;
+      const usagePercentage = dailyLimit && dailyLimit > 0 ? Math.round(callsToday / dailyLimit * 100) : null;
       res.json({
         success: true,
         usage: {
           callsToday,
           dailyLimit,
-          remainingDaily,
+          // null unless TME_DAILY_LIMIT is configured
+          remainingDaily: dailyLimit ? Math.max(0, dailyLimit - callsToday) : null,
           usagePercentage,
-          rateLimitPerMinute,
-          callsThisMinute,
-          remainingThisMinute,
-          safeRateLimit,
-          status,
           lastUpdated: apiUsage?.updatedAt || null,
           lastResetAt: apiUsage?.lastResetAt || null
         },
-        limits: {
-          daily: dailyLimit,
-          perMinute: rateLimitPerMinute,
-          safePerMinute: safeRateLimit
-        },
-        recommendations: status === "RATE_LIMITED" ? [
-          `Rate limit reached (${callsThisMinute}/${safeRateLimit} calls/min) - waiting for next minute`,
-          "Sync will automatically resume when rate limit resets"
-        ] : status === "WARNING" ? [
-          `You've used ${usagePercentage}% of your daily limit (${callsToday}/${dailyLimit} calls)`,
-          "Consider reducing API calls or upgrading your TME plan"
-        ] : status === "LIMIT_EXCEEDED" ? [
-          "Daily limit exceeded - API calls will fail until tomorrow",
-          "Contact TME support to increase your daily limit"
-        ] : [
-          `API usage is within normal limits (${callsToday}/${dailyLimit} calls)`
-        ]
+        note: "callsToday is real (DB-tracked). Per-minute metering removed (meaningless on serverless). Set TME_DAILY_LIMIT to show a % against your actual TME tier."
       });
     } catch (error) {
       console.error("Failed to get TME usage:", error);
-      res.status(500).json({
-        success: false,
-        error: "Failed to get TME usage statistics"
-      });
+      res.status(500).json({ success: false, error: "Failed to get TME usage statistics" });
     }
   });
   app.get("/api/ebay/usage", async (req, res) => {

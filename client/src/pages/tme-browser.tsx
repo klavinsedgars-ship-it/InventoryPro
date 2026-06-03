@@ -629,20 +629,11 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
             <div className="flex items-center gap-2">
               <Card className="p-1.5" data-testid="api-usage-card">
                 <div className="flex items-center gap-2 text-[10px]">
-                  <div className="border-r pr-2">
-                    <span className="text-gray-500">Min: </span>
-                    <span className={`font-semibold ${
-                      (apiUsage?.usage?.callsThisMinute ?? 0) >= (apiUsage?.usage?.safeRateLimit ?? 55) 
-                        ? "text-red-600" 
-                        : "text-green-600"
-                    }`}>
-                      {apiUsage?.usage?.callsThisMinute ?? 0}/{apiUsage?.usage?.safeRateLimit ?? 55}
-                    </span>
-                  </div>
                   <div>
-                    <span className="text-gray-500">Daily: </span>
+                    <span className="text-gray-500">TME calls today: </span>
                     <span className={`font-semibold ${getApiUsageColor()}`}>
-                      {apiUsage?.usage?.callsToday ?? 0}/{apiUsage?.usage?.dailyLimit ?? 10000}
+                      {apiUsage?.usage?.callsToday ?? 0}
+                      {apiUsage?.usage?.dailyLimit ? `/${apiUsage.usage.dailyLimit}` : ""}
                     </span>
                   </div>
                 </div>
@@ -1333,22 +1324,11 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                       Syncing products... {syncProgress}%
                     </p>
                     <div className="flex justify-center gap-4 text-xs">
-                      <div className={`px-2 py-1 rounded ${
-                        (apiUsage?.usage?.callsThisMinute ?? 0) >= (apiUsage?.usage?.safeRateLimit ?? 30)
-                          ? "bg-red-100 text-red-700"
-                          : "bg-green-100 text-green-700"
-                      }`}>
-                        Rate: {apiUsage?.usage?.callsThisMinute ?? 0}/{apiUsage?.usage?.safeRateLimit ?? 30} calls/min
-                      </div>
                       <div className="px-2 py-1 rounded bg-gray-100 text-gray-700">
-                        Daily: {apiUsage?.usage?.callsToday ?? 0}/{apiUsage?.usage?.dailyLimit ?? 10000}
+                        TME calls today: {apiUsage?.usage?.callsToday ?? 0}
+                        {apiUsage?.usage?.dailyLimit ? `/${apiUsage.usage.dailyLimit}` : ""}
                       </div>
                     </div>
-                    {(apiUsage?.usage?.callsThisMinute ?? 0) >= (apiUsage?.usage?.safeRateLimit ?? 30) && (
-                      <p className="text-xs text-center text-amber-600 bg-amber-50 p-2 rounded">
-                        Rate limit reached - waiting for next minute to continue...
-                      </p>
-                    )}
                   </div>
                 )}
               </DialogContent>
