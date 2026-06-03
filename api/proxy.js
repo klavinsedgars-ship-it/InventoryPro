@@ -5280,11 +5280,26 @@ var init_ebay_inventory_api = __esm({
         }
         return [fixed];
       }
+      /** Build a <=80-char eBay title that always contains the SKU (findability). */
+      async buildTitle(product) {
+        let base = product.name;
+        try {
+          const { generateUnifiedEbayTemplate: generateUnifiedEbayTemplate2 } = await Promise.resolve().then(() => (init_ebay_unified_template(), ebay_unified_template_exports));
+          base = generateUnifiedEbayTemplate2(product)?.title || product.name;
+        } catch {
+        }
+        let title = filterBundleWords(base).trim();
+        if (!title.toLowerCase().includes(product.sku.toLowerCase())) {
+          const room = 80 - product.sku.length - 1;
+          title = `${title.slice(0, Math.max(0, room)).trim()} ${product.sku}`;
+        }
+        return title.slice(0, 80).trim();
+      }
       /** Build the inventory_item payload from a product. */
       async buildInventoryItem(product, categoryId) {
         const stock = calculateEbayStock(product).ebayStock;
         const images = await this.resolveImages(product);
-        const title = filterBundleWords(product.name).slice(0, 80);
+        const title = await this.buildTitle(product);
         const weightG = product.weight ? parseFloat(product.weight) : 0;
         const aspects = await this.buildAspects(product, categoryId);
         return {

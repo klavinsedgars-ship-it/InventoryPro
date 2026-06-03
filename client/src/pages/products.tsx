@@ -71,6 +71,7 @@ export function Products({ user }: ProductsProps) {
   // Bulk listing progress state
   const [bulkListingModalOpen, setBulkListingModalOpen] = useState(false);
   const [listingCount, setListingCount] = useState(0);
+  const [listProgress, setListProgress] = useState<{ done: number; total: number; published: number; failed: number } | null>(null);
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [bulkListingProgress, setBulkListingProgress] = useState<BulkListingJob | null>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -257,17 +258,29 @@ export function Products({ user }: ProductsProps) {
 
   const bulkListToEbayMutation = useMutation({
     mutationFn: async (productIds: number[]) => {
-      // Inventory API pipeline (inventory item -> offer -> publish), 25/batch
-      const response = await apiRequest("POST", "/api/ebay/inventory-list-batch", { productIds });
-      return response.json();
+      // List in small chunks so the progress bar advances live. Each chunk
+      // runs the Inventory pipeline (inventory item -> offer -> publish).
+      const CHUNK = 10;
+      let published = 0, failed = 0, skipped = 0, done = 0, limitHit = false;
+      const failures: string[] = [];
+      setListProgress({ done: 0, total: productIds.length, published: 0, failed: 0 });
+      for (let i = 0; i < productIds.length && !limitHit; i += CHUNK) {
+        const chunk = productIds.slice(i, i + CHUNK);
+        const response = await apiRequest("POST", "/api/ebay/inventory-list-batch", { productIds: chunk });
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || data.message || "Listing failed");
+        published += data.published || 0;
+        failed += data.failed || 0;
+        skipped += data.skipped || 0;
+        done += chunk.length;
+        (data.results || []).filter((r: any) => !r.ok).forEach((r: any) => failures.push(`${r.sku}: ${r.error}`));
+        setListProgress({ done, total: productIds.length, published, failed });
+        if (data.limitHit) limitHit = true;
+      }
+      return { success: true, published, failed, skipped, attempted: productIds.length, limitHit, failures };
     },
     onSuccess: (data: any) => {
-      console.log("Inventory listing response:", data);
-
       if (data.success) {
-        const failedDetails = (data.results || [])
-          .filter((r: any) => !r.ok)
-          .map((r: any) => `${r.sku}: ${r.error}`);
         toast({
           title: data.published > 0 ? "Listed on eBay" : "Listing finished",
           description:
@@ -277,7 +290,7 @@ export function Products({ user }: ProductsProps) {
             (data.limitHit ? " (eBay limit reached — resume later)" : ""),
           variant: data.failed && !data.published ? "destructive" : undefined,
         });
-        if (failedDetails.length) console.warn("Listing failures:\n" + failedDetails.join("\n"));
+        if (data.failures?.length) console.warn("Listing failures:\n" + data.failures.join("\n"));
         queryClient.invalidateQueries({ queryKey: ["/api/products"] });
         queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
         setSelectedProducts(new Set());
@@ -295,6 +308,9 @@ export function Products({ user }: ProductsProps) {
         description: error.message || "Failed to connect to eBay API.",
         variant: "destructive",
       });
+    },
+    onSettled: () => {
+      setListProgress(null);
     },
   });
 
@@ -1034,19 +1050,30 @@ export function Products({ user }: ProductsProps) {
         product={selectedProduct}
       />
 
-      {/* Inventory-API listing in progress (synchronous) */}
+      {/* Inventory-API listing progress */}
       {bulkListToEbayMutation.isPending && (
         <div className="fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-gray-900 border-t border-blue-200 shadow-lg">
           <div className="px-4 py-3 max-w-7xl mx-auto">
-            <div className="flex items-center gap-3">
-              <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
-              <span className="text-sm font-medium">
-                Listing {listingCount} product{listingCount === 1 ? "" : "s"} on eBay…
-              </span>
-              <span className="text-xs text-muted-foreground">processing in batches of 25 — please wait</span>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                <span className="text-sm font-medium">
+                  Listing on eBay… {listProgress ? `${listProgress.done}/${listProgress.total}` : `${listingCount}`}
+                </span>
+              </div>
+              {listProgress && (
+                <span className="text-xs text-muted-foreground">
+                  {listProgress.published} published
+                  {listProgress.failed ? `, ${listProgress.failed} failed` : ""}
+                  {" · "}{Math.max(0, listProgress.total - listProgress.done)} left
+                </span>
+              )}
             </div>
-            <div className="mt-2 h-1.5 w-full overflow-hidden rounded bg-blue-100">
-              <div className="h-full w-full animate-pulse rounded bg-blue-500" />
+            <div className="mt-2 h-2 w-full overflow-hidden rounded bg-blue-100">
+              <div
+                className="h-full rounded bg-blue-600 transition-all duration-300"
+                style={{ width: listProgress && listProgress.total ? `${Math.round((listProgress.done / listProgress.total) * 100)}%` : "5%" }}
+              />
             </div>
           </div>
         </div>

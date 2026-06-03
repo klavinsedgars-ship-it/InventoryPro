@@ -205,11 +205,27 @@ export class EbayInventoryApiService {
     return [fixed];
   }
 
+  /** Build a <=80-char eBay title that always contains the SKU (findability). */
+  private async buildTitle(product: Product): Promise<string> {
+    let base = product.name;
+    try {
+      const { generateUnifiedEbayTemplate } = await import("./ebay-unified-template");
+      base = generateUnifiedEbayTemplate(product)?.title || product.name;
+    } catch { /* fall back to name */ }
+    let title = filterBundleWords(base).trim();
+    // Guarantee the SKU is present (it makes the listing findable by part no.)
+    if (!title.toLowerCase().includes(product.sku.toLowerCase())) {
+      const room = 80 - product.sku.length - 1;
+      title = `${title.slice(0, Math.max(0, room)).trim()} ${product.sku}`;
+    }
+    return title.slice(0, 80).trim();
+  }
+
   /** Build the inventory_item payload from a product. */
   private async buildInventoryItem(product: Product, categoryId: string) {
     const stock = calculateEbayStock(product).ebayStock;
     const images = await this.resolveImages(product);
-    const title = filterBundleWords(product.name).slice(0, 80);
+    const title = await this.buildTitle(product);
     const weightG = product.weight ? parseFloat(product.weight) : 0;
     const aspects = await this.buildAspects(product, categoryId);
 
