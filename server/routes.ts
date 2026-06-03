@@ -698,14 +698,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Show what eBay suggests as the category for a query on the active
-  // site (DE). Use to sanity-check category resolution.
-  //   GET /api/__ebay-suggest-category?q=wheel%20robot
+  // site (DE). Returns the raw eBay XML so we can see the real structure /
+  // any error. GET /api/__ebay-suggest-category?q=wheel%20robot
   app.get("/api/__ebay-suggest-category", async (req, res) => {
     const q = String(req.query.q || "");
     if (!q) return res.status(400).json({ ok: false, message: "?q= required" });
     try {
-      const suggested = await ebayApi.getSuggestedCategory(q);
-      res.json({ ok: !!suggested, query: q, suggested });
+      const token = await ebayOAuth.getValidAccessToken();
+      const siteId = process.env.EBAY_MARKETPLACE_SITE_ID || "77";
+      const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetSuggestedCategoriesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <Query>${q.replace(/[<>&]/g, " ")}</Query>
+</GetSuggestedCategoriesRequest>`;
+      const resp = await fetch("https://api.ebay.com/ws/api.dll", {
+        method: "POST",
+        headers: {
+          "Content-Type": "text/xml; charset=utf-8",
+          "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+          "X-EBAY-API-DEV-NAME": process.env.EBAY_DEV_ID || "",
+          "X-EBAY-API-APP-NAME": process.env.EBAY_APP_ID || "",
+          "X-EBAY-API-CERT-NAME": process.env.EBAY_CERT_ID || "",
+          "X-EBAY-API-CALL-NAME": "GetSuggestedCategories",
+          "X-EBAY-API-SITEID": siteId,
+          "X-EBAY-API-IAF-TOKEN": token,
+        },
+        body: xml,
+      });
+      const text = await resp.text();
+      const ack = text.match(/<Ack>(.*?)<\/Ack>/)?.[1];
+      const count = text.match(/<CategoryCount>(\d+)<\/CategoryCount>/)?.[1];
+      res.json({
+        ok: ack === "Success",
+        query: q,
+        siteId,
+        ack,
+        categoryCount: count,
+        raw: text.slice(0, 1500),
+      });
     } catch (err) {
       res.status(500).json({ ok: false, error: (err as Error).message });
     }
