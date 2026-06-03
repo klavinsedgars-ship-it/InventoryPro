@@ -5739,14 +5739,14 @@ async function listProductsViaInventory(allProducts) {
       if (o?.ok && o.offerId) toPublish.push({ sku: w.product.sku, offerId: o.offerId });
     }
     const pubRes = toPublish.length ? await ebayInventoryApi.bulkPublishOffer(toPublish) : /* @__PURE__ */ new Map();
-    for (const w of chunk) {
-      const sku = w.product.sku;
+    for (const prod of chunk) {
+      const sku = prod.sku;
       const inv = invRes.get(sku);
       const offer = offerRes.get(sku);
       const pub = pubRes.get(sku);
       if (pub?.ok && pub.listingId) {
         published++;
-        await storage.updateProduct(w.product.id, {
+        await storage.updateProduct(prod.id, {
           listedOnEbay: true,
           ebayOfferId: offer?.offerId ?? null,
           ebayListingId: pub.listingId,
@@ -5759,7 +5759,7 @@ async function listProductsViaInventory(allProducts) {
         failed++;
         const err = pub?.error || offer?.error || inv?.error || "unknown error";
         const status = offer?.offerId ? "offer_created" : inv?.ok ? "inventory_created" : "error";
-        await storage.updateProduct(w.product.id, {
+        await storage.updateProduct(prod.id, {
           ebayOfferId: offer?.offerId ?? null,
           ebayListingStatus: status,
           ebayListingError: String(err).slice(0, 500)
