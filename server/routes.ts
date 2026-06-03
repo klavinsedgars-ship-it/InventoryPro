@@ -656,6 +656,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // TME connectivity check. Hits TME's GetPing equivalent (a tiny
+  // Products.GetPrices call) with the configured creds and reports the
+  // raw response — so we know whether TME is actually reachable, vs the
+  // env vars being missing, vs HMAC signature failing.
+  app.get("/api/__tme-check", async (_req, res) => {
+    const have = {
+      TME_TOKEN: !!process.env.TME_TOKEN,
+      TME_APPLICATION_SECRET: !!process.env.TME_APPLICATION_SECRET,
+      TME_CUSTOMER_NUMBER: !!process.env.TME_CUSTOMER_NUMBER,
+      TME_CONTACT_NUMBER: !!process.env.TME_CONTACT_NUMBER,
+    };
+    if (!have.TME_TOKEN || !have.TME_APPLICATION_SECRET) {
+      return res.json({
+        ok: false,
+        stage: "config",
+        have,
+        message:
+          "TME_TOKEN and/or TME_APPLICATION_SECRET are not set in env. Get a token from https://developers.tme.eu/ and add both to Vercel.",
+      });
+    }
+    try {
+      const { tmeApi } = await import("./tme-api");
+      // Cheapest live call: ask for one well-known TME SKU
+      const probe = await (tmeApi as any)
+        .getProductsPricesAndStocks?.(["AVT-LITE"])
+        .catch((e: Error) => ({ __error: e.message }));
+      if (probe?.__error) {
+        return res.json({ ok: false, stage: "tme-api", have, error: probe.__error });
+      }
+      return res.json({
+        ok: true,
+        stage: "success",
+        have,
+        sampleCount: Array.isArray(probe) ? probe.length : null,
+        sample: Array.isArray(probe) ? probe.slice(0, 1) : probe,
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, stage: "exception", have, error: (err as Error).message });
+    }
+  });
+
   // credentials and returns the raw response. No DB, no listing logic.
   // Reveals exact reason for "OAuth authentication fail" errors.
   app.get("/api/__ebay-check", async (_req, res) => {

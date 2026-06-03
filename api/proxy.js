@@ -8,6 +8,2000 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
+// shared/schema.ts
+var schema_exports = {};
+__export(schema_exports, {
+  Marketplace: () => Marketplace,
+  OrderStatus: () => OrderStatus,
+  apiUsageTracking: () => apiUsageTracking,
+  autoMessageRules: () => autoMessageRules,
+  bulkListingJobs: () => bulkListingJobs,
+  categories: () => categories,
+  ebayFulfillmentPolicies: () => ebayFulfillmentPolicies,
+  ebayPaymentPolicies: () => ebayPaymentPolicies,
+  ebayReturnPolicies: () => ebayReturnPolicies,
+  insertApiUsageTrackingSchema: () => insertApiUsageTrackingSchema,
+  insertAutoMessageRuleSchema: () => insertAutoMessageRuleSchema,
+  insertBulkListingJobSchema: () => insertBulkListingJobSchema,
+  insertCategorySchema: () => insertCategorySchema,
+  insertEbayFulfillmentPolicySchema: () => insertEbayFulfillmentPolicySchema,
+  insertEbayPaymentPolicySchema: () => insertEbayPaymentPolicySchema,
+  insertEbayReturnPolicySchema: () => insertEbayReturnPolicySchema,
+  insertMarketplaceSettingsSchema: () => insertMarketplaceSettingsSchema,
+  insertMessageSchema: () => insertMessageSchema,
+  insertMessageTemplateSchema: () => insertMessageTemplateSchema,
+  insertMessageThreadSchema: () => insertMessageThreadSchema,
+  insertOrderEventSchema: () => insertOrderEventSchema,
+  insertOrderFeeSchema: () => insertOrderFeeSchema,
+  insertOrderItemSchema: () => insertOrderItemSchema,
+  insertOrderSchema: () => insertOrderSchema,
+  insertPricingTierSchema: () => insertPricingTierSchema,
+  insertProductSchema: () => insertProductSchema,
+  insertScheduledMessageSchema: () => insertScheduledMessageSchema,
+  insertShippingPolicySchema: () => insertShippingPolicySchema,
+  insertSyncLogSchema: () => insertSyncLogSchema,
+  insertSyncQueueSchema: () => insertSyncQueueSchema,
+  insertTmeProductCacheSchema: () => insertTmeProductCacheSchema,
+  insertUserSchema: () => insertUserSchema,
+  loginSchema: () => loginSchema,
+  marketplaceSettings: () => marketplaceSettings,
+  messageTemplates: () => messageTemplates,
+  messageThreads: () => messageThreads,
+  messages: () => messages,
+  orderEvents: () => orderEvents,
+  orderFees: () => orderFees,
+  orderItems: () => orderItems,
+  orders: () => orders,
+  pricingTiers: () => pricingTiers,
+  products: () => products,
+  scheduledMessages: () => scheduledMessages,
+  shippingPolicies: () => shippingPolicies,
+  syncLogs: () => syncLogs,
+  syncQueue: () => syncQueue,
+  tmeProductCache: () => tmeProductCache,
+  users: () => users
+});
+import { pgTable, text, serial, integer, boolean, decimal, timestamp } from "drizzle-orm/pg-core";
+import { createInsertSchema } from "drizzle-zod";
+import { z } from "zod";
+var users, products, categories, marketplaceSettings, syncLogs, syncQueue, pricingTiers, shippingPolicies, apiUsageTracking, bulkListingJobs, tmeProductCache, ebayPaymentPolicies, ebayFulfillmentPolicies, ebayReturnPolicies, orders, orderItems, orderFees, orderEvents, insertUserSchema, insertProductSchema, insertCategorySchema, insertMarketplaceSettingsSchema, insertSyncLogSchema, insertSyncQueueSchema, insertPricingTierSchema, insertShippingPolicySchema, insertApiUsageTrackingSchema, insertTmeProductCacheSchema, insertBulkListingJobSchema, insertEbayPaymentPolicySchema, insertEbayFulfillmentPolicySchema, insertEbayReturnPolicySchema, insertOrderSchema, insertOrderItemSchema, insertOrderFeeSchema, insertOrderEventSchema, loginSchema, OrderStatus, messageThreads, messages, messageTemplates, autoMessageRules, scheduledMessages, insertMessageThreadSchema, insertMessageSchema, insertMessageTemplateSchema, insertAutoMessageRuleSchema, insertScheduledMessageSchema, Marketplace;
+var init_schema = __esm({
+  "shared/schema.ts"() {
+    "use strict";
+    users = pgTable("users", {
+      id: serial("id").primaryKey(),
+      username: text("username").notNull().unique(),
+      password: text("password").notNull(),
+      email: text("email").notNull().unique(),
+      role: text("role").notNull().default("user"),
+      // admin or user
+      createdAt: timestamp("created_at").defaultNow()
+    });
+    products = pgTable("products", {
+      id: serial("id").primaryKey(),
+      name: text("name").notNull(),
+      sku: text("sku").notNull().unique(),
+      ean: text("ean"),
+      category: text("category").notNull(),
+      description: text("description"),
+      supplierPrice: decimal("supplier_price", { precision: 10, scale: 2 }).notNull(),
+      salePrice: decimal("sale_price", { precision: 10, scale: 2 }).notNull(),
+      calculatedPrice: decimal("calculated_price", { precision: 10, scale: 2 }),
+      // auto-calculated price
+      marginTier: text("margin_tier"),
+      // tier label (e.g., "Ultra High", "Medium")
+      marginPercentage: decimal("margin_percentage", { precision: 5, scale: 2 }),
+      // applied margin %
+      priceUpdatedAt: timestamp("price_updated_at"),
+      // last price calculation
+      useCalculatedPrice: boolean("use_calculated_price").default(true),
+      // use dynamic vs manual pricing
+      stock: integer("stock").notNull().default(0),
+      // Real TME stock
+      moq: integer("moq").notNull().default(1),
+      // Minimum order quantity from TME
+      multiples: integer("multiples").notNull().default(1),
+      // Order multiples from TME
+      ebayStockLimit: integer("ebay_stock_limit").notNull().default(2),
+      // Max stock to show on eBay
+      useStockLimit: boolean("use_stock_limit").default(true),
+      // Whether to apply eBay stock limits
+      weight: decimal("weight", { precision: 8, scale: 2 }),
+      // in grams
+      margin: decimal("margin", { precision: 5, scale: 2 }),
+      // percentage (legacy field)
+      status: text("status").notNull().default("active"),
+      // active, inactive, out_of_stock
+      listedOnEbay: boolean("listed_on_ebay").default(false),
+      listedOnAmazon: boolean("listed_on_amazon").default(false),
+      excludeFromListing: boolean("exclude_from_listing").default(false),
+      ebayItemId: text("ebay_item_id"),
+      amazonAsin: text("amazon_asin"),
+      tmeProductId: text("tme_product_id"),
+      tmeCategoryId: text("tme_category_id"),
+      // TME category ID for synced products
+      supplier: text("supplier").default("manual"),
+      // manual, TME, etc.
+      supplierProductId: text("supplier_product_id"),
+      imageUrl: text("image_url"),
+      dataSheetUrl: text("datasheet_url"),
+      productUrl: text("product_url"),
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at").defaultNow(),
+      lastSyncedAt: timestamp("last_synced_at")
+      // When product was last synced from TME
+    });
+    categories = pgTable("categories", {
+      id: serial("id").primaryKey(),
+      name: text("name").notNull().unique(),
+      ebayMapping: text("ebay_mapping"),
+      amazonMapping: text("amazon_mapping")
+    });
+    marketplaceSettings = pgTable("marketplace_settings", {
+      id: serial("id").primaryKey(),
+      marketplace: text("marketplace").notNull(),
+      // ebay or amazon
+      setting: text("setting").notNull(),
+      value: text("value").notNull()
+    });
+    syncLogs = pgTable("sync_logs", {
+      id: serial("id").primaryKey(),
+      source: text("source").notNull(),
+      // tme, ebay, amazon
+      operation: text("operation").default("sync"),
+      // sync_start, sync_complete, price_update, etc.
+      status: text("status").notNull(),
+      // success, error, pending, in_progress
+      message: text("message"),
+      details: text("details"),
+      // JSON string for additional data
+      syncedAt: timestamp("synced_at").defaultNow()
+    });
+    syncQueue = pgTable("sync_queue", {
+      id: serial("id").primaryKey(),
+      productId: integer("product_id").references(() => products.id).notNull(),
+      operation: text("operation").notNull(),
+      // 'list', 'update_price', 'update_stock', 'unlist'
+      priority: integer("priority").notNull().default(3),
+      // 1=critical, 2=high, 3=medium, 4=low
+      status: text("status").notNull().default("pending"),
+      // 'pending', 'processing', 'completed', 'failed'
+      retryCount: integer("retry_count").notNull().default(0),
+      maxRetries: integer("max_retries").notNull().default(3),
+      marketplace: text("marketplace").notNull().default("ebay"),
+      // ebay, amazon
+      scheduledFor: timestamp("scheduled_for").defaultNow(),
+      errorMessage: text("error_message"),
+      createdAt: timestamp("created_at").defaultNow(),
+      processedAt: timestamp("processed_at")
+    });
+    pricingTiers = pgTable("pricing_tiers", {
+      id: serial("id").primaryKey(),
+      min: decimal("min", { precision: 10, scale: 2 }).notNull(),
+      max: decimal("max", { precision: 10, scale: 2 }).notNull(),
+      multiplier: decimal("multiplier", { precision: 5, scale: 2 }).notNull(),
+      label: text("label").notNull(),
+      marginPercentage: decimal("margin_percentage", { precision: 5, scale: 2 }).notNull(),
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at").defaultNow()
+    });
+    shippingPolicies = pgTable("shipping_policies", {
+      id: text("id").primaryKey(),
+      // e.g., "policy_light", "policy_heavy"
+      name: text("name").notNull(),
+      description: text("description").notNull(),
+      minWeight: integer("min_weight").notNull(),
+      // in grams
+      maxWeight: integer("max_weight").notNull(),
+      // in grams
+      type: text("type").default("standard"),
+      // standard, express, overnight
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at").defaultNow()
+    });
+    apiUsageTracking = pgTable("api_usage_tracking", {
+      id: serial("id").primaryKey(),
+      provider: text("provider").notNull().default("tme"),
+      // tme, ebay, amazon
+      callsToday: integer("calls_today").notNull().default(0),
+      dailyLimit: integer("daily_limit").notNull().default(1e4),
+      lastResetAt: timestamp("last_reset_at").defaultNow(),
+      updatedAt: timestamp("updated_at").defaultNow()
+    });
+    bulkListingJobs = pgTable("bulk_listing_jobs", {
+      id: text("id").primaryKey(),
+      // UUID for job tracking
+      status: text("status").notNull().default("pending"),
+      // pending, processing, completed, failed
+      total: integer("total").notNull().default(0),
+      processed: integer("processed").notNull().default(0),
+      succeeded: integer("succeeded").notNull().default(0),
+      failed: integer("failed").notNull().default(0),
+      currentProduct: text("current_product"),
+      // Name of product currently being processed
+      lastMessage: text("last_message"),
+      errorDetails: text("error_details"),
+      // JSON array of failed items with reasons
+      createdAt: timestamp("created_at").defaultNow(),
+      completedAt: timestamp("completed_at")
+    });
+    tmeProductCache = pgTable("tme_product_cache", {
+      id: serial("id").primaryKey(),
+      symbol: text("symbol").notNull().unique(),
+      // TME product SKU/Symbol
+      productData: text("product_data").notNull(),
+      // JSON string of product info
+      priceData: text("price_data"),
+      // JSON string of pricing info
+      stockData: text("stock_data"),
+      // JSON string of stock info
+      categoryId: integer("category_id"),
+      fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
+      // When data was fetched
+      expiresAt: timestamp("expires_at").notNull()
+      // When cache should be refreshed (24 hours)
+    });
+    ebayPaymentPolicies = pgTable("ebay_payment_policies", {
+      id: serial("id").primaryKey(),
+      policyId: text("policy_id").notNull().unique(),
+      // eBay's policy ID
+      name: text("name").notNull(),
+      description: text("description"),
+      marketplaceId: text("marketplace_id").notNull().default("EBAY_GB"),
+      // EBAY_US, EBAY_GB, etc.
+      categoryTypes: text("category_types"),
+      // JSON array of category types
+      paymentMethods: text("payment_methods"),
+      // JSON array of payment methods
+      immediatePay: boolean("immediate_pay").default(true),
+      isDefault: boolean("is_default").default(false),
+      syncedFromEbay: boolean("synced_from_ebay").default(false),
+      // true if fetched from eBay
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at").defaultNow()
+    });
+    ebayFulfillmentPolicies = pgTable("ebay_fulfillment_policies", {
+      id: serial("id").primaryKey(),
+      policyId: text("policy_id").notNull().unique(),
+      // eBay's policy ID
+      name: text("name").notNull(),
+      description: text("description"),
+      marketplaceId: text("marketplace_id").notNull().default("EBAY_GB"),
+      categoryTypes: text("category_types"),
+      // JSON array
+      handlingTime: integer("handling_time").notNull().default(1),
+      // Days to dispatch
+      shippingOptions: text("shipping_options"),
+      // JSON array of shipping options
+      shipToLocations: text("ship_to_locations"),
+      // JSON - regions included/excluded
+      globalShipping: boolean("global_shipping").default(false),
+      pickupDropOff: boolean("pickup_drop_off").default(false),
+      freightShipping: boolean("freight_shipping").default(false),
+      isDefault: boolean("is_default").default(false),
+      syncedFromEbay: boolean("synced_from_ebay").default(false),
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at").defaultNow()
+    });
+    ebayReturnPolicies = pgTable("ebay_return_policies", {
+      id: serial("id").primaryKey(),
+      policyId: text("policy_id").notNull().unique(),
+      // eBay's policy ID
+      name: text("name").notNull(),
+      description: text("description"),
+      marketplaceId: text("marketplace_id").notNull().default("EBAY_GB"),
+      categoryTypes: text("category_types"),
+      // JSON array
+      returnsAccepted: boolean("returns_accepted").notNull().default(true),
+      returnPeriod: integer("return_period").default(30),
+      // Days
+      refundMethod: text("refund_method").default("MONEY_BACK"),
+      // MONEY_BACK, EXCHANGE
+      returnShippingCostPayer: text("return_shipping_cost_payer").default("BUYER"),
+      // BUYER, SELLER
+      restockingFeePercentage: text("restocking_fee_percentage"),
+      // Optional restocking fee
+      isDefault: boolean("is_default").default(false),
+      syncedFromEbay: boolean("synced_from_ebay").default(false),
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at").defaultNow()
+    });
+    orders = pgTable("orders", {
+      id: serial("id").primaryKey(),
+      marketplace: text("marketplace").notNull(),
+      // ebay, amazon
+      marketplaceOrderId: text("marketplace_order_id").notNull(),
+      // eBay order ID, Amazon order ID
+      status: text("status").notNull().default("new"),
+      // new, packed, shipped, delivered, return_requested, returned, completed, cancelled, on_hold
+      // Buyer Information
+      buyerUsername: text("buyer_username").notNull(),
+      // eBay nickname or Amazon customer name
+      buyerEmail: text("buyer_email"),
+      // Shipping Address (JSON for flexibility across marketplaces)
+      shippingName: text("shipping_name").notNull(),
+      shippingAddressLine1: text("shipping_address_line1").notNull(),
+      shippingAddressLine2: text("shipping_address_line2"),
+      shippingCity: text("shipping_city").notNull(),
+      shippingStateOrProvince: text("shipping_state_or_province"),
+      shippingPostalCode: text("shipping_postal_code").notNull(),
+      shippingCountry: text("shipping_country").notNull(),
+      shippingPhone: text("shipping_phone"),
+      // Order Totals
+      subtotal: decimal("subtotal", { precision: 10, scale: 2 }).notNull(),
+      shippingCost: decimal("shipping_cost", { precision: 10, scale: 2 }).notNull().default("0.00"),
+      totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
+      currency: text("currency").notNull().default("GBP"),
+      // Marketplace Fees
+      marketplaceFee: decimal("marketplace_fee", { precision: 10, scale: 2 }),
+      // eBay/Amazon fee
+      paymentProcessingFee: decimal("payment_processing_fee", { precision: 10, scale: 2 }),
+      // Shipping Details
+      shippingService: text("shipping_service"),
+      // e.g., "Royal Mail 2nd Class"
+      shippingCarrier: text("shipping_carrier"),
+      // e.g., "Royal Mail"
+      trackingNumber: text("tracking_number"),
+      trackingUrl: text("tracking_url"),
+      // Fulfillment
+      paidAt: timestamp("paid_at"),
+      shippedAt: timestamp("shipped_at"),
+      deliveredAt: timestamp("delivered_at"),
+      expectedDeliveryStart: timestamp("expected_delivery_start"),
+      expectedDeliveryEnd: timestamp("expected_delivery_end"),
+      // Logistics Integration (for Latvian Post, etc.)
+      logisticsCarrier: text("logistics_carrier"),
+      // pasts_lv, dhl, ups, etc.
+      logisticsLabelUrl: text("logistics_label_url"),
+      logisticsLabelData: text("logistics_label_data"),
+      // JSON for carrier-specific data
+      // Notes and Metadata
+      buyerNote: text("buyer_note"),
+      // Message from buyer
+      sellerNote: text("seller_note"),
+      // Internal seller notes
+      rawOrderData: text("raw_order_data"),
+      // Full marketplace response JSON
+      // Timestamps
+      orderDate: timestamp("order_date").notNull(),
+      // When order was placed
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at").defaultNow(),
+      lastSyncedAt: timestamp("last_synced_at")
+    });
+    orderItems = pgTable("order_items", {
+      id: serial("id").primaryKey(),
+      orderId: integer("order_id").references(() => orders.id).notNull(),
+      // Product Reference
+      productId: integer("product_id").references(() => products.id),
+      // Can be null for unmapped products
+      sku: text("sku").notNull(),
+      tmeProductId: text("tme_product_id"),
+      // TME SKU for direct link
+      // Item Details
+      title: text("title").notNull(),
+      // Product title as shown on marketplace
+      quantity: integer("quantity").notNull().default(1),
+      unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
+      totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
+      // Marketplace-specific
+      marketplaceItemId: text("marketplace_item_id"),
+      // eBay listing ID, Amazon ASIN
+      imageUrl: text("image_url"),
+      createdAt: timestamp("created_at").defaultNow()
+    });
+    orderFees = pgTable("order_fees", {
+      id: serial("id").primaryKey(),
+      orderId: integer("order_id").references(() => orders.id).notNull(),
+      feeType: text("fee_type").notNull(),
+      // ebay_final_value, ebay_international, shipping, payment_processing, promoted_listing, refund
+      description: text("description"),
+      amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+      currency: text("currency").notNull().default("GBP"),
+      createdAt: timestamp("created_at").defaultNow()
+    });
+    orderEvents = pgTable("order_events", {
+      id: serial("id").primaryKey(),
+      orderId: integer("order_id").references(() => orders.id).notNull(),
+      eventType: text("event_type").notNull(),
+      // status_change, note_added, tracking_added, label_printed, synced, refund_initiated
+      fromStatus: text("from_status"),
+      // Previous status (for status_change events)
+      toStatus: text("to_status"),
+      // New status (for status_change events)
+      note: text("note"),
+      userId: integer("user_id").references(() => users.id),
+      // Who performed the action
+      createdAt: timestamp("created_at").defaultNow()
+    });
+    insertUserSchema = createInsertSchema(users).omit({
+      id: true,
+      createdAt: true
+    });
+    insertProductSchema = createInsertSchema(products).omit({
+      id: true,
+      createdAt: true,
+      updatedAt: true
+    });
+    insertCategorySchema = createInsertSchema(categories).omit({
+      id: true
+    });
+    insertMarketplaceSettingsSchema = createInsertSchema(marketplaceSettings).omit({
+      id: true
+    });
+    insertSyncLogSchema = createInsertSchema(syncLogs).omit({
+      id: true,
+      syncedAt: true
+    });
+    insertSyncQueueSchema = createInsertSchema(syncQueue).omit({
+      id: true,
+      createdAt: true,
+      processedAt: true
+    });
+    insertPricingTierSchema = createInsertSchema(pricingTiers).omit({
+      id: true,
+      createdAt: true,
+      updatedAt: true
+    });
+    insertShippingPolicySchema = createInsertSchema(shippingPolicies).omit({
+      createdAt: true,
+      updatedAt: true
+    });
+    insertApiUsageTrackingSchema = createInsertSchema(apiUsageTracking).omit({
+      id: true,
+      lastResetAt: true,
+      updatedAt: true
+    });
+    insertTmeProductCacheSchema = createInsertSchema(tmeProductCache).omit({
+      id: true,
+      fetchedAt: true
+    });
+    insertBulkListingJobSchema = createInsertSchema(bulkListingJobs).omit({
+      createdAt: true
+    });
+    insertEbayPaymentPolicySchema = createInsertSchema(ebayPaymentPolicies).omit({
+      id: true,
+      createdAt: true,
+      updatedAt: true
+    });
+    insertEbayFulfillmentPolicySchema = createInsertSchema(ebayFulfillmentPolicies).omit({
+      id: true,
+      createdAt: true,
+      updatedAt: true
+    });
+    insertEbayReturnPolicySchema = createInsertSchema(ebayReturnPolicies).omit({
+      id: true,
+      createdAt: true,
+      updatedAt: true
+    });
+    insertOrderSchema = createInsertSchema(orders).omit({
+      id: true,
+      createdAt: true,
+      updatedAt: true,
+      lastSyncedAt: true
+    });
+    insertOrderItemSchema = createInsertSchema(orderItems).omit({
+      id: true,
+      createdAt: true
+    });
+    insertOrderFeeSchema = createInsertSchema(orderFees).omit({
+      id: true,
+      createdAt: true
+    });
+    insertOrderEventSchema = createInsertSchema(orderEvents).omit({
+      id: true,
+      createdAt: true
+    });
+    loginSchema = z.object({
+      username: z.string().min(1, "Username is required"),
+      password: z.string().min(1, "Password is required")
+    });
+    OrderStatus = {
+      NEW: "new",
+      PACKED: "packed",
+      SHIPPED: "shipped",
+      DELIVERED: "delivered",
+      RETURN_REQUESTED: "return_requested",
+      RETURNED: "returned",
+      COMPLETED: "completed",
+      CANCELLED: "cancelled",
+      ON_HOLD: "on_hold"
+    };
+    messageThreads = pgTable("message_threads", {
+      id: serial("id").primaryKey(),
+      // Marketplace context
+      marketplace: text("marketplace").notNull().default("ebay"),
+      // ebay, amazon
+      marketplaceThreadId: text("marketplace_thread_id"),
+      // eBay message ID for thread reference
+      // Buyer info
+      buyerUsername: text("buyer_username").notNull(),
+      buyerEmail: text("buyer_email"),
+      // Order context (optional - some messages may not be order-related)
+      orderId: integer("order_id").references(() => orders.id),
+      marketplaceOrderId: text("marketplace_order_id"),
+      // eBay/Amazon order ID
+      // Item context
+      itemId: text("item_id"),
+      // eBay listing ID
+      itemTitle: text("item_title"),
+      // Thread status
+      status: text("status").notNull().default("open"),
+      // open, closed, archived
+      isRead: boolean("is_read").notNull().default(false),
+      isStarred: boolean("is_starred").notNull().default(false),
+      lastMessageAt: timestamp("last_message_at"),
+      messageCount: integer("message_count").notNull().default(0),
+      // Metadata
+      subject: text("subject"),
+      tags: text("tags").array(),
+      // custom tags for organization
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at").defaultNow()
+    });
+    messages = pgTable("messages", {
+      id: serial("id").primaryKey(),
+      threadId: integer("thread_id").references(() => messageThreads.id).notNull(),
+      // Message content
+      direction: text("direction").notNull(),
+      // inbound (from buyer), outbound (to buyer)
+      subject: text("subject"),
+      body: text("body").notNull(),
+      bodyHtml: text("body_html"),
+      // HTML version if available
+      // Marketplace reference
+      marketplaceMessageId: text("marketplace_message_id"),
+      // eBay's message ID
+      // Sender info
+      senderUsername: text("sender_username").notNull(),
+      senderEmail: text("sender_email"),
+      // Status
+      status: text("status").notNull().default("sent"),
+      // draft, pending, sent, delivered, failed, read
+      errorMessage: text("error_message"),
+      // If sending failed
+      // Auto-message reference
+      templateId: integer("template_id").references(() => messageTemplates.id),
+      autoMessageRuleId: integer("auto_message_rule_id"),
+      // Metadata
+      rawPayload: text("raw_payload"),
+      // Original XML/JSON from eBay
+      sentAt: timestamp("sent_at"),
+      readAt: timestamp("read_at"),
+      createdAt: timestamp("created_at").defaultNow()
+    });
+    messageTemplates = pgTable("message_templates", {
+      id: serial("id").primaryKey(),
+      name: text("name").notNull(),
+      // Template name for quick selection
+      description: text("description"),
+      // Content
+      subject: text("subject"),
+      body: text("body").notNull(),
+      // Template type
+      category: text("category").notNull().default("general"),
+      // general, thank_you, shipping, follow_up, return, custom
+      // Placeholders available in this template
+      // {{buyer_name}}, {{order_id}}, {{item_title}}, {{tracking_number}}, {{shop_name}}, etc.
+      placeholders: text("placeholders").array(),
+      // Usage stats
+      usageCount: integer("usage_count").notNull().default(0),
+      lastUsedAt: timestamp("last_used_at"),
+      // Status
+      isActive: boolean("is_active").notNull().default(true),
+      isDefault: boolean("is_default").notNull().default(false),
+      // Default for a category
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at").defaultNow()
+    });
+    autoMessageRules = pgTable("auto_message_rules", {
+      id: serial("id").primaryKey(),
+      name: text("name").notNull(),
+      description: text("description"),
+      // Trigger configuration
+      triggerType: text("trigger_type").notNull(),
+      // order_placed, order_packed, order_shipped, order_delivered, days_after_delivery
+      triggerDelay: integer("trigger_delay").default(0),
+      // Delay in minutes/hours before sending
+      triggerDelayUnit: text("trigger_delay_unit").default("minutes"),
+      // minutes, hours, days
+      // Template to use
+      templateId: integer("template_id").references(() => messageTemplates.id).notNull(),
+      // Conditions
+      marketplaces: text("marketplaces").array().default(["ebay"]),
+      // Which marketplaces this applies to
+      minOrderValue: decimal("min_order_value", { precision: 10, scale: 2 }),
+      // Only trigger if order value >= this
+      excludeCountries: text("exclude_countries").array(),
+      // Don't send to these countries
+      // Status
+      isActive: boolean("is_active").notNull().default(true),
+      // Stats
+      sentCount: integer("sent_count").notNull().default(0),
+      lastTriggeredAt: timestamp("last_triggered_at"),
+      createdAt: timestamp("created_at").defaultNow(),
+      updatedAt: timestamp("updated_at").defaultNow()
+    });
+    scheduledMessages = pgTable("scheduled_messages", {
+      id: serial("id").primaryKey(),
+      // References
+      orderId: integer("order_id").references(() => orders.id),
+      ruleId: integer("rule_id").references(() => autoMessageRules.id),
+      templateId: integer("template_id").references(() => messageTemplates.id).notNull(),
+      // Target
+      buyerUsername: text("buyer_username").notNull(),
+      itemId: text("item_id"),
+      // Schedule
+      scheduledFor: timestamp("scheduled_for").notNull(),
+      // Status
+      status: text("status").notNull().default("pending"),
+      // pending, sent, cancelled, failed
+      sentAt: timestamp("sent_at"),
+      errorMessage: text("error_message"),
+      messageId: integer("message_id").references(() => messages.id),
+      // Reference to sent message
+      createdAt: timestamp("created_at").defaultNow()
+    });
+    insertMessageThreadSchema = createInsertSchema(messageThreads).omit({
+      id: true,
+      createdAt: true,
+      updatedAt: true
+    });
+    insertMessageSchema = createInsertSchema(messages).omit({
+      id: true,
+      createdAt: true
+    });
+    insertMessageTemplateSchema = createInsertSchema(messageTemplates).omit({
+      id: true,
+      createdAt: true,
+      updatedAt: true,
+      usageCount: true,
+      lastUsedAt: true
+    });
+    insertAutoMessageRuleSchema = createInsertSchema(autoMessageRules).omit({
+      id: true,
+      createdAt: true,
+      updatedAt: true,
+      sentCount: true,
+      lastTriggeredAt: true
+    });
+    insertScheduledMessageSchema = createInsertSchema(scheduledMessages).omit({
+      id: true,
+      createdAt: true
+    });
+    Marketplace = {
+      EBAY: "ebay",
+      AMAZON: "amazon"
+    };
+  }
+});
+
+// server/db.ts
+import { Pool, neonConfig } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-serverless";
+import ws from "ws";
+var connectionString, pool, db;
+var init_db = __esm({
+  "server/db.ts"() {
+    "use strict";
+    init_schema();
+    neonConfig.webSocketConstructor = ws;
+    connectionString = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.POSTGRES_URL;
+    if (!connectionString) {
+      throw new Error(
+        "DATABASE_URL (or NEON_DATABASE_URL / POSTGRES_URL) must be set. Did you forget to provision a database?"
+      );
+    }
+    pool = new Pool({ connectionString });
+    db = drizzle({ client: pool, schema: schema_exports });
+  }
+});
+
+// server/storage.ts
+import { eq, and, gte, lte, desc, asc, count, or, ilike } from "drizzle-orm";
+import bcrypt from "bcryptjs";
+var DatabaseStorage, storage;
+var init_storage = __esm({
+  "server/storage.ts"() {
+    "use strict";
+    init_schema();
+    init_db();
+    DatabaseStorage = class {
+      constructor() {
+        this.initializeDatabase();
+      }
+      async initializeDatabase() {
+        try {
+          const existingAdmin = await this.getUserByUsername("admin");
+          if (!existingAdmin) {
+            const hashedPassword = await bcrypt.hash("admin123", 10);
+            await this.createUser({
+              username: "admin",
+              password: hashedPassword,
+              email: "admin@inventorysync.com",
+              role: "admin"
+            });
+          }
+          const existingCategories = await this.getCategories();
+          if (existingCategories.length === 0) {
+            await this.createCategory({ name: "Electronics", ebayMapping: "Electronics", amazonMapping: "Electronics" });
+            await this.createCategory({ name: "Accessories", ebayMapping: "Accessories", amazonMapping: "Accessories" });
+            await this.createCategory({ name: "Gaming", ebayMapping: "Gaming", amazonMapping: "Gaming" });
+            await this.createCategory({ name: "Home & Garden", ebayMapping: "Home & Garden", amazonMapping: "Home & Garden" });
+          }
+          const existingTiers = await this.getPricingTiers();
+          if (existingTiers.length === 0) {
+            await this.createPricingTier({ min: "1.00", max: "5.00", multiplier: "6.00", label: "Ultra High", marginPercentage: "500" });
+            await this.createPricingTier({ min: "5.01", max: "9.99", multiplier: "4.00", label: "Very High", marginPercentage: "300" });
+            await this.createPricingTier({ min: "10.00", max: "15.00", multiplier: "3.00", label: "High", marginPercentage: "200" });
+            await this.createPricingTier({ min: "15.01", max: "25.00", multiplier: "2.50", label: "Medium-High", marginPercentage: "150" });
+            await this.createPricingTier({ min: "25.01", max: "50.00", multiplier: "2.00", label: "Medium", marginPercentage: "100" });
+            await this.createPricingTier({ min: "50.01", max: "100.00", multiplier: "1.75", label: "Low-Medium", marginPercentage: "75" });
+            await this.createPricingTier({ min: "100.01", max: "999999", multiplier: "1.50", label: "Low", marginPercentage: "50" });
+          }
+        } catch (error) {
+          console.error("Error initializing database:", error);
+        }
+      }
+      // User methods
+      async getUser(id) {
+        const [user] = await db.select().from(users).where(eq(users.id, id));
+        return user || void 0;
+      }
+      async getUserByUsername(username) {
+        const [user] = await db.select().from(users).where(eq(users.username, username));
+        return user || void 0;
+      }
+      async getUserByEmail(email) {
+        const [user] = await db.select().from(users).where(eq(users.email, email));
+        return user || void 0;
+      }
+      async createUser(insertUser) {
+        const [user] = await db.insert(users).values(insertUser).returning();
+        return user;
+      }
+      // Product methods
+      async getProducts() {
+        return await db.select().from(products).orderBy(desc(products.createdAt));
+      }
+      async getProduct(id) {
+        const [product] = await db.select().from(products).where(eq(products.id, id));
+        return product || void 0;
+      }
+      async getProductBySku(sku) {
+        const [product] = await db.select().from(products).where(eq(products.sku, sku));
+        return product || void 0;
+      }
+      async createProduct(insertProduct) {
+        const [product] = await db.insert(products).values(insertProduct).returning();
+        return product;
+      }
+      async updateProduct(id, updateData) {
+        const [updated] = await db.update(products).set({ ...updateData, updatedAt: /* @__PURE__ */ new Date() }).where(eq(products.id, id)).returning();
+        return updated || void 0;
+      }
+      async deleteProduct(id) {
+        const result = await db.delete(products).where(eq(products.id, id));
+        return (result.rowCount ?? 0) > 0;
+      }
+      async deleteAllProducts() {
+        const result = await db.delete(products);
+        return result.rowCount ?? 0;
+      }
+      async getProductsByCategory(category) {
+        return await db.select().from(products).where(eq(products.category, category));
+      }
+      async getProductsWithFilters(filters) {
+        const conditions = [];
+        if (filters.category) conditions.push(eq(products.category, filters.category));
+        if (filters.status) conditions.push(eq(products.status, filters.status));
+        if (filters.listedOnEbay !== void 0) conditions.push(eq(products.listedOnEbay, filters.listedOnEbay));
+        if (filters.listedOnAmazon !== void 0) conditions.push(eq(products.listedOnAmazon, filters.listedOnAmazon));
+        if (filters.minStock !== void 0) conditions.push(gte(products.stock, filters.minStock));
+        if (filters.maxStock !== void 0) conditions.push(lte(products.stock, filters.maxStock));
+        if (conditions.length > 0) {
+          return await db.select().from(products).where(and(...conditions)).orderBy(desc(products.createdAt));
+        }
+        return await db.select().from(products).orderBy(desc(products.createdAt));
+      }
+      // Category methods
+      async getCategories() {
+        return await db.select().from(categories);
+      }
+      async createCategory(insertCategory) {
+        const [category] = await db.insert(categories).values(insertCategory).returning();
+        return category;
+      }
+      // Marketplace settings methods
+      async getMarketplaceSettings(marketplace) {
+        return await db.select().from(marketplaceSettings).where(eq(marketplaceSettings.marketplace, marketplace));
+      }
+      async setMarketplaceSetting(insertSetting) {
+        const [setting] = await db.insert(marketplaceSettings).values(insertSetting).returning();
+        return setting;
+      }
+      // Sync log methods
+      async getSyncLogs(limit = 50) {
+        return await db.select().from(syncLogs).orderBy(desc(syncLogs.syncedAt)).limit(limit);
+      }
+      async createSyncLog(insertLog) {
+        const [log] = await db.insert(syncLogs).values(insertLog).returning();
+        return log;
+      }
+      // Dashboard metrics
+      async getDashboardMetrics() {
+        const allProducts = await db.select().from(products);
+        const totalProducts = allProducts.length;
+        const ebayListings = allProducts.filter((p) => p.listedOnEbay).length;
+        const amazonListings = allProducts.filter((p) => p.listedOnAmazon).length;
+        const outOfStock = allProducts.filter((p) => p.stock === 0).length;
+        const totalRevenue = allProducts.reduce((sum, product) => {
+          const price = parseFloat(product.salePrice) || 0;
+          return sum + price * product.stock;
+        }, 0);
+        return {
+          totalProducts,
+          ebayListings,
+          amazonListings,
+          totalRevenue: Math.round(totalRevenue),
+          outOfStock
+        };
+      }
+      // Sync Queue Operations
+      async createSyncQueueItem(item) {
+        const [result] = await db.insert(syncQueue).values(item).returning();
+        return result;
+      }
+      async createBulkSyncQueueItems(items) {
+        if (items.length === 0) return;
+        await db.insert(syncQueue).values(items);
+      }
+      async getPendingSyncQueueItems(limit = 100) {
+        return await db.select().from(syncQueue).where(eq(syncQueue.status, "pending")).orderBy(asc(syncQueue.priority), asc(syncQueue.createdAt)).limit(limit);
+      }
+      async updateSyncQueueItem(id, updates) {
+        await db.update(syncQueue).set(updates).where(eq(syncQueue.id, id));
+      }
+      async getSyncQueueCount(status) {
+        const conditions = status ? [eq(syncQueue.status, status)] : [];
+        const [result] = await db.select({ count: count() }).from(syncQueue).where(and(...conditions));
+        return result.count;
+      }
+      async getSyncQueueStats() {
+        const [statusCounts, priorityCounts] = await Promise.all([
+          db.select({
+            status: syncQueue.status,
+            count: count()
+          }).from(syncQueue).groupBy(syncQueue.status),
+          db.select({
+            priority: syncQueue.priority,
+            count: count()
+          }).from(syncQueue).where(eq(syncQueue.status, "pending")).groupBy(syncQueue.priority)
+        ]);
+        const stats = {
+          pending: 0,
+          processing: 0,
+          completed: 0,
+          failed: 0,
+          byPriority: {}
+        };
+        statusCounts.forEach((row) => {
+          if (row.status === "pending") stats.pending = row.count;
+          else if (row.status === "processing") stats.processing = row.count;
+          else if (row.status === "completed") stats.completed = row.count;
+          else if (row.status === "failed") stats.failed = row.count;
+        });
+        priorityCounts.forEach((row) => {
+          stats.byPriority[String(row.priority)] = row.count;
+        });
+        return stats;
+      }
+      // Pricing Tier methods
+      async getPricingTiers() {
+        const result = await db.select().from(pricingTiers).orderBy(asc(pricingTiers.min));
+        return result;
+      }
+      async createPricingTier(tier) {
+        const result = await db.insert(pricingTiers).values(tier).returning();
+        return result[0];
+      }
+      async updatePricingTier(id, tier) {
+        const result = await db.update(pricingTiers).set({ ...tier, updatedAt: /* @__PURE__ */ new Date() }).where(eq(pricingTiers.id, id)).returning();
+        return result[0];
+      }
+      async deletePricingTier(id) {
+        const result = await db.delete(pricingTiers).where(eq(pricingTiers.id, id));
+        return (result.rowCount ?? 0) > 0;
+      }
+      // Shipping Policy methods
+      async getShippingPolicies() {
+        const result = await db.select().from(shippingPolicies).orderBy(asc(shippingPolicies.minWeight));
+        return result;
+      }
+      async createShippingPolicy(policy) {
+        const result = await db.insert(shippingPolicies).values(policy).returning();
+        return result[0];
+      }
+      async updateShippingPolicy(id, policy) {
+        const result = await db.update(shippingPolicies).set({ ...policy, updatedAt: /* @__PURE__ */ new Date() }).where(eq(shippingPolicies.id, id)).returning();
+        return result[0];
+      }
+      async deleteShippingPolicy(id) {
+        const result = await db.delete(shippingPolicies).where(eq(shippingPolicies.id, id));
+        return (result.rowCount ?? 0) > 0;
+      }
+      // API Usage Tracking methods
+      async getApiUsage(provider = "tme") {
+        const result = await db.select().from(apiUsageTracking).where(eq(apiUsageTracking.provider, provider)).limit(1);
+        return result[0];
+      }
+      async trackApiCall(provider) {
+        const existing = await this.getApiUsage(provider);
+        if (existing) {
+          const lastReset = new Date(existing.lastResetAt || /* @__PURE__ */ new Date());
+          const now = /* @__PURE__ */ new Date();
+          const isNewDay = lastReset.toDateString() !== now.toDateString();
+          if (isNewDay) {
+            await db.update(apiUsageTracking).set({ callsToday: 1, lastResetAt: now, updatedAt: now }).where(eq(apiUsageTracking.provider, provider));
+          } else {
+            await db.update(apiUsageTracking).set({ callsToday: existing.callsToday + 1, updatedAt: now }).where(eq(apiUsageTracking.provider, provider));
+          }
+        } else {
+          await db.insert(apiUsageTracking).values({
+            provider,
+            callsToday: 1,
+            dailyLimit: 1e4,
+            lastResetAt: /* @__PURE__ */ new Date(),
+            updatedAt: /* @__PURE__ */ new Date()
+          });
+        }
+      }
+      async resetApiUsageIfNewDay(provider) {
+        const existing = await this.getApiUsage(provider);
+        if (existing) {
+          const lastReset = new Date(existing.lastResetAt || /* @__PURE__ */ new Date());
+          const now = /* @__PURE__ */ new Date();
+          if (lastReset.toDateString() !== now.toDateString()) {
+            await db.update(apiUsageTracking).set({ callsToday: 0, lastResetAt: now, updatedAt: now }).where(eq(apiUsageTracking.provider, provider));
+          }
+        }
+      }
+      // TME Product Cache methods - PostgreSQL-based caching for 150k+ products
+      async getTmeCachedProduct(symbol) {
+        const now = /* @__PURE__ */ new Date();
+        const result = await db.select().from(tmeProductCache).where(and(
+          eq(tmeProductCache.symbol, symbol),
+          gte(tmeProductCache.expiresAt, now)
+        )).limit(1);
+        return result[0];
+      }
+      async getTmeCachedProducts(symbols) {
+        if (symbols.length === 0) return [];
+        const now = /* @__PURE__ */ new Date();
+        const results = [];
+        for (const symbol of symbols) {
+          const cached = await this.getTmeCachedProduct(symbol);
+          if (cached) results.push(cached);
+        }
+        return results;
+      }
+      async setTmeCachedProduct(cache) {
+        const existing = await db.select().from(tmeProductCache).where(eq(tmeProductCache.symbol, cache.symbol)).limit(1);
+        if (existing.length > 0) {
+          const result = await db.update(tmeProductCache).set({
+            productData: cache.productData,
+            priceData: cache.priceData,
+            stockData: cache.stockData,
+            categoryId: cache.categoryId,
+            fetchedAt: /* @__PURE__ */ new Date(),
+            expiresAt: cache.expiresAt
+          }).where(eq(tmeProductCache.symbol, cache.symbol)).returning();
+          return result[0];
+        } else {
+          const result = await db.insert(tmeProductCache).values({
+            ...cache,
+            fetchedAt: /* @__PURE__ */ new Date()
+          }).returning();
+          return result[0];
+        }
+      }
+      async setTmeCachedProducts(caches) {
+        if (caches.length === 0) return;
+        const batchSize = 50;
+        for (let i = 0; i < caches.length; i += batchSize) {
+          const batch = caches.slice(i, i + batchSize);
+          await Promise.all(batch.map((cache) => this.setTmeCachedProduct(cache)));
+        }
+      }
+      async getStaleProductSymbols(olderThan24Hours = true) {
+        const cutoffTime = new Date(Date.now() - (olderThan24Hours ? 24 * 60 * 60 * 1e3 : 0));
+        const result = await db.select({ symbol: tmeProductCache.symbol }).from(tmeProductCache).where(lte(tmeProductCache.expiresAt, cutoffTime));
+        return result.map((r) => r.symbol);
+      }
+      async cleanExpiredCache() {
+        const now = /* @__PURE__ */ new Date();
+        const result = await db.delete(tmeProductCache).where(lte(tmeProductCache.expiresAt, now));
+        return result.rowCount ?? 0;
+      }
+      // Bulk Listing Jobs - track progress of bulk listing operations
+      async createBulkListingJob(job) {
+        const result = await db.insert(bulkListingJobs).values(job).returning();
+        return result[0];
+      }
+      async getBulkListingJob(id) {
+        const result = await db.select().from(bulkListingJobs).where(eq(bulkListingJobs.id, id));
+        return result[0] || void 0;
+      }
+      async updateBulkListingJob(id, updates) {
+        const result = await db.update(bulkListingJobs).set(updates).where(eq(bulkListingJobs.id, id)).returning();
+        return result[0] || void 0;
+      }
+      async cleanOldBulkListingJobs(olderThanHours = 24) {
+        const cutoffTime = new Date(Date.now() - olderThanHours * 60 * 60 * 1e3);
+        const result = await db.delete(bulkListingJobs).where(lte(bulkListingJobs.createdAt, cutoffTime));
+        return result.rowCount ?? 0;
+      }
+      // eBay Payment Policies
+      async getEbayPaymentPolicies() {
+        return await db.select().from(ebayPaymentPolicies).orderBy(desc(ebayPaymentPolicies.createdAt));
+      }
+      async getEbayPaymentPolicy(policyId) {
+        const result = await db.select().from(ebayPaymentPolicies).where(eq(ebayPaymentPolicies.policyId, policyId));
+        return result[0] || void 0;
+      }
+      async createEbayPaymentPolicy(policy) {
+        const result = await db.insert(ebayPaymentPolicies).values(policy).returning();
+        return result[0];
+      }
+      async updateEbayPaymentPolicy(policyId, policy) {
+        const result = await db.update(ebayPaymentPolicies).set({ ...policy, updatedAt: /* @__PURE__ */ new Date() }).where(eq(ebayPaymentPolicies.policyId, policyId)).returning();
+        return result[0] || void 0;
+      }
+      async deleteEbayPaymentPolicy(policyId) {
+        const result = await db.delete(ebayPaymentPolicies).where(eq(ebayPaymentPolicies.policyId, policyId));
+        return (result.rowCount ?? 0) > 0;
+      }
+      // eBay Fulfillment (Shipping) Policies
+      async getEbayFulfillmentPolicies() {
+        return await db.select().from(ebayFulfillmentPolicies).orderBy(desc(ebayFulfillmentPolicies.createdAt));
+      }
+      async getEbayFulfillmentPolicy(policyId) {
+        const result = await db.select().from(ebayFulfillmentPolicies).where(eq(ebayFulfillmentPolicies.policyId, policyId));
+        return result[0] || void 0;
+      }
+      async createEbayFulfillmentPolicy(policy) {
+        const result = await db.insert(ebayFulfillmentPolicies).values(policy).returning();
+        return result[0];
+      }
+      async updateEbayFulfillmentPolicy(policyId, policy) {
+        const result = await db.update(ebayFulfillmentPolicies).set({ ...policy, updatedAt: /* @__PURE__ */ new Date() }).where(eq(ebayFulfillmentPolicies.policyId, policyId)).returning();
+        return result[0] || void 0;
+      }
+      async deleteEbayFulfillmentPolicy(policyId) {
+        const result = await db.delete(ebayFulfillmentPolicies).where(eq(ebayFulfillmentPolicies.policyId, policyId));
+        return (result.rowCount ?? 0) > 0;
+      }
+      // eBay Return Policies
+      async getEbayReturnPolicies() {
+        return await db.select().from(ebayReturnPolicies).orderBy(desc(ebayReturnPolicies.createdAt));
+      }
+      async getEbayReturnPolicy(policyId) {
+        const result = await db.select().from(ebayReturnPolicies).where(eq(ebayReturnPolicies.policyId, policyId));
+        return result[0] || void 0;
+      }
+      async createEbayReturnPolicy(policy) {
+        const result = await db.insert(ebayReturnPolicies).values(policy).returning();
+        return result[0];
+      }
+      async updateEbayReturnPolicy(policyId, policy) {
+        const result = await db.update(ebayReturnPolicies).set({ ...policy, updatedAt: /* @__PURE__ */ new Date() }).where(eq(ebayReturnPolicies.policyId, policyId)).returning();
+        return result[0] || void 0;
+      }
+      async deleteEbayReturnPolicy(policyId) {
+        const result = await db.delete(ebayReturnPolicies).where(eq(ebayReturnPolicies.policyId, policyId));
+        return (result.rowCount ?? 0) > 0;
+      }
+      // ==========================================
+      // ORDERS MANAGEMENT
+      // ==========================================
+      async getOrders(filters) {
+        const conditions = [];
+        if (filters?.marketplace) {
+          conditions.push(eq(orders.marketplace, filters.marketplace));
+        }
+        if (filters?.status) {
+          conditions.push(eq(orders.status, filters.status));
+        }
+        if (filters?.fromDate) {
+          conditions.push(gte(orders.orderDate, filters.fromDate));
+        }
+        if (filters?.toDate) {
+          conditions.push(lte(orders.orderDate, filters.toDate));
+        }
+        if (filters?.search) {
+          conditions.push(
+            or(
+              ilike(orders.marketplaceOrderId, `%${filters.search}%`),
+              ilike(orders.buyerUsername, `%${filters.search}%`),
+              ilike(orders.shippingName, `%${filters.search}%`)
+            )
+          );
+        }
+        let query = db.select().from(orders);
+        if (conditions.length > 0) {
+          query = query.where(and(...conditions));
+        }
+        query = query.orderBy(desc(orders.orderDate));
+        if (filters?.limit) {
+          query = query.limit(filters.limit);
+        }
+        if (filters?.offset) {
+          query = query.offset(filters.offset);
+        }
+        return await query;
+      }
+      async getOrder(id) {
+        const result = await db.select().from(orders).where(eq(orders.id, id));
+        return result[0] || void 0;
+      }
+      async getOrderByMarketplaceId(marketplace, marketplaceOrderId) {
+        const result = await db.select().from(orders).where(
+          and(
+            eq(orders.marketplace, marketplace),
+            eq(orders.marketplaceOrderId, marketplaceOrderId)
+          )
+        );
+        return result[0] || void 0;
+      }
+      async createOrder(order) {
+        const result = await db.insert(orders).values(order).returning();
+        return result[0];
+      }
+      async updateOrder(id, order) {
+        const result = await db.update(orders).set({ ...order, updatedAt: /* @__PURE__ */ new Date() }).where(eq(orders.id, id)).returning();
+        return result[0] || void 0;
+      }
+      async deleteOrder(id) {
+        await db.delete(orderEvents).where(eq(orderEvents.orderId, id));
+        await db.delete(orderFees).where(eq(orderFees.orderId, id));
+        await db.delete(orderItems).where(eq(orderItems.orderId, id));
+        const result = await db.delete(orders).where(eq(orders.id, id));
+        return (result.rowCount ?? 0) > 0;
+      }
+      async getOrdersCount(filters) {
+        const conditions = [];
+        if (filters?.marketplace) {
+          conditions.push(eq(orders.marketplace, filters.marketplace));
+        }
+        if (filters?.status) {
+          conditions.push(eq(orders.status, filters.status));
+        }
+        let query = db.select({ count: count() }).from(orders);
+        if (conditions.length > 0) {
+          query = query.where(and(...conditions));
+        }
+        const result = await query;
+        return result[0]?.count || 0;
+      }
+      // Order Items
+      async getOrderItems(orderId) {
+        return await db.select().from(orderItems).where(eq(orderItems.orderId, orderId));
+      }
+      async createOrderItem(item) {
+        const result = await db.insert(orderItems).values(item).returning();
+        return result[0];
+      }
+      async createOrderItems(items) {
+        if (items.length > 0) {
+          await db.insert(orderItems).values(items);
+        }
+      }
+      // Order Fees
+      async getOrderFees(orderId) {
+        return await db.select().from(orderFees).where(eq(orderFees.orderId, orderId));
+      }
+      async createOrderFee(fee) {
+        const result = await db.insert(orderFees).values(fee).returning();
+        return result[0];
+      }
+      async createOrderFees(fees) {
+        if (fees.length > 0) {
+          await db.insert(orderFees).values(fees);
+        }
+      }
+      // Order Events
+      async getOrderEvents(orderId) {
+        return await db.select().from(orderEvents).where(eq(orderEvents.orderId, orderId)).orderBy(desc(orderEvents.createdAt));
+      }
+      async createOrderEvent(event) {
+        const result = await db.insert(orderEvents).values(event).returning();
+        return result[0];
+      }
+      // ============================================
+      // MESSAGING SYSTEM
+      // ============================================
+      // Message Threads
+      async getMessageThreads(filters) {
+        const conditions = [];
+        if (filters?.marketplace) {
+          conditions.push(eq(messageThreads.marketplace, filters.marketplace));
+        }
+        if (filters?.status) {
+          conditions.push(eq(messageThreads.status, filters.status));
+        }
+        if (filters?.isRead !== void 0) {
+          conditions.push(eq(messageThreads.isRead, filters.isRead));
+        }
+        if (filters?.orderId) {
+          conditions.push(eq(messageThreads.orderId, filters.orderId));
+        }
+        if (filters?.buyerUsername) {
+          conditions.push(ilike(messageThreads.buyerUsername, `%${filters.buyerUsername}%`));
+        }
+        let query = db.select().from(messageThreads).orderBy(desc(messageThreads.lastMessageAt), desc(messageThreads.createdAt));
+        if (conditions.length > 0) {
+          query = query.where(and(...conditions));
+        }
+        if (filters?.limit) {
+          query = query.limit(filters.limit);
+        }
+        if (filters?.offset) {
+          query = query.offset(filters.offset);
+        }
+        return await query;
+      }
+      async getMessageThread(id) {
+        const result = await db.select().from(messageThreads).where(eq(messageThreads.id, id));
+        return result[0] || void 0;
+      }
+      async getMessageThreadByBuyer(buyerUsername, itemId) {
+        const conditions = [eq(messageThreads.buyerUsername, buyerUsername)];
+        if (itemId) {
+          conditions.push(eq(messageThreads.itemId, itemId));
+        }
+        const result = await db.select().from(messageThreads).where(and(...conditions)).orderBy(desc(messageThreads.createdAt)).limit(1);
+        return result[0] || void 0;
+      }
+      async createMessageThread(thread) {
+        const result = await db.insert(messageThreads).values(thread).returning();
+        return result[0];
+      }
+      async updateMessageThread(id, thread) {
+        const result = await db.update(messageThreads).set({ ...thread, updatedAt: /* @__PURE__ */ new Date() }).where(eq(messageThreads.id, id)).returning();
+        return result[0] || void 0;
+      }
+      async getUnreadThreadCount() {
+        const result = await db.select({ count: count() }).from(messageThreads).where(eq(messageThreads.isRead, false));
+        return result[0]?.count || 0;
+      }
+      // Messages
+      async getMessages(threadId) {
+        return await db.select().from(messages).where(eq(messages.threadId, threadId)).orderBy(asc(messages.createdAt));
+      }
+      async getMessage(id) {
+        const result = await db.select().from(messages).where(eq(messages.id, id));
+        return result[0] || void 0;
+      }
+      async createMessage(message) {
+        const result = await db.insert(messages).values(message).returning();
+        if (result[0]) {
+          const countResult = await db.select({ count: count() }).from(messages).where(eq(messages.threadId, message.threadId));
+          const msgCount = countResult[0]?.count || 0;
+          await db.update(messageThreads).set({
+            messageCount: msgCount,
+            lastMessageAt: /* @__PURE__ */ new Date(),
+            updatedAt: /* @__PURE__ */ new Date()
+          }).where(eq(messageThreads.id, message.threadId));
+        }
+        return result[0];
+      }
+      async updateMessage(id, message) {
+        const result = await db.update(messages).set(message).where(eq(messages.id, id)).returning();
+        return result[0] || void 0;
+      }
+      // Message Templates
+      async getMessageTemplates(category) {
+        if (category) {
+          return await db.select().from(messageTemplates).where(eq(messageTemplates.category, category)).orderBy(desc(messageTemplates.usageCount));
+        }
+        return await db.select().from(messageTemplates).orderBy(desc(messageTemplates.usageCount));
+      }
+      async getMessageTemplate(id) {
+        const result = await db.select().from(messageTemplates).where(eq(messageTemplates.id, id));
+        return result[0] || void 0;
+      }
+      async createMessageTemplate(template) {
+        const result = await db.insert(messageTemplates).values(template).returning();
+        return result[0];
+      }
+      async updateMessageTemplate(id, template) {
+        const result = await db.update(messageTemplates).set({ ...template, updatedAt: /* @__PURE__ */ new Date() }).where(eq(messageTemplates.id, id)).returning();
+        return result[0] || void 0;
+      }
+      async deleteMessageTemplate(id) {
+        const result = await db.delete(messageTemplates).where(eq(messageTemplates.id, id));
+        return (result.rowCount ?? 0) > 0;
+      }
+      async incrementTemplateUsage(id) {
+        const template = await this.getMessageTemplate(id);
+        if (template) {
+          await db.update(messageTemplates).set({
+            usageCount: template.usageCount + 1,
+            lastUsedAt: /* @__PURE__ */ new Date()
+          }).where(eq(messageTemplates.id, id));
+        }
+      }
+      // Auto Message Rules
+      async getAutoMessageRules(triggerType) {
+        if (triggerType) {
+          return await db.select().from(autoMessageRules).where(eq(autoMessageRules.triggerType, triggerType)).orderBy(desc(autoMessageRules.createdAt));
+        }
+        return await db.select().from(autoMessageRules).orderBy(desc(autoMessageRules.createdAt));
+      }
+      async getAutoMessageRule(id) {
+        const result = await db.select().from(autoMessageRules).where(eq(autoMessageRules.id, id));
+        return result[0] || void 0;
+      }
+      async getActiveAutoMessageRules(triggerType) {
+        return await db.select().from(autoMessageRules).where(and(
+          eq(autoMessageRules.triggerType, triggerType),
+          eq(autoMessageRules.isActive, true)
+        ));
+      }
+      async createAutoMessageRule(rule) {
+        const result = await db.insert(autoMessageRules).values(rule).returning();
+        return result[0];
+      }
+      async updateAutoMessageRule(id, rule) {
+        const result = await db.update(autoMessageRules).set({ ...rule, updatedAt: /* @__PURE__ */ new Date() }).where(eq(autoMessageRules.id, id)).returning();
+        return result[0] || void 0;
+      }
+      async deleteAutoMessageRule(id) {
+        const result = await db.delete(autoMessageRules).where(eq(autoMessageRules.id, id));
+        return (result.rowCount ?? 0) > 0;
+      }
+      async incrementRuleSentCount(id) {
+        const rule = await this.getAutoMessageRule(id);
+        if (rule) {
+          await db.update(autoMessageRules).set({
+            sentCount: rule.sentCount + 1,
+            lastTriggeredAt: /* @__PURE__ */ new Date()
+          }).where(eq(autoMessageRules.id, id));
+        }
+      }
+      // Scheduled Messages
+      async getScheduledMessages(status) {
+        if (status) {
+          return await db.select().from(scheduledMessages).where(eq(scheduledMessages.status, status)).orderBy(asc(scheduledMessages.scheduledFor));
+        }
+        return await db.select().from(scheduledMessages).orderBy(asc(scheduledMessages.scheduledFor));
+      }
+      async getPendingScheduledMessages() {
+        return await db.select().from(scheduledMessages).where(and(
+          eq(scheduledMessages.status, "pending"),
+          lte(scheduledMessages.scheduledFor, /* @__PURE__ */ new Date())
+        )).orderBy(asc(scheduledMessages.scheduledFor));
+      }
+      async createScheduledMessage(message) {
+        const result = await db.insert(scheduledMessages).values(message).returning();
+        return result[0];
+      }
+      async updateScheduledMessage(id, message) {
+        const result = await db.update(scheduledMessages).set(message).where(eq(scheduledMessages.id, id)).returning();
+        return result[0] || void 0;
+      }
+      async cancelScheduledMessage(id) {
+        const result = await db.update(scheduledMessages).set({ status: "cancelled" }).where(eq(scheduledMessages.id, id));
+        return (result.rowCount ?? 0) > 0;
+      }
+    };
+    storage = new DatabaseStorage();
+  }
+});
+
+// server/tme-api.ts
+var tme_api_exports = {};
+__export(tme_api_exports, {
+  TMEApiService: () => TMEApiService,
+  tmeApi: () => tmeApi
+});
+import crypto from "crypto";
+var TMEApiService, tmeApi;
+var init_tme_api = __esm({
+  "server/tme-api.ts"() {
+    "use strict";
+    init_storage();
+    TMEApiService = class {
+      credentials;
+      static credentialsValidated = false;
+      baseUrl = "https://api.tme.eu";
+      callCount = 0;
+      dailyLimit = 1e4;
+      rateLimitPerMinute = 60;
+      lastCallTimestamp = 0;
+      callsThisMinute = 0;
+      requestQueue = [];
+      isProcessingQueue = false;
+      storage;
+      constructor() {
+        this.storage = storage;
+        const requiredEnvVars = ["TME_TOKEN", "TME_CUSTOMER_NUMBER", "TME_CONTACT_NUMBER", "TME_APPLICATION_SECRET"];
+        const missingVars = requiredEnvVars.filter((v) => !process.env[v]);
+        if (missingVars.length > 0) {
+          console.error(`\u274C Missing required TME environment variables: ${missingVars.join(", ")}`);
+          console.error("Please set these in your environment secrets.");
+        }
+        this.credentials = {
+          token: process.env.TME_TOKEN || "",
+          customerNumber: process.env.TME_CUSTOMER_NUMBER || "",
+          contactNumber: process.env.TME_CONTACT_NUMBER || "",
+          applicationSecret: process.env.TME_APPLICATION_SECRET || ""
+        };
+        console.log("\u2705 TME API Service initialized");
+        console.log("- Token length:", this.credentials.token.length);
+        console.log("- Credentials loaded from environment");
+      }
+      generateApiSignature(method, url, params) {
+        const paramsForSignature = { ...params };
+        delete paramsForSignature.ApiSignature;
+        const sortedParams = Object.keys(paramsForSignature).sort().map((key) => {
+          const value = paramsForSignature[key];
+          if (Array.isArray(value)) {
+            return value.map(
+              (item, index) => `${encodeURIComponent(`${key}[${index}]`)}=${encodeURIComponent(String(item))}`
+            ).join("&");
+          } else {
+            return `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`;
+          }
+        }).join("&");
+        const baseString = `${method}&${encodeURIComponent(url)}&${encodeURIComponent(sortedParams)}`;
+        console.log("\u{1F510} Signature base string:", baseString.substring(0, 200) + "...");
+        const signature = crypto.createHmac("sha1", this.credentials.applicationSecret).update(baseString).digest("base64");
+        console.log("\u{1F510} Generated signature:", signature.substring(0, 20) + "...");
+        return signature;
+      }
+      async rateLimitCheck() {
+        const now = Date.now();
+        if (now - this.lastCallTimestamp > 6e4) {
+          this.callsThisMinute = 0;
+        }
+        const safeRateLimit = 55;
+        if (this.callsThisMinute >= safeRateLimit) {
+          const waitTime = 6e4 - (now - this.lastCallTimestamp);
+          console.log(`\u{1F6A6} Rate limit reached. Waiting ${waitTime}ms...`);
+          await new Promise((resolve) => setTimeout(resolve, waitTime));
+          this.callsThisMinute = 0;
+        }
+        if (this.lastCallTimestamp > 0) {
+          const timeSinceLastCall = now - this.lastCallTimestamp;
+          const minimumDelay = 1e3;
+          if (timeSinceLastCall < minimumDelay) {
+            const waitTime = minimumDelay - timeSinceLastCall;
+            console.log(`\u23F1\uFE0F Waiting ${waitTime}ms between API calls...`);
+            await new Promise((resolve) => setTimeout(resolve, waitTime));
+          }
+        }
+        if (this.callCount >= this.dailyLimit) {
+          throw new Error(`TME daily limit exceeded: ${this.callCount}/${this.dailyLimit}`);
+        }
+      }
+      async makeRequest(endpoint, params = {}) {
+        await this.rateLimitCheck();
+        const url = `${this.baseUrl}${endpoint}`;
+        const requestParams = {
+          Token: this.credentials.token,
+          Language: "EN"
+        };
+        if (this.credentials.token.length === 45) {
+          requestParams.Country = "GB";
+        }
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== void 0 && value !== null) {
+            requestParams[key] = value;
+          }
+        });
+        const apiSignature = this.generateApiSignature("POST", url, requestParams);
+        requestParams.ApiSignature = apiSignature;
+        const formData = new URLSearchParams();
+        Object.entries(requestParams).forEach(([key, value]) => {
+          if (Array.isArray(value)) {
+            value.forEach((item, index) => {
+              formData.append(`${key}[${index}]`, String(item));
+            });
+          } else {
+            formData.append(key, String(value));
+          }
+        });
+        this.callCount++;
+        this.callsThisMinute++;
+        this.lastCallTimestamp = Date.now();
+        try {
+          await this.storage.trackApiCall("tme");
+        } catch (error) {
+          console.error("Failed to track API call:", error);
+        }
+        console.log(`\u{1F4CA} TME API Call #${this.callCount}: ${endpoint}`);
+        console.log(`\u{1F4DD} Request params:`, Object.keys(requestParams).join(", "));
+        const maxRetries = 3;
+        const baseDelayMs = 2e3;
+        const timeoutMs = 2e4;
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+          try {
+            const response = await fetch(url, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "application/json",
+                "User-Agent": "TME-API-Client/1.0"
+              },
+              body: formData.toString(),
+              signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            const responseText = await response.text();
+            console.log(`\u{1F4E5} Response status: ${response.status}, length: ${responseText.length}`);
+            if (!response.ok) {
+              const isRetriable = response.status >= 500 || response.status === 429;
+              console.error(`\u274C HTTP Error: ${response.status} ${response.statusText}`);
+              console.error(`\u274C Response body:`, responseText.substring(0, 1e3));
+              if (isRetriable && attempt < maxRetries) {
+                const delay = baseDelayMs * Math.pow(2, attempt - 1) * (0.8 + Math.random() * 0.4);
+                console.log(`\u{1F504} Retry ${attempt}/${maxRetries} after ${Math.round(delay)}ms...`);
+                await new Promise((resolve) => setTimeout(resolve, delay));
+                continue;
+              }
+              throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            let data;
+            try {
+              data = JSON.parse(responseText);
+            } catch (parseError) {
+              console.error("\u274C JSON parse error:", responseText.substring(0, 500));
+              throw new Error(`Invalid JSON response from TME API`);
+            }
+            if (data.Status !== "OK") {
+              console.error("\u274C TME API Error:", {
+                status: data.Status,
+                errorMessage: data.ErrorMessage,
+                errorCode: data.ErrorCode,
+                errors: data.Error
+              });
+              if (data.Status === "E_TOO_MANY_REQUESTS") {
+                if (attempt < maxRetries) {
+                  const delay = 5e3 * attempt;
+                  console.log(`\u23F8\uFE0F Rate limit hit, waiting ${delay / 1e3}s (retry ${attempt}/${maxRetries})...`);
+                  await new Promise((resolve) => setTimeout(resolve, delay));
+                  continue;
+                }
+                throw new Error(`TME API rate limit exceeded. Please try again later.`);
+              }
+              if (data.Status === "E_INPUT_PARAMS_VALIDATION_ERROR") {
+                throw new Error(`TME API parameter validation error: ${JSON.stringify(data.Error)}`);
+              }
+              throw new Error(`TME API error: ${data.ErrorMessage || data.Message || "Unknown error"}`);
+            }
+            console.log(`\u2705 TME API success: ${endpoint}`);
+            return data;
+          } catch (error) {
+            clearTimeout(timeoutId);
+            const isAbortError = error.name === "AbortError";
+            const isNetworkError = error.code === "ECONNRESET" || error.code === "ENOTFOUND" || error.code === "ETIMEDOUT";
+            const isRetriable = isAbortError || isNetworkError;
+            if (isRetriable && attempt < maxRetries) {
+              const delay = baseDelayMs * Math.pow(2, attempt - 1) * (0.8 + Math.random() * 0.4);
+              console.log(`\u{1F504} ${isAbortError ? "Timeout" : "Network error"}, retry ${attempt}/${maxRetries} after ${Math.round(delay)}ms...`);
+              await new Promise((resolve) => setTimeout(resolve, delay));
+              continue;
+            }
+            console.error(`\u274C TME API request failed after ${attempt} attempts:`, error);
+            throw error;
+          }
+        }
+        throw new Error(`TME API request failed after ${maxRetries} retries`);
+      }
+      // Get raw TME categories response for debugging
+      async getAllCategoriesRaw() {
+        try {
+          const response = await this.makeRequest("/Products/GetCategories.json");
+          console.log("\u{1F4CB} Raw TME response Data keys:", Object.keys(response.Data || {}));
+          for (const key of Object.keys(response.Data || {})) {
+            const value = response.Data[key];
+            console.log(`\u{1F4CB} Data.${key} type:`, typeof value, Array.isArray(value) ? `(array of ${value.length})` : "");
+            if (Array.isArray(value) && value.length > 0) {
+              console.log(`\u{1F4CB} Sample ${key}[0] keys:`, Object.keys(value[0]));
+            } else if (typeof value === "object" && value !== null) {
+              console.log(`\u{1F4CB} ${key} object keys:`, Object.keys(value));
+            }
+          }
+          return {
+            dataKeys: Object.keys(response.Data || {}),
+            categoryTree: response.Data?.CategoryTree,
+            categoryList: response.Data?.CategoryList,
+            rawDataSample: JSON.stringify(response.Data).substring(0, 2e3)
+          };
+        } catch (error) {
+          console.error("Failed to get raw categories:", error);
+          return { error: String(error) };
+        }
+      }
+      // Get all available categories with real product counts from TME
+      async getAllCategories() {
+        try {
+          const response = await this.makeRequest("/Products/GetCategories.json");
+          if (response.Data && response.Data.CategoryTree) {
+            const rootCategory = response.Data.CategoryTree;
+            const categories2 = this.parseCategoryTree(rootCategory);
+            console.log(`\u{1F4C1} Parsed ${categories2.length} categories from TME with real product counts`);
+            return categories2;
+          }
+          console.log("\u26A0\uFE0F Using fallback categories - TME response format unexpected");
+          return this.getFallbackCategories();
+        } catch (error) {
+          console.warn("Failed to fetch categories from TME API, using fallback:", error);
+          return this.getFallbackCategories();
+        }
+      }
+      // Parse TME's nested CategoryTree structure into flat array
+      parseCategoryTree(node, parentId = null) {
+        const categories2 = [];
+        if (node.Id && node.Name) {
+          const category = {
+            CategoryId: String(node.Id),
+            Name: node.Name,
+            ParentId: parentId,
+            ProductCount: node.TotalProducts || 0
+          };
+          categories2.push(category);
+        }
+        if (node.SubTree && Array.isArray(node.SubTree) && node.SubTree.length > 0) {
+          for (const childNode of node.SubTree) {
+            const childCategories = this.parseCategoryTree(childNode, node.Id ? String(node.Id) : null);
+            categories2.push(...childCategories);
+          }
+        }
+        return categories2;
+      }
+      getFallbackCategories() {
+        return [
+          { CategoryId: "1000", Name: "Microcontrollers & Processors", ProductCount: 8e3 },
+          { CategoryId: "1001", Name: "Arduino Compatible", ProductCount: 800 },
+          { CategoryId: "1002", Name: "Development Boards", ProductCount: 1200 },
+          { CategoryId: "2000", Name: "Semiconductors", ProductCount: 2e4 },
+          { CategoryId: "2001", Name: "Transistors", ProductCount: 8e3 },
+          { CategoryId: "2002", Name: "Diodes", ProductCount: 5e3 },
+          { CategoryId: "2003", Name: "Integrated Circuits", ProductCount: 25e3 },
+          { CategoryId: "3000", Name: "Optoelectronics", ProductCount: 15e3 },
+          { CategoryId: "3001", Name: "LEDs", ProductCount: 8e3 },
+          { CategoryId: "3002", Name: "Displays", ProductCount: 2e3 },
+          { CategoryId: "5000", Name: "Passive Components", ProductCount: 8e4 },
+          { CategoryId: "5001", Name: "Resistors", ProductCount: 25e3 },
+          { CategoryId: "5002", Name: "Capacitors", ProductCount: 35e3 },
+          { CategoryId: "5003", Name: "Inductors", ProductCount: 8e3 },
+          { CategoryId: "6000", Name: "Connectors", ProductCount: 25e3 },
+          { CategoryId: "6001", Name: "Pin Headers", ProductCount: 1200 },
+          { CategoryId: "6002", Name: "Terminal Blocks", ProductCount: 800 },
+          { CategoryId: "7000", Name: "Power Management", ProductCount: 15e3 },
+          { CategoryId: "8000", Name: "Switches & Indicators", ProductCount: 12e3 },
+          { CategoryId: "10000", Name: "Sensors", ProductCount: 18e3 },
+          { CategoryId: "14000", Name: "Wires & Cables", ProductCount: 15e3 }
+        ];
+      }
+      // Search products with enhanced filtering
+      async searchProducts(query, limit = 100) {
+        try {
+          console.log(`\u{1F50D} Searching TME for: "${query}"`);
+          const response = await this.makeRequest("/Products/Search.json", {
+            SearchPlain: query,
+            SearchWithStock: "1"
+            // Removed SearchPhoto as it's not a valid parameter
+          });
+          const products2 = response.Data.ProductList || [];
+          console.log(`\u2705 TME search returned ${products2.length} products for "${query}"`);
+          return products2.slice(0, limit);
+        } catch (error) {
+          console.error(`\u274C Search failed for "${query}":`, error);
+          return [];
+        }
+      }
+      // Get products by category with pagination using TME Search API with SearchCategory filter
+      async getProductsByCategory(categoryId, page = 1, limit = 20) {
+        console.log(`\u{1F50D} Getting products for category ${categoryId}, page ${page}, limit ${limit}`);
+        try {
+          const response = await this.makeRequest("/Products/Search.json", {
+            SearchCategory: categoryId,
+            SearchWithStock: "1",
+            SearchPage: String(page)
+          });
+          const products2 = response.Data?.ProductList || [];
+          const totalProducts = response.Data?.Amount || 0;
+          const pageNumber = response.Data?.PageNumber || page;
+          console.log(`\u2705 TME returned ${products2.length} products for category ${categoryId} (page ${pageNumber}), total: ${totalProducts}`);
+          if (products2.length > 0) {
+            return {
+              products: products2,
+              total: totalProducts
+            };
+          }
+          console.log(`\u{1F504} No products found with SearchCategory filter, falling back to keyword search`);
+          return this.searchProductsByCategoryKeywords(categoryId, page, limit);
+        } catch (error) {
+          console.error(`\u274C Failed to get products for category ${categoryId}:`, error);
+          return this.searchProductsByCategoryKeywords(categoryId, page, limit);
+        }
+      }
+      // Fallback: search products by category using keywords  
+      async searchProductsByCategoryKeywords(categoryId, page, limit) {
+        const searchTerms = this.getCategorySearchTerms(categoryId);
+        let allProducts = [];
+        const termsPerPage = 3;
+        const startTermIndex = (page - 1) * termsPerPage % searchTerms.length;
+        for (let i = 0; i < termsPerPage && i < searchTerms.length; i++) {
+          const termIndex = (startTermIndex + i) % searchTerms.length;
+          const searchTerm = searchTerms[termIndex];
+          try {
+            const products2 = await this.searchProducts(searchTerm, 50);
+            const newProducts = products2.filter(
+              (product) => !allProducts.some((existing) => existing.Symbol === product.Symbol)
+            );
+            allProducts = allProducts.concat(newProducts);
+            if (allProducts.length >= limit * 2) break;
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          } catch (e) {
+            console.warn(`Search failed for "${searchTerm}":`, e);
+          }
+        }
+        if (allProducts.length === 0) {
+          return this.getMockProductsForCategory(categoryId, page, limit);
+        }
+        return {
+          products: allProducts.slice(0, limit),
+          total: searchTerms.length * 100
+        };
+      }
+      async searchProductsByCategory(categoryId, page, limit) {
+        const searchTerms = this.getCategorySearchTerms(categoryId);
+        let allProducts = [];
+        for (const term of searchTerms.slice(0, 5)) {
+          try {
+            const products2 = await this.searchProducts(term, 50);
+            const newProducts = products2.filter(
+              (product) => !allProducts.some((existing) => existing.Symbol === product.Symbol)
+            );
+            allProducts = allProducts.concat(newProducts);
+            if (allProducts.length >= limit * 2) break;
+            await new Promise((resolve) => setTimeout(resolve, 300));
+          } catch (error) {
+            console.warn(`Search failed for term "${term}":`, error);
+          }
+        }
+        const startIndex = (page - 1) * limit;
+        const endIndex = startIndex + limit;
+        return {
+          products: allProducts.slice(startIndex, endIndex),
+          total: allProducts.length
+        };
+      }
+      getCategorySearchTerms(categoryId) {
+        const categoryTerms = {
+          "1000": ["microcontroller", "atmega", "stm32", "esp32", "arduino", "pic", "arm"],
+          "1001": ["arduino", "uno", "nano", "mega", "esp32", "nodemcu"],
+          "2000": ["transistor", "mosfet", "diode", "ic", "semiconductor"],
+          "2001": ["transistor", "mosfet", "bjt", "fet"],
+          "2002": ["diode", "rectifier", "schottky", "zener"],
+          "3000": ["led", "display", "opto", "laser"],
+          "3001": ["led", "rgb", "smd", "through hole"],
+          "5000": ["resistor", "capacitor", "inductor"],
+          "5001": ["resistor", "ohm", "smd", "through hole"],
+          "5002": ["capacitor", "ceramic", "electrolytic", "tantalum"],
+          "6000": ["connector", "header", "terminal", "socket"],
+          "10000": ["sensor", "temperature", "humidity", "pressure"]
+        };
+        return categoryTerms[categoryId] || ["electronic", "component"];
+      }
+      // Batch get product details
+      async getProductDetails(symbols) {
+        if (symbols.length === 0) return [];
+        try {
+          const response = await this.makeRequest("/Products/GetProducts.json", {
+            SymbolList: symbols
+          });
+          return response.Data.ProductList || [];
+        } catch (error) {
+          console.error("Failed to get product details:", error);
+          return [];
+        }
+      }
+      // Batch get product prices
+      async getProductPrices(symbols) {
+        if (symbols.length === 0) return [];
+        try {
+          const response = await this.makeRequest("/Products/GetPrices.json", {
+            SymbolList: symbols
+          });
+          return response.Data.ProductList || [];
+        } catch (error) {
+          console.error("Failed to get product prices:", error);
+          return [];
+        }
+      }
+      // Batch get product stock
+      async getProductStock(symbols) {
+        if (symbols.length === 0) return [];
+        try {
+          const response = await this.makeRequest("/Products/GetStocks.json", {
+            SymbolList: symbols
+          });
+          return response.Data.ProductList || [];
+        } catch (error) {
+          console.error("Failed to get product stock:", error);
+          return [];
+        }
+      }
+      // OPTIMIZED: Get prices AND stocks in a SINGLE API call (50% fewer calls!)
+      async getPricesAndStocks(symbols) {
+        if (symbols.length === 0) return [];
+        try {
+          const response = await this.makeRequest("/Products/GetPricesAndStocks.json", {
+            SymbolList: symbols
+          });
+          return response.Data.ProductList || [];
+        } catch (error) {
+          console.error("Failed to get prices and stocks:", error);
+          return [];
+        }
+      }
+      // OPTIMIZED: Get enhanced product info using combined GetPricesAndStocks endpoint
+      // Uses batch size of 50 (vs old 10) and 2 API calls per batch (vs old 3)
+      // For 163 products: Old = 51 calls, New = ~7 calls (85% reduction!)
+      async getEnhancedProductInfo(symbols) {
+        if (symbols.length === 0) return [];
+        const batchSize = 50;
+        const results = [];
+        console.log(`\u{1F680} Optimized sync: ${symbols.length} products in ${Math.ceil(symbols.length / batchSize)} batches of ${batchSize}`);
+        console.log(`\u{1F4CA} API calls needed: ~${Math.ceil(symbols.length / batchSize) * 2} (using GetPricesAndStocks)`);
+        for (let i = 0; i < symbols.length; i += batchSize) {
+          const batch = symbols.slice(i, i + batchSize);
+          const batchNum = Math.floor(i / batchSize) + 1;
+          const totalBatches = Math.ceil(symbols.length / batchSize);
+          console.log(`\u26A1 Processing batch ${batchNum}/${totalBatches} (${batch.length} products)`);
+          try {
+            const [products2, pricesAndStocks] = await Promise.all([
+              this.getProductDetails(batch),
+              this.getPricesAndStocks(batch)
+            ]);
+            batch.forEach((symbol) => {
+              const product = products2.find((p) => p.Symbol === symbol);
+              const priceAndStock = pricesAndStocks.find((p) => p.Symbol === symbol);
+              if (product) {
+                const price = priceAndStock ? {
+                  Symbol: priceAndStock.Symbol,
+                  PriceList: priceAndStock.PriceList,
+                  Unit: priceAndStock.Unit,
+                  VatRate: priceAndStock.VatRate,
+                  VatType: priceAndStock.VatType
+                } : null;
+                const stock = priceAndStock ? {
+                  Symbol: priceAndStock.Symbol,
+                  Amount: priceAndStock.Amount,
+                  Unit: priceAndStock.Unit
+                } : null;
+                results.push({ product, price, stock });
+              }
+            });
+            console.log(`\u2705 Batch ${batchNum} complete: ${results.length}/${symbols.length} products processed`);
+            if (i + batchSize < symbols.length) {
+              await new Promise((resolve) => setTimeout(resolve, 500));
+            }
+          } catch (error) {
+            console.error(`Failed to get enhanced info for batch ${batchNum}:`, error);
+          }
+        }
+        console.log(`\u{1F389} Sync complete: ${results.length} products fetched`);
+        return results;
+      }
+      // Get API usage statistics
+      getApiUsage() {
+        return {
+          callsToday: this.callCount,
+          dailyLimit: this.dailyLimit,
+          callsThisMinute: this.callsThisMinute,
+          rateLimitPerMinute: this.rateLimitPerMinute,
+          remainingDaily: this.dailyLimit - this.callCount,
+          remainingThisMinute: this.rateLimitPerMinute - this.callsThisMinute,
+          usagePercentage: Math.round(this.callCount / this.dailyLimit * 100),
+          lastCallTimestamp: this.lastCallTimestamp,
+          status: this.callCount >= this.dailyLimit ? "LIMIT_EXCEEDED" : this.callCount > this.dailyLimit * 0.8 ? "WARNING" : "OK"
+        };
+      }
+      // Reset daily usage counters
+      resetDailyUsage() {
+        this.callCount = 0;
+        console.log("\u{1F4CA} TME API daily usage counter reset");
+      }
+      // Check if we can make more API calls
+      canMakeApiCall() {
+        return this.callCount < this.dailyLimit && this.callsThisMinute < this.rateLimitPerMinute;
+      }
+      // Mock products for development when API fails
+      getMockProductsForCategory(categoryId, page, limit) {
+        const mockProducts = [];
+        const categoryInfo = this.getFallbackCategories().find((cat) => cat.CategoryId === categoryId);
+        const categoryName = categoryInfo?.Name || "Electronics";
+        const productCount = Math.min(50, categoryInfo?.ProductCount || 25);
+        for (let i = 1; i <= productCount; i++) {
+          mockProducts.push({
+            Symbol: `MOCK-${categoryId}-${String(i).padStart(3, "0")}`,
+            CustomerSymbol: `MOCK-${categoryId}-${String(i).padStart(3, "0")}`,
+            OriginalSymbol: `MOCK-${categoryId}-${String(i).padStart(3, "0")}`,
+            EAN: `123456789${String(i).padStart(4, "0")}`,
+            Producer: this.getMockProducer(categoryId),
+            Description: `${categoryName} Component - Model ${i}`,
+            CategoryId: parseInt(categoryId),
+            Category: categoryName,
+            Photo: "",
+            Thumbnail: "",
+            DataSheet: "",
+            ProductInformationPage: "",
+            Weight: Math.floor(Math.random() * 100) + 1,
+            WeightUnit: "g",
+            SuppliedAmount: 1,
+            MinAmount: 1,
+            Multiples: 1,
+            Unit: "pcs",
+            Parameters: [
+              {
+                ParameterId: 1,
+                ParameterName: "Operating Temperature",
+                ParameterValue: "-40...+85",
+                ParameterUnit: "\xB0C"
+              },
+              {
+                ParameterId: 2,
+                ParameterName: "Package",
+                ParameterValue: this.getMockPackage(categoryId),
+                ParameterUnit: ""
+              }
+            ]
+          });
+        }
+        const startIndex = (page - 1) * limit;
+        const endIndex = startIndex + limit;
+        return {
+          products: mockProducts.slice(startIndex, endIndex),
+          total: mockProducts.length
+        };
+      }
+      getMockProducer(categoryId) {
+        const producers = {
+          "1000": ["Microchip", "STMicroelectronics", "Texas Instruments"],
+          "1001": ["Arduino", "SparkFun", "Adafruit"],
+          "2000": ["Infineon", "ON Semiconductor", "Vishay"],
+          "3000": ["Osram", "Cree", "Lumileds"],
+          "5000": ["Yageo", "Murata", "TDK"],
+          "6000": ["Molex", "TE Connectivity", "JST"]
+        };
+        const categoryProducers = producers[categoryId] || ["Generic Electronics"];
+        return categoryProducers[Math.floor(Math.random() * categoryProducers.length)];
+      }
+      getMockPackage(categoryId) {
+        const packages = {
+          "1000": ["TQFP-64", "QFN-32", "SOIC-20"],
+          "1001": ["Through Hole", "Shield", "Module"],
+          "2000": ["SOT-23", "TO-220", "SOIC-8"],
+          "3000": ["0603", "5mm", "SMD"],
+          "5000": ["0805", "1206", "Through Hole"],
+          "6000": ["2.54mm", "1.27mm", "JST-XH"]
+        };
+        const categoryPackages = packages[categoryId] || ["Standard"];
+        return categoryPackages[Math.floor(Math.random() * categoryPackages.length)];
+      }
+    };
+    tmeApi = new TMEApiService();
+  }
+});
+
 // server/ebay-oauth.ts
 var ebay_oauth_exports = {};
 __export(ebay_oauth_exports, {
@@ -874,1981 +2868,21 @@ var init_dynamic_pricing = __esm({
 });
 
 // server/app.ts
+init_db();
 import express from "express";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 
-// server/db.ts
-import { Pool, neonConfig } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-serverless";
-import ws from "ws";
-
-// shared/schema.ts
-var schema_exports = {};
-__export(schema_exports, {
-  Marketplace: () => Marketplace,
-  OrderStatus: () => OrderStatus,
-  apiUsageTracking: () => apiUsageTracking,
-  autoMessageRules: () => autoMessageRules,
-  bulkListingJobs: () => bulkListingJobs,
-  categories: () => categories,
-  ebayFulfillmentPolicies: () => ebayFulfillmentPolicies,
-  ebayPaymentPolicies: () => ebayPaymentPolicies,
-  ebayReturnPolicies: () => ebayReturnPolicies,
-  insertApiUsageTrackingSchema: () => insertApiUsageTrackingSchema,
-  insertAutoMessageRuleSchema: () => insertAutoMessageRuleSchema,
-  insertBulkListingJobSchema: () => insertBulkListingJobSchema,
-  insertCategorySchema: () => insertCategorySchema,
-  insertEbayFulfillmentPolicySchema: () => insertEbayFulfillmentPolicySchema,
-  insertEbayPaymentPolicySchema: () => insertEbayPaymentPolicySchema,
-  insertEbayReturnPolicySchema: () => insertEbayReturnPolicySchema,
-  insertMarketplaceSettingsSchema: () => insertMarketplaceSettingsSchema,
-  insertMessageSchema: () => insertMessageSchema,
-  insertMessageTemplateSchema: () => insertMessageTemplateSchema,
-  insertMessageThreadSchema: () => insertMessageThreadSchema,
-  insertOrderEventSchema: () => insertOrderEventSchema,
-  insertOrderFeeSchema: () => insertOrderFeeSchema,
-  insertOrderItemSchema: () => insertOrderItemSchema,
-  insertOrderSchema: () => insertOrderSchema,
-  insertPricingTierSchema: () => insertPricingTierSchema,
-  insertProductSchema: () => insertProductSchema,
-  insertScheduledMessageSchema: () => insertScheduledMessageSchema,
-  insertShippingPolicySchema: () => insertShippingPolicySchema,
-  insertSyncLogSchema: () => insertSyncLogSchema,
-  insertSyncQueueSchema: () => insertSyncQueueSchema,
-  insertTmeProductCacheSchema: () => insertTmeProductCacheSchema,
-  insertUserSchema: () => insertUserSchema,
-  loginSchema: () => loginSchema,
-  marketplaceSettings: () => marketplaceSettings,
-  messageTemplates: () => messageTemplates,
-  messageThreads: () => messageThreads,
-  messages: () => messages,
-  orderEvents: () => orderEvents,
-  orderFees: () => orderFees,
-  orderItems: () => orderItems,
-  orders: () => orders,
-  pricingTiers: () => pricingTiers,
-  products: () => products,
-  scheduledMessages: () => scheduledMessages,
-  shippingPolicies: () => shippingPolicies,
-  syncLogs: () => syncLogs,
-  syncQueue: () => syncQueue,
-  tmeProductCache: () => tmeProductCache,
-  users: () => users
-});
-import { pgTable, text, serial, integer, boolean, decimal, timestamp } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod";
-var users = pgTable("users", {
-  id: serial("id").primaryKey(),
-  username: text("username").notNull().unique(),
-  password: text("password").notNull(),
-  email: text("email").notNull().unique(),
-  role: text("role").notNull().default("user"),
-  // admin or user
-  createdAt: timestamp("created_at").defaultNow()
-});
-var products = pgTable("products", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  sku: text("sku").notNull().unique(),
-  ean: text("ean"),
-  category: text("category").notNull(),
-  description: text("description"),
-  supplierPrice: decimal("supplier_price", { precision: 10, scale: 2 }).notNull(),
-  salePrice: decimal("sale_price", { precision: 10, scale: 2 }).notNull(),
-  calculatedPrice: decimal("calculated_price", { precision: 10, scale: 2 }),
-  // auto-calculated price
-  marginTier: text("margin_tier"),
-  // tier label (e.g., "Ultra High", "Medium")
-  marginPercentage: decimal("margin_percentage", { precision: 5, scale: 2 }),
-  // applied margin %
-  priceUpdatedAt: timestamp("price_updated_at"),
-  // last price calculation
-  useCalculatedPrice: boolean("use_calculated_price").default(true),
-  // use dynamic vs manual pricing
-  stock: integer("stock").notNull().default(0),
-  // Real TME stock
-  moq: integer("moq").notNull().default(1),
-  // Minimum order quantity from TME
-  multiples: integer("multiples").notNull().default(1),
-  // Order multiples from TME
-  ebayStockLimit: integer("ebay_stock_limit").notNull().default(2),
-  // Max stock to show on eBay
-  useStockLimit: boolean("use_stock_limit").default(true),
-  // Whether to apply eBay stock limits
-  weight: decimal("weight", { precision: 8, scale: 2 }),
-  // in grams
-  margin: decimal("margin", { precision: 5, scale: 2 }),
-  // percentage (legacy field)
-  status: text("status").notNull().default("active"),
-  // active, inactive, out_of_stock
-  listedOnEbay: boolean("listed_on_ebay").default(false),
-  listedOnAmazon: boolean("listed_on_amazon").default(false),
-  excludeFromListing: boolean("exclude_from_listing").default(false),
-  ebayItemId: text("ebay_item_id"),
-  amazonAsin: text("amazon_asin"),
-  tmeProductId: text("tme_product_id"),
-  tmeCategoryId: text("tme_category_id"),
-  // TME category ID for synced products
-  supplier: text("supplier").default("manual"),
-  // manual, TME, etc.
-  supplierProductId: text("supplier_product_id"),
-  imageUrl: text("image_url"),
-  dataSheetUrl: text("datasheet_url"),
-  productUrl: text("product_url"),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
-  lastSyncedAt: timestamp("last_synced_at")
-  // When product was last synced from TME
-});
-var categories = pgTable("categories", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull().unique(),
-  ebayMapping: text("ebay_mapping"),
-  amazonMapping: text("amazon_mapping")
-});
-var marketplaceSettings = pgTable("marketplace_settings", {
-  id: serial("id").primaryKey(),
-  marketplace: text("marketplace").notNull(),
-  // ebay or amazon
-  setting: text("setting").notNull(),
-  value: text("value").notNull()
-});
-var syncLogs = pgTable("sync_logs", {
-  id: serial("id").primaryKey(),
-  source: text("source").notNull(),
-  // tme, ebay, amazon
-  operation: text("operation").default("sync"),
-  // sync_start, sync_complete, price_update, etc.
-  status: text("status").notNull(),
-  // success, error, pending, in_progress
-  message: text("message"),
-  details: text("details"),
-  // JSON string for additional data
-  syncedAt: timestamp("synced_at").defaultNow()
-});
-var syncQueue = pgTable("sync_queue", {
-  id: serial("id").primaryKey(),
-  productId: integer("product_id").references(() => products.id).notNull(),
-  operation: text("operation").notNull(),
-  // 'list', 'update_price', 'update_stock', 'unlist'
-  priority: integer("priority").notNull().default(3),
-  // 1=critical, 2=high, 3=medium, 4=low
-  status: text("status").notNull().default("pending"),
-  // 'pending', 'processing', 'completed', 'failed'
-  retryCount: integer("retry_count").notNull().default(0),
-  maxRetries: integer("max_retries").notNull().default(3),
-  marketplace: text("marketplace").notNull().default("ebay"),
-  // ebay, amazon
-  scheduledFor: timestamp("scheduled_for").defaultNow(),
-  errorMessage: text("error_message"),
-  createdAt: timestamp("created_at").defaultNow(),
-  processedAt: timestamp("processed_at")
-});
-var pricingTiers = pgTable("pricing_tiers", {
-  id: serial("id").primaryKey(),
-  min: decimal("min", { precision: 10, scale: 2 }).notNull(),
-  max: decimal("max", { precision: 10, scale: 2 }).notNull(),
-  multiplier: decimal("multiplier", { precision: 5, scale: 2 }).notNull(),
-  label: text("label").notNull(),
-  marginPercentage: decimal("margin_percentage", { precision: 5, scale: 2 }).notNull(),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow()
-});
-var shippingPolicies = pgTable("shipping_policies", {
-  id: text("id").primaryKey(),
-  // e.g., "policy_light", "policy_heavy"
-  name: text("name").notNull(),
-  description: text("description").notNull(),
-  minWeight: integer("min_weight").notNull(),
-  // in grams
-  maxWeight: integer("max_weight").notNull(),
-  // in grams
-  type: text("type").default("standard"),
-  // standard, express, overnight
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow()
-});
-var apiUsageTracking = pgTable("api_usage_tracking", {
-  id: serial("id").primaryKey(),
-  provider: text("provider").notNull().default("tme"),
-  // tme, ebay, amazon
-  callsToday: integer("calls_today").notNull().default(0),
-  dailyLimit: integer("daily_limit").notNull().default(1e4),
-  lastResetAt: timestamp("last_reset_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow()
-});
-var bulkListingJobs = pgTable("bulk_listing_jobs", {
-  id: text("id").primaryKey(),
-  // UUID for job tracking
-  status: text("status").notNull().default("pending"),
-  // pending, processing, completed, failed
-  total: integer("total").notNull().default(0),
-  processed: integer("processed").notNull().default(0),
-  succeeded: integer("succeeded").notNull().default(0),
-  failed: integer("failed").notNull().default(0),
-  currentProduct: text("current_product"),
-  // Name of product currently being processed
-  lastMessage: text("last_message"),
-  errorDetails: text("error_details"),
-  // JSON array of failed items with reasons
-  createdAt: timestamp("created_at").defaultNow(),
-  completedAt: timestamp("completed_at")
-});
-var tmeProductCache = pgTable("tme_product_cache", {
-  id: serial("id").primaryKey(),
-  symbol: text("symbol").notNull().unique(),
-  // TME product SKU/Symbol
-  productData: text("product_data").notNull(),
-  // JSON string of product info
-  priceData: text("price_data"),
-  // JSON string of pricing info
-  stockData: text("stock_data"),
-  // JSON string of stock info
-  categoryId: integer("category_id"),
-  fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
-  // When data was fetched
-  expiresAt: timestamp("expires_at").notNull()
-  // When cache should be refreshed (24 hours)
-});
-var ebayPaymentPolicies = pgTable("ebay_payment_policies", {
-  id: serial("id").primaryKey(),
-  policyId: text("policy_id").notNull().unique(),
-  // eBay's policy ID
-  name: text("name").notNull(),
-  description: text("description"),
-  marketplaceId: text("marketplace_id").notNull().default("EBAY_GB"),
-  // EBAY_US, EBAY_GB, etc.
-  categoryTypes: text("category_types"),
-  // JSON array of category types
-  paymentMethods: text("payment_methods"),
-  // JSON array of payment methods
-  immediatePay: boolean("immediate_pay").default(true),
-  isDefault: boolean("is_default").default(false),
-  syncedFromEbay: boolean("synced_from_ebay").default(false),
-  // true if fetched from eBay
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow()
-});
-var ebayFulfillmentPolicies = pgTable("ebay_fulfillment_policies", {
-  id: serial("id").primaryKey(),
-  policyId: text("policy_id").notNull().unique(),
-  // eBay's policy ID
-  name: text("name").notNull(),
-  description: text("description"),
-  marketplaceId: text("marketplace_id").notNull().default("EBAY_GB"),
-  categoryTypes: text("category_types"),
-  // JSON array
-  handlingTime: integer("handling_time").notNull().default(1),
-  // Days to dispatch
-  shippingOptions: text("shipping_options"),
-  // JSON array of shipping options
-  shipToLocations: text("ship_to_locations"),
-  // JSON - regions included/excluded
-  globalShipping: boolean("global_shipping").default(false),
-  pickupDropOff: boolean("pickup_drop_off").default(false),
-  freightShipping: boolean("freight_shipping").default(false),
-  isDefault: boolean("is_default").default(false),
-  syncedFromEbay: boolean("synced_from_ebay").default(false),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow()
-});
-var ebayReturnPolicies = pgTable("ebay_return_policies", {
-  id: serial("id").primaryKey(),
-  policyId: text("policy_id").notNull().unique(),
-  // eBay's policy ID
-  name: text("name").notNull(),
-  description: text("description"),
-  marketplaceId: text("marketplace_id").notNull().default("EBAY_GB"),
-  categoryTypes: text("category_types"),
-  // JSON array
-  returnsAccepted: boolean("returns_accepted").notNull().default(true),
-  returnPeriod: integer("return_period").default(30),
-  // Days
-  refundMethod: text("refund_method").default("MONEY_BACK"),
-  // MONEY_BACK, EXCHANGE
-  returnShippingCostPayer: text("return_shipping_cost_payer").default("BUYER"),
-  // BUYER, SELLER
-  restockingFeePercentage: text("restocking_fee_percentage"),
-  // Optional restocking fee
-  isDefault: boolean("is_default").default(false),
-  syncedFromEbay: boolean("synced_from_ebay").default(false),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow()
-});
-var orders = pgTable("orders", {
-  id: serial("id").primaryKey(),
-  marketplace: text("marketplace").notNull(),
-  // ebay, amazon
-  marketplaceOrderId: text("marketplace_order_id").notNull(),
-  // eBay order ID, Amazon order ID
-  status: text("status").notNull().default("new"),
-  // new, packed, shipped, delivered, return_requested, returned, completed, cancelled, on_hold
-  // Buyer Information
-  buyerUsername: text("buyer_username").notNull(),
-  // eBay nickname or Amazon customer name
-  buyerEmail: text("buyer_email"),
-  // Shipping Address (JSON for flexibility across marketplaces)
-  shippingName: text("shipping_name").notNull(),
-  shippingAddressLine1: text("shipping_address_line1").notNull(),
-  shippingAddressLine2: text("shipping_address_line2"),
-  shippingCity: text("shipping_city").notNull(),
-  shippingStateOrProvince: text("shipping_state_or_province"),
-  shippingPostalCode: text("shipping_postal_code").notNull(),
-  shippingCountry: text("shipping_country").notNull(),
-  shippingPhone: text("shipping_phone"),
-  // Order Totals
-  subtotal: decimal("subtotal", { precision: 10, scale: 2 }).notNull(),
-  shippingCost: decimal("shipping_cost", { precision: 10, scale: 2 }).notNull().default("0.00"),
-  totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
-  currency: text("currency").notNull().default("GBP"),
-  // Marketplace Fees
-  marketplaceFee: decimal("marketplace_fee", { precision: 10, scale: 2 }),
-  // eBay/Amazon fee
-  paymentProcessingFee: decimal("payment_processing_fee", { precision: 10, scale: 2 }),
-  // Shipping Details
-  shippingService: text("shipping_service"),
-  // e.g., "Royal Mail 2nd Class"
-  shippingCarrier: text("shipping_carrier"),
-  // e.g., "Royal Mail"
-  trackingNumber: text("tracking_number"),
-  trackingUrl: text("tracking_url"),
-  // Fulfillment
-  paidAt: timestamp("paid_at"),
-  shippedAt: timestamp("shipped_at"),
-  deliveredAt: timestamp("delivered_at"),
-  expectedDeliveryStart: timestamp("expected_delivery_start"),
-  expectedDeliveryEnd: timestamp("expected_delivery_end"),
-  // Logistics Integration (for Latvian Post, etc.)
-  logisticsCarrier: text("logistics_carrier"),
-  // pasts_lv, dhl, ups, etc.
-  logisticsLabelUrl: text("logistics_label_url"),
-  logisticsLabelData: text("logistics_label_data"),
-  // JSON for carrier-specific data
-  // Notes and Metadata
-  buyerNote: text("buyer_note"),
-  // Message from buyer
-  sellerNote: text("seller_note"),
-  // Internal seller notes
-  rawOrderData: text("raw_order_data"),
-  // Full marketplace response JSON
-  // Timestamps
-  orderDate: timestamp("order_date").notNull(),
-  // When order was placed
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
-  lastSyncedAt: timestamp("last_synced_at")
-});
-var orderItems = pgTable("order_items", {
-  id: serial("id").primaryKey(),
-  orderId: integer("order_id").references(() => orders.id).notNull(),
-  // Product Reference
-  productId: integer("product_id").references(() => products.id),
-  // Can be null for unmapped products
-  sku: text("sku").notNull(),
-  tmeProductId: text("tme_product_id"),
-  // TME SKU for direct link
-  // Item Details
-  title: text("title").notNull(),
-  // Product title as shown on marketplace
-  quantity: integer("quantity").notNull().default(1),
-  unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
-  totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
-  // Marketplace-specific
-  marketplaceItemId: text("marketplace_item_id"),
-  // eBay listing ID, Amazon ASIN
-  imageUrl: text("image_url"),
-  createdAt: timestamp("created_at").defaultNow()
-});
-var orderFees = pgTable("order_fees", {
-  id: serial("id").primaryKey(),
-  orderId: integer("order_id").references(() => orders.id).notNull(),
-  feeType: text("fee_type").notNull(),
-  // ebay_final_value, ebay_international, shipping, payment_processing, promoted_listing, refund
-  description: text("description"),
-  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
-  currency: text("currency").notNull().default("GBP"),
-  createdAt: timestamp("created_at").defaultNow()
-});
-var orderEvents = pgTable("order_events", {
-  id: serial("id").primaryKey(),
-  orderId: integer("order_id").references(() => orders.id).notNull(),
-  eventType: text("event_type").notNull(),
-  // status_change, note_added, tracking_added, label_printed, synced, refund_initiated
-  fromStatus: text("from_status"),
-  // Previous status (for status_change events)
-  toStatus: text("to_status"),
-  // New status (for status_change events)
-  note: text("note"),
-  userId: integer("user_id").references(() => users.id),
-  // Who performed the action
-  createdAt: timestamp("created_at").defaultNow()
-});
-var insertUserSchema = createInsertSchema(users).omit({
-  id: true,
-  createdAt: true
-});
-var insertProductSchema = createInsertSchema(products).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true
-});
-var insertCategorySchema = createInsertSchema(categories).omit({
-  id: true
-});
-var insertMarketplaceSettingsSchema = createInsertSchema(marketplaceSettings).omit({
-  id: true
-});
-var insertSyncLogSchema = createInsertSchema(syncLogs).omit({
-  id: true,
-  syncedAt: true
-});
-var insertSyncQueueSchema = createInsertSchema(syncQueue).omit({
-  id: true,
-  createdAt: true,
-  processedAt: true
-});
-var insertPricingTierSchema = createInsertSchema(pricingTiers).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true
-});
-var insertShippingPolicySchema = createInsertSchema(shippingPolicies).omit({
-  createdAt: true,
-  updatedAt: true
-});
-var insertApiUsageTrackingSchema = createInsertSchema(apiUsageTracking).omit({
-  id: true,
-  lastResetAt: true,
-  updatedAt: true
-});
-var insertTmeProductCacheSchema = createInsertSchema(tmeProductCache).omit({
-  id: true,
-  fetchedAt: true
-});
-var insertBulkListingJobSchema = createInsertSchema(bulkListingJobs).omit({
-  createdAt: true
-});
-var insertEbayPaymentPolicySchema = createInsertSchema(ebayPaymentPolicies).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true
-});
-var insertEbayFulfillmentPolicySchema = createInsertSchema(ebayFulfillmentPolicies).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true
-});
-var insertEbayReturnPolicySchema = createInsertSchema(ebayReturnPolicies).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true
-});
-var insertOrderSchema = createInsertSchema(orders).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-  lastSyncedAt: true
-});
-var insertOrderItemSchema = createInsertSchema(orderItems).omit({
-  id: true,
-  createdAt: true
-});
-var insertOrderFeeSchema = createInsertSchema(orderFees).omit({
-  id: true,
-  createdAt: true
-});
-var insertOrderEventSchema = createInsertSchema(orderEvents).omit({
-  id: true,
-  createdAt: true
-});
-var loginSchema = z.object({
-  username: z.string().min(1, "Username is required"),
-  password: z.string().min(1, "Password is required")
-});
-var OrderStatus = {
-  NEW: "new",
-  PACKED: "packed",
-  SHIPPED: "shipped",
-  DELIVERED: "delivered",
-  RETURN_REQUESTED: "return_requested",
-  RETURNED: "returned",
-  COMPLETED: "completed",
-  CANCELLED: "cancelled",
-  ON_HOLD: "on_hold"
-};
-var messageThreads = pgTable("message_threads", {
-  id: serial("id").primaryKey(),
-  // Marketplace context
-  marketplace: text("marketplace").notNull().default("ebay"),
-  // ebay, amazon
-  marketplaceThreadId: text("marketplace_thread_id"),
-  // eBay message ID for thread reference
-  // Buyer info
-  buyerUsername: text("buyer_username").notNull(),
-  buyerEmail: text("buyer_email"),
-  // Order context (optional - some messages may not be order-related)
-  orderId: integer("order_id").references(() => orders.id),
-  marketplaceOrderId: text("marketplace_order_id"),
-  // eBay/Amazon order ID
-  // Item context
-  itemId: text("item_id"),
-  // eBay listing ID
-  itemTitle: text("item_title"),
-  // Thread status
-  status: text("status").notNull().default("open"),
-  // open, closed, archived
-  isRead: boolean("is_read").notNull().default(false),
-  isStarred: boolean("is_starred").notNull().default(false),
-  lastMessageAt: timestamp("last_message_at"),
-  messageCount: integer("message_count").notNull().default(0),
-  // Metadata
-  subject: text("subject"),
-  tags: text("tags").array(),
-  // custom tags for organization
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow()
-});
-var messages = pgTable("messages", {
-  id: serial("id").primaryKey(),
-  threadId: integer("thread_id").references(() => messageThreads.id).notNull(),
-  // Message content
-  direction: text("direction").notNull(),
-  // inbound (from buyer), outbound (to buyer)
-  subject: text("subject"),
-  body: text("body").notNull(),
-  bodyHtml: text("body_html"),
-  // HTML version if available
-  // Marketplace reference
-  marketplaceMessageId: text("marketplace_message_id"),
-  // eBay's message ID
-  // Sender info
-  senderUsername: text("sender_username").notNull(),
-  senderEmail: text("sender_email"),
-  // Status
-  status: text("status").notNull().default("sent"),
-  // draft, pending, sent, delivered, failed, read
-  errorMessage: text("error_message"),
-  // If sending failed
-  // Auto-message reference
-  templateId: integer("template_id").references(() => messageTemplates.id),
-  autoMessageRuleId: integer("auto_message_rule_id"),
-  // Metadata
-  rawPayload: text("raw_payload"),
-  // Original XML/JSON from eBay
-  sentAt: timestamp("sent_at"),
-  readAt: timestamp("read_at"),
-  createdAt: timestamp("created_at").defaultNow()
-});
-var messageTemplates = pgTable("message_templates", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  // Template name for quick selection
-  description: text("description"),
-  // Content
-  subject: text("subject"),
-  body: text("body").notNull(),
-  // Template type
-  category: text("category").notNull().default("general"),
-  // general, thank_you, shipping, follow_up, return, custom
-  // Placeholders available in this template
-  // {{buyer_name}}, {{order_id}}, {{item_title}}, {{tracking_number}}, {{shop_name}}, etc.
-  placeholders: text("placeholders").array(),
-  // Usage stats
-  usageCount: integer("usage_count").notNull().default(0),
-  lastUsedAt: timestamp("last_used_at"),
-  // Status
-  isActive: boolean("is_active").notNull().default(true),
-  isDefault: boolean("is_default").notNull().default(false),
-  // Default for a category
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow()
-});
-var autoMessageRules = pgTable("auto_message_rules", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  description: text("description"),
-  // Trigger configuration
-  triggerType: text("trigger_type").notNull(),
-  // order_placed, order_packed, order_shipped, order_delivered, days_after_delivery
-  triggerDelay: integer("trigger_delay").default(0),
-  // Delay in minutes/hours before sending
-  triggerDelayUnit: text("trigger_delay_unit").default("minutes"),
-  // minutes, hours, days
-  // Template to use
-  templateId: integer("template_id").references(() => messageTemplates.id).notNull(),
-  // Conditions
-  marketplaces: text("marketplaces").array().default(["ebay"]),
-  // Which marketplaces this applies to
-  minOrderValue: decimal("min_order_value", { precision: 10, scale: 2 }),
-  // Only trigger if order value >= this
-  excludeCountries: text("exclude_countries").array(),
-  // Don't send to these countries
-  // Status
-  isActive: boolean("is_active").notNull().default(true),
-  // Stats
-  sentCount: integer("sent_count").notNull().default(0),
-  lastTriggeredAt: timestamp("last_triggered_at"),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow()
-});
-var scheduledMessages = pgTable("scheduled_messages", {
-  id: serial("id").primaryKey(),
-  // References
-  orderId: integer("order_id").references(() => orders.id),
-  ruleId: integer("rule_id").references(() => autoMessageRules.id),
-  templateId: integer("template_id").references(() => messageTemplates.id).notNull(),
-  // Target
-  buyerUsername: text("buyer_username").notNull(),
-  itemId: text("item_id"),
-  // Schedule
-  scheduledFor: timestamp("scheduled_for").notNull(),
-  // Status
-  status: text("status").notNull().default("pending"),
-  // pending, sent, cancelled, failed
-  sentAt: timestamp("sent_at"),
-  errorMessage: text("error_message"),
-  messageId: integer("message_id").references(() => messages.id),
-  // Reference to sent message
-  createdAt: timestamp("created_at").defaultNow()
-});
-var insertMessageThreadSchema = createInsertSchema(messageThreads).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true
-});
-var insertMessageSchema = createInsertSchema(messages).omit({
-  id: true,
-  createdAt: true
-});
-var insertMessageTemplateSchema = createInsertSchema(messageTemplates).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-  usageCount: true,
-  lastUsedAt: true
-});
-var insertAutoMessageRuleSchema = createInsertSchema(autoMessageRules).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-  sentCount: true,
-  lastTriggeredAt: true
-});
-var insertScheduledMessageSchema = createInsertSchema(scheduledMessages).omit({
-  id: true,
-  createdAt: true
-});
-var Marketplace = {
-  EBAY: "ebay",
-  AMAZON: "amazon"
-};
-
-// server/db.ts
-neonConfig.webSocketConstructor = ws;
-var connectionString = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.POSTGRES_URL;
-if (!connectionString) {
-  throw new Error(
-    "DATABASE_URL (or NEON_DATABASE_URL / POSTGRES_URL) must be set. Did you forget to provision a database?"
-  );
-}
-var pool = new Pool({ connectionString });
-var db = drizzle({ client: pool, schema: schema_exports });
-
 // server/routes.ts
+init_storage();
+init_schema();
+init_tme_api();
 import { createServer } from "http";
-
-// server/storage.ts
-import { eq, and, gte, lte, desc, asc, count, or, ilike } from "drizzle-orm";
-import bcrypt from "bcryptjs";
-var DatabaseStorage = class {
-  constructor() {
-    this.initializeDatabase();
-  }
-  async initializeDatabase() {
-    try {
-      const existingAdmin = await this.getUserByUsername("admin");
-      if (!existingAdmin) {
-        const hashedPassword = await bcrypt.hash("admin123", 10);
-        await this.createUser({
-          username: "admin",
-          password: hashedPassword,
-          email: "admin@inventorysync.com",
-          role: "admin"
-        });
-      }
-      const existingCategories = await this.getCategories();
-      if (existingCategories.length === 0) {
-        await this.createCategory({ name: "Electronics", ebayMapping: "Electronics", amazonMapping: "Electronics" });
-        await this.createCategory({ name: "Accessories", ebayMapping: "Accessories", amazonMapping: "Accessories" });
-        await this.createCategory({ name: "Gaming", ebayMapping: "Gaming", amazonMapping: "Gaming" });
-        await this.createCategory({ name: "Home & Garden", ebayMapping: "Home & Garden", amazonMapping: "Home & Garden" });
-      }
-      const existingTiers = await this.getPricingTiers();
-      if (existingTiers.length === 0) {
-        await this.createPricingTier({ min: "1.00", max: "5.00", multiplier: "6.00", label: "Ultra High", marginPercentage: "500" });
-        await this.createPricingTier({ min: "5.01", max: "9.99", multiplier: "4.00", label: "Very High", marginPercentage: "300" });
-        await this.createPricingTier({ min: "10.00", max: "15.00", multiplier: "3.00", label: "High", marginPercentage: "200" });
-        await this.createPricingTier({ min: "15.01", max: "25.00", multiplier: "2.50", label: "Medium-High", marginPercentage: "150" });
-        await this.createPricingTier({ min: "25.01", max: "50.00", multiplier: "2.00", label: "Medium", marginPercentage: "100" });
-        await this.createPricingTier({ min: "50.01", max: "100.00", multiplier: "1.75", label: "Low-Medium", marginPercentage: "75" });
-        await this.createPricingTier({ min: "100.01", max: "999999", multiplier: "1.50", label: "Low", marginPercentage: "50" });
-      }
-    } catch (error) {
-      console.error("Error initializing database:", error);
-    }
-  }
-  // User methods
-  async getUser(id) {
-    const [user] = await db.select().from(users).where(eq(users.id, id));
-    return user || void 0;
-  }
-  async getUserByUsername(username) {
-    const [user] = await db.select().from(users).where(eq(users.username, username));
-    return user || void 0;
-  }
-  async getUserByEmail(email) {
-    const [user] = await db.select().from(users).where(eq(users.email, email));
-    return user || void 0;
-  }
-  async createUser(insertUser) {
-    const [user] = await db.insert(users).values(insertUser).returning();
-    return user;
-  }
-  // Product methods
-  async getProducts() {
-    return await db.select().from(products).orderBy(desc(products.createdAt));
-  }
-  async getProduct(id) {
-    const [product] = await db.select().from(products).where(eq(products.id, id));
-    return product || void 0;
-  }
-  async getProductBySku(sku) {
-    const [product] = await db.select().from(products).where(eq(products.sku, sku));
-    return product || void 0;
-  }
-  async createProduct(insertProduct) {
-    const [product] = await db.insert(products).values(insertProduct).returning();
-    return product;
-  }
-  async updateProduct(id, updateData) {
-    const [updated] = await db.update(products).set({ ...updateData, updatedAt: /* @__PURE__ */ new Date() }).where(eq(products.id, id)).returning();
-    return updated || void 0;
-  }
-  async deleteProduct(id) {
-    const result = await db.delete(products).where(eq(products.id, id));
-    return (result.rowCount ?? 0) > 0;
-  }
-  async deleteAllProducts() {
-    const result = await db.delete(products);
-    return result.rowCount ?? 0;
-  }
-  async getProductsByCategory(category) {
-    return await db.select().from(products).where(eq(products.category, category));
-  }
-  async getProductsWithFilters(filters) {
-    const conditions = [];
-    if (filters.category) conditions.push(eq(products.category, filters.category));
-    if (filters.status) conditions.push(eq(products.status, filters.status));
-    if (filters.listedOnEbay !== void 0) conditions.push(eq(products.listedOnEbay, filters.listedOnEbay));
-    if (filters.listedOnAmazon !== void 0) conditions.push(eq(products.listedOnAmazon, filters.listedOnAmazon));
-    if (filters.minStock !== void 0) conditions.push(gte(products.stock, filters.minStock));
-    if (filters.maxStock !== void 0) conditions.push(lte(products.stock, filters.maxStock));
-    if (conditions.length > 0) {
-      return await db.select().from(products).where(and(...conditions)).orderBy(desc(products.createdAt));
-    }
-    return await db.select().from(products).orderBy(desc(products.createdAt));
-  }
-  // Category methods
-  async getCategories() {
-    return await db.select().from(categories);
-  }
-  async createCategory(insertCategory) {
-    const [category] = await db.insert(categories).values(insertCategory).returning();
-    return category;
-  }
-  // Marketplace settings methods
-  async getMarketplaceSettings(marketplace) {
-    return await db.select().from(marketplaceSettings).where(eq(marketplaceSettings.marketplace, marketplace));
-  }
-  async setMarketplaceSetting(insertSetting) {
-    const [setting] = await db.insert(marketplaceSettings).values(insertSetting).returning();
-    return setting;
-  }
-  // Sync log methods
-  async getSyncLogs(limit = 50) {
-    return await db.select().from(syncLogs).orderBy(desc(syncLogs.syncedAt)).limit(limit);
-  }
-  async createSyncLog(insertLog) {
-    const [log] = await db.insert(syncLogs).values(insertLog).returning();
-    return log;
-  }
-  // Dashboard metrics
-  async getDashboardMetrics() {
-    const allProducts = await db.select().from(products);
-    const totalProducts = allProducts.length;
-    const ebayListings = allProducts.filter((p) => p.listedOnEbay).length;
-    const amazonListings = allProducts.filter((p) => p.listedOnAmazon).length;
-    const outOfStock = allProducts.filter((p) => p.stock === 0).length;
-    const totalRevenue = allProducts.reduce((sum, product) => {
-      const price = parseFloat(product.salePrice) || 0;
-      return sum + price * product.stock;
-    }, 0);
-    return {
-      totalProducts,
-      ebayListings,
-      amazonListings,
-      totalRevenue: Math.round(totalRevenue),
-      outOfStock
-    };
-  }
-  // Sync Queue Operations
-  async createSyncQueueItem(item) {
-    const [result] = await db.insert(syncQueue).values(item).returning();
-    return result;
-  }
-  async createBulkSyncQueueItems(items) {
-    if (items.length === 0) return;
-    await db.insert(syncQueue).values(items);
-  }
-  async getPendingSyncQueueItems(limit = 100) {
-    return await db.select().from(syncQueue).where(eq(syncQueue.status, "pending")).orderBy(asc(syncQueue.priority), asc(syncQueue.createdAt)).limit(limit);
-  }
-  async updateSyncQueueItem(id, updates) {
-    await db.update(syncQueue).set(updates).where(eq(syncQueue.id, id));
-  }
-  async getSyncQueueCount(status) {
-    const conditions = status ? [eq(syncQueue.status, status)] : [];
-    const [result] = await db.select({ count: count() }).from(syncQueue).where(and(...conditions));
-    return result.count;
-  }
-  async getSyncQueueStats() {
-    const [statusCounts, priorityCounts] = await Promise.all([
-      db.select({
-        status: syncQueue.status,
-        count: count()
-      }).from(syncQueue).groupBy(syncQueue.status),
-      db.select({
-        priority: syncQueue.priority,
-        count: count()
-      }).from(syncQueue).where(eq(syncQueue.status, "pending")).groupBy(syncQueue.priority)
-    ]);
-    const stats = {
-      pending: 0,
-      processing: 0,
-      completed: 0,
-      failed: 0,
-      byPriority: {}
-    };
-    statusCounts.forEach((row) => {
-      if (row.status === "pending") stats.pending = row.count;
-      else if (row.status === "processing") stats.processing = row.count;
-      else if (row.status === "completed") stats.completed = row.count;
-      else if (row.status === "failed") stats.failed = row.count;
-    });
-    priorityCounts.forEach((row) => {
-      stats.byPriority[String(row.priority)] = row.count;
-    });
-    return stats;
-  }
-  // Pricing Tier methods
-  async getPricingTiers() {
-    const result = await db.select().from(pricingTiers).orderBy(asc(pricingTiers.min));
-    return result;
-  }
-  async createPricingTier(tier) {
-    const result = await db.insert(pricingTiers).values(tier).returning();
-    return result[0];
-  }
-  async updatePricingTier(id, tier) {
-    const result = await db.update(pricingTiers).set({ ...tier, updatedAt: /* @__PURE__ */ new Date() }).where(eq(pricingTiers.id, id)).returning();
-    return result[0];
-  }
-  async deletePricingTier(id) {
-    const result = await db.delete(pricingTiers).where(eq(pricingTiers.id, id));
-    return (result.rowCount ?? 0) > 0;
-  }
-  // Shipping Policy methods
-  async getShippingPolicies() {
-    const result = await db.select().from(shippingPolicies).orderBy(asc(shippingPolicies.minWeight));
-    return result;
-  }
-  async createShippingPolicy(policy) {
-    const result = await db.insert(shippingPolicies).values(policy).returning();
-    return result[0];
-  }
-  async updateShippingPolicy(id, policy) {
-    const result = await db.update(shippingPolicies).set({ ...policy, updatedAt: /* @__PURE__ */ new Date() }).where(eq(shippingPolicies.id, id)).returning();
-    return result[0];
-  }
-  async deleteShippingPolicy(id) {
-    const result = await db.delete(shippingPolicies).where(eq(shippingPolicies.id, id));
-    return (result.rowCount ?? 0) > 0;
-  }
-  // API Usage Tracking methods
-  async getApiUsage(provider = "tme") {
-    const result = await db.select().from(apiUsageTracking).where(eq(apiUsageTracking.provider, provider)).limit(1);
-    return result[0];
-  }
-  async trackApiCall(provider) {
-    const existing = await this.getApiUsage(provider);
-    if (existing) {
-      const lastReset = new Date(existing.lastResetAt || /* @__PURE__ */ new Date());
-      const now = /* @__PURE__ */ new Date();
-      const isNewDay = lastReset.toDateString() !== now.toDateString();
-      if (isNewDay) {
-        await db.update(apiUsageTracking).set({ callsToday: 1, lastResetAt: now, updatedAt: now }).where(eq(apiUsageTracking.provider, provider));
-      } else {
-        await db.update(apiUsageTracking).set({ callsToday: existing.callsToday + 1, updatedAt: now }).where(eq(apiUsageTracking.provider, provider));
-      }
-    } else {
-      await db.insert(apiUsageTracking).values({
-        provider,
-        callsToday: 1,
-        dailyLimit: 1e4,
-        lastResetAt: /* @__PURE__ */ new Date(),
-        updatedAt: /* @__PURE__ */ new Date()
-      });
-    }
-  }
-  async resetApiUsageIfNewDay(provider) {
-    const existing = await this.getApiUsage(provider);
-    if (existing) {
-      const lastReset = new Date(existing.lastResetAt || /* @__PURE__ */ new Date());
-      const now = /* @__PURE__ */ new Date();
-      if (lastReset.toDateString() !== now.toDateString()) {
-        await db.update(apiUsageTracking).set({ callsToday: 0, lastResetAt: now, updatedAt: now }).where(eq(apiUsageTracking.provider, provider));
-      }
-    }
-  }
-  // TME Product Cache methods - PostgreSQL-based caching for 150k+ products
-  async getTmeCachedProduct(symbol) {
-    const now = /* @__PURE__ */ new Date();
-    const result = await db.select().from(tmeProductCache).where(and(
-      eq(tmeProductCache.symbol, symbol),
-      gte(tmeProductCache.expiresAt, now)
-    )).limit(1);
-    return result[0];
-  }
-  async getTmeCachedProducts(symbols) {
-    if (symbols.length === 0) return [];
-    const now = /* @__PURE__ */ new Date();
-    const results = [];
-    for (const symbol of symbols) {
-      const cached = await this.getTmeCachedProduct(symbol);
-      if (cached) results.push(cached);
-    }
-    return results;
-  }
-  async setTmeCachedProduct(cache) {
-    const existing = await db.select().from(tmeProductCache).where(eq(tmeProductCache.symbol, cache.symbol)).limit(1);
-    if (existing.length > 0) {
-      const result = await db.update(tmeProductCache).set({
-        productData: cache.productData,
-        priceData: cache.priceData,
-        stockData: cache.stockData,
-        categoryId: cache.categoryId,
-        fetchedAt: /* @__PURE__ */ new Date(),
-        expiresAt: cache.expiresAt
-      }).where(eq(tmeProductCache.symbol, cache.symbol)).returning();
-      return result[0];
-    } else {
-      const result = await db.insert(tmeProductCache).values({
-        ...cache,
-        fetchedAt: /* @__PURE__ */ new Date()
-      }).returning();
-      return result[0];
-    }
-  }
-  async setTmeCachedProducts(caches) {
-    if (caches.length === 0) return;
-    const batchSize = 50;
-    for (let i = 0; i < caches.length; i += batchSize) {
-      const batch = caches.slice(i, i + batchSize);
-      await Promise.all(batch.map((cache) => this.setTmeCachedProduct(cache)));
-    }
-  }
-  async getStaleProductSymbols(olderThan24Hours = true) {
-    const cutoffTime = new Date(Date.now() - (olderThan24Hours ? 24 * 60 * 60 * 1e3 : 0));
-    const result = await db.select({ symbol: tmeProductCache.symbol }).from(tmeProductCache).where(lte(tmeProductCache.expiresAt, cutoffTime));
-    return result.map((r) => r.symbol);
-  }
-  async cleanExpiredCache() {
-    const now = /* @__PURE__ */ new Date();
-    const result = await db.delete(tmeProductCache).where(lte(tmeProductCache.expiresAt, now));
-    return result.rowCount ?? 0;
-  }
-  // Bulk Listing Jobs - track progress of bulk listing operations
-  async createBulkListingJob(job) {
-    const result = await db.insert(bulkListingJobs).values(job).returning();
-    return result[0];
-  }
-  async getBulkListingJob(id) {
-    const result = await db.select().from(bulkListingJobs).where(eq(bulkListingJobs.id, id));
-    return result[0] || void 0;
-  }
-  async updateBulkListingJob(id, updates) {
-    const result = await db.update(bulkListingJobs).set(updates).where(eq(bulkListingJobs.id, id)).returning();
-    return result[0] || void 0;
-  }
-  async cleanOldBulkListingJobs(olderThanHours = 24) {
-    const cutoffTime = new Date(Date.now() - olderThanHours * 60 * 60 * 1e3);
-    const result = await db.delete(bulkListingJobs).where(lte(bulkListingJobs.createdAt, cutoffTime));
-    return result.rowCount ?? 0;
-  }
-  // eBay Payment Policies
-  async getEbayPaymentPolicies() {
-    return await db.select().from(ebayPaymentPolicies).orderBy(desc(ebayPaymentPolicies.createdAt));
-  }
-  async getEbayPaymentPolicy(policyId) {
-    const result = await db.select().from(ebayPaymentPolicies).where(eq(ebayPaymentPolicies.policyId, policyId));
-    return result[0] || void 0;
-  }
-  async createEbayPaymentPolicy(policy) {
-    const result = await db.insert(ebayPaymentPolicies).values(policy).returning();
-    return result[0];
-  }
-  async updateEbayPaymentPolicy(policyId, policy) {
-    const result = await db.update(ebayPaymentPolicies).set({ ...policy, updatedAt: /* @__PURE__ */ new Date() }).where(eq(ebayPaymentPolicies.policyId, policyId)).returning();
-    return result[0] || void 0;
-  }
-  async deleteEbayPaymentPolicy(policyId) {
-    const result = await db.delete(ebayPaymentPolicies).where(eq(ebayPaymentPolicies.policyId, policyId));
-    return (result.rowCount ?? 0) > 0;
-  }
-  // eBay Fulfillment (Shipping) Policies
-  async getEbayFulfillmentPolicies() {
-    return await db.select().from(ebayFulfillmentPolicies).orderBy(desc(ebayFulfillmentPolicies.createdAt));
-  }
-  async getEbayFulfillmentPolicy(policyId) {
-    const result = await db.select().from(ebayFulfillmentPolicies).where(eq(ebayFulfillmentPolicies.policyId, policyId));
-    return result[0] || void 0;
-  }
-  async createEbayFulfillmentPolicy(policy) {
-    const result = await db.insert(ebayFulfillmentPolicies).values(policy).returning();
-    return result[0];
-  }
-  async updateEbayFulfillmentPolicy(policyId, policy) {
-    const result = await db.update(ebayFulfillmentPolicies).set({ ...policy, updatedAt: /* @__PURE__ */ new Date() }).where(eq(ebayFulfillmentPolicies.policyId, policyId)).returning();
-    return result[0] || void 0;
-  }
-  async deleteEbayFulfillmentPolicy(policyId) {
-    const result = await db.delete(ebayFulfillmentPolicies).where(eq(ebayFulfillmentPolicies.policyId, policyId));
-    return (result.rowCount ?? 0) > 0;
-  }
-  // eBay Return Policies
-  async getEbayReturnPolicies() {
-    return await db.select().from(ebayReturnPolicies).orderBy(desc(ebayReturnPolicies.createdAt));
-  }
-  async getEbayReturnPolicy(policyId) {
-    const result = await db.select().from(ebayReturnPolicies).where(eq(ebayReturnPolicies.policyId, policyId));
-    return result[0] || void 0;
-  }
-  async createEbayReturnPolicy(policy) {
-    const result = await db.insert(ebayReturnPolicies).values(policy).returning();
-    return result[0];
-  }
-  async updateEbayReturnPolicy(policyId, policy) {
-    const result = await db.update(ebayReturnPolicies).set({ ...policy, updatedAt: /* @__PURE__ */ new Date() }).where(eq(ebayReturnPolicies.policyId, policyId)).returning();
-    return result[0] || void 0;
-  }
-  async deleteEbayReturnPolicy(policyId) {
-    const result = await db.delete(ebayReturnPolicies).where(eq(ebayReturnPolicies.policyId, policyId));
-    return (result.rowCount ?? 0) > 0;
-  }
-  // ==========================================
-  // ORDERS MANAGEMENT
-  // ==========================================
-  async getOrders(filters) {
-    const conditions = [];
-    if (filters?.marketplace) {
-      conditions.push(eq(orders.marketplace, filters.marketplace));
-    }
-    if (filters?.status) {
-      conditions.push(eq(orders.status, filters.status));
-    }
-    if (filters?.fromDate) {
-      conditions.push(gte(orders.orderDate, filters.fromDate));
-    }
-    if (filters?.toDate) {
-      conditions.push(lte(orders.orderDate, filters.toDate));
-    }
-    if (filters?.search) {
-      conditions.push(
-        or(
-          ilike(orders.marketplaceOrderId, `%${filters.search}%`),
-          ilike(orders.buyerUsername, `%${filters.search}%`),
-          ilike(orders.shippingName, `%${filters.search}%`)
-        )
-      );
-    }
-    let query = db.select().from(orders);
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions));
-    }
-    query = query.orderBy(desc(orders.orderDate));
-    if (filters?.limit) {
-      query = query.limit(filters.limit);
-    }
-    if (filters?.offset) {
-      query = query.offset(filters.offset);
-    }
-    return await query;
-  }
-  async getOrder(id) {
-    const result = await db.select().from(orders).where(eq(orders.id, id));
-    return result[0] || void 0;
-  }
-  async getOrderByMarketplaceId(marketplace, marketplaceOrderId) {
-    const result = await db.select().from(orders).where(
-      and(
-        eq(orders.marketplace, marketplace),
-        eq(orders.marketplaceOrderId, marketplaceOrderId)
-      )
-    );
-    return result[0] || void 0;
-  }
-  async createOrder(order) {
-    const result = await db.insert(orders).values(order).returning();
-    return result[0];
-  }
-  async updateOrder(id, order) {
-    const result = await db.update(orders).set({ ...order, updatedAt: /* @__PURE__ */ new Date() }).where(eq(orders.id, id)).returning();
-    return result[0] || void 0;
-  }
-  async deleteOrder(id) {
-    await db.delete(orderEvents).where(eq(orderEvents.orderId, id));
-    await db.delete(orderFees).where(eq(orderFees.orderId, id));
-    await db.delete(orderItems).where(eq(orderItems.orderId, id));
-    const result = await db.delete(orders).where(eq(orders.id, id));
-    return (result.rowCount ?? 0) > 0;
-  }
-  async getOrdersCount(filters) {
-    const conditions = [];
-    if (filters?.marketplace) {
-      conditions.push(eq(orders.marketplace, filters.marketplace));
-    }
-    if (filters?.status) {
-      conditions.push(eq(orders.status, filters.status));
-    }
-    let query = db.select({ count: count() }).from(orders);
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions));
-    }
-    const result = await query;
-    return result[0]?.count || 0;
-  }
-  // Order Items
-  async getOrderItems(orderId) {
-    return await db.select().from(orderItems).where(eq(orderItems.orderId, orderId));
-  }
-  async createOrderItem(item) {
-    const result = await db.insert(orderItems).values(item).returning();
-    return result[0];
-  }
-  async createOrderItems(items) {
-    if (items.length > 0) {
-      await db.insert(orderItems).values(items);
-    }
-  }
-  // Order Fees
-  async getOrderFees(orderId) {
-    return await db.select().from(orderFees).where(eq(orderFees.orderId, orderId));
-  }
-  async createOrderFee(fee) {
-    const result = await db.insert(orderFees).values(fee).returning();
-    return result[0];
-  }
-  async createOrderFees(fees) {
-    if (fees.length > 0) {
-      await db.insert(orderFees).values(fees);
-    }
-  }
-  // Order Events
-  async getOrderEvents(orderId) {
-    return await db.select().from(orderEvents).where(eq(orderEvents.orderId, orderId)).orderBy(desc(orderEvents.createdAt));
-  }
-  async createOrderEvent(event) {
-    const result = await db.insert(orderEvents).values(event).returning();
-    return result[0];
-  }
-  // ============================================
-  // MESSAGING SYSTEM
-  // ============================================
-  // Message Threads
-  async getMessageThreads(filters) {
-    const conditions = [];
-    if (filters?.marketplace) {
-      conditions.push(eq(messageThreads.marketplace, filters.marketplace));
-    }
-    if (filters?.status) {
-      conditions.push(eq(messageThreads.status, filters.status));
-    }
-    if (filters?.isRead !== void 0) {
-      conditions.push(eq(messageThreads.isRead, filters.isRead));
-    }
-    if (filters?.orderId) {
-      conditions.push(eq(messageThreads.orderId, filters.orderId));
-    }
-    if (filters?.buyerUsername) {
-      conditions.push(ilike(messageThreads.buyerUsername, `%${filters.buyerUsername}%`));
-    }
-    let query = db.select().from(messageThreads).orderBy(desc(messageThreads.lastMessageAt), desc(messageThreads.createdAt));
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions));
-    }
-    if (filters?.limit) {
-      query = query.limit(filters.limit);
-    }
-    if (filters?.offset) {
-      query = query.offset(filters.offset);
-    }
-    return await query;
-  }
-  async getMessageThread(id) {
-    const result = await db.select().from(messageThreads).where(eq(messageThreads.id, id));
-    return result[0] || void 0;
-  }
-  async getMessageThreadByBuyer(buyerUsername, itemId) {
-    const conditions = [eq(messageThreads.buyerUsername, buyerUsername)];
-    if (itemId) {
-      conditions.push(eq(messageThreads.itemId, itemId));
-    }
-    const result = await db.select().from(messageThreads).where(and(...conditions)).orderBy(desc(messageThreads.createdAt)).limit(1);
-    return result[0] || void 0;
-  }
-  async createMessageThread(thread) {
-    const result = await db.insert(messageThreads).values(thread).returning();
-    return result[0];
-  }
-  async updateMessageThread(id, thread) {
-    const result = await db.update(messageThreads).set({ ...thread, updatedAt: /* @__PURE__ */ new Date() }).where(eq(messageThreads.id, id)).returning();
-    return result[0] || void 0;
-  }
-  async getUnreadThreadCount() {
-    const result = await db.select({ count: count() }).from(messageThreads).where(eq(messageThreads.isRead, false));
-    return result[0]?.count || 0;
-  }
-  // Messages
-  async getMessages(threadId) {
-    return await db.select().from(messages).where(eq(messages.threadId, threadId)).orderBy(asc(messages.createdAt));
-  }
-  async getMessage(id) {
-    const result = await db.select().from(messages).where(eq(messages.id, id));
-    return result[0] || void 0;
-  }
-  async createMessage(message) {
-    const result = await db.insert(messages).values(message).returning();
-    if (result[0]) {
-      const countResult = await db.select({ count: count() }).from(messages).where(eq(messages.threadId, message.threadId));
-      const msgCount = countResult[0]?.count || 0;
-      await db.update(messageThreads).set({
-        messageCount: msgCount,
-        lastMessageAt: /* @__PURE__ */ new Date(),
-        updatedAt: /* @__PURE__ */ new Date()
-      }).where(eq(messageThreads.id, message.threadId));
-    }
-    return result[0];
-  }
-  async updateMessage(id, message) {
-    const result = await db.update(messages).set(message).where(eq(messages.id, id)).returning();
-    return result[0] || void 0;
-  }
-  // Message Templates
-  async getMessageTemplates(category) {
-    if (category) {
-      return await db.select().from(messageTemplates).where(eq(messageTemplates.category, category)).orderBy(desc(messageTemplates.usageCount));
-    }
-    return await db.select().from(messageTemplates).orderBy(desc(messageTemplates.usageCount));
-  }
-  async getMessageTemplate(id) {
-    const result = await db.select().from(messageTemplates).where(eq(messageTemplates.id, id));
-    return result[0] || void 0;
-  }
-  async createMessageTemplate(template) {
-    const result = await db.insert(messageTemplates).values(template).returning();
-    return result[0];
-  }
-  async updateMessageTemplate(id, template) {
-    const result = await db.update(messageTemplates).set({ ...template, updatedAt: /* @__PURE__ */ new Date() }).where(eq(messageTemplates.id, id)).returning();
-    return result[0] || void 0;
-  }
-  async deleteMessageTemplate(id) {
-    const result = await db.delete(messageTemplates).where(eq(messageTemplates.id, id));
-    return (result.rowCount ?? 0) > 0;
-  }
-  async incrementTemplateUsage(id) {
-    const template = await this.getMessageTemplate(id);
-    if (template) {
-      await db.update(messageTemplates).set({
-        usageCount: template.usageCount + 1,
-        lastUsedAt: /* @__PURE__ */ new Date()
-      }).where(eq(messageTemplates.id, id));
-    }
-  }
-  // Auto Message Rules
-  async getAutoMessageRules(triggerType) {
-    if (triggerType) {
-      return await db.select().from(autoMessageRules).where(eq(autoMessageRules.triggerType, triggerType)).orderBy(desc(autoMessageRules.createdAt));
-    }
-    return await db.select().from(autoMessageRules).orderBy(desc(autoMessageRules.createdAt));
-  }
-  async getAutoMessageRule(id) {
-    const result = await db.select().from(autoMessageRules).where(eq(autoMessageRules.id, id));
-    return result[0] || void 0;
-  }
-  async getActiveAutoMessageRules(triggerType) {
-    return await db.select().from(autoMessageRules).where(and(
-      eq(autoMessageRules.triggerType, triggerType),
-      eq(autoMessageRules.isActive, true)
-    ));
-  }
-  async createAutoMessageRule(rule) {
-    const result = await db.insert(autoMessageRules).values(rule).returning();
-    return result[0];
-  }
-  async updateAutoMessageRule(id, rule) {
-    const result = await db.update(autoMessageRules).set({ ...rule, updatedAt: /* @__PURE__ */ new Date() }).where(eq(autoMessageRules.id, id)).returning();
-    return result[0] || void 0;
-  }
-  async deleteAutoMessageRule(id) {
-    const result = await db.delete(autoMessageRules).where(eq(autoMessageRules.id, id));
-    return (result.rowCount ?? 0) > 0;
-  }
-  async incrementRuleSentCount(id) {
-    const rule = await this.getAutoMessageRule(id);
-    if (rule) {
-      await db.update(autoMessageRules).set({
-        sentCount: rule.sentCount + 1,
-        lastTriggeredAt: /* @__PURE__ */ new Date()
-      }).where(eq(autoMessageRules.id, id));
-    }
-  }
-  // Scheduled Messages
-  async getScheduledMessages(status) {
-    if (status) {
-      return await db.select().from(scheduledMessages).where(eq(scheduledMessages.status, status)).orderBy(asc(scheduledMessages.scheduledFor));
-    }
-    return await db.select().from(scheduledMessages).orderBy(asc(scheduledMessages.scheduledFor));
-  }
-  async getPendingScheduledMessages() {
-    return await db.select().from(scheduledMessages).where(and(
-      eq(scheduledMessages.status, "pending"),
-      lte(scheduledMessages.scheduledFor, /* @__PURE__ */ new Date())
-    )).orderBy(asc(scheduledMessages.scheduledFor));
-  }
-  async createScheduledMessage(message) {
-    const result = await db.insert(scheduledMessages).values(message).returning();
-    return result[0];
-  }
-  async updateScheduledMessage(id, message) {
-    const result = await db.update(scheduledMessages).set(message).where(eq(scheduledMessages.id, id)).returning();
-    return result[0] || void 0;
-  }
-  async cancelScheduledMessage(id) {
-    const result = await db.update(scheduledMessages).set({ status: "cancelled" }).where(eq(scheduledMessages.id, id));
-    return (result.rowCount ?? 0) > 0;
-  }
-};
-var storage = new DatabaseStorage();
-
-// server/routes.ts
 import { ZodError } from "zod";
 import bcrypt2 from "bcryptjs";
 
-// server/tme-api.ts
-import crypto from "crypto";
-var TMEApiService = class {
-  credentials;
-  static credentialsValidated = false;
-  baseUrl = "https://api.tme.eu";
-  callCount = 0;
-  dailyLimit = 1e4;
-  rateLimitPerMinute = 60;
-  lastCallTimestamp = 0;
-  callsThisMinute = 0;
-  requestQueue = [];
-  isProcessingQueue = false;
-  storage;
-  constructor() {
-    this.storage = storage;
-    const requiredEnvVars = ["TME_TOKEN", "TME_CUSTOMER_NUMBER", "TME_CONTACT_NUMBER", "TME_APPLICATION_SECRET"];
-    const missingVars = requiredEnvVars.filter((v) => !process.env[v]);
-    if (missingVars.length > 0) {
-      console.error(`\u274C Missing required TME environment variables: ${missingVars.join(", ")}`);
-      console.error("Please set these in your environment secrets.");
-    }
-    this.credentials = {
-      token: process.env.TME_TOKEN || "",
-      customerNumber: process.env.TME_CUSTOMER_NUMBER || "",
-      contactNumber: process.env.TME_CONTACT_NUMBER || "",
-      applicationSecret: process.env.TME_APPLICATION_SECRET || ""
-    };
-    console.log("\u2705 TME API Service initialized");
-    console.log("- Token length:", this.credentials.token.length);
-    console.log("- Credentials loaded from environment");
-  }
-  generateApiSignature(method, url, params) {
-    const paramsForSignature = { ...params };
-    delete paramsForSignature.ApiSignature;
-    const sortedParams = Object.keys(paramsForSignature).sort().map((key) => {
-      const value = paramsForSignature[key];
-      if (Array.isArray(value)) {
-        return value.map(
-          (item, index) => `${encodeURIComponent(`${key}[${index}]`)}=${encodeURIComponent(String(item))}`
-        ).join("&");
-      } else {
-        return `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`;
-      }
-    }).join("&");
-    const baseString = `${method}&${encodeURIComponent(url)}&${encodeURIComponent(sortedParams)}`;
-    console.log("\u{1F510} Signature base string:", baseString.substring(0, 200) + "...");
-    const signature = crypto.createHmac("sha1", this.credentials.applicationSecret).update(baseString).digest("base64");
-    console.log("\u{1F510} Generated signature:", signature.substring(0, 20) + "...");
-    return signature;
-  }
-  async rateLimitCheck() {
-    const now = Date.now();
-    if (now - this.lastCallTimestamp > 6e4) {
-      this.callsThisMinute = 0;
-    }
-    const safeRateLimit = 55;
-    if (this.callsThisMinute >= safeRateLimit) {
-      const waitTime = 6e4 - (now - this.lastCallTimestamp);
-      console.log(`\u{1F6A6} Rate limit reached. Waiting ${waitTime}ms...`);
-      await new Promise((resolve) => setTimeout(resolve, waitTime));
-      this.callsThisMinute = 0;
-    }
-    if (this.lastCallTimestamp > 0) {
-      const timeSinceLastCall = now - this.lastCallTimestamp;
-      const minimumDelay = 1e3;
-      if (timeSinceLastCall < minimumDelay) {
-        const waitTime = minimumDelay - timeSinceLastCall;
-        console.log(`\u23F1\uFE0F Waiting ${waitTime}ms between API calls...`);
-        await new Promise((resolve) => setTimeout(resolve, waitTime));
-      }
-    }
-    if (this.callCount >= this.dailyLimit) {
-      throw new Error(`TME daily limit exceeded: ${this.callCount}/${this.dailyLimit}`);
-    }
-  }
-  async makeRequest(endpoint, params = {}) {
-    await this.rateLimitCheck();
-    const url = `${this.baseUrl}${endpoint}`;
-    const requestParams = {
-      Token: this.credentials.token,
-      Language: "EN"
-    };
-    if (this.credentials.token.length === 45) {
-      requestParams.Country = "GB";
-    }
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== void 0 && value !== null) {
-        requestParams[key] = value;
-      }
-    });
-    const apiSignature = this.generateApiSignature("POST", url, requestParams);
-    requestParams.ApiSignature = apiSignature;
-    const formData = new URLSearchParams();
-    Object.entries(requestParams).forEach(([key, value]) => {
-      if (Array.isArray(value)) {
-        value.forEach((item, index) => {
-          formData.append(`${key}[${index}]`, String(item));
-        });
-      } else {
-        formData.append(key, String(value));
-      }
-    });
-    this.callCount++;
-    this.callsThisMinute++;
-    this.lastCallTimestamp = Date.now();
-    try {
-      await this.storage.trackApiCall("tme");
-    } catch (error) {
-      console.error("Failed to track API call:", error);
-    }
-    console.log(`\u{1F4CA} TME API Call #${this.callCount}: ${endpoint}`);
-    console.log(`\u{1F4DD} Request params:`, Object.keys(requestParams).join(", "));
-    const maxRetries = 3;
-    const baseDelayMs = 2e3;
-    const timeoutMs = 2e4;
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-      try {
-        const response = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Accept": "application/json",
-            "User-Agent": "TME-API-Client/1.0"
-          },
-          body: formData.toString(),
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        const responseText = await response.text();
-        console.log(`\u{1F4E5} Response status: ${response.status}, length: ${responseText.length}`);
-        if (!response.ok) {
-          const isRetriable = response.status >= 500 || response.status === 429;
-          console.error(`\u274C HTTP Error: ${response.status} ${response.statusText}`);
-          console.error(`\u274C Response body:`, responseText.substring(0, 1e3));
-          if (isRetriable && attempt < maxRetries) {
-            const delay = baseDelayMs * Math.pow(2, attempt - 1) * (0.8 + Math.random() * 0.4);
-            console.log(`\u{1F504} Retry ${attempt}/${maxRetries} after ${Math.round(delay)}ms...`);
-            await new Promise((resolve) => setTimeout(resolve, delay));
-            continue;
-          }
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        let data;
-        try {
-          data = JSON.parse(responseText);
-        } catch (parseError) {
-          console.error("\u274C JSON parse error:", responseText.substring(0, 500));
-          throw new Error(`Invalid JSON response from TME API`);
-        }
-        if (data.Status !== "OK") {
-          console.error("\u274C TME API Error:", {
-            status: data.Status,
-            errorMessage: data.ErrorMessage,
-            errorCode: data.ErrorCode,
-            errors: data.Error
-          });
-          if (data.Status === "E_TOO_MANY_REQUESTS") {
-            if (attempt < maxRetries) {
-              const delay = 5e3 * attempt;
-              console.log(`\u23F8\uFE0F Rate limit hit, waiting ${delay / 1e3}s (retry ${attempt}/${maxRetries})...`);
-              await new Promise((resolve) => setTimeout(resolve, delay));
-              continue;
-            }
-            throw new Error(`TME API rate limit exceeded. Please try again later.`);
-          }
-          if (data.Status === "E_INPUT_PARAMS_VALIDATION_ERROR") {
-            throw new Error(`TME API parameter validation error: ${JSON.stringify(data.Error)}`);
-          }
-          throw new Error(`TME API error: ${data.ErrorMessage || data.Message || "Unknown error"}`);
-        }
-        console.log(`\u2705 TME API success: ${endpoint}`);
-        return data;
-      } catch (error) {
-        clearTimeout(timeoutId);
-        const isAbortError = error.name === "AbortError";
-        const isNetworkError = error.code === "ECONNRESET" || error.code === "ENOTFOUND" || error.code === "ETIMEDOUT";
-        const isRetriable = isAbortError || isNetworkError;
-        if (isRetriable && attempt < maxRetries) {
-          const delay = baseDelayMs * Math.pow(2, attempt - 1) * (0.8 + Math.random() * 0.4);
-          console.log(`\u{1F504} ${isAbortError ? "Timeout" : "Network error"}, retry ${attempt}/${maxRetries} after ${Math.round(delay)}ms...`);
-          await new Promise((resolve) => setTimeout(resolve, delay));
-          continue;
-        }
-        console.error(`\u274C TME API request failed after ${attempt} attempts:`, error);
-        throw error;
-      }
-    }
-    throw new Error(`TME API request failed after ${maxRetries} retries`);
-  }
-  // Get raw TME categories response for debugging
-  async getAllCategoriesRaw() {
-    try {
-      const response = await this.makeRequest("/Products/GetCategories.json");
-      console.log("\u{1F4CB} Raw TME response Data keys:", Object.keys(response.Data || {}));
-      for (const key of Object.keys(response.Data || {})) {
-        const value = response.Data[key];
-        console.log(`\u{1F4CB} Data.${key} type:`, typeof value, Array.isArray(value) ? `(array of ${value.length})` : "");
-        if (Array.isArray(value) && value.length > 0) {
-          console.log(`\u{1F4CB} Sample ${key}[0] keys:`, Object.keys(value[0]));
-        } else if (typeof value === "object" && value !== null) {
-          console.log(`\u{1F4CB} ${key} object keys:`, Object.keys(value));
-        }
-      }
-      return {
-        dataKeys: Object.keys(response.Data || {}),
-        categoryTree: response.Data?.CategoryTree,
-        categoryList: response.Data?.CategoryList,
-        rawDataSample: JSON.stringify(response.Data).substring(0, 2e3)
-      };
-    } catch (error) {
-      console.error("Failed to get raw categories:", error);
-      return { error: String(error) };
-    }
-  }
-  // Get all available categories with real product counts from TME
-  async getAllCategories() {
-    try {
-      const response = await this.makeRequest("/Products/GetCategories.json");
-      if (response.Data && response.Data.CategoryTree) {
-        const rootCategory = response.Data.CategoryTree;
-        const categories2 = this.parseCategoryTree(rootCategory);
-        console.log(`\u{1F4C1} Parsed ${categories2.length} categories from TME with real product counts`);
-        return categories2;
-      }
-      console.log("\u26A0\uFE0F Using fallback categories - TME response format unexpected");
-      return this.getFallbackCategories();
-    } catch (error) {
-      console.warn("Failed to fetch categories from TME API, using fallback:", error);
-      return this.getFallbackCategories();
-    }
-  }
-  // Parse TME's nested CategoryTree structure into flat array
-  parseCategoryTree(node, parentId = null) {
-    const categories2 = [];
-    if (node.Id && node.Name) {
-      const category = {
-        CategoryId: String(node.Id),
-        Name: node.Name,
-        ParentId: parentId,
-        ProductCount: node.TotalProducts || 0
-      };
-      categories2.push(category);
-    }
-    if (node.SubTree && Array.isArray(node.SubTree) && node.SubTree.length > 0) {
-      for (const childNode of node.SubTree) {
-        const childCategories = this.parseCategoryTree(childNode, node.Id ? String(node.Id) : null);
-        categories2.push(...childCategories);
-      }
-    }
-    return categories2;
-  }
-  getFallbackCategories() {
-    return [
-      { CategoryId: "1000", Name: "Microcontrollers & Processors", ProductCount: 8e3 },
-      { CategoryId: "1001", Name: "Arduino Compatible", ProductCount: 800 },
-      { CategoryId: "1002", Name: "Development Boards", ProductCount: 1200 },
-      { CategoryId: "2000", Name: "Semiconductors", ProductCount: 2e4 },
-      { CategoryId: "2001", Name: "Transistors", ProductCount: 8e3 },
-      { CategoryId: "2002", Name: "Diodes", ProductCount: 5e3 },
-      { CategoryId: "2003", Name: "Integrated Circuits", ProductCount: 25e3 },
-      { CategoryId: "3000", Name: "Optoelectronics", ProductCount: 15e3 },
-      { CategoryId: "3001", Name: "LEDs", ProductCount: 8e3 },
-      { CategoryId: "3002", Name: "Displays", ProductCount: 2e3 },
-      { CategoryId: "5000", Name: "Passive Components", ProductCount: 8e4 },
-      { CategoryId: "5001", Name: "Resistors", ProductCount: 25e3 },
-      { CategoryId: "5002", Name: "Capacitors", ProductCount: 35e3 },
-      { CategoryId: "5003", Name: "Inductors", ProductCount: 8e3 },
-      { CategoryId: "6000", Name: "Connectors", ProductCount: 25e3 },
-      { CategoryId: "6001", Name: "Pin Headers", ProductCount: 1200 },
-      { CategoryId: "6002", Name: "Terminal Blocks", ProductCount: 800 },
-      { CategoryId: "7000", Name: "Power Management", ProductCount: 15e3 },
-      { CategoryId: "8000", Name: "Switches & Indicators", ProductCount: 12e3 },
-      { CategoryId: "10000", Name: "Sensors", ProductCount: 18e3 },
-      { CategoryId: "14000", Name: "Wires & Cables", ProductCount: 15e3 }
-    ];
-  }
-  // Search products with enhanced filtering
-  async searchProducts(query, limit = 100) {
-    try {
-      console.log(`\u{1F50D} Searching TME for: "${query}"`);
-      const response = await this.makeRequest("/Products/Search.json", {
-        SearchPlain: query,
-        SearchWithStock: "1"
-        // Removed SearchPhoto as it's not a valid parameter
-      });
-      const products2 = response.Data.ProductList || [];
-      console.log(`\u2705 TME search returned ${products2.length} products for "${query}"`);
-      return products2.slice(0, limit);
-    } catch (error) {
-      console.error(`\u274C Search failed for "${query}":`, error);
-      return [];
-    }
-  }
-  // Get products by category with pagination using TME Search API with SearchCategory filter
-  async getProductsByCategory(categoryId, page = 1, limit = 20) {
-    console.log(`\u{1F50D} Getting products for category ${categoryId}, page ${page}, limit ${limit}`);
-    try {
-      const response = await this.makeRequest("/Products/Search.json", {
-        SearchCategory: categoryId,
-        SearchWithStock: "1",
-        SearchPage: String(page)
-      });
-      const products2 = response.Data?.ProductList || [];
-      const totalProducts = response.Data?.Amount || 0;
-      const pageNumber = response.Data?.PageNumber || page;
-      console.log(`\u2705 TME returned ${products2.length} products for category ${categoryId} (page ${pageNumber}), total: ${totalProducts}`);
-      if (products2.length > 0) {
-        return {
-          products: products2,
-          total: totalProducts
-        };
-      }
-      console.log(`\u{1F504} No products found with SearchCategory filter, falling back to keyword search`);
-      return this.searchProductsByCategoryKeywords(categoryId, page, limit);
-    } catch (error) {
-      console.error(`\u274C Failed to get products for category ${categoryId}:`, error);
-      return this.searchProductsByCategoryKeywords(categoryId, page, limit);
-    }
-  }
-  // Fallback: search products by category using keywords  
-  async searchProductsByCategoryKeywords(categoryId, page, limit) {
-    const searchTerms = this.getCategorySearchTerms(categoryId);
-    let allProducts = [];
-    const termsPerPage = 3;
-    const startTermIndex = (page - 1) * termsPerPage % searchTerms.length;
-    for (let i = 0; i < termsPerPage && i < searchTerms.length; i++) {
-      const termIndex = (startTermIndex + i) % searchTerms.length;
-      const searchTerm = searchTerms[termIndex];
-      try {
-        const products2 = await this.searchProducts(searchTerm, 50);
-        const newProducts = products2.filter(
-          (product) => !allProducts.some((existing) => existing.Symbol === product.Symbol)
-        );
-        allProducts = allProducts.concat(newProducts);
-        if (allProducts.length >= limit * 2) break;
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      } catch (e) {
-        console.warn(`Search failed for "${searchTerm}":`, e);
-      }
-    }
-    if (allProducts.length === 0) {
-      return this.getMockProductsForCategory(categoryId, page, limit);
-    }
-    return {
-      products: allProducts.slice(0, limit),
-      total: searchTerms.length * 100
-    };
-  }
-  async searchProductsByCategory(categoryId, page, limit) {
-    const searchTerms = this.getCategorySearchTerms(categoryId);
-    let allProducts = [];
-    for (const term of searchTerms.slice(0, 5)) {
-      try {
-        const products2 = await this.searchProducts(term, 50);
-        const newProducts = products2.filter(
-          (product) => !allProducts.some((existing) => existing.Symbol === product.Symbol)
-        );
-        allProducts = allProducts.concat(newProducts);
-        if (allProducts.length >= limit * 2) break;
-        await new Promise((resolve) => setTimeout(resolve, 300));
-      } catch (error) {
-        console.warn(`Search failed for term "${term}":`, error);
-      }
-    }
-    const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + limit;
-    return {
-      products: allProducts.slice(startIndex, endIndex),
-      total: allProducts.length
-    };
-  }
-  getCategorySearchTerms(categoryId) {
-    const categoryTerms = {
-      "1000": ["microcontroller", "atmega", "stm32", "esp32", "arduino", "pic", "arm"],
-      "1001": ["arduino", "uno", "nano", "mega", "esp32", "nodemcu"],
-      "2000": ["transistor", "mosfet", "diode", "ic", "semiconductor"],
-      "2001": ["transistor", "mosfet", "bjt", "fet"],
-      "2002": ["diode", "rectifier", "schottky", "zener"],
-      "3000": ["led", "display", "opto", "laser"],
-      "3001": ["led", "rgb", "smd", "through hole"],
-      "5000": ["resistor", "capacitor", "inductor"],
-      "5001": ["resistor", "ohm", "smd", "through hole"],
-      "5002": ["capacitor", "ceramic", "electrolytic", "tantalum"],
-      "6000": ["connector", "header", "terminal", "socket"],
-      "10000": ["sensor", "temperature", "humidity", "pressure"]
-    };
-    return categoryTerms[categoryId] || ["electronic", "component"];
-  }
-  // Batch get product details
-  async getProductDetails(symbols) {
-    if (symbols.length === 0) return [];
-    try {
-      const response = await this.makeRequest("/Products/GetProducts.json", {
-        SymbolList: symbols
-      });
-      return response.Data.ProductList || [];
-    } catch (error) {
-      console.error("Failed to get product details:", error);
-      return [];
-    }
-  }
-  // Batch get product prices
-  async getProductPrices(symbols) {
-    if (symbols.length === 0) return [];
-    try {
-      const response = await this.makeRequest("/Products/GetPrices.json", {
-        SymbolList: symbols
-      });
-      return response.Data.ProductList || [];
-    } catch (error) {
-      console.error("Failed to get product prices:", error);
-      return [];
-    }
-  }
-  // Batch get product stock
-  async getProductStock(symbols) {
-    if (symbols.length === 0) return [];
-    try {
-      const response = await this.makeRequest("/Products/GetStocks.json", {
-        SymbolList: symbols
-      });
-      return response.Data.ProductList || [];
-    } catch (error) {
-      console.error("Failed to get product stock:", error);
-      return [];
-    }
-  }
-  // OPTIMIZED: Get prices AND stocks in a SINGLE API call (50% fewer calls!)
-  async getPricesAndStocks(symbols) {
-    if (symbols.length === 0) return [];
-    try {
-      const response = await this.makeRequest("/Products/GetPricesAndStocks.json", {
-        SymbolList: symbols
-      });
-      return response.Data.ProductList || [];
-    } catch (error) {
-      console.error("Failed to get prices and stocks:", error);
-      return [];
-    }
-  }
-  // OPTIMIZED: Get enhanced product info using combined GetPricesAndStocks endpoint
-  // Uses batch size of 50 (vs old 10) and 2 API calls per batch (vs old 3)
-  // For 163 products: Old = 51 calls, New = ~7 calls (85% reduction!)
-  async getEnhancedProductInfo(symbols) {
-    if (symbols.length === 0) return [];
-    const batchSize = 50;
-    const results = [];
-    console.log(`\u{1F680} Optimized sync: ${symbols.length} products in ${Math.ceil(symbols.length / batchSize)} batches of ${batchSize}`);
-    console.log(`\u{1F4CA} API calls needed: ~${Math.ceil(symbols.length / batchSize) * 2} (using GetPricesAndStocks)`);
-    for (let i = 0; i < symbols.length; i += batchSize) {
-      const batch = symbols.slice(i, i + batchSize);
-      const batchNum = Math.floor(i / batchSize) + 1;
-      const totalBatches = Math.ceil(symbols.length / batchSize);
-      console.log(`\u26A1 Processing batch ${batchNum}/${totalBatches} (${batch.length} products)`);
-      try {
-        const [products2, pricesAndStocks] = await Promise.all([
-          this.getProductDetails(batch),
-          this.getPricesAndStocks(batch)
-        ]);
-        batch.forEach((symbol) => {
-          const product = products2.find((p) => p.Symbol === symbol);
-          const priceAndStock = pricesAndStocks.find((p) => p.Symbol === symbol);
-          if (product) {
-            const price = priceAndStock ? {
-              Symbol: priceAndStock.Symbol,
-              PriceList: priceAndStock.PriceList,
-              Unit: priceAndStock.Unit,
-              VatRate: priceAndStock.VatRate,
-              VatType: priceAndStock.VatType
-            } : null;
-            const stock = priceAndStock ? {
-              Symbol: priceAndStock.Symbol,
-              Amount: priceAndStock.Amount,
-              Unit: priceAndStock.Unit
-            } : null;
-            results.push({ product, price, stock });
-          }
-        });
-        console.log(`\u2705 Batch ${batchNum} complete: ${results.length}/${symbols.length} products processed`);
-        if (i + batchSize < symbols.length) {
-          await new Promise((resolve) => setTimeout(resolve, 500));
-        }
-      } catch (error) {
-        console.error(`Failed to get enhanced info for batch ${batchNum}:`, error);
-      }
-    }
-    console.log(`\u{1F389} Sync complete: ${results.length} products fetched`);
-    return results;
-  }
-  // Get API usage statistics
-  getApiUsage() {
-    return {
-      callsToday: this.callCount,
-      dailyLimit: this.dailyLimit,
-      callsThisMinute: this.callsThisMinute,
-      rateLimitPerMinute: this.rateLimitPerMinute,
-      remainingDaily: this.dailyLimit - this.callCount,
-      remainingThisMinute: this.rateLimitPerMinute - this.callsThisMinute,
-      usagePercentage: Math.round(this.callCount / this.dailyLimit * 100),
-      lastCallTimestamp: this.lastCallTimestamp,
-      status: this.callCount >= this.dailyLimit ? "LIMIT_EXCEEDED" : this.callCount > this.dailyLimit * 0.8 ? "WARNING" : "OK"
-    };
-  }
-  // Reset daily usage counters
-  resetDailyUsage() {
-    this.callCount = 0;
-    console.log("\u{1F4CA} TME API daily usage counter reset");
-  }
-  // Check if we can make more API calls
-  canMakeApiCall() {
-    return this.callCount < this.dailyLimit && this.callsThisMinute < this.rateLimitPerMinute;
-  }
-  // Mock products for development when API fails
-  getMockProductsForCategory(categoryId, page, limit) {
-    const mockProducts = [];
-    const categoryInfo = this.getFallbackCategories().find((cat) => cat.CategoryId === categoryId);
-    const categoryName = categoryInfo?.Name || "Electronics";
-    const productCount = Math.min(50, categoryInfo?.ProductCount || 25);
-    for (let i = 1; i <= productCount; i++) {
-      mockProducts.push({
-        Symbol: `MOCK-${categoryId}-${String(i).padStart(3, "0")}`,
-        CustomerSymbol: `MOCK-${categoryId}-${String(i).padStart(3, "0")}`,
-        OriginalSymbol: `MOCK-${categoryId}-${String(i).padStart(3, "0")}`,
-        EAN: `123456789${String(i).padStart(4, "0")}`,
-        Producer: this.getMockProducer(categoryId),
-        Description: `${categoryName} Component - Model ${i}`,
-        CategoryId: parseInt(categoryId),
-        Category: categoryName,
-        Photo: "",
-        Thumbnail: "",
-        DataSheet: "",
-        ProductInformationPage: "",
-        Weight: Math.floor(Math.random() * 100) + 1,
-        WeightUnit: "g",
-        SuppliedAmount: 1,
-        MinAmount: 1,
-        Multiples: 1,
-        Unit: "pcs",
-        Parameters: [
-          {
-            ParameterId: 1,
-            ParameterName: "Operating Temperature",
-            ParameterValue: "-40...+85",
-            ParameterUnit: "\xB0C"
-          },
-          {
-            ParameterId: 2,
-            ParameterName: "Package",
-            ParameterValue: this.getMockPackage(categoryId),
-            ParameterUnit: ""
-          }
-        ]
-      });
-    }
-    const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + limit;
-    return {
-      products: mockProducts.slice(startIndex, endIndex),
-      total: mockProducts.length
-    };
-  }
-  getMockProducer(categoryId) {
-    const producers = {
-      "1000": ["Microchip", "STMicroelectronics", "Texas Instruments"],
-      "1001": ["Arduino", "SparkFun", "Adafruit"],
-      "2000": ["Infineon", "ON Semiconductor", "Vishay"],
-      "3000": ["Osram", "Cree", "Lumileds"],
-      "5000": ["Yageo", "Murata", "TDK"],
-      "6000": ["Molex", "TE Connectivity", "JST"]
-    };
-    const categoryProducers = producers[categoryId] || ["Generic Electronics"];
-    return categoryProducers[Math.floor(Math.random() * categoryProducers.length)];
-  }
-  getMockPackage(categoryId) {
-    const packages = {
-      "1000": ["TQFP-64", "QFN-32", "SOIC-20"],
-      "1001": ["Through Hole", "Shield", "Module"],
-      "2000": ["SOT-23", "TO-220", "SOIC-8"],
-      "3000": ["0603", "5mm", "SMD"],
-      "5000": ["0805", "1206", "Through Hole"],
-      "6000": ["2.54mm", "1.27mm", "JST-XH"]
-    };
-    const categoryPackages = packages[categoryId] || ["Standard"];
-    return categoryPackages[Math.floor(Math.random() * categoryPackages.length)];
-  }
-};
-var tmeApi = new TMEApiService();
-
 // server/ebay-api.ts
+init_storage();
 init_ebay_oauth();
 
 // server/ebay-listing-template.ts
@@ -5119,6 +5153,7 @@ var ebayApi = new EbayApiService();
 init_ebay_oauth();
 
 // server/ebay-account-api.ts
+init_storage();
 init_ebay_oauth();
 var EbayAccountApiService = class {
   baseUrl = "https://api.ebay.com";
@@ -5670,7 +5705,11 @@ var ebayAccountApi = new EbayAccountApiService();
 // server/routes.ts
 init_dynamic_pricing();
 
+// server/cron-jobs.ts
+init_storage();
+
 // server/tme-api-optimized.ts
+init_storage();
 import crypto3 from "crypto";
 var TMEApiServiceOptimized = class {
   credentials;
@@ -6453,6 +6492,7 @@ async function triggerManualSync() {
 
 // server/ebay-orders-api.ts
 init_ebay_oauth();
+init_storage();
 var EbayOrdersApiService = class {
   baseUrl = "https://api.ebay.com";
   sandboxUrl = "https://api.sandbox.ebay.com";
@@ -7049,6 +7089,7 @@ var ebayMessagesApi = {
 };
 
 // server/auto-message-scheduler.ts
+init_storage();
 init_ebay_oauth();
 async function processAutoMessageTrigger(triggerType, context) {
   const results = { sent: 0, errors: [] };
@@ -7229,6 +7270,7 @@ var autoMessageScheduler = {
 };
 
 // server/routes.ts
+init_schema();
 async function registerRoutes(app) {
   const requireAuth = async (req, res, next) => {
     if (process.env.BYPASS_AUTH === "true") {
@@ -7693,6 +7735,38 @@ async function registerRoutes(app) {
       });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+  app.get("/api/__tme-check", async (_req, res) => {
+    const have = {
+      TME_TOKEN: !!process.env.TME_TOKEN,
+      TME_APPLICATION_SECRET: !!process.env.TME_APPLICATION_SECRET,
+      TME_CUSTOMER_NUMBER: !!process.env.TME_CUSTOMER_NUMBER,
+      TME_CONTACT_NUMBER: !!process.env.TME_CONTACT_NUMBER
+    };
+    if (!have.TME_TOKEN || !have.TME_APPLICATION_SECRET) {
+      return res.json({
+        ok: false,
+        stage: "config",
+        have,
+        message: "TME_TOKEN and/or TME_APPLICATION_SECRET are not set in env. Get a token from https://developers.tme.eu/ and add both to Vercel."
+      });
+    }
+    try {
+      const { tmeApi: tmeApi3 } = await Promise.resolve().then(() => (init_tme_api(), tme_api_exports));
+      const probe = await tmeApi3.getProductsPricesAndStocks?.(["AVT-LITE"]).catch((e) => ({ __error: e.message }));
+      if (probe?.__error) {
+        return res.json({ ok: false, stage: "tme-api", have, error: probe.__error });
+      }
+      return res.json({
+        ok: true,
+        stage: "success",
+        have,
+        sampleCount: Array.isArray(probe) ? probe.length : null,
+        sample: Array.isArray(probe) ? probe.slice(0, 1) : probe
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, stage: "exception", have, error: err.message });
     }
   });
   app.get("/api/__ebay-check", async (_req, res) => {
