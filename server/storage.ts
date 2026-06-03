@@ -70,7 +70,7 @@ import {
   type InsertScheduledMessage
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, gte, lte, desc, asc, count, or, ilike, isNull, isNotNull, sql } from "drizzle-orm";
+import { eq, and, gte, lte, lt, desc, asc, count, or, ilike, isNull, isNotNull, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 
 export interface IStorage {
@@ -367,6 +367,40 @@ export class DatabaseStorage implements IStorage {
       `UPDATE products SET listed_on_ebay = false, ebay_offer_id = NULL, ebay_listing_id = NULL, ebay_item_id = NULL, ebay_listing_status = 'unlisted', ebay_listing_error = NULL WHERE listed_on_ebay = true OR ebay_offer_id IS NOT NULL OR ebay_item_id IS NOT NULL`,
     ));
     return r.rowCount ?? 0;
+  }
+
+  // Stale TME products for the sync poll (DB-side, indexed by
+  // products_supplier_stale_idx). Stalest first; never-synced win.
+  async getStaleTmeProducts(limit: number, staleBefore: Date): Promise<Product[]> {
+    return await db
+      .select()
+      .from(products)
+      .where(
+        and(
+          eq(products.supplier, "TME"),
+          or(isNull(products.lastSyncedAt), lt(products.lastSyncedAt, staleBefore)),
+        ),
+      )
+      .orderBy(asc(products.lastSyncedAt))
+      .limit(limit);
+  }
+
+  async getStaleTmeProductCount(staleBefore: Date): Promise<number> {
+    const [r] = await db
+      .select({ c: count() })
+      .from(products)
+      .where(
+        and(
+          eq(products.supplier, "TME"),
+          or(isNull(products.lastSyncedAt), lt(products.lastSyncedAt, staleBefore)),
+        ),
+      );
+    return r?.c ?? 0;
+  }
+
+  async getTmeProductCount(): Promise<number> {
+    const [r] = await db.select({ c: count() }).from(products).where(eq(products.supplier, "TME"));
+    return r?.c ?? 0;
   }
 
   // Candidates to list on eBay: TME products, in stock, not already listed,

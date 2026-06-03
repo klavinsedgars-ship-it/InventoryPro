@@ -19,7 +19,6 @@ import {
   calculateDynamicPrice,
   calculatePackagePrice,
 } from "./dynamic-pricing";
-import { ebayApi } from "./ebay-api";
 
 export interface SyncChunkResult {
   total: number; // total TME products
@@ -41,23 +40,11 @@ export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
   const errors: string[] = [];
   const today = startOfToday();
 
-  const all = await storage.getProducts();
-  const tmeProducts = all.filter((p) => p.supplier === "TME" && p.sku);
-  const total = tmeProducts.length;
-
-  // Stalest first: anything never synced, or last synced before today.
-  const pending = tmeProducts
-    .filter((p) => {
-      const t = p.lastSyncedAt ? new Date(p.lastSyncedAt).getTime() : 0;
-      return t < today;
-    })
-    .sort((a, b) => {
-      const at = a.lastSyncedAt ? new Date(a.lastSyncedAt).getTime() : 0;
-      const bt = b.lastSyncedAt ? new Date(b.lastSyncedAt).getTime() : 0;
-      return at - bt;
-    });
-
-  const slice = pending.slice(0, limit);
+  // DB-side: load only the next `limit` stalest TME products (indexed),
+  // not the whole table. todayStart is the staleness cutoff.
+  const staleBefore = new Date(today);
+  const total = await storage.getTmeProductCount();
+  const slice = (await storage.getStaleTmeProducts(limit, staleBefore)).filter((p) => p.sku);
   if (slice.length === 0) {
     return { total, remaining: 0, processedThisChunk: 0, changed: 0, ebayUpdated: 0, done: true, errors };
   }
@@ -72,7 +59,8 @@ export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
   const bySymbol = new Map(enhanced.map((e) => [e.product?.Symbol, e]));
 
   let changed = 0;
-  const ebayBatch: Array<{ productId: number; ebayItemId: string; quantity?: number; price?: number }> = [];
+  // Inventory-model listings (offerId) -> bulkUpdatePriceQuantity.
+  const inventoryUpdates: Array<{ product: any; quantity: number; price: number }> = [];
   const now = new Date();
 
   for (const product of slice) {
@@ -117,33 +105,35 @@ export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
 
     if (priceChanged || stockChanged) {
       changed++;
-      if (product.listedOnEbay && product.ebayItemId) {
+      // Inventory listings carry an offerId; push qty/price via the
+      // Inventory API (bulkUpdatePriceQuantity).
+      if (product.listedOnEbay && product.ebayOfferId) {
         const limited =
           product.useStockLimit && product.ebayStockLimit != null
             ? Math.min(stock, product.ebayStockLimit)
             : stock;
-        ebayBatch.push({
-          productId: product.id,
-          ebayItemId: product.ebayItemId,
+        inventoryUpdates.push({
+          product: { ...product, stock },
           quantity: Math.max(0, limited),
-          price: pricing ? Number(pricing.finalPrice) : undefined,
+          price: pricing ? Number(pricing.finalPrice) : parseFloat(product.salePrice) || 0,
         });
       }
     }
   }
 
   let ebayUpdated = 0;
-  if (ebayBatch.length > 0) {
+  if (inventoryUpdates.length > 0) {
     try {
-      const r = await ebayApi.bulkUpdateInventory(ebayBatch);
-      ebayUpdated = r.succeeded;
+      const { updateListedProductsViaInventory } = await import("./ebay-lister");
+      const r = await updateListedProductsViaInventory(inventoryUpdates);
+      ebayUpdated += r.updated;
       if (r.failed) errors.push(`eBay updates: ${r.failed} failed`);
     } catch (e) {
-      errors.push(`eBay bulk update failed: ${(e as Error).message}`);
+      errors.push(`eBay update failed: ${(e as Error).message}`);
     }
   }
 
-  const remaining = Math.max(0, pending.length - slice.length);
+  const remaining = Math.max(0, (await storage.getStaleTmeProductCount(staleBefore)));
   return {
     total,
     remaining,

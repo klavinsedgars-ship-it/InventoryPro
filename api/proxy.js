@@ -705,7 +705,7 @@ var init_db = __esm({
 });
 
 // server/storage.ts
-import { eq, and, gte, lte, desc, asc, count, or, ilike, isNull, isNotNull, sql } from "drizzle-orm";
+import { eq, and, gte, lte, lt, desc, asc, count, or, ilike, isNull, isNotNull, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 var DatabaseStorage, storage;
 var init_storage = __esm({
@@ -801,6 +801,29 @@ var init_storage = __esm({
           `UPDATE products SET listed_on_ebay = false, ebay_offer_id = NULL, ebay_listing_id = NULL, ebay_item_id = NULL, ebay_listing_status = 'unlisted', ebay_listing_error = NULL WHERE listed_on_ebay = true OR ebay_offer_id IS NOT NULL OR ebay_item_id IS NOT NULL`
         ));
         return r.rowCount ?? 0;
+      }
+      // Stale TME products for the sync poll (DB-side, indexed by
+      // products_supplier_stale_idx). Stalest first; never-synced win.
+      async getStaleTmeProducts(limit, staleBefore) {
+        return await db.select().from(products).where(
+          and(
+            eq(products.supplier, "TME"),
+            or(isNull(products.lastSyncedAt), lt(products.lastSyncedAt, staleBefore))
+          )
+        ).orderBy(asc(products.lastSyncedAt)).limit(limit);
+      }
+      async getStaleTmeProductCount(staleBefore) {
+        const [r] = await db.select({ c: count() }).from(products).where(
+          and(
+            eq(products.supplier, "TME"),
+            or(isNull(products.lastSyncedAt), lt(products.lastSyncedAt, staleBefore))
+          )
+        );
+        return r?.c ?? 0;
+      }
+      async getTmeProductCount() {
+        const [r] = await db.select({ c: count() }).from(products).where(eq(products.supplier, "TME"));
+        return r?.c ?? 0;
       }
       // Candidates to list on eBay: TME products, in stock, not already listed,
       // not excluded. DB-side filter + limit (no full-table load).
@@ -7177,7 +7200,6 @@ async function triggerManualSync() {
 init_storage();
 init_tme_api();
 init_dynamic_pricing();
-init_ebay_api();
 function startOfToday() {
   const d = /* @__PURE__ */ new Date();
   d.setHours(0, 0, 0, 0);
@@ -7186,18 +7208,9 @@ function startOfToday() {
 async function runSyncChunk(limit = 50) {
   const errors = [];
   const today = startOfToday();
-  const all = await storage.getProducts();
-  const tmeProducts = all.filter((p) => p.supplier === "TME" && p.sku);
-  const total = tmeProducts.length;
-  const pending = tmeProducts.filter((p) => {
-    const t = p.lastSyncedAt ? new Date(p.lastSyncedAt).getTime() : 0;
-    return t < today;
-  }).sort((a, b) => {
-    const at = a.lastSyncedAt ? new Date(a.lastSyncedAt).getTime() : 0;
-    const bt = b.lastSyncedAt ? new Date(b.lastSyncedAt).getTime() : 0;
-    return at - bt;
-  });
-  const slice = pending.slice(0, limit);
+  const staleBefore = new Date(today);
+  const total = await storage.getTmeProductCount();
+  const slice = (await storage.getStaleTmeProducts(limit, staleBefore)).filter((p) => p.sku);
   if (slice.length === 0) {
     return { total, remaining: 0, processedThisChunk: 0, changed: 0, ebayUpdated: 0, done: true, errors };
   }
@@ -7210,7 +7223,7 @@ async function runSyncChunk(limit = 50) {
   }
   const bySymbol = new Map(enhanced.map((e) => [e.product?.Symbol, e]));
   let changed = 0;
-  const ebayBatch = [];
+  const inventoryUpdates = [];
   const now = /* @__PURE__ */ new Date();
   for (const product of slice) {
     const sym = product.supplierProductId || product.sku;
@@ -7241,28 +7254,28 @@ async function runSyncChunk(limit = 50) {
     await storage.updateProduct(product.id, update);
     if (priceChanged || stockChanged) {
       changed++;
-      if (product.listedOnEbay && product.ebayItemId) {
+      if (product.listedOnEbay && product.ebayOfferId) {
         const limited = product.useStockLimit && product.ebayStockLimit != null ? Math.min(stock, product.ebayStockLimit) : stock;
-        ebayBatch.push({
-          productId: product.id,
-          ebayItemId: product.ebayItemId,
+        inventoryUpdates.push({
+          product: { ...product, stock },
           quantity: Math.max(0, limited),
-          price: pricing ? Number(pricing.finalPrice) : void 0
+          price: pricing ? Number(pricing.finalPrice) : parseFloat(product.salePrice) || 0
         });
       }
     }
   }
   let ebayUpdated = 0;
-  if (ebayBatch.length > 0) {
+  if (inventoryUpdates.length > 0) {
     try {
-      const r = await ebayApi.bulkUpdateInventory(ebayBatch);
-      ebayUpdated = r.succeeded;
+      const { updateListedProductsViaInventory: updateListedProductsViaInventory2 } = await Promise.resolve().then(() => (init_ebay_lister(), ebay_lister_exports));
+      const r = await updateListedProductsViaInventory2(inventoryUpdates);
+      ebayUpdated += r.updated;
       if (r.failed) errors.push(`eBay updates: ${r.failed} failed`);
     } catch (e) {
-      errors.push(`eBay bulk update failed: ${e.message}`);
+      errors.push(`eBay update failed: ${e.message}`);
     }
   }
-  const remaining = Math.max(0, pending.length - slice.length);
+  const remaining = Math.max(0, await storage.getStaleTmeProductCount(staleBefore));
   return {
     total,
     remaining,
