@@ -70,6 +70,7 @@ export function Products({ user }: ProductsProps) {
   
   // Bulk listing progress state
   const [bulkListingModalOpen, setBulkListingModalOpen] = useState(false);
+  const [listingCount, setListingCount] = useState(0);
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [bulkListingProgress, setBulkListingProgress] = useState<BulkListingJob | null>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -676,12 +677,19 @@ export function Products({ user }: ProductsProps) {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => bulkListToEbayMutation.mutate(Array.from(selectedProducts))}
+                        onClick={() => {
+                          setListingCount(selectedProducts.size);
+                          bulkListToEbayMutation.mutate(Array.from(selectedProducts));
+                        }}
                         disabled={bulkListToEbayMutation.isPending}
                         data-testid="btn-bulk-ebay"
                       >
-                        <Upload className="w-3 h-3 mr-1" />
-                        List eBay
+                        {bulkListToEbayMutation.isPending ? (
+                          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                        ) : (
+                          <Upload className="w-3 h-3 mr-1" />
+                        )}
+                        {bulkListToEbayMutation.isPending ? "Listing…" : "List eBay"}
                       </Button>
                       <Button
                         variant="outline"
@@ -1024,6 +1032,24 @@ export function Products({ user }: ProductsProps) {
         onClose={() => setProductModalOpen(false)}
         product={selectedProduct}
       />
+
+      {/* Inventory-API listing in progress (synchronous) */}
+      {bulkListToEbayMutation.isPending && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-gray-900 border-t border-blue-200 shadow-lg">
+          <div className="px-4 py-3 max-w-7xl mx-auto">
+            <div className="flex items-center gap-3">
+              <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+              <span className="text-sm font-medium">
+                Listing {listingCount} product{listingCount === 1 ? "" : "s"} on eBay…
+              </span>
+              <span className="text-xs text-muted-foreground">processing in batches of 25 — please wait</span>
+            </div>
+            <div className="mt-2 h-1.5 w-full overflow-hidden rounded bg-blue-100">
+              <div className="h-full w-full animate-pulse rounded bg-blue-500" />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Bulk Listing Progress Bar - Fixed at Bottom */}
       {bulkListingProgress && (
