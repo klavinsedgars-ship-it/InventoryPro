@@ -21,15 +21,18 @@ import fs from 'fs';
 import path from 'path';
 import { findValidEbayCategory, getCategoryNameById } from "./ebay-category-finder";
 import { findBestCategoryForProduct, explainCategoryChoice, categorizeBatch } from "./product-category-matcher";
-import { 
-  calculateDynamicPrice, 
-  calculateBulkPricing, 
-  getPricingTiers, 
+import {
+  calculateDynamicPrice,
+  calculateBulkPricing,
+  getPricingTiers,
   getPricingTierInfo,
   generatePricingSummary,
   validatePricingConfig,
-  formatPrice
+  formatPrice,
+  calculatePriceWithFloor
 } from "./dynamic-pricing";
+import { getFeeConfig } from "./fee-config";
+import { calculateNetProfit } from "./fee-model";
 import { calculateEbayStock, calculateBulkEbayStock, validateStockLimit, getRecommendedStockLimit } from "./stock-manager";
 import { imageProcessingService } from "./image-processing";
 import { triggerManualSync } from "./cron-jobs";
@@ -993,16 +996,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Dynamic Pricing API routes
   app.post("/api/pricing/calculate", requireAuth, async (req, res) => {
     try {
-      const { supplierPrice } = req.body;
+      const { supplierPrice, weightGrams, moq, multiples, marketplace } = req.body;
 
       if (!supplierPrice) {
         return res.status(400).json({ message: "Supplier price is required" });
+      }
+
+      // When weight is supplied, apply the net-profit floor so the preview
+      // matches what the sync would actually list. Otherwise raw tier price.
+      if (weightGrams != null) {
+        const mp = marketplace === "amazon" ? "amazon" : "ebay";
+        const config = await getFeeConfig(mp);
+        const result = calculatePriceWithFloor(supplierPrice, {
+          moq: moq != null ? Number(moq) : 1,
+          multiples: multiples != null ? Number(multiples) : 1,
+          weightGrams: Number(weightGrams),
+          marketplace: mp,
+          config,
+        });
+        return res.json(result);
       }
 
       const result = calculateDynamicPrice(supplierPrice);
       res.json(result);
     } catch (error) {
       res.status(500).json({ message: "Failed to calculate pricing" });
+    }
+  });
+
+  // Real net-profit breakdown after eBay fees + VAT + shipping. Single source
+  // of truth for the per-product breakdown card (no client/server drift).
+  app.post("/api/pricing/net-profit", requireAuth, async (req, res) => {
+    try {
+      const { salePrice, supplierPrice, moq, weightGrams, marketplace } = req.body;
+
+      if (salePrice == null || supplierPrice == null) {
+        return res
+          .status(400)
+          .json({ message: "salePrice and supplierPrice are required" });
+      }
+
+      const mp = marketplace === "amazon" ? "amazon" : "ebay";
+      const config = await getFeeConfig(mp);
+      const moqNum = Number(moq) > 1 ? Number(moq) : 1;
+      const packageSupplierCost = Number(supplierPrice) * moqNum;
+
+      const breakdown = calculateNetProfit({
+        salePrice: Number(salePrice),
+        packageSupplierCost,
+        weightGrams: weightGrams != null ? Number(weightGrams) : null,
+        marketplace: mp,
+        config,
+      });
+
+      res.json(breakdown);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to compute net profit" });
     }
   });
 
@@ -2565,6 +2614,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const existingProducts = await storage.getProducts();
           const existingBySku = new Map(existingProducts.map(p => [p.sku, p]));
 
+          // Resolve fee config once (drives the net-profit price floor).
+          const feeConfig = await getFeeConfig("ebay");
+
           for (const enhanced of enhancedProducts) {
             try {
               const { product, price, stock } = enhanced;
@@ -2574,9 +2626,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
               const multiples = product.Multiples || 1;
 
               // Calculate pricing - use correct price tier for MOQ quantity
-              const { getSupplierPriceForMoq, calculateDynamicPrice, calculatePackagePrice } = await import("./dynamic-pricing");
+              const { getSupplierPriceForMoq } = await import("./dynamic-pricing");
               const supplierPrice = getSupplierPriceForMoq(price?.PriceList, moq);
-              
+              const weightGrams =
+                (product as any).Weight ?? null;
+
               let pricingResult = {
                 finalPrice: supplierPrice,
                 calculatedPrice: supplierPrice,
@@ -2585,11 +2639,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
               };
 
               if (settings?.applyDynamicPricing && supplierPrice > 0) {
-                // For MOQ > 1: apply margin to PACKAGE cost (unit price × MOQ)
-                // This ensures margin is applied to what we actually pay TME
-                const result = moq > 1
-                  ? calculatePackagePrice(supplierPrice, moq, multiples)
-                  : calculateDynamicPrice(supplierPrice);
+                // Tier markup with the net-profit floor applied (package-aware).
+                const result = calculatePriceWithFloor(supplierPrice, {
+                  moq,
+                  multiples,
+                  weightGrams,
+                  marketplace: "ebay",
+                  config: feeConfig
+                });
                 pricingResult = {
                   finalPrice: result.finalPrice,
                   calculatedPrice: result.calculatedPrice,
@@ -2689,6 +2746,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         let failedCount = 0;
         const errors: string[] = [];
 
+        // Resolve fee config once (drives the net-profit price floor).
+        const feeConfig = await getFeeConfig("ebay");
+
         // Get enhanced product information in batches
         const batchSize = 10;
         for (let i = 0; i < productSymbols.length; i += batchSize) {
@@ -2709,9 +2769,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 const multiples = product.Multiples || 1;
 
                 // Calculate pricing - use correct price tier for MOQ quantity
-                const { getSupplierPriceForMoq, calculateDynamicPrice, calculatePackagePrice } = await import("./dynamic-pricing");
+                const { getSupplierPriceForMoq } = await import("./dynamic-pricing");
                 const supplierPrice = getSupplierPriceForMoq(price?.PriceList, moq);
-                
+                const weightGrams = (product as any).Weight ?? null;
+
                 let pricingResult = {
                   finalPrice: supplierPrice,
                   calculatedPrice: supplierPrice,
@@ -2720,10 +2781,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 };
 
                 if (settings.applyDynamicPricing && supplierPrice > 0) {
-                  // For MOQ > 1: apply margin to PACKAGE cost (unit price × MOQ)
-                  const result = moq > 1
-                    ? calculatePackagePrice(supplierPrice, moq, multiples)
-                    : calculateDynamicPrice(supplierPrice);
+                  // Tier markup with the net-profit floor applied (package-aware).
+                  const result = calculatePriceWithFloor(supplierPrice, {
+                    moq,
+                    multiples,
+                    weightGrams,
+                    marketplace: "ebay",
+                    config: feeConfig
+                  });
                   pricingResult = {
                     finalPrice: result.finalPrice,
                     calculatedPrice: result.calculatedPrice,
@@ -3124,6 +3189,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         let failedCount = 0;
         const errors: string[] = [];
 
+        // Resolve fee config once (drives the net-profit price floor).
+        const feeConfig = await getFeeConfig("ebay");
+
         // Get enhanced product information in batches
         const batchSize = 10;
         for (let i = 0; i < productSymbols.length; i += batchSize) {
@@ -3144,9 +3212,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 const multiples = product.Multiples || 1;
 
                 // Calculate pricing - use correct price tier for MOQ quantity
-                const { getSupplierPriceForMoq, calculateDynamicPrice, calculatePackagePrice } = await import("./dynamic-pricing");
+                const { getSupplierPriceForMoq } = await import("./dynamic-pricing");
                 const supplierPrice = getSupplierPriceForMoq(price?.PriceList, moq);
-                
+                const weightGrams = (product as any).Weight ?? null;
+
                 let pricingResult = {
                   finalPrice: supplierPrice,
                   calculatedPrice: supplierPrice,
@@ -3155,10 +3224,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 };
 
                 if (settings.applyDynamicPricing && supplierPrice > 0) {
-                  // For MOQ > 1: apply margin to PACKAGE cost (unit price × MOQ)
-                  const result = moq > 1
-                    ? calculatePackagePrice(supplierPrice, moq, multiples)
-                    : calculateDynamicPrice(supplierPrice);
+                  // Tier markup with the net-profit floor applied (package-aware).
+                  const result = calculatePriceWithFloor(supplierPrice, {
+                    moq,
+                    multiples,
+                    weightGrams,
+                    marketplace: "ebay",
+                    config: feeConfig
+                  });
                   pricingResult = {
                     finalPrice: result.finalPrice,
                     calculatedPrice: result.calculatedPrice,

@@ -9,7 +9,8 @@
 import { storage } from "./storage";
 import { TMEApiServiceOptimized } from "./tme-api-optimized";
 import { ebayApi } from "./ebay-api";
-import { calculateDynamicPrice, getSupplierPriceForMoq } from "./dynamic-pricing";
+import { calculatePriceWithFloor, getSupplierPriceForMoq } from "./dynamic-pricing";
+import { getFeeConfig } from "./fee-config";
 import { calculateEbayStock } from "./stock-manager";
 
 // TME PriceList entry structure
@@ -291,7 +292,10 @@ async function syncToEbay(diffs: DiffResult[]): Promise<{
       productName: string;
       sku?: string;
     }> = [];
-    
+
+    // Resolve fee config once (drives the net-profit price floor).
+    const feeConfig = await getFeeConfig("ebay");
+
     const productsToRelist: Array<{
       productId: number;
       productName: string;
@@ -338,8 +342,15 @@ async function syncToEbay(diffs: DiffResult[]): Promise<{
       
       // Calculate eBay price with dynamic pricing for in-stock products
       const supplierPrice = diff.changes.newPrice || parseFloat(product.supplierPrice?.toString() || '0');
-      const pricingResult = supplierPrice > 0 
-        ? calculateDynamicPrice(supplierPrice) 
+      const weightGrams = product.weight ? parseFloat(product.weight) : null;
+      const pricingResult = supplierPrice > 0
+        ? calculatePriceWithFloor(supplierPrice, {
+            moq: product.moq ?? 1,
+            multiples: product.multiples ?? 1,
+            weightGrams,
+            marketplace: "ebay",
+            config: feeConfig,
+          })
         : { finalPrice: parseFloat(product.salePrice?.toString() || '0') };
       
       ebayUpdates.push({

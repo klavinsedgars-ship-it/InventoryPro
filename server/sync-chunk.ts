@@ -16,9 +16,9 @@ import { storage } from "./storage";
 import { tmeApi } from "./tme-api";
 import {
   getSupplierPriceForMoq,
-  calculateDynamicPrice,
-  calculatePackagePrice,
+  calculatePriceWithFloor,
 } from "./dynamic-pricing";
+import { getFeeConfig } from "./fee-config";
 
 export interface SyncChunkResult {
   total: number; // total TME products
@@ -50,6 +50,9 @@ export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
     return { total, remaining: 0, processedThisChunk: 0, changed: 0, ebayUpdated: 0, done: true, errors };
   }
 
+  // Resolve fee config once per chunk (drives the net-profit price floor).
+  const feeConfig = await getFeeConfig("ebay");
+
   const symbols = slice.map((p) => p.supplierProductId || p.sku);
   let enhanced: Awaited<ReturnType<typeof tmeApi.getEnhancedProductInfo>> = [];
   try {
@@ -79,12 +82,18 @@ export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
     const multiples = info.product?.Multiples || product.multiples || 1;
     const supplierPrice = getSupplierPriceForMoq(info.price?.PriceList as any, moq);
     const stock = info.stock?.Amount ?? product.stock ?? 0;
+    const weightGrams =
+      info.product?.Weight ?? (product.weight ? parseFloat(product.weight) : null);
 
     const pricing =
       supplierPrice > 0
-        ? moq > 1
-          ? calculatePackagePrice(supplierPrice, moq, multiples)
-          : calculateDynamicPrice(supplierPrice)
+        ? calculatePriceWithFloor(supplierPrice, {
+            moq,
+            multiples,
+            weightGrams,
+            marketplace: "ebay",
+            config: feeConfig,
+          })
         : null;
 
     const localSupplier = parseFloat(product.supplierPrice?.toString() || "0");

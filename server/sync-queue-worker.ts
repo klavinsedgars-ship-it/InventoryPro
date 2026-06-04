@@ -11,7 +11,8 @@
 
 import { storage } from "./storage";
 import { tmeApi } from "./tme-api";
-import { calculateDynamicPrice, calculatePackagePrice, getSupplierPriceForMoq } from "./dynamic-pricing";
+import { calculatePriceWithFloor, getSupplierPriceForMoq } from "./dynamic-pricing";
+import { getFeeConfig } from "./fee-config";
 import type { SyncQueue } from "@shared/schema";
 
 interface QueueWorkerConfig {
@@ -138,14 +139,20 @@ export class SyncQueueWorker {
 
       // Calculate pricing - use correct price tier for MOQ quantity
       const supplierPrice = getSupplierPriceForMoq(price?.PriceList, moq);
-      
-      // For MOQ > 1 products: apply margin to PACKAGE cost (unit price × MOQ)
-      // For single items: apply margin to unit price directly
+      const weightGrams =
+        (tmeProduct as any).Weight ?? (product.weight ? parseFloat(product.weight) : null);
+
+      // Tier markup with the net-profit floor applied (package-aware).
+      const feeConfig = await getFeeConfig("ebay");
       const pricingResult =
         supplierPrice > 0
-          ? moq > 1
-            ? calculatePackagePrice(supplierPrice, moq, multiples)
-            : calculateDynamicPrice(supplierPrice)
+          ? calculatePriceWithFloor(supplierPrice, {
+              moq,
+              multiples,
+              weightGrams,
+              marketplace: "ebay",
+              config: feeConfig,
+            })
           : {
               finalPrice: supplierPrice,
               calculatedPrice: supplierPrice,

@@ -145,11 +145,30 @@ export function getShippingPolicyName(weightGrams: number | null | undefined): s
 }
 
 /**
- * Get full policy details by weight
+ * Get full policy details by weight.
+ *
+ * Matches by weight RANGE directly (not via ebayPolicyId) — the eBay policy
+ * IDs can collide across bands when their env vars are unset, so the id
+ * round-trip would return the wrong band's price. This is the correct source
+ * for the band name/price used in margin calculations.
  */
 export function getShippingPolicyByWeight(weightGrams: number | null | undefined): ShippingPolicy | null {
-  const policyId = getShippingPolicyId(weightGrams);
-  return getShippingPolicyById(policyId);
+  const lightest =
+    SHIPPING_POLICIES.find(p => p.id === "policy_0_20") || SHIPPING_POLICIES[0] || null;
+
+  if (weightGrams === null || weightGrams === undefined || weightGrams <= 0) {
+    return lightest;
+  }
+  for (const policy of SHIPPING_POLICIES) {
+    if (weightGrams >= policy.weightRange.min && weightGrams < policy.weightRange.max) {
+      return policy;
+    }
+  }
+  // Above the heaviest band -> use the heaviest policy.
+  if (weightGrams >= 2001) {
+    return SHIPPING_POLICIES[SHIPPING_POLICIES.length - 1];
+  }
+  return lightest;
 }
 
 /**
