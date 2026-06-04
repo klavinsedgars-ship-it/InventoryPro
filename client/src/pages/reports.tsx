@@ -61,6 +61,117 @@ export function Reports({ user }: ReportsProps) {
             </Button>
           </div>
 
+          {/* Sales & Real Profit (revenue − eBay fees − VAT − supplier cost) */}
+          {(() => {
+            const sales = salesAnalytics as
+              | undefined
+              | {
+                  totals: {
+                    orders: number; items: number; revenue: number; shipping: number;
+                    fees: number; vat: number; supplierCost: number; postage: number;
+                    packaging: number; netProfit: number; netMarginPct: number;
+                  };
+                  monthly: Array<{ month: string; revenue: number; netProfit: number; orders: number }>;
+                  byMarketplace: Array<{ marketplace: string; orders: number; revenue: number; netProfit: number }>;
+                  assumptions: string[];
+                };
+            const t = sales?.totals;
+            return (
+              <div className="mb-8">
+                <h2 className="text-lg font-semibold text-gray-900 mb-3">Sales &amp; Real Profit</h2>
+                {!t || t.orders === 0 ? (
+                  <Card>
+                    <CardContent className="p-6 text-sm text-gray-500">
+                      No sales recorded yet. Sync orders from eBay to see realized profit
+                      (revenue − fees − VAT − supplier cost).
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                      <Card>
+                        <CardContent className="p-4">
+                          <p className="text-xs text-gray-500">Revenue</p>
+                          <p className="text-lg font-semibold">{formatCurrency(t.revenue)}</p>
+                          <p className="text-[11px] text-gray-400">{t.orders} orders · {t.items} items</p>
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardContent className="p-4">
+                          <p className="text-xs text-gray-500">eBay fees</p>
+                          <p className="text-lg font-semibold text-red-600">−{formatCurrency(t.fees)}</p>
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardContent className="p-4">
+                          <p className="text-xs text-gray-500">VAT</p>
+                          <p className="text-lg font-semibold text-red-600">−{formatCurrency(t.vat)}</p>
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardContent className="p-4">
+                          <p className="text-xs text-gray-500">Supplier cost</p>
+                          <p className="text-lg font-semibold text-red-600">−{formatCurrency(t.supplierCost)}</p>
+                        </CardContent>
+                      </Card>
+                      <Card>
+                        <CardContent className="p-4">
+                          <p className="text-xs text-gray-500">Postage + packaging</p>
+                          <p className="text-lg font-semibold text-red-600">
+                            −{formatCurrency(t.postage + t.packaging)}
+                          </p>
+                        </CardContent>
+                      </Card>
+                      <Card className="border-green-200 bg-green-50">
+                        <CardContent className="p-4">
+                          <p className="text-xs text-gray-500">Net profit</p>
+                          <p className={`text-lg font-bold ${t.netProfit >= 0 ? "text-green-700" : "text-red-600"}`}>
+                            {formatCurrency(t.netProfit)}
+                          </p>
+                          <p className="text-[11px] text-gray-400">{t.netMarginPct}% margin</p>
+                        </CardContent>
+                      </Card>
+                    </div>
+                    {sales?.monthly && sales.monthly.length > 0 && (
+                      <Card className="mt-4">
+                        <CardHeader className="py-3">
+                          <CardTitle className="text-sm">Monthly</CardTitle>
+                        </CardHeader>
+                        <CardContent className="pt-0">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="text-left text-xs text-gray-500">
+                                <th className="py-1">Month</th>
+                                <th className="py-1 text-right">Orders</th>
+                                <th className="py-1 text-right">Revenue</th>
+                                <th className="py-1 text-right">Net profit</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sales.monthly.map((m) => (
+                                <tr key={m.month} className="border-t">
+                                  <td className="py-1">{m.month}</td>
+                                  <td className="py-1 text-right">{m.orders}</td>
+                                  <td className="py-1 text-right">{formatCurrency(m.revenue)}</td>
+                                  <td className={`py-1 text-right ${m.netProfit >= 0 ? "text-green-700" : "text-red-600"}`}>
+                                    {formatCurrency(m.netProfit)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </CardContent>
+                      </Card>
+                    )}
+                    {sales?.assumptions && sales.assumptions.length > 0 && (
+                      <p className="text-[11px] text-gray-400 mt-2">{sales.assumptions.join(" ")}</p>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })()}
+
           {isLoading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
               {[...Array(4)].map((_, i) => (

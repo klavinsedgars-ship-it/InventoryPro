@@ -67,6 +67,19 @@ export function Products({ user }: ProductsProps) {
   const [moqFilter, setMoqFilter] = useState<string>("all");
   const [itemsPerPage, setItemsPerPage] = useState<number>(250);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Click-to-sort on Price / TME-stock columns
+  const [sortField, setSortField] = useState<"price" | "stock" | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const toggleSort = (field: "price" | "stock") => {
+    if (sortField === field) {
+      setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    } else {
+      setSortField(field);
+      setSortDir("desc");
+    }
+  };
+  const sortArrow = (field: "price" | "stock") =>
+    sortField === field ? (sortDir === "desc" ? " ↓" : " ↑") : " ↕";
   
   // Bulk listing progress state
   const [bulkListingModalOpen, setBulkListingModalOpen] = useState(false);
@@ -520,8 +533,17 @@ export function Products({ user }: ProductsProps) {
            matchesPrice && matchesStock && matchesMarketplace && matchesMoq;
   });
 
+  // Optional sort by Price (salePrice) or TME stock, then paginate.
+  const sortedProducts = sortField
+    ? [...filteredProducts].sort((a, b) => {
+        const av = sortField === "price" ? parseFloat(a.salePrice) || 0 : a.stock ?? 0;
+        const bv = sortField === "price" ? parseFloat(b.salePrice) || 0 : b.stock ?? 0;
+        return sortDir === "desc" ? bv - av : av - bv;
+      })
+    : filteredProducts;
+
   // Paginate products based on itemsPerPage
-  const displayedProducts = filteredProducts.slice(0, itemsPerPage);
+  const displayedProducts = sortedProducts.slice(0, itemsPerPage);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -877,11 +899,21 @@ export function Products({ user }: ProductsProps) {
                       <th className="px-1 py-2 text-left text-xs font-medium text-gray-500 uppercase" style={{width: '100px'}}>
                         Category
                       </th>
-                      <th className="px-1 py-2 text-right text-xs font-medium text-gray-500 uppercase" style={{width: '55px'}}>
-                        Price
+                      <th
+                        className="px-1 py-2 text-right text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-800"
+                        style={{width: '55px'}}
+                        onClick={() => toggleSort("price")}
+                        title="Sort by price"
+                      >
+                        Price<span className="text-gray-400">{sortArrow("price")}</span>
                       </th>
-                      <th className="px-1 py-2 text-right text-xs font-medium text-gray-500 uppercase" style={{width: '50px'}}>
-                        TME
+                      <th
+                        className="px-1 py-2 text-right text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-800"
+                        style={{width: '50px'}}
+                        onClick={() => toggleSort("stock")}
+                        title="Sort by TME stock"
+                      >
+                        TME<span className="text-gray-400">{sortArrow("stock")}</span>
                       </th>
                       <th className="px-1 py-2 text-right text-xs font-medium text-gray-500 uppercase" style={{width: '45px'}}>
                         eBay

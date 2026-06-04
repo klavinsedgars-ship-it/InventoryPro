@@ -1055,6 +1055,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Unauthenticated diagnostic: confirms whether THIS deployment has the
+  // €4-net price floor active. Open in a browser:
+  //   /api/__pricing-check?supplierPrice=0.5&weight=10&moq=1
+  // If "floorApplied" is true and finalPriceWithFloor > tierPriceNoFloor,
+  // the new pricing is live. A 404 means the old build is deployed.
+  app.get("/api/__pricing-check", async (req, res) => {
+    try {
+      const supplierPrice = parseFloat((req.query.supplierPrice as string) || "0.5");
+      const weightGrams = req.query.weight ? parseFloat(req.query.weight as string) : null;
+      const moq = req.query.moq ? parseInt(req.query.moq as string, 10) : 1;
+      const config = await getFeeConfig("ebay");
+      const tier = calculateDynamicPrice(supplierPrice);
+      const withFloor = calculatePriceWithFloor(supplierPrice, {
+        moq,
+        weightGrams,
+        marketplace: "ebay",
+        config,
+      });
+      const breakdown = calculateNetProfit({
+        salePrice: withFloor.finalPrice,
+        packageSupplierCost: supplierPrice * (moq > 1 ? moq : 1),
+        weightGrams,
+        marketplace: "ebay",
+        config,
+      });
+      res.json({
+        input: { supplierPrice, weightGrams, moq },
+        targetMinNetProfit: config.targetMinNetProfit,
+        tierPriceNoFloor: tier.finalPrice,
+        finalPriceWithFloor: withFloor.finalPrice,
+        floorApplied: withFloor.finalPrice > tier.finalPrice,
+        netProfitAtFinal: breakdown.netProfit,
+        note: "If floorApplied is true, the €4-net pricing is live in this deployment.",
+      });
+    } catch (error) {
+      res.status(500).json({ error: (error as Error).message });
+    }
+  });
+
   // Marketplace settings (fee rates, VAT, target profit, etc.)
   app.get("/api/marketplace-settings/:marketplace", requireAuth, async (req, res) => {
     try {
@@ -1086,6 +1125,109 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ settings: saved });
     } catch (error) {
       res.status(500).json({ message: "Failed to save marketplace settings" });
+    }
+  });
+
+  // Realized sales & real profit (revenue − eBay fees − VAT − supplier cost
+  // − postage − packaging), aggregated from synced orders.
+  app.get("/api/analytics/sales", requireAuth, async (req, res) => {
+    try {
+      const config = await getFeeConfig("ebay");
+      const vatFrac = config.vatPct / (1 + config.vatPct);
+      const round2 = (n: number) => Math.round(n * 100) / 100;
+
+      const orders = await storage.getOrders({});
+      const allProducts = await storage.getProducts();
+      const bySku = new Map(allProducts.map((p) => [p.sku, p]));
+
+      const totals = {
+        orders: 0, items: 0, revenue: 0, shipping: 0,
+        fees: 0, vat: 0, supplierCost: 0, postage: 0, packaging: 0, netProfit: 0,
+      };
+      const monthlyMap = new Map<string, { month: string; revenue: number; netProfit: number; orders: number }>();
+      const mpMap = new Map<string, { marketplace: string; orders: number; revenue: number; netProfit: number }>();
+      let usedActualFees = false;
+
+      for (const order of orders) {
+        if (order.status === "cancelled") continue;
+
+        const items = await storage.getOrderItems(order.id);
+        const feeRows = await storage.getOrderFees(order.id);
+
+        const subtotal = parseFloat(order.subtotal) || 0;
+        const shipping = parseFloat(order.shippingCost) || 0;
+        const gross = subtotal + shipping;
+
+        const actualFee = feeRows.reduce((s, f) => s + (parseFloat(f.amount) || 0), 0);
+        const fee = actualFee > 0 ? actualFee : config.ebayFvfPct * gross + config.ebayFixedFee;
+        if (actualFee > 0) usedActualFees = true;
+
+        const vat = vatFrac * subtotal;
+        const postage = shipping / (1 + config.postageMarkup);
+        const packaging = config.packagingCost;
+
+        let supplierCost = 0;
+        let itemCount = 0;
+        for (const it of items) {
+          const prod = bySku.get(it.sku);
+          const cost = prod ? parseFloat(prod.supplierPrice) || 0 : 0;
+          supplierCost += cost * (it.quantity || 1);
+          itemCount += it.quantity || 1;
+        }
+
+        const netProfit = gross - fee - vat - supplierCost - postage - packaging;
+
+        totals.orders++;
+        totals.items += itemCount;
+        totals.revenue += subtotal;
+        totals.shipping += shipping;
+        totals.fees += fee;
+        totals.vat += vat;
+        totals.supplierCost += supplierCost;
+        totals.postage += postage;
+        totals.packaging += packaging;
+        totals.netProfit += netProfit;
+
+        const d = order.orderDate ? new Date(order.orderDate) : new Date(order.createdAt as any);
+        const month = isNaN(d.getTime()) ? "unknown" : d.toISOString().slice(0, 7);
+        const m = monthlyMap.get(month) || { month, revenue: 0, netProfit: 0, orders: 0 };
+        m.revenue += subtotal;
+        m.netProfit += netProfit;
+        m.orders++;
+        monthlyMap.set(month, m);
+
+        const mp = order.marketplace || "unknown";
+        const mm = mpMap.get(mp) || { marketplace: mp, orders: 0, revenue: 0, netProfit: 0 };
+        mm.orders++;
+        mm.revenue += subtotal;
+        mm.netProfit += netProfit;
+        mpMap.set(mp, mm);
+      }
+
+      const totalsRounded: Record<string, number> = {};
+      for (const [k, v] of Object.entries(totals)) totalsRounded[k] = round2(v);
+      totalsRounded.netMarginPct = totals.revenue > 0 ? round2((totals.netProfit / totals.revenue) * 100) : 0;
+
+      res.json({
+        totals: totalsRounded,
+        monthly: Array.from(monthlyMap.values())
+          .sort((a, b) => a.month.localeCompare(b.month))
+          .map((m) => ({ ...m, revenue: round2(m.revenue), netProfit: round2(m.netProfit) })),
+        byMarketplace: Array.from(mpMap.values()).map((m) => ({
+          ...m,
+          revenue: round2(m.revenue),
+          netProfit: round2(m.netProfit),
+        })),
+        assumptions: [
+          usedActualFees
+            ? "eBay fees use actual recorded marketplace fees where available."
+            : `eBay fees estimated at ${(config.ebayFvfPct * 100).toFixed(1)}% + €${config.ebayFixedFee.toFixed(2)} (no actual fees recorded yet).`,
+          "Supplier cost uses the current TME cost (cost at sale time is not stored).",
+          `VAT ${(config.vatPct * 100).toFixed(0)}% on item subtotal; postage = buyer shipping / ${(1 + config.postageMarkup).toFixed(2)}.`,
+        ],
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to compute sales analytics" });
     }
   });
 
