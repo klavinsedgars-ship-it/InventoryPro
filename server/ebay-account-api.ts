@@ -82,7 +82,7 @@ export class EbayAccountApiService {
   private baseUrl = "https://api.ebay.com";
   private sandboxUrl = "https://api.sandbox.ebay.com";
   private isProduction = true;
-  private defaultMarketplaceId = "EBAY_GB"; // UK marketplace
+  private defaultMarketplaceId = process.env.EBAY_MARKETPLACE_ID || "EBAY_DE";
 
   constructor() {
     console.log("✅ eBay Account API Service initialized");
@@ -332,9 +332,9 @@ export class EbayAccountApiService {
             costType: "FLAT_RATE",
             shippingServices: [
               {
-                shippingCarrierCode: "Royal Mail",
-                shippingServiceCode: "UK_RoyalMailSecondClassStandard",
-                shippingCost: { value: "0.00", currency: "GBP" },
+                shippingCarrierCode: "DHL",
+                shippingServiceCode: "DE_DHLPaket",
+                shippingCost: { value: "0.00", currency: "EUR" },
                 freeShipping: true,
                 sortOrder: 1
               }
@@ -707,7 +707,7 @@ export class EbayAccountApiService {
 
       const limitQuantity = response.sellingLimit?.quantity || 0;
       const limitAmount = parseFloat(response.sellingLimit?.amount?.value || "0");
-      const currency = response.sellingLimit?.amount?.currency || "GBP";
+      const currency = response.sellingLimit?.amount?.currency || "EUR";
 
       const remainingQuantity = Math.max(0, limitQuantity - listedCount);
       const remainingAmount = Math.max(0, limitAmount - listedValue);
@@ -763,7 +763,7 @@ export class EbayAccountApiService {
       // Try to get eBay API limits
       let itemLimit = 0;
       let valueLimit = 0;
-      let currency = "GBP";
+      let currency = "EUR";
       let ebayApiResponse: any = null;
 
       try {
@@ -778,7 +778,7 @@ export class EbayAccountApiService {
           ebayApiResponse = response;
           itemLimit = response.sellingLimit?.quantity || 0;
           valueLimit = parseFloat(response.sellingLimit?.amount?.value || "0");
-          currency = response.sellingLimit?.amount?.currency || "GBP";
+          currency = response.sellingLimit?.amount?.currency || "EUR";
         }
       } catch (apiError) {
         console.warn("Could not fetch eBay selling limits from API, using estimates:", apiError);

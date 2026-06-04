@@ -3,6 +3,15 @@ import sharp from 'sharp';
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
+import os from 'os';
+
+// On serverless (Vercel/Lambda), the working directory is read-only;
+// only /tmp is writable. Fall back to /tmp on Vercel; otherwise use a
+// local ./processed_images directory.
+const DEFAULT_CACHE_DIR =
+  process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME
+    ? path.join(os.tmpdir(), 'inventorypro-processed-images')
+    : './processed_images';
 
 interface ImageProcessingResult {
   success: boolean;
@@ -13,11 +22,15 @@ interface ImageProcessingResult {
 }
 
 export class ImageProcessingService {
-  private cacheDir = './processed_images';
+  private cacheDir = DEFAULT_CACHE_DIR;
   private maxImageSize = 5 * 1024 * 1024; // 5MB limit
 
   constructor() {
-    this.ensureCacheDirectory();
+    // Best-effort: if it fails (read-only FS, permissions), swallow.
+    // Each operation that writes will create the dir again as needed.
+    this.ensureCacheDirectory().catch((err) => {
+      console.warn(`[image-processing] cache dir init failed (${this.cacheDir}):`, err.message);
+    });
   }
 
   private async ensureCacheDirectory() {
@@ -34,15 +47,62 @@ export class ImageProcessingService {
    */
   async removeWatermark(imageUrl: string): Promise<ImageProcessingResult> {
     const startTime = Date.now();
-    
+
     try {
       console.log(`🖼️ Processing image: ${imageUrl}`);
 
-      // Generate cache key based on image URL
+      // Stable, content-addressed key based on the source URL.
       const cacheKey = crypto.createHash('md5').update(imageUrl).digest('hex');
-      const processedImagePath = path.join(this.cacheDir, `${cacheKey}_processed.jpg`);
+      const blobKey = `processed/${cacheKey}.jpg`;
 
-      // Check if already processed
+      const useBlob = !!process.env.BLOB_READ_WRITE_TOKEN;
+
+      // On Vercel (or any host where BLOB_READ_WRITE_TOKEN is set), check
+      // Blob for an already-processed copy keyed off the source URL hash.
+      // Returns the public Blob URL eBay can fetch directly.
+      if (useBlob) {
+        try {
+          const { head, put } = await import("@vercel/blob");
+          const existing = await head(blobKey).catch(() => null);
+          if (existing?.url) {
+            console.log(`✅ Blob cache hit: ${existing.url}`);
+            return {
+              success: true,
+              processedImageUrl: existing.url,
+              originalImageUrl: imageUrl,
+              processingTime: Date.now() - startTime,
+            };
+          }
+
+          const imageBuffer = await this.downloadImage(imageUrl);
+          if (!imageBuffer) throw new Error('Failed to download image');
+          const processedBuffer = await this.processImageBuffer(imageBuffer);
+
+          const uploaded = await put(blobKey, processedBuffer, {
+            access: "public",
+            contentType: "image/jpeg",
+            addRandomSuffix: false,
+            allowOverwrite: true,
+            cacheControlMaxAge: 60 * 60 * 24 * 30, // 30d at the edge
+          });
+
+          console.log(`✅ Watermark removed and uploaded to Blob: ${uploaded.url}`);
+          return {
+            success: true,
+            processedImageUrl: uploaded.url,
+            originalImageUrl: imageUrl,
+            processingTime: Date.now() - startTime,
+          };
+        } catch (blobErr) {
+          // Fall through to the local-disk path; never silently use the
+          // unprocessed TME image — the caller should know we failed.
+          console.error("Vercel Blob path failed, falling back to local disk:", blobErr);
+        }
+      }
+
+      // Local-disk path: only used in dev / non-serverless. The served
+      // /api/images/processed/{file} route reads from this.cacheDir.
+      const processedImagePath = path.join(this.cacheDir, `${cacheKey}_processed.jpg`);
       try {
         await fs.access(processedImagePath);
         console.log(`✅ Using cached processed image for ${imageUrl}`);
@@ -50,31 +110,23 @@ export class ImageProcessingService {
           success: true,
           processedImageUrl: `/api/images/processed/${cacheKey}_processed.jpg`,
           originalImageUrl: imageUrl,
-          processingTime: Date.now() - startTime
+          processingTime: Date.now() - startTime,
         };
       } catch {
-        // File doesn't exist, need to process
+        /* not cached */
       }
 
-      // Download original image
       const imageBuffer = await this.downloadImage(imageUrl);
-      if (!imageBuffer) {
-        throw new Error('Failed to download image');
-      }
-
-      // Process image to remove watermark
+      if (!imageBuffer) throw new Error('Failed to download image');
       const processedBuffer = await this.processImageBuffer(imageBuffer);
-
-      // Save processed image
       await fs.writeFile(processedImagePath, processedBuffer);
 
       console.log(`✅ Watermark removed from ${imageUrl}`);
-
       return {
         success: true,
         processedImageUrl: `/api/images/processed/${cacheKey}_processed.jpg`,
         originalImageUrl: imageUrl,
-        processingTime: Date.now() - startTime
+        processingTime: Date.now() - startTime,
       };
 
     } catch (error) {
@@ -83,7 +135,7 @@ export class ImageProcessingService {
         success: false,
         originalImageUrl: imageUrl,
         error: (error as Error).message,
-        processingTime: Date.now() - startTime
+        processingTime: Date.now() - startTime,
       };
     }
   }

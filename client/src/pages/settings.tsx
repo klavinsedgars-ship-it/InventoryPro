@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
@@ -16,11 +16,12 @@ import {
   User, 
   ShoppingCart, 
   Store, 
-  Database, 
+  Database,
   Bell,
   Key,
   Save,
-  LogOut
+  LogOut,
+  Percent
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -86,6 +87,61 @@ export function Settings({ user }: SettingsProps) {
     pushNotifications: false,
   });
 
+  // Fees & Pricing settings (persisted via marketplaceSettings). Percent fields
+  // are shown as whole percents but stored as fractions (12 <-> 0.12).
+  const FEE_DEFAULTS = {
+    fvfPct: "12",
+    fixed: "0.35",
+    vatPct: "21",
+    packaging: "0.30",
+    postageMarkup: "15",
+    targetMinProfit: "4.00",
+  };
+  const [feeForm, setFeeForm] = useState(FEE_DEFAULTS);
+  const pctFromFraction = (v?: string) =>
+    v != null && v !== "" && !isNaN(parseFloat(v)) ? String(parseFloat(v) * 100) : undefined;
+
+  const { data: feeSettingsData } = useQuery<{ settings: Array<{ setting: string; value: string }> }>({
+    queryKey: ["/api/marketplace-settings/ebay"],
+  });
+  useEffect(() => {
+    const rows = feeSettingsData?.settings;
+    if (!rows) return;
+    const get = (k: string) => rows.find((r) => r.setting === k)?.value;
+    setFeeForm({
+      fvfPct: pctFromFraction(get("fee.fvf_pct")) ?? FEE_DEFAULTS.fvfPct,
+      fixed: get("fee.fixed") ?? FEE_DEFAULTS.fixed,
+      vatPct: pctFromFraction(get("fee.vat_pct")) ?? FEE_DEFAULTS.vatPct,
+      packaging: get("fee.packaging") ?? FEE_DEFAULTS.packaging,
+      postageMarkup: pctFromFraction(get("fee.postage_markup")) ?? FEE_DEFAULTS.postageMarkup,
+      targetMinProfit: get("fee.target_min_profit") ?? FEE_DEFAULTS.targetMinProfit,
+    });
+  }, [feeSettingsData]);
+
+  const saveFeesMutation = useMutation({
+    mutationFn: async () => {
+      const settings = [
+        { setting: "fee.fvf_pct", value: String((parseFloat(feeForm.fvfPct) || 0) / 100) },
+        { setting: "fee.fixed", value: String(parseFloat(feeForm.fixed) || 0) },
+        { setting: "fee.vat_pct", value: String((parseFloat(feeForm.vatPct) || 0) / 100) },
+        { setting: "fee.packaging", value: String(parseFloat(feeForm.packaging) || 0) },
+        { setting: "fee.postage_markup", value: String((parseFloat(feeForm.postageMarkup) || 0) / 100) },
+        { setting: "fee.target_min_profit", value: String(parseFloat(feeForm.targetMinProfit) || 0) },
+      ];
+      const res = await apiRequest("PUT", "/api/marketplace-settings/ebay", { settings });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/marketplace-settings/ebay"] });
+      toast({
+        title: "Fees & Pricing saved",
+        description: "New rates apply to future syncs and the per-product profit breakdown.",
+      });
+    },
+    onError: () =>
+      toast({ title: "Save failed", description: "Could not save fee settings.", variant: "destructive" }),
+  });
+
   const handleLogout = async () => {
     try {
       await apiRequest("POST", "/api/auth/logout");
@@ -145,7 +201,7 @@ export function Settings({ user }: SettingsProps) {
         
         <div className="p-6">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-            <TabsList className="grid w-full grid-cols-5">
+            <TabsList className="grid w-full grid-cols-6">
               <TabsTrigger value="profile" className="flex items-center space-x-2">
                 <User className="w-4 h-4" />
                 <span>Profile</span>
@@ -161,6 +217,10 @@ export function Settings({ user }: SettingsProps) {
               <TabsTrigger value="tme" className="flex items-center space-x-2">
                 <Database className="w-4 h-4" />
                 <span>TME</span>
+              </TabsTrigger>
+              <TabsTrigger value="fees" className="flex items-center space-x-2">
+                <Percent className="w-4 h-4" />
+                <span>Fees</span>
               </TabsTrigger>
               <TabsTrigger value="notifications" className="flex items-center space-x-2">
                 <Bell className="w-4 h-4" />
@@ -667,6 +727,94 @@ export function Settings({ user }: SettingsProps) {
                   <Button onClick={saveNotificationSettings}>
                     <Save className="w-4 h-4 mr-2" />
                     Save Notification Settings
+                  </Button>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* Fees & Pricing Settings */}
+            <TabsContent value="fees" className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center space-x-2">
+                    <Percent className="w-5 h-5" />
+                    <span>Fees &amp; Pricing (eBay)</span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <p className="text-sm text-gray-600">
+                    These drive the real net-profit calculation and the price floor.
+                    Every listing is priced to net at least the target profit after
+                    these fees + VAT.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>eBay Final Value Fee (%)</Label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        value={feeForm.fvfPct}
+                        onChange={(e) => setFeeForm({ ...feeForm, fvfPct: e.target.value })}
+                      />
+                      <p className="text-xs text-gray-500">% of item + shipping.</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Fixed fee per order (€)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={feeForm.fixed}
+                        onChange={(e) => setFeeForm({ ...feeForm, fixed: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>VAT (%)</Label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        value={feeForm.vatPct}
+                        onChange={(e) => setFeeForm({ ...feeForm, vatPct: e.target.value })}
+                      />
+                      <p className="text-xs text-gray-500">VAT-inclusive sale price (LV 21%).</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Packaging cost per order (€)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={feeForm.packaging}
+                        onChange={(e) => setFeeForm({ ...feeForm, packaging: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Postage markup (%)</Label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        value={feeForm.postageMarkup}
+                        onChange={(e) => setFeeForm({ ...feeForm, postageMarkup: e.target.value })}
+                      />
+                      <p className="text-xs text-gray-500">
+                        Buyer shipping includes this markup over carrier cost.
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Target minimum net profit (€)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={feeForm.targetMinProfit}
+                        onChange={(e) => setFeeForm({ ...feeForm, targetMinProfit: e.target.value })}
+                      />
+                      <p className="text-xs text-gray-500">
+                        Cheap items are priced up to guarantee this net profit.
+                      </p>
+                    </div>
+                  </div>
+
+                  <Button onClick={() => saveFeesMutation.mutate()} disabled={saveFeesMutation.isPending}>
+                    <Save className="w-4 h-4 mr-2" />
+                    {saveFeesMutation.isPending ? "Saving…" : "Save Fees & Pricing"}
                   </Button>
                 </CardContent>
               </Card>

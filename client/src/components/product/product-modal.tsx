@@ -23,6 +23,23 @@ const productFormSchema = insertProductSchema.extend({
 
 type ProductFormData = z.infer<typeof productFormSchema>;
 
+interface ProfitBreakdown {
+  marketplace: string;
+  salePrice: number;
+  buyerShipping: number;
+  shippingBand: string | null;
+  grossRevenue: number;
+  marketplaceFee: number;
+  vatAmount: number;
+  supplierCost: number;
+  actualPostageCost: number;
+  packagingCost: number;
+  netProfit: number;
+  netMarginPct: number;
+  meetsTarget: boolean;
+  assumptions: string[];
+}
+
 interface ProductModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -121,6 +138,46 @@ export function ProductModal({ isOpen, onClose, product }: ProductModalProps) {
       setCalculatedMargin("0");
     }
   }, [supplierPrice, salePrice]);
+
+  // Real net-profit breakdown (after eBay fees + VAT + shipping). Debounced so
+  // it follows live edits. Server is the single source of truth (no drift).
+  const weight = form.watch("weight");
+  const moq = (product as any)?.moq ?? 1;
+  const [profitInputs, setProfitInputs] = useState<{ salePrice: string; supplierPrice: string; weight: string }>({
+    salePrice: "",
+    supplierPrice: "",
+    weight: "",
+  });
+  useEffect(() => {
+    const t = setTimeout(
+      () => setProfitInputs({ salePrice, supplierPrice, weight: weight || "" }),
+      400,
+    );
+    return () => clearTimeout(t);
+  }, [salePrice, supplierPrice, weight]);
+
+  const profitSale = parseFloat(profitInputs.salePrice);
+  const profitSupplier = parseFloat(profitInputs.supplierPrice);
+  const { data: profit, isFetching: profitLoading } = useQuery<ProfitBreakdown>({
+    queryKey: [
+      "/api/pricing/net-profit",
+      profitInputs.salePrice,
+      profitInputs.supplierPrice,
+      profitInputs.weight,
+      moq,
+    ],
+    queryFn: async () => {
+      const res = await apiRequest("POST", "/api/pricing/net-profit", {
+        salePrice: profitSale,
+        supplierPrice: profitSupplier,
+        moq,
+        weightGrams: profitInputs.weight ? parseFloat(profitInputs.weight) : null,
+        marketplace: "ebay",
+      });
+      return res.json();
+    },
+    enabled: isOpen && profitSale > 0 && profitSupplier > 0,
+  });
 
   const createMutation = useMutation({
     mutationFn: (data: any) => apiRequest("POST", "/api/products", data),
@@ -339,6 +396,66 @@ export function ProductModal({ isOpen, onClose, product }: ProductModalProps) {
                 )}
               </div>
             </div>
+          </div>
+
+          {/* Fee & Net Profit breakdown */}
+          <div className="rounded-lg border border-gray-200 p-4">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-medium text-gray-900">Fee &amp; Net Profit (eBay)</h3>
+              {profitLoading && <span className="text-xs text-gray-400">Calculating…</span>}
+            </div>
+            {profit ? (
+              <div className="space-y-1 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Sale price</span>
+                  <span>€{profit.salePrice.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">
+                    + Buyer shipping{profit.shippingBand ? ` (${profit.shippingBand})` : ""}
+                  </span>
+                  <span className="text-gray-700">€{profit.buyerShipping.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-gray-600">
+                  <span>− eBay fee (FVF + fixed)</span>
+                  <span className="text-red-600">−€{profit.marketplaceFee.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-gray-600">
+                  <span>− VAT</span>
+                  <span className="text-red-600">−€{profit.vatAmount.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-gray-600">
+                  <span>− Supplier cost{moq > 1 ? ` (×${moq})` : ""}</span>
+                  <span className="text-red-600">−€{profit.supplierCost.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-gray-600">
+                  <span>− Postage + packaging</span>
+                  <span className="text-red-600">
+                    −€{(profit.actualPostageCost + profit.packagingCost).toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex justify-between border-t pt-1.5 mt-1.5 font-semibold">
+                  <span>Net profit</span>
+                  <span className={profit.netProfit >= 0 ? "text-green-600" : "text-red-600"}>
+                    €{profit.netProfit.toFixed(2)} ({profit.netMarginPct.toFixed(1)}%)
+                  </span>
+                </div>
+                {!profit.meetsTarget && (
+                  <p className="text-xs text-amber-600 pt-1">
+                    ⚠ Below the €4 net-profit target — sync would raise this price.
+                  </p>
+                )}
+                {profit.assumptions?.length > 0 && (
+                  <p className="text-[10px] text-gray-400 pt-1 leading-snug">
+                    {profit.assumptions.join(" ")}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400">
+                Enter supplier and sale price to see net profit after fees.
+              </p>
+            )}
           </div>
 
           {/* Marketplace Settings */}

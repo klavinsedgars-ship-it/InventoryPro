@@ -130,6 +130,38 @@ interface TMEBrowserProps {
   user: any;
 }
 
+// Persist the categories response across reloads so cold-start failures
+// don't leave the user with an empty tree. The server response is large
+// (~1.7k entries) but well under localStorage limits.
+const TME_CATEGORIES_CACHE_KEY = "tme-categories-cache-v1";
+
+function loadCachedCategoriesResponse(): { categories: TMECategory[] } | undefined {
+  if (typeof window === "undefined") return undefined;
+  try {
+    const raw = window.localStorage.getItem(TME_CATEGORIES_CACHE_KEY);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.categories) && parsed.categories.length > 0) {
+      return parsed;
+    }
+  } catch {
+    // ignore corrupt cache
+  }
+  return undefined;
+}
+
+function saveCachedCategoriesResponse(categories: TMECategory[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      TME_CATEGORIES_CACHE_KEY,
+      JSON.stringify({ categories })
+    );
+  } catch {
+    // quota or disabled storage — non-fatal
+  }
+}
+
 // Build hierarchical category tree from flat list
 function buildCategoryTree(categories: TMECategory[]): TMECategory[] {
   const categoryMap = new Map<string, TMECategory>();
@@ -200,11 +232,32 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // Fetch TME categories
-  const { data: categoriesData, isLoading: categoriesLoading } = useQuery({
+  // Fetch TME categories. The endpoint is slow on Vercel cold starts and
+  // the global queryClient has retry:false, so a single failure used to
+  // leave the tree empty until a manual reload. Override retry locally and
+  // hydrate from localStorage so the user sees categories instantly even
+  // when the network call is still in flight (or fails).
+  const {
+    data: categoriesData,
+    isLoading: categoriesLoading,
+    error: categoriesError,
+    refetch: refetchCategories,
+    isFetching: categoriesFetching,
+  } = useQuery({
     queryKey: ["/api/tme/categories"],
-    staleTime: 5 * 60 * 1000
+    staleTime: 5 * 60 * 1000,
+    retry: 3,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
+    initialData: loadCachedCategoriesResponse,
   });
+
+  // Persist successful responses so the next mount hydrates from cache.
+  useEffect(() => {
+    const cats = (categoriesData as any)?.categories as TMECategory[] | undefined;
+    if (cats && cats.length > 0) {
+      saveCachedCategoriesResponse(cats);
+    }
+  }, [categoriesData]);
 
   // Fetch products for selected category
   const { data: productsData, isLoading: productsLoading, refetch: refetchProducts } = useQuery({
@@ -629,20 +682,11 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
             <div className="flex items-center gap-2">
               <Card className="p-1.5" data-testid="api-usage-card">
                 <div className="flex items-center gap-2 text-[10px]">
-                  <div className="border-r pr-2">
-                    <span className="text-gray-500">Min: </span>
-                    <span className={`font-semibold ${
-                      (apiUsage?.usage?.callsThisMinute ?? 0) >= (apiUsage?.usage?.safeRateLimit ?? 55) 
-                        ? "text-red-600" 
-                        : "text-green-600"
-                    }`}>
-                      {apiUsage?.usage?.callsThisMinute ?? 0}/{apiUsage?.usage?.safeRateLimit ?? 55}
-                    </span>
-                  </div>
                   <div>
-                    <span className="text-gray-500">Daily: </span>
+                    <span className="text-gray-500">TME calls today: </span>
                     <span className={`font-semibold ${getApiUsageColor()}`}>
-                      {apiUsage?.usage?.callsToday ?? 0}/{apiUsage?.usage?.dailyLimit ?? 10000}
+                      {apiUsage?.usage?.callsToday ?? 0}
+                      {apiUsage?.usage?.dailyLimit ? `/${apiUsage.usage.dailyLimit}` : ""}
                     </span>
                   </div>
                 </div>
@@ -698,6 +742,26 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                         {[...Array(10)].map((_, i) => (
                           <div key={i} className="h-8 bg-gray-200 rounded animate-pulse"></div>
                         ))}
+                      </div>
+                    ) : categoriesError && rawCategories.length === 0 ? (
+                      <div className="text-center py-6 space-y-3 px-2" data-testid="categories-error">
+                        <AlertCircle className="h-8 w-8 mx-auto text-red-500" />
+                        <p className="text-xs text-gray-700 font-medium">
+                          Failed to load categories
+                        </p>
+                        <p className="text-[10px] text-gray-500 break-words">
+                          {(categoriesError as Error)?.message || "Network error"}
+                        </p>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => refetchCategories()}
+                          disabled={categoriesFetching}
+                          data-testid="btn-retry-categories"
+                        >
+                          <RefreshCw className={`h-3 w-3 mr-1 ${categoriesFetching ? "animate-spin" : ""}`} />
+                          {categoriesFetching ? "Retrying..." : "Retry"}
+                        </Button>
                       </div>
                     ) : (
                       <div className="space-y-0.5">
@@ -1333,22 +1397,11 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                       Syncing products... {syncProgress}%
                     </p>
                     <div className="flex justify-center gap-4 text-xs">
-                      <div className={`px-2 py-1 rounded ${
-                        (apiUsage?.usage?.callsThisMinute ?? 0) >= (apiUsage?.usage?.safeRateLimit ?? 30)
-                          ? "bg-red-100 text-red-700"
-                          : "bg-green-100 text-green-700"
-                      }`}>
-                        Rate: {apiUsage?.usage?.callsThisMinute ?? 0}/{apiUsage?.usage?.safeRateLimit ?? 30} calls/min
-                      </div>
                       <div className="px-2 py-1 rounded bg-gray-100 text-gray-700">
-                        Daily: {apiUsage?.usage?.callsToday ?? 0}/{apiUsage?.usage?.dailyLimit ?? 10000}
+                        TME calls today: {apiUsage?.usage?.callsToday ?? 0}
+                        {apiUsage?.usage?.dailyLimit ? `/${apiUsage.usage.dailyLimit}` : ""}
                       </div>
                     </div>
-                    {(apiUsage?.usage?.callsThisMinute ?? 0) >= (apiUsage?.usage?.safeRateLimit ?? 30) && (
-                      <p className="text-xs text-center text-amber-600 bg-amber-50 p-2 rounded">
-                        Rate limit reached - waiting for next minute to continue...
-                      </p>
-                    )}
                   </div>
                 )}
               </DialogContent>

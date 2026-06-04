@@ -620,9 +620,9 @@ export function Marketplaces({ user }: MarketplacesProps) {
                         <div className="flex justify-between text-sm">
                           <span className="text-gray-500">Total Value:</span>
                           <span className="font-medium">
-                            {sellerLimits.currency === 'GBP' ? '£' : sellerLimits.currency}
+                            {sellerLimits.currency === 'EUR' ? '€' : (sellerLimits.currency || '€')}
                             {sellerLimits.valueListed.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / 
-                            {sellerLimits.currency === 'GBP' ? '£' : sellerLimits.currency}
+                            {sellerLimits.currency === 'EUR' ? '€' : (sellerLimits.currency || '€')}
                             {sellerLimits.valueLimit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </span>
                         </div>
@@ -633,7 +633,7 @@ export function Marketplaces({ user }: MarketplacesProps) {
                         <div className="flex justify-between text-xs text-gray-500">
                           <span>{sellerLimits.valueUsagePercent}% used</span>
                           <span className="font-medium text-green-600">
-                            {sellerLimits.currency === 'GBP' ? '£' : sellerLimits.currency}
+                            {sellerLimits.currency === 'EUR' ? '€' : (sellerLimits.currency || '€')}
                             {sellerLimits.valueRemaining.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} remaining
                           </span>
                         </div>

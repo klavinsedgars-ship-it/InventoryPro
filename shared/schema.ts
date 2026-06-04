@@ -36,7 +36,12 @@ export const products = pgTable("products", {
   listedOnEbay: boolean("listed_on_ebay").default(false),
   listedOnAmazon: boolean("listed_on_amazon").default(false),
   excludeFromListing: boolean("exclude_from_listing").default(false),
-  ebayItemId: text("ebay_item_id"),
+  ebayItemId: text("ebay_item_id"), // legacy Trading-API listing id (migrated listings)
+  // Inventory API listing state (SKU-keyed model: inventory item -> offer -> publish)
+  ebayOfferId: text("ebay_offer_id"),
+  ebayListingId: text("ebay_listing_id"),
+  ebayListingStatus: text("ebay_listing_status"), // unlisted|inventory_created|offer_created|published|error
+  ebayListingError: text("ebay_listing_error"),
   amazonAsin: text("amazon_asin"),
   tmeProductId: text("tme_product_id"),
   tmeCategoryId: text("tme_category_id"), // TME category ID for synced products

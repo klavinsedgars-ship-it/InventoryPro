@@ -67,9 +67,24 @@ export function Products({ user }: ProductsProps) {
   const [moqFilter, setMoqFilter] = useState<string>("all");
   const [itemsPerPage, setItemsPerPage] = useState<number>(250);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Click-to-sort on Price / TME-stock columns
+  const [sortField, setSortField] = useState<"price" | "stock" | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const toggleSort = (field: "price" | "stock") => {
+    if (sortField === field) {
+      setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    } else {
+      setSortField(field);
+      setSortDir("desc");
+    }
+  };
+  const sortArrow = (field: "price" | "stock") =>
+    sortField === field ? (sortDir === "desc" ? " ↓" : " ↑") : " ↕";
   
   // Bulk listing progress state
   const [bulkListingModalOpen, setBulkListingModalOpen] = useState(false);
+  const [listingCount, setListingCount] = useState(0);
+  const [listProgress, setListProgress] = useState<{ done: number; total: number; published: number; failed: number } | null>(null);
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [bulkListingProgress, setBulkListingProgress] = useState<BulkListingJob | null>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -88,6 +103,14 @@ export function Products({ user }: ProductsProps) {
   const { data: stockInfoResponse } = useQuery({
     queryKey: ["/api/stock/info"],
   });
+
+  // Which eBay domain to link listings to (driven by the configured
+  // marketplace site id on the server, not hardcoded to co.uk).
+  const { data: publicConfig } = useQuery<{ ebaySiteId: string; ebayDomain: string }>({
+    queryKey: ["/api/public-config"],
+    staleTime: 60 * 60 * 1000,
+  });
+  const ebayDomain = publicConfig?.ebayDomain || "www.ebay.com";
   
   const stockInfo = (stockInfoResponse as any)?.stockInfo || [];
 
@@ -248,34 +271,46 @@ export function Products({ user }: ProductsProps) {
 
   const bulkListToEbayMutation = useMutation({
     mutationFn: async (productIds: number[]) => {
-      const response = await apiRequest("POST", "/api/ebay/bulk-list", { productIds });
-      return response.json();
+      // List one product per request so the progress bar advances per item
+      // (total time is the same — the eBay calls dominate — but it moves).
+      const CHUNK = 1;
+      let published = 0, failed = 0, skipped = 0, done = 0, limitHit = false;
+      const failures: string[] = [];
+      setListProgress({ done: 0, total: productIds.length, published: 0, failed: 0 });
+      for (let i = 0; i < productIds.length && !limitHit; i += CHUNK) {
+        const chunk = productIds.slice(i, i + CHUNK);
+        const response = await apiRequest("POST", "/api/ebay/inventory-list-batch", { productIds: chunk });
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || data.message || "Listing failed");
+        published += data.published || 0;
+        failed += data.failed || 0;
+        skipped += data.skipped || 0;
+        done += chunk.length;
+        (data.results || []).filter((r: any) => !r.ok).forEach((r: any) => failures.push(`${r.sku}: ${r.error}`));
+        setListProgress({ done, total: productIds.length, published, failed });
+        if (data.limitHit) limitHit = true;
+      }
+      return { success: true, published, failed, skipped, attempted: productIds.length, limitHit, failures };
     },
     onSuccess: (data: any) => {
-      console.log("Bulk listing response:", data);
-      
-      if (data.success && data.jobId) {
-        // Start tracking the job
-        setCurrentJobId(data.jobId);
-        setBulkListingProgress({
-          id: data.jobId,
-          status: "processing",
-          total: data.total,
-          processed: 0,
-          succeeded: 0,
-          failed: 0,
-          currentProduct: null,
-          lastMessage: "Starting bulk listing...",
-          errorDetails: null,
-          createdAt: new Date().toISOString(),
-          completedAt: null
+      if (data.success) {
+        toast({
+          title: data.published > 0 ? "Listed on eBay" : "Listing finished",
+          description:
+            `${data.published}/${data.attempted} published` +
+            (data.failed ? `, ${data.failed} failed` : "") +
+            (data.skipped ? `, ${data.skipped} skipped (out of stock)` : "") +
+            (data.limitHit ? " (eBay limit reached — resume later)" : ""),
+          variant: data.failed && !data.published ? "destructive" : undefined,
         });
-        setBulkListingModalOpen(true);
+        if (data.failures?.length) console.warn("Listing failures:\n" + data.failures.join("\n"));
+        queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
         setSelectedProducts(new Set());
       } else {
         toast({
           title: "Bulk Listing Failed",
-          description: data.message || "Failed to start bulk listing job.",
+          description: data.error || data.message || "Failed to list on eBay.",
           variant: "destructive",
         });
       }
@@ -286,6 +321,9 @@ export function Products({ user }: ProductsProps) {
         description: error.message || "Failed to connect to eBay API.",
         variant: "destructive",
       });
+    },
+    onSettled: () => {
+      setListProgress(null);
     },
   });
 
@@ -332,7 +370,7 @@ export function Products({ user }: ProductsProps) {
       // Filter to only products that are actually listed on eBay
       const listedProductIds = productIds.filter(id => {
         const product = products.find(p => p.id === id);
-        return product?.listedOnEbay && product?.ebayItemId;
+        return product?.listedOnEbay && (product?.ebayItemId || (product as any)?.ebayOfferId);
       });
       
       // If no products are listed, return early
@@ -495,8 +533,17 @@ export function Products({ user }: ProductsProps) {
            matchesPrice && matchesStock && matchesMarketplace && matchesMoq;
   });
 
+  // Optional sort by Price (salePrice) or TME stock, then paginate.
+  const sortedProducts = sortField
+    ? [...filteredProducts].sort((a, b) => {
+        const av = sortField === "price" ? parseFloat(a.salePrice) || 0 : a.stock ?? 0;
+        const bv = sortField === "price" ? parseFloat(b.salePrice) || 0 : b.stock ?? 0;
+        return sortDir === "desc" ? bv - av : av - bv;
+      })
+    : filteredProducts;
+
   // Paginate products based on itemsPerPage
-  const displayedProducts = filteredProducts.slice(0, itemsPerPage);
+  const displayedProducts = sortedProducts.slice(0, itemsPerPage);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -669,12 +716,19 @@ export function Products({ user }: ProductsProps) {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => bulkListToEbayMutation.mutate(Array.from(selectedProducts))}
+                        onClick={() => {
+                          setListingCount(selectedProducts.size);
+                          bulkListToEbayMutation.mutate(Array.from(selectedProducts));
+                        }}
                         disabled={bulkListToEbayMutation.isPending}
                         data-testid="btn-bulk-ebay"
                       >
-                        <Upload className="w-3 h-3 mr-1" />
-                        List eBay
+                        {bulkListToEbayMutation.isPending ? (
+                          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                        ) : (
+                          <Upload className="w-3 h-3 mr-1" />
+                        )}
+                        {bulkListToEbayMutation.isPending ? "Listing…" : "List eBay"}
                       </Button>
                       <Button
                         variant="outline"
@@ -845,11 +899,21 @@ export function Products({ user }: ProductsProps) {
                       <th className="px-1 py-2 text-left text-xs font-medium text-gray-500 uppercase" style={{width: '100px'}}>
                         Category
                       </th>
-                      <th className="px-1 py-2 text-right text-xs font-medium text-gray-500 uppercase" style={{width: '55px'}}>
-                        Price
+                      <th
+                        className="px-1 py-2 text-right text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-800"
+                        style={{width: '55px'}}
+                        onClick={() => toggleSort("price")}
+                        title="Sort by price"
+                      >
+                        Price<span className="text-gray-400">{sortArrow("price")}</span>
                       </th>
-                      <th className="px-1 py-2 text-right text-xs font-medium text-gray-500 uppercase" style={{width: '50px'}}>
-                        TME
+                      <th
+                        className="px-1 py-2 text-right text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-800"
+                        style={{width: '50px'}}
+                        onClick={() => toggleSort("stock")}
+                        title="Sort by TME stock"
+                      >
+                        TME<span className="text-gray-400">{sortArrow("stock")}</span>
                       </th>
                       <th className="px-1 py-2 text-right text-xs font-medium text-gray-500 uppercase" style={{width: '45px'}}>
                         eBay
@@ -945,7 +1009,7 @@ export function Products({ user }: ProductsProps) {
                           <div className="flex items-center justify-center gap-1">
                             {product.listedOnEbay && product.ebayItemId ? (
                               <a 
-                                href={`https://www.ebay.co.uk/itm/${product.ebayItemId}`}
+                                href={`https://${ebayDomain}/itm/${product.ebayItemId}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 title={`View on eBay (${product.ebayItemId})`}
@@ -1017,6 +1081,35 @@ export function Products({ user }: ProductsProps) {
         onClose={() => setProductModalOpen(false)}
         product={selectedProduct}
       />
+
+      {/* Inventory-API listing progress */}
+      {bulkListToEbayMutation.isPending && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-gray-900 border-t border-blue-200 shadow-lg">
+          <div className="px-4 py-3 max-w-7xl mx-auto">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                <span className="text-sm font-medium">
+                  Listing on eBay… {listProgress ? `${listProgress.done}/${listProgress.total}` : `${listingCount}`}
+                </span>
+              </div>
+              {listProgress && (
+                <span className="text-xs text-muted-foreground">
+                  {listProgress.published} published
+                  {listProgress.failed ? `, ${listProgress.failed} failed` : ""}
+                  {" · "}{Math.max(0, listProgress.total - listProgress.done)} left
+                </span>
+              )}
+            </div>
+            <div className="mt-2 h-2 w-full overflow-hidden rounded bg-blue-100">
+              <div
+                className="h-full rounded bg-blue-600 transition-all duration-300"
+                style={{ width: listProgress && listProgress.total ? `${Math.round((listProgress.done / listProgress.total) * 100)}%` : "5%" }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Bulk Listing Progress Bar - Fixed at Bottom */}
       {bulkListingProgress && (
@@ -1109,18 +1202,19 @@ export function Products({ user }: ProductsProps) {
 
               {/* Error Details - expandable section */}
               {bulkListingProgress.status === "completed" && bulkListingProgress.failed > 0 && bulkListingProgress.errorDetails && (
-                <div className="mt-2 bg-red-50 dark:bg-red-950/50 rounded px-3 py-2 max-h-20 overflow-y-auto">
+                <div className="mt-2 bg-red-50 dark:bg-red-950/50 rounded px-3 py-2 max-h-64 overflow-y-auto">
                   <p className="text-xs text-red-600 dark:text-red-400 font-medium mb-1">Failed Items:</p>
-                  <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-red-600 dark:text-red-400">
-                    {bulkListingProgress.errorDetails.slice(0, 5).map((err, idx) => (
-                      <span key={idx} className="truncate max-w-xs">
-                        #{err.productId}: {err.error}
-                      </span>
+                  <ul className="flex flex-col gap-1 text-xs text-red-700 dark:text-red-300">
+                    {bulkListingProgress.errorDetails.map((err, idx) => (
+                      <li
+                        key={idx}
+                        className="whitespace-pre-wrap break-words font-mono leading-snug"
+                        title={err.error}
+                      >
+                        <span className="font-semibold">#{err.productId}:</span> {err.error}
+                      </li>
                     ))}
-                    {bulkListingProgress.errorDetails.length > 5 && (
-                      <span className="font-medium">+{bulkListingProgress.errorDetails.length - 5} more</span>
-                    )}
-                  </div>
+                  </ul>
                 </div>
               )}
             </div>

@@ -2,6 +2,11 @@
  * Dynamic Pricing System for eBay Lister CRM
  * Implements tiered margin-based pricing calculation
  */
+import {
+  calculateProfitFloorPrice,
+  type FeeConfig,
+  type Marketplace,
+} from "./fee-model";
 
 export interface PricingTier {
   min: number;
@@ -297,6 +302,87 @@ export function calculatePackagePrice(
     pricePerUnit,
     quantityLabel: formatQuantityLabel(moq)
   };
+}
+
+export interface ProfitFloorOptions {
+  packageSupplierCost: number; // unit supplier price * MOQ
+  weightGrams: number | null | undefined;
+  marketplace: Marketplace;
+  config: FeeConfig;
+}
+
+/**
+ * Raise a tier-priced result up to the price that nets at least
+ * config.targetMinNetProfit (after eBay fees + VAT + shipping residual).
+ * The aspirational tier label/margin is preserved; only finalPrice changes,
+ * and a note is appended when the floor binds. This replaces the role of the
+ * flat €2.00 min for callers that can supply weight + fee config.
+ */
+export function applyProfitFloor<T extends PriceCalculationResult>(
+  result: T,
+  opts: ProfitFloorOptions,
+): T {
+  if (!result.isValid) return result;
+
+  const floorRaw = calculateProfitFloorPrice({
+    packageSupplierCost: opts.packageSupplierCost,
+    weightGrams: opts.weightGrams,
+    marketplace: opts.marketplace,
+    config: opts.config,
+  });
+  if (!isFinite(floorRaw) || floorRaw <= 0) return result;
+
+  // Round up to the next .99 so the floor still nets >= target.
+  let floorPrice = Math.floor(floorRaw) + 0.99;
+  if (floorPrice < floorRaw) floorPrice += 1;
+  floorPrice = Math.min(floorPrice, PRICING_CONFIG.maxPrice);
+
+  if (floorPrice > result.finalPrice) {
+    return {
+      ...result,
+      finalPrice: floorPrice,
+      errors: [
+        ...result.errors,
+        `Raised to €${floorPrice.toFixed(2)} to meet €${opts.config.targetMinNetProfit.toFixed(2)} net profit floor`,
+      ],
+    };
+  }
+  return result;
+}
+
+/**
+ * Single shared entry point: compute the tier price (package-aware) and apply
+ * the net-profit floor. Use this everywhere prices are set so the floor is
+ * applied consistently. packageSupplierCost = unit price * MOQ.
+ */
+export function calculatePriceWithFloor(
+  supplierUnitPrice: number | string,
+  opts: {
+    moq?: number;
+    multiples?: number;
+    weightGrams?: number | null;
+    marketplace?: Marketplace;
+    config: FeeConfig;
+  },
+): PriceCalculationResult {
+  const unit =
+    typeof supplierUnitPrice === "string"
+      ? parseFloat(supplierUnitPrice)
+      : supplierUnitPrice;
+  const moq = opts.moq && opts.moq > 1 ? opts.moq : 1;
+  const multiples = opts.multiples && opts.multiples > 1 ? opts.multiples : 1;
+
+  const base =
+    moq > 1
+      ? calculatePackagePrice(unit, moq, multiples)
+      : calculateDynamicPrice(unit);
+
+  return applyProfitFloor(base, {
+    packageSupplierCost: unit * moq,
+    weightGrams: opts.weightGrams ?? null,
+    marketplace: opts.marketplace ?? "ebay",
+    config: opts.config,
+  });
 }
 
 /**

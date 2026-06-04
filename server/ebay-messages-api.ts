@@ -79,7 +79,7 @@ async function makeXmlRequest(callName: string, xmlBody: string, retries: number
   
   const headers = {
     'Content-Type': 'text/xml',
-    'X-EBAY-API-SITEID': '3', // UK site
+    'X-EBAY-API-SITEID': process.env.EBAY_MARKETPLACE_SITE_ID || '77',
     'X-EBAY-API-COMPATIBILITY-LEVEL': '1225',
     'X-EBAY-API-CALL-NAME': callName,
     'X-EBAY-API-IAF-TOKEN': token,

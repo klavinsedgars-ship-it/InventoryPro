@@ -29,7 +29,7 @@ const BUNDLE_WORDS = [
   'variety', 'varieties'
 ];
 
-function filterBundleWords(text: string): string {
+export function filterBundleWords(text: string): string {
   if (!text) return text;
   
   let filtered = text;
@@ -119,9 +119,31 @@ export class EbayApiService {
   private sandboxUrl = "https://api.sandbox.ebay.com";
   private tradingApiUrl = "https://api.ebay.com/ws/api.dll";
   private sandboxTradingApiUrl = "https://api.sandbox.ebay.com/ws/api.dll";
-  private siteId = "3"; // eBay UK site ID
+  // Marketplace config — env-driven so the same code lists to DE (site 77,
+  // EUR) or any other marketplace without code changes. Defaults to DE
+  // (the active marketplace) when env vars are unset.
+  private siteId = process.env.EBAY_MARKETPLACE_SITE_ID || "77"; // 77=DE, 3=UK
+  private listingCurrency = process.env.EBAY_LISTING_CURRENCY || "EUR";
+  // REST marketplace id derived from the site id (3->EBAY_GB, 77->EBAY_DE...)
+  private marketplaceId = (() => {
+    const map: Record<string, string> = {
+      "0": "EBAY_US", "3": "EBAY_GB", "77": "EBAY_DE",
+      "71": "EBAY_FR", "101": "EBAY_IT", "186": "EBAY_ES",
+    };
+    return map[process.env.EBAY_MARKETPLACE_SITE_ID || "77"] || "EBAY_DE";
+  })();
+  private listingCountry = process.env.EBAY_LISTING_COUNTRY || "LV";
+  private listingLocation = process.env.EBAY_LISTING_LOCATION || "Riga, Latvia";
+  private paymentProfileId =
+    process.env.EBAY_PAYMENT_PROFILE_ID || "209734844019";
+  private returnProfileId =
+    process.env.EBAY_RETURN_PROFILE_ID || "161272624019";
   private authToken?: EbayAuthToken;
   private isProduction = true; // Force production for OAuth token testing
+  // Cache eBay category suggestions per query so we make at most one
+  // GetSuggestedCategories call per distinct product-type query, not per
+  // listing. Keyed by lowercased query string.
+  private categorySuggestionCache = new Map<string, { id: string; name: string }>();
 
   constructor() {
     this.credentials = {
@@ -186,7 +208,7 @@ export class EbayApiService {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
-          'X-EBAY-C-MARKETPLACE-ID': 'EBAY_GB',
+          'X-EBAY-C-MARKETPLACE-ID': this.marketplaceId,
         },
         body: body ? JSON.stringify(body) : undefined,
       });
@@ -265,43 +287,78 @@ export class EbayApiService {
         reason: stockInfo.limitReason
       });
 
-      // Automatically determine the best eBay category for this TME product
-      const categoryMapping = findEbayCategoryForTMEProduct(product);
-      console.log(`Category mapping for ${product.name}:`, {
+      // Determine the best eBay category. Prefer eBay's own
+      // GetSuggestedCategories on the active site (so we get a real DE
+      // category, not the old hardcoded UK 58277), cached per query.
+      // Fall back to the static keyword map only if the API yields nothing.
+      const staticMapping = findEbayCategoryForTMEProduct(product);
+      // Final fallback: an env-set DE catch-all category, NOT the static
+      // map's 58277 (a UK id that resolves to the wrong tree on eBay.de).
+      const envDefault = process.env.EBAY_DEFAULT_CATEGORY_ID;
+      let resolvedCategoryId = envDefault || staticMapping.categoryId;
+      let resolvedCategoryName = envDefault ? "Default (env)" : staticMapping.categoryName;
+      if (!listingDetails.categoryId) {
+        // Query built from the product's own words — most specific first.
+        const query = [product.category, product.name]
+          .filter(Boolean)
+          .join(" ")
+          .replace(/[;|]/g, " ")
+          .slice(0, 80);
+        const suggested = await this.getSuggestedCategory(query);
+        if (suggested) {
+          resolvedCategoryId = suggested.id;
+          resolvedCategoryName = suggested.name;
+        }
+      }
+      const categoryMapping = { categoryId: resolvedCategoryId, categoryName: resolvedCategoryName, confidence: staticMapping.confidence };
+      console.log(`Category resolution for ${product.name}:`, {
         productCategory: product.category,
-        suggestedEbayCategory: categoryMapping.categoryId,
-        categoryName: categoryMapping.categoryName,
-        confidence: categoryMapping.confidence
+        resolvedEbayCategory: resolvedCategoryId,
+        categoryName: resolvedCategoryName,
+        source: listingDetails.categoryId ? "explicit" : "ebay-suggested-or-static",
       });
 
       // Process images to remove TME watermarks
       let processedImageUrls: string[] = [];
       if (product.imageUrl) {
         // Fix protocol-relative URLs (starting with //)
-        const fixedImageUrl = product.imageUrl.startsWith('//') 
-          ? 'https:' + product.imageUrl 
+        const fixedImageUrl = product.imageUrl.startsWith('//')
+          ? 'https:' + product.imageUrl
           : product.imageUrl;
-        
-        try {
-          console.log(`🖼️ Processing image for eBay listing: ${fixedImageUrl}`);
-          const imageResult = await imageProcessingService.removeWatermark(fixedImageUrl);
-          
-          if (imageResult.success && imageResult.processedImageUrl) {
-            // Convert relative URL to absolute URL for eBay
-            const baseUrl = process.env.REPL_URL || 'https://2456a1da-de77-4e0b-816f-7e7cfe47cc15-00-23jr7vbxsin6z.kirk.replit.dev';
-            const absoluteImageUrl = imageResult.processedImageUrl.startsWith('http') 
-              ? imageResult.processedImageUrl 
-              : `${baseUrl}${imageResult.processedImageUrl}`;
-            
-            processedImageUrls = [absoluteImageUrl];
-            console.log(`✅ Watermark removed, using processed image: ${absoluteImageUrl}`);
-          } else {
-            console.log(`⚠️ Watermark removal failed, using original image: ${imageResult.error}`);
+
+        // Try watermark removal. On Vercel that requires BLOB_READ_WRITE_TOKEN
+        // (the result lives in Vercel Blob and is served from a public URL
+        // eBay can fetch). Locally/dev it's saved to disk + served via
+        // /api/images/processed/. If neither persistent target is reachable
+        // we fall back to TME's URL (watermark visible, listing still has
+        // an image).
+        const hasBlob = !!process.env.BLOB_READ_WRITE_TOKEN;
+        const publicBaseUrl = process.env.PUBLIC_BASE_URL || process.env.REPL_URL;
+        const canPersist = hasBlob || !!publicBaseUrl;
+
+        if (!canPersist) {
+          console.log(`🖼️ No persistent image storage configured (BLOB_READ_WRITE_TOKEN or PUBLIC_BASE_URL); using original TME URL: ${fixedImageUrl}`);
+          processedImageUrls = [fixedImageUrl];
+        } else {
+          try {
+            console.log(`🖼️ Processing image for eBay listing: ${fixedImageUrl}`);
+            const imageResult = await imageProcessingService.removeWatermark(fixedImageUrl);
+
+            if (imageResult.success && imageResult.processedImageUrl) {
+              const absoluteImageUrl = imageResult.processedImageUrl.startsWith('http')
+                ? imageResult.processedImageUrl
+                : `${publicBaseUrl}${imageResult.processedImageUrl}`;
+
+              processedImageUrls = [absoluteImageUrl];
+              console.log(`✅ Watermark removed, using processed image: ${absoluteImageUrl}`);
+            } else {
+              console.log(`⚠️ Watermark removal failed, using original image: ${imageResult.error}`);
+              processedImageUrls = [fixedImageUrl];
+            }
+          } catch (error) {
+            console.warn(`⚠️ Image processing failed, using original: ${error}`);
             processedImageUrls = [fixedImageUrl];
           }
-        } catch (error) {
-          console.warn(`⚠️ Image processing failed, using original: ${error}`);
-          processedImageUrls = [fixedImageUrl];
         }
       }
 
@@ -341,6 +398,15 @@ export class EbayApiService {
         pictureURLs: listingDetails.pictureURLs || processedImageUrls,
         shippingPolicyId: shippingPolicyId,
         weight: product.weight,
+        // Item specifics — real product data, not the old hardcoded
+        // "Arduino A000066 Development Board". No brand field exists on
+        // the product, so default to Unbranded; MPN falls back to the
+        // supplier product id / SKU. eBay category specifics requirements
+        // are satisfied without mislabelling every component.
+        sku: product.sku,
+        mpn: product.supplierProductId || product.sku,
+        brand: (listingDetails as any).brand || "Unbranded",
+        itemSpecifics: (listingDetails as any).itemSpecifics,
         shippingDetails: listingDetails.shippingDetails || {
           shippingType: "Flat",
           shippingServiceCost: 5.99
@@ -423,24 +489,31 @@ export class EbayApiService {
             };
           }
           
-          // If actual error, parse and report it - find actual Error-level messages, not just Warnings
-          // Look for errors with SeverityCode=Error (not Warning)
-          const errorBlockRegex = /<Errors>[\s\S]*?<SeverityCode>Error<\/SeverityCode>[\s\S]*?<\/Errors>/g;
-          const errorBlocks = response.match(errorBlockRegex);
-          
+          // Parse each <Errors> block individually, then prefer the one
+          // with SeverityCode=Error. The previous regex spanned across
+          // block boundaries and reported the first (often a harmless
+          // Warning) message instead of the real failure.
+          const allErrorBlocks = response.match(/<Errors>[\s\S]*?<\/Errors>/g) || [];
+          const errorSeverityBlocks = allErrorBlocks.filter((b) =>
+            /<SeverityCode>Error<\/SeverityCode>/.test(b),
+          );
+          const chosen = errorSeverityBlocks[0] || allErrorBlocks[0];
+
           let errorMessage = 'Unknown eBay API error';
-          if (errorBlocks && errorBlocks.length > 0) {
-            // Extract the short message from the first actual error
-            const shortMsgMatch = errorBlocks[0].match(/<ShortMessage>(.*?)<\/ShortMessage>/);
-            const longMsgMatch = errorBlocks[0].match(/<LongMessage>(.*?)<\/LongMessage>/);
-            errorMessage = shortMsgMatch ? shortMsgMatch[1] : (longMsgMatch ? longMsgMatch[1] : errorMessage);
-          } else {
-            // Fallback: get first message if no Error-level found
-            const fallbackMatch = response.match(/<ShortMessage>(.*?)<\/ShortMessage>/) ||
-                                 response.match(/<LongMessage>(.*?)<\/LongMessage>/);
-            errorMessage = fallbackMatch ? fallbackMatch[1] : errorMessage;
+          if (chosen) {
+            // eBay error 240 with a tax/policy block puts the real reason
+            // in ErrorParameters; ShortMessage is generic. Prefer the
+            // longest available text.
+            const longMsg = chosen.match(/<LongMessage>(.*?)<\/LongMessage>/)?.[1];
+            const shortMsg = chosen.match(/<ShortMessage>(.*?)<\/ShortMessage>/)?.[1];
+            const paramVal = chosen.match(/<ErrorParameters[^>]*>\s*<Value>(.*?)<\/Value>/)?.[1];
+            const code = chosen.match(/<ErrorCode>(\d+)<\/ErrorCode>/)?.[1];
+            errorMessage = [longMsg || shortMsg, paramVal && paramVal !== longMsg ? paramVal : null]
+              .filter(Boolean)
+              .join(' — ');
+            if (code) errorMessage = `[eBay ${code}] ${errorMessage}`;
           }
-          
+
           console.log("eBay API Error - Full response:", response);
           throw new Error(`eBay listing failed: ${errorMessage}`);
         }
@@ -528,46 +601,31 @@ export class EbayApiService {
 <VerifyAddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <Item>
     <Title>${this.escapeXml(listingData.title)}</Title>
-    <Description><![CDATA[${listingData.description}]]></Description>
+    <Description><![CDATA[${this.sanitizeCdata(listingData.description)}]]></Description>
     <PrimaryCategory>
       <CategoryID>${listingData.categoryId}</CategoryID>
     </PrimaryCategory>
-    <StartPrice currencyID="GBP">${listingData.startPrice}</StartPrice>
+    <StartPrice currencyID="${this.listingCurrency}">${listingData.startPrice}</StartPrice>
     <Quantity>${listingData.quantity}</Quantity>
     <ListingDuration>GTC</ListingDuration>
-    <Country>LV</Country>
-    <Currency>GBP</Currency>
-    <Location>Riga, Latvia</Location>
+    <Country>${this.listingCountry}</Country>
+    <Currency>${this.listingCurrency}</Currency>
+    <Location>${this.escapeXml(this.listingLocation)}</Location>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
-    <PictureDetails>
-      <PictureURL>${listingData.pictureURLs && listingData.pictureURLs.length > 0 ? this.escapeXml(listingData.pictureURLs[0]) : ""}</PictureURL>
-    </PictureDetails>
+    ${this.buildPictureDetailsXml(listingData.pictureURLs)}
     <SellerProfiles>
       <SellerShippingProfile>
         <ShippingProfileID>${listingData.shippingPolicyId}</ShippingProfileID>
       </SellerShippingProfile>
       <SellerPaymentProfile>
-        <PaymentProfileID>209734844019</PaymentProfileID>
+        <PaymentProfileID>${this.paymentProfileId}</PaymentProfileID>
       </SellerPaymentProfile>
       <SellerReturnProfile>
-        <ReturnProfileID>161272624019</ReturnProfileID>
+        <ReturnProfileID>${this.returnProfileId}</ReturnProfileID>
       </SellerReturnProfile>
     </SellerProfiles>
-    ${listingData.pictureURLs && listingData.pictureURLs.length > 0 ? `<ItemSpecifics>
-      <NameValueList>
-        <Name>Brand</Name>
-        <Value>Arduino</Value>
-      </NameValueList>
-      <NameValueList>
-        <Name>Type</Name>
-        <Value>Development Board</Value>
-      </NameValueList>
-      <NameValueList>
-        <Name>MPN</Name>
-        <Value>${listingData.sku || 'Arduino'}</Value>
-      </NameValueList>
-    </ItemSpecifics>` : ''}
+    ${this.buildItemSpecificsXml(listingData)}
   </Item>
 </VerifyAddFixedPriceItemRequest>`;
   }
@@ -580,53 +638,37 @@ export class EbayApiService {
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <Item>
     <Title>${this.escapeXml(listingData.title)}</Title>
-    <Description><![CDATA[${listingData.description}]]></Description>
+    <Description><![CDATA[${this.sanitizeCdata(listingData.description)}]]></Description>
     <PrimaryCategory>
       <CategoryID>${listingData.categoryId}</CategoryID>
     </PrimaryCategory>
-    <StartPrice currencyID="GBP">${listingData.startPrice}</StartPrice>
+    <StartPrice currencyID="${this.listingCurrency}">${listingData.startPrice}</StartPrice>
     <Quantity>${listingData.quantity}</Quantity>
     <ListingDuration>GTC</ListingDuration>
-    <Country>LV</Country>
-    <Currency>GBP</Currency>
-    <Location>Riga, Latvia</Location>
+    <Country>${this.listingCountry}</Country>
+    <Currency>${this.listingCurrency}</Currency>
+    <Location>${this.escapeXml(this.listingLocation)}</Location>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
-    <PictureDetails>
-      <PictureURL>${listingData.pictureURLs && listingData.pictureURLs.length > 0 ? this.escapeXml(listingData.pictureURLs[0]) : ""}</PictureURL>
-    </PictureDetails>
+    ${this.buildPictureDetailsXml(listingData.pictureURLs)}
     <SellerProfiles>
       <SellerShippingProfile>
         <ShippingProfileID>${listingData.shippingPolicyId}</ShippingProfileID>
       </SellerShippingProfile>
       <SellerPaymentProfile>
-        <PaymentProfileID>209734844019</PaymentProfileID>
+        <PaymentProfileID>${this.paymentProfileId}</PaymentProfileID>
       </SellerPaymentProfile>
       <SellerReturnProfile>
-        <ReturnProfileID>161272624019</ReturnProfileID>
+        <ReturnProfileID>${this.returnProfileId}</ReturnProfileID>
       </SellerReturnProfile>
     </SellerProfiles>
-    <ItemSpecifics>
-      <NameValueList>
-        <Name>Brand</Name>
-        <Value>Arduino</Value>
-      </NameValueList>
-      <NameValueList>
-        <Name>Type</Name>
-        <Value>Development Board</Value>
-      </NameValueList>
-      <NameValueList>
-        <Name>MPN</Name>
-        <Value>A000066</Value>
-      </NameValueList>
-    </ItemSpecifics>
-
+    ${this.buildItemSpecificsXml(listingData)}
   </Item>
 </AddFixedPriceItemRequest>`;
   }
 
   private escapeXml(text: string): string {
-    return text
+    return String(text ?? '')
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
@@ -634,14 +676,62 @@ export class EbayApiService {
       .replace(/'/g, '&#39;');
   }
 
+  // CDATA can't contain the literal sequence "]]>". Split it so the
+  // description survives even if a product description embeds it. Also cap
+  // length — eBay's Description limit is 500k chars.
+  private sanitizeCdata(text: string): string {
+    return String(text ?? '')
+      .replace(/]]>/g, ']]]]><![CDATA[>')
+      .slice(0, 500000);
+  }
+
+  // Emit one <PictureURL> per image (eBay allows up to 24). Falls back to
+  // an empty <PictureDetails/> when there are none.
+  private buildPictureDetailsXml(pictureURLs?: string[]): string {
+    if (!pictureURLs || pictureURLs.length === 0) {
+      return `<PictureDetails></PictureDetails>`;
+    }
+    const urls = pictureURLs
+      .slice(0, 24)
+      .map((url) => `      <PictureURL>${this.escapeXml(url)}</PictureURL>`)
+      .join('\n');
+    return `<PictureDetails>\n${urls}\n    </PictureDetails>`;
+  }
+
+  // Item specifics derived from the product, not hardcoded to Arduino.
+  // Uses whatever the caller provides on listingData.itemSpecifics
+  // (a record of name -> value); falls back to Brand=Unbranded and the
+  // product's SKU as MPN, which satisfies eBay's "required specifics"
+  // for most electronics categories without mislabelling everything as
+  // an Arduino dev board.
+  private buildItemSpecificsXml(listingData: any): string {
+    const specifics: Record<string, string> = {
+      Brand: listingData.brand || 'Unbranded',
+      ...(listingData.mpn || listingData.sku
+        ? { MPN: listingData.mpn || listingData.sku }
+        : {}),
+      ...(listingData.itemSpecifics || {}),
+    };
+
+    const entries = Object.entries(specifics).filter(
+      ([, v]) => v !== undefined && v !== null && String(v).trim() !== '',
+    );
+    if (entries.length === 0) return '';
+
+    const nameValueLists = entries
+      .map(
+        ([name, value]) => `      <NameValueList>
+        <Name>${this.escapeXml(name)}</Name>
+        <Value>${this.escapeXml(String(value))}</Value>
+      </NameValueList>`,
+      )
+      .join('\n');
+
+    return `<ItemSpecifics>\n${nameValueLists}\n    </ItemSpecifics>`;
+  }
+
   private createReviseItemXML(listingData: any): string {
-    const pictureURLs = listingData.pictureURLs || [];
-    
-    const pictureXML = pictureURLs.length > 0 ? `
-      <PictureDetails>
-        ${pictureURLs.map((url: string) => `<PictureURL>${this.escapeXml(url)}</PictureURL>`).join('')}
-      </PictureDetails>
-    ` : '';
+    const pictureXML = this.buildPictureDetailsXml(listingData.pictureURLs);
 
     console.log("createReviseItemXML - Using OAuth via header");
     console.log(`Shipping policy ID for revision: ${listingData.shippingPolicyId}`);
@@ -654,10 +744,10 @@ export class EbayApiService {
         <ShippingProfileID>${listingData.shippingPolicyId}</ShippingProfileID>
       </SellerShippingProfile>
       <SellerPaymentProfile>
-        <PaymentProfileID>209734844019</PaymentProfileID>
+        <PaymentProfileID>${this.paymentProfileId}</PaymentProfileID>
       </SellerPaymentProfile>
       <SellerReturnProfile>
-        <ReturnProfileID>161272624019</ReturnProfileID>
+        <ReturnProfileID>${this.returnProfileId}</ReturnProfileID>
       </SellerReturnProfile>
     </SellerProfiles>` : '';
 
@@ -666,16 +756,16 @@ export class EbayApiService {
   <Item>
     <ItemID>${listingData.itemId}</ItemID>
     <Title>${this.escapeXml(listingData.title)}</Title>
-    <Description><![CDATA[${listingData.description}]]></Description>
+    <Description><![CDATA[${this.sanitizeCdata(listingData.description)}]]></Description>
     <PrimaryCategory>
       <CategoryID>${listingData.categoryId}</CategoryID>
     </PrimaryCategory>
-    <StartPrice currencyID="GBP">${listingData.startPrice}</StartPrice>
+    <StartPrice currencyID="${this.listingCurrency}">${listingData.startPrice}</StartPrice>
     <Quantity>${listingData.quantity}</Quantity>
     <ListingDuration>GTC</ListingDuration>
-    <Country>LV</Country>
-    <Currency>GBP</Currency>
-    <Location>Riga, Latvia</Location>
+    <Country>${this.listingCountry}</Country>
+    <Currency>${this.listingCurrency}</Currency>
+    <Location>${this.escapeXml(this.listingLocation)}</Location>
     <ListingType>FixedPriceItem</ListingType>
     <ConditionID>1000</ConditionID>
     ${pictureXML}${sellerProfilesXML}
@@ -799,12 +889,61 @@ export class EbayApiService {
     };
   }
 
+  /**
+   * Ask eBay for the best category for a free-text query on the configured
+   * site (DE=77). Result cached per query. Returns null on any failure so
+   * the caller can fall back to a default category.
+   */
+  async getSuggestedCategory(query: string): Promise<{ id: string; name: string } | null> {
+    const key = query.trim().toLowerCase();
+    if (!key) return null;
+    if (this.categorySuggestionCache.has(key)) {
+      return this.categorySuggestionCache.get(key)!;
+    }
+    try {
+      // Modern Taxonomy REST API (the legacy Trading GetSuggestedCategories
+      // is blocked at eBay's edge). category_tree_id == site id for the
+      // major marketplaces (DE=77, UK=3, US=0).
+      const token = await ebayOAuth.getValidAccessToken();
+      const treeId = this.siteId;
+      const url =
+        `https://api.ebay.com/commerce/taxonomy/v1/category_tree/${treeId}` +
+        `/get_category_suggestions?q=${encodeURIComponent(query)}`;
+      const resp = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+          "Accept-Language": "de-DE",
+          "X-EBAY-C-MARKETPLACE-ID": this.marketplaceId,
+        },
+      });
+      if (!resp.ok) {
+        console.warn(`Taxonomy suggestions HTTP ${resp.status} for "${query}": ${(await resp.text()).slice(0, 200)}`);
+        return null;
+      }
+      const data = await resp.json();
+      const top = data?.categorySuggestions?.[0]?.category;
+      const id = top?.categoryId;
+      const name = top?.categoryName || "";
+      if (id) {
+        const result = { id: String(id), name };
+        this.categorySuggestionCache.set(key, result);
+        console.log(`🗂️ eBay suggested category for "${query}": ${id} (${name})`);
+        return result;
+      }
+      return null;
+    } catch (err) {
+      console.warn(`Taxonomy get_category_suggestions failed for "${query}":`, (err as Error).message);
+      return null;
+    }
+  }
+
   async getEbayCategories(): Promise<any[]> {
     try {
       console.log('Fetching eBay categories... (using OAuth via header)');
       const xmlBody = `<?xml version="1.0" encoding="utf-8"?>
 <GetCategoriesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <CategorySiteID>0</CategorySiteID>
+  <CategorySiteID>${this.siteId}</CategorySiteID>
   <DetailLevel>ReturnAll</DetailLevel>
   <LevelLimit>4</LevelLimit>
   <ViewAllNodes>true</ViewAllNodes>
@@ -991,7 +1130,7 @@ export class EbayApiService {
         'X-EBAY-API-APP-NAME': this.credentials.appId,
         'X-EBAY-API-CERT-NAME': this.credentials.certId,
         'X-EBAY-API-CALL-NAME': 'GetUser',
-        'X-EBAY-API-SITEID': '3',
+        'X-EBAY-API-SITEID': this.siteId,
         'X-EBAY-API-IAF-TOKEN': oauthToken
       },
       body: xmlBody
@@ -1379,7 +1518,7 @@ export class EbayApiService {
         fields += `\n        <Quantity>${item.quantity}</Quantity>`;
       }
       if (item.price !== undefined) {
-        fields += `\n        <StartPrice currencyID="GBP">${item.price.toFixed(2)}</StartPrice>`;
+        fields += `\n        <StartPrice currencyID="${this.listingCurrency}">${item.price.toFixed(2)}</StartPrice>`;
       }
       return `<InventoryStatus>\n        ${fields}\n      </InventoryStatus>`;
     }).join('\n      ');
