@@ -7,6 +7,7 @@
 import type { Product } from "@shared/schema";
 import { storage } from "./storage";
 import { ebayInventoryApi } from "./ebay-inventory-api";
+import { validateListingEnv } from "./ebay-env";
 
 export interface ListBatchResult {
   attempted: number;
@@ -108,11 +109,28 @@ export async function updateListedProductsViaInventory(
  */
 export async function listProductsViaInventoryBulk(
   allProducts: Product[],
-): Promise<ListBatchResult & { skipped: number }> {
+): Promise<ListBatchResult & { skipped: number; envBlocked?: boolean; envIssues?: { level: string; key: string; message: string }[] }> {
   const results: ListBatchResult["results"] = [];
   let published = 0;
   let failed = 0;
   let limitHit = false;
+
+  // Pre-flight: refuse to start if the env would make every publish fail
+  // (missing policies, image token, OAuth). Otherwise we'd burn quota and
+  // mark thousands of products as errored for one config issue.
+  const env = validateListingEnv();
+  if (!env.ok) {
+    return {
+      attempted: allProducts.length,
+      published: 0,
+      failed: 0,
+      skipped: 0,
+      limitHit: false,
+      results: [],
+      envBlocked: true,
+      envIssues: env.issues,
+    };
+  }
 
   const products = allProducts.filter((p) => (p.stock ?? 0) > 0);
   const skipped = allProducts.length - products.length;

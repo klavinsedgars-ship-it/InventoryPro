@@ -1127,6 +1127,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // cheap aggregate queries (no full-table scans).
   app.get("/api/ops/daily", requireAuth, async (_req, res) => {
     try {
+      const { validateListingEnv } = await import("./ebay-env");
       const [ebayUsage, tmeUsage, queue, listings, logStats, recentLogs, allLogs] =
         await Promise.all([
           storage.getApiUsage("ebay"),
@@ -1137,6 +1138,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           storage.getSyncLogs(15),
           storage.getSyncLogs(200),
         ]);
+      const envCheck = validateListingEnv();
 
       const parseDetails = (l: any) => {
         try { return l?.details ? JSON.parse(l.details) : {}; } catch { return {}; }
@@ -1183,9 +1185,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
           message: l.message,
           syncedAt: l.syncedAt,
         })),
+        listingEnv: {
+          ok: envCheck.ok,
+          rampEnabled: process.env.LISTING_RAMP_ENABLED === "true",
+          issues: envCheck.issues,
+        },
       });
     } catch (error) {
       res.status(500).json({ error: (error as Error).message });
+    }
+  });
+
+  // Manual trigger for the listing ramp (also runs once if you'd rather not
+  // wait for the cron). Returns immediately with this run's stats; the
+  // server self-chains until the ramp finishes or hits a rate limit.
+  app.post("/api/ops/list-ramp/start", requireAuth, async (req, res) => {
+    try {
+      if (process.env.LISTING_RAMP_ENABLED !== "true") {
+        return res.status(412).json({ success: false, error: "LISTING_RAMP_ENABLED is not 'true'" });
+      }
+      const base = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
+      const secret = process.env.CRON_SECRET;
+      // Fire-and-forget: the cron handler logs progress and self-chains.
+      fetch(`${base}/api/cron/list-ramp`, {
+        method: "POST",
+        headers: secret ? { authorization: `Bearer ${secret}` } : {},
+      }).catch(() => {});
+      res.json({ success: true, message: "Listing ramp started (running in background; check Operations for progress)." });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
     }
   });
 
@@ -3952,6 +3980,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
   };
   app.get("/api/cron/daily-sync", cronHandler);
   app.post("/api/cron/daily-sync", cronHandler);
+
+  // Server-side listing ramp: pulls listing candidates from the DB and runs
+  // them through the 25-SKU Inventory-API bulk path within a 270s budget,
+  // self-chaining if more remain. Resumable across cold starts (state lives
+  // on each product's listedOnEbay/ebayOfferId). Gated by LISTING_RAMP_ENABLED
+  // so it doesn't fire by accident — Vercel still schedules it, but the
+  // handler exits cleanly until the flag is set.
+  const listRampHandler = async (req: any, res: any) => {
+    const auth = req.headers["authorization"] || "";
+    const cronSecret = process.env.CRON_SECRET;
+    const isVercelCron = cronSecret && auth === `Bearer ${cronSecret}`;
+    const isAuthed = !!req.session?.userId || process.env.BYPASS_AUTH === "true";
+    if (!isVercelCron && !isAuthed) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    if (process.env.LISTING_RAMP_ENABLED !== "true") {
+      return res.json({ success: true, skipped: true, reason: "LISTING_RAMP_ENABLED not set" });
+    }
+
+    const env = (await import("./ebay-env")).validateListingEnv();
+    if (!env.ok) {
+      return res.status(412).json({ success: false, envBlocked: true, issues: env.issues });
+    }
+
+    const { listProductsViaInventoryBulk } = await import("./ebay-lister");
+    const budgetMs = 270_000;
+    const start = Date.now();
+    const batchSize = 25; // matches the bulk endpoint capacity per call
+    let batches = 0;
+    let published = 0;
+    let failed = 0;
+    let skipped = 0;
+    let limitHit = false;
+    let lastBatchSize = 0;
+    try {
+      while (Date.now() - start < budgetMs && !limitHit) {
+        const candidates = await storage.getListingCandidates(batchSize);
+        lastBatchSize = candidates.length;
+        if (candidates.length === 0) break;
+        const r = await listProductsViaInventoryBulk(candidates as any);
+        batches++;
+        published += r.published;
+        failed += r.failed;
+        skipped += r.skipped ?? 0;
+        if (r.limitHit) limitHit = true;
+      }
+
+      const done = !limitHit && lastBatchSize < batchSize;
+
+      await storage.createSyncLog({
+        source: "ebay",
+        operation: "list_ramp",
+        status: failed > 0 ? "partial" : "success",
+        message: `List ramp: ${batches} batches, ${published} published, ${failed} failed, ${skipped} skipped${limitHit ? " (limit hit)" : ""}`,
+        details: JSON.stringify({ batches, published, failed, skipped, limitHit, done }),
+      });
+
+      // Self-chain: keep going with a fresh 300s budget until the ramp is
+      // drained or a rate-limit pause is needed.
+      if (!done && !limitHit) {
+        const base = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
+        const secret = process.env.CRON_SECRET;
+        fetch(`${base}/api/cron/list-ramp`, {
+          method: "POST",
+          headers: secret ? { authorization: `Bearer ${secret}` } : {},
+        }).catch(() => {});
+      }
+
+      res.json({ success: true, batches, published, failed, skipped, limitHit, done, elapsedMs: Date.now() - start });
+    } catch (error) {
+      console.error("List ramp failed:", error);
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  };
+  app.get("/api/cron/list-ramp", listRampHandler);
+  app.post("/api/cron/list-ramp", listRampHandler);
 
   app.post("/api/sync/trigger-daily", requireAuth, async (req, res) => {
     try {

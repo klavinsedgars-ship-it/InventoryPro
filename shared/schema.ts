@@ -152,6 +152,18 @@ export const tmeProductCache = pgTable("tme_product_cache", {
   expiresAt: timestamp("expires_at").notNull(), // When cache should be refreshed (24 hours)
 });
 
+// eBay Taxonomy Cache - persists Taxonomy lookups (category suggestions and
+// required-aspects per category) across serverless cold starts. Avoids
+// re-spending Taxonomy quota on every new function instance.
+export const ebayTaxonomyCache = pgTable("ebay_taxonomy_cache", {
+  id: serial("id").primaryKey(),
+  // "suggest:<treeId>:<query>" or "aspects:<treeId>:<categoryId>"
+  cacheKey: text("cache_key").notNull().unique(),
+  value: text("value").notNull(), // JSON string
+  expiresAt: timestamp("expires_at").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // eBay Business Policies - Payment Policies
 export const ebayPaymentPolicies = pgTable("ebay_payment_policies", {
   id: serial("id").primaryKey(),

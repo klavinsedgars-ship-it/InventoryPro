@@ -1,10 +1,12 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import {
   Activity,
   RefreshCw,
@@ -13,6 +15,8 @@ import {
   Server,
   Boxes,
   ListChecks,
+  Rocket,
+  ShieldAlert,
 } from "lucide-react";
 
 interface OpsProps {
@@ -48,6 +52,11 @@ interface OpsData {
     notYetListed: number;
   };
   recentLogs: Array<{ source: string; operation: string; status: string; message: string; syncedAt: string }>;
+  listingEnv: {
+    ok: boolean;
+    rampEnabled: boolean;
+    issues: Array<{ level: "error" | "warning"; key: string; message: string }>;
+  };
 }
 
 const fmt = (n: number | undefined) => (n ?? 0).toLocaleString();
@@ -117,10 +126,28 @@ const statusBadge = (status: string) => {
 
 export function OpsDashboard({ user }: OpsProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const { toast } = useToast();
+  const qc = useQueryClient();
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery<OpsData>({
     queryKey: ["/api/ops/daily"],
     refetchInterval: 60000, // auto-refresh each minute
+  });
+
+  const startRamp = useMutation({
+    mutationFn: async () => {
+      const r = await apiRequest("POST", "/api/ops/list-ramp/start", {});
+      return r.json();
+    },
+    onSuccess: (d: any) => {
+      if (d?.success) {
+        toast({ title: "Listing ramp started", description: d.message });
+        setTimeout(() => qc.invalidateQueries({ queryKey: ["/api/ops/daily"] }), 2000);
+      } else {
+        toast({ title: "Could not start ramp", description: d?.error || "Unknown error", variant: "destructive" });
+      }
+    },
+    onError: (e: any) => toast({ title: "Could not start ramp", description: e.message, variant: "destructive" }),
   });
 
   return (
@@ -135,9 +162,16 @@ export function OpsDashboard({ user }: OpsProps) {
               <Activity className="w-4 h-4" />
               {data?.date ? `Snapshot for ${data.date} (UTC)` : "Loading…"}
             </div>
-            <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
-              <RefreshCw className={`w-4 h-4 mr-2 ${isFetching ? "animate-spin" : ""}`} /> Refresh
-            </Button>
+            <div className="flex gap-2">
+              {data?.listingEnv.rampEnabled && data.listingEnv.ok && (
+                <Button size="sm" onClick={() => startRamp.mutate()} disabled={startRamp.isPending}>
+                  <Rocket className="w-4 h-4 mr-2" /> Start listing ramp
+                </Button>
+              )}
+              <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+                <RefreshCw className={`w-4 h-4 mr-2 ${isFetching ? "animate-spin" : ""}`} /> Refresh
+              </Button>
+            </div>
           </div>
 
           {isLoading && <div className="text-gray-400">Loading operations data…</div>}
@@ -145,6 +179,38 @@ export function OpsDashboard({ user }: OpsProps) {
 
           {data && (
             <>
+              {/* Listing readiness (env validation) */}
+              {(data.listingEnv.issues.length > 0 || !data.listingEnv.rampEnabled) && (
+                <Card className={!data.listingEnv.ok ? "border-red-200 bg-red-50/40" : data.listingEnv.issues.length > 0 ? "border-amber-200 bg-amber-50/40" : ""}>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium flex items-center gap-2">
+                      <ShieldAlert className="w-4 h-4" />
+                      Listing readiness
+                      {data.listingEnv.ok ? (
+                        <Badge variant="outline" className="text-green-700 border-green-300">ready</Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-red-700 border-red-300">blocked</Badge>
+                      )}
+                      {data.listingEnv.rampEnabled ? (
+                        <Badge variant="outline" className="text-blue-700 border-blue-300">ramp enabled</Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-gray-600 border-gray-300">ramp paused</Badge>
+                      )}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="text-sm space-y-1">
+                    {data.listingEnv.issues.length === 0 && (
+                      <div className="text-gray-600">All required env vars set. Set <code>LISTING_RAMP_ENABLED=true</code> to start auto-listing on the cron.</div>
+                    )}
+                    {data.listingEnv.issues.map((i, n) => (
+                      <div key={n} className={i.level === "error" ? "text-red-700" : "text-amber-700"}>
+                        <b>{i.level === "error" ? "✖" : "⚠"} {i.key}:</b> {i.message}
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              )}
+
               {/* API usage */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <UsageCard label="eBay" used={data.apiCalls.ebay.callsToday} limit={data.apiCalls.ebay.dailyLimit} resetAt={data.apiCalls.ebay.lastResetAt} />

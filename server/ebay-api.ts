@@ -900,6 +900,14 @@ export class EbayApiService {
     if (this.categorySuggestionCache.has(key)) {
       return this.categorySuggestionCache.get(key)!;
     }
+    // DB-backed cache: survives serverless cold starts (the in-memory Map
+    // above empties on every new function instance).
+    const cacheKey = `suggest:${this.siteId}:${key}`;
+    const cached = await storage.getTaxonomyCache(cacheKey);
+    if (cached) {
+      this.categorySuggestionCache.set(key, cached);
+      return cached;
+    }
     try {
       // Modern Taxonomy REST API (the legacy Trading GetSuggestedCategories
       // is blocked at eBay's edge). category_tree_id == site id for the
@@ -928,6 +936,7 @@ export class EbayApiService {
       if (id) {
         const result = { id: String(id), name };
         this.categorySuggestionCache.set(key, result);
+        await storage.setTaxonomyCache(cacheKey, result); // 30-day TTL
         console.log(`🗂️ eBay suggested category for "${query}": ${id} (${name})`);
         return result;
       }
