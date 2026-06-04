@@ -3,9 +3,9 @@
  * timeout. Instead of one long-running pass over all products (which
  * exceeds the 60s limit and can't run as a background loop on serverless),
  * each call processes the N *stalest* TME products (those not yet synced
- * today), refreshes their price/stock/MOQ from TME, recomputes pricing,
- * updates the DB, and pushes inventory changes to eBay for already-listed
- * items.
+ * today), refreshes their price/stock from TME (via the optimized combined
+ * endpoint, 100/call), recomputes pricing, updates the DB, and pushes
+ * inventory changes to eBay for already-listed items.
  *
  * Callers loop until `done`:
  *   - Manual "Sync Now": the browser drives the loop, showing progress.
@@ -13,12 +13,25 @@
  *     budget.
  */
 import { storage } from "./storage";
-import { tmeApi } from "./tme-api";
+import { tmeApiOptimized } from "./tme-api-optimized";
 import {
   getSupplierPriceForMoq,
   calculatePriceWithFloor,
 } from "./dynamic-pricing";
 import { getFeeConfig } from "./fee-config";
+
+// Sum stock across TME warehouses (StockList), falling back to the flat
+// Amount field, then to the value we already hold in the DB.
+function extractStock(
+  ps: { StockList?: Array<{ Amount: number }>; Amount?: number },
+  fallback: number,
+): number {
+  if (ps.StockList && ps.StockList.length > 0) {
+    return ps.StockList.reduce((sum, w) => sum + (w.Amount || 0), 0);
+  }
+  if (typeof ps.Amount === "number") return ps.Amount;
+  return fallback;
+}
 
 export interface SyncChunkResult {
   total: number; // total TME products
@@ -32,9 +45,8 @@ export interface SyncChunkResult {
 
 // A product is "stale" if it hasn't been synced within this many hours.
 // Default 12h -> each product refreshes ~2x/day. Tune via SYNC_STALE_HOURS.
-// Keeps TME usage under its ~10k/day cap as the catalog grows toward 100k:
-// 100k/50*2 calls = ~4k calls/pass * 2 passes/day = ~8k/day. (Switching the
-// cron to the optimized combined endpoint would cut this ~4x further.)
+// With the optimized combined endpoint (100 symbols/call), 100k products =
+// ~1k calls/pass * 2 passes/day = ~2k/day, well under TME's ~10k/day cap.
 function staleCutoff(): Date {
   const hours = Number(process.env.SYNC_STALE_HOURS) || 12;
   return new Date(Date.now() - hours * 3600 * 1000);
@@ -56,36 +68,43 @@ export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
   const feeConfig = await getFeeConfig("ebay");
 
   const symbols = slice.map((p) => p.supplierProductId || p.sku);
-  let enhanced: Awaited<ReturnType<typeof tmeApi.getEnhancedProductInfo>> = [];
+  // Optimized client: one combined GetPricesAndStocks call per 100 symbols
+  // (vs the standard client's 2 calls per 50), and it persists the count via
+  // storage.trackApiCall('tme'). MOQ/multiples/weight come from the DB row
+  // (captured at import/list time and effectively static), so the cron needs
+  // no per-product GetProducts call — ~4x fewer TME calls at 100k scale.
+  let priceStocks: Awaited<ReturnType<typeof tmeApiOptimized.getProductsPricesAndStocks>> = [];
   try {
-    enhanced = await tmeApi.getEnhancedProductInfo(symbols);
+    priceStocks = await tmeApiOptimized.getProductsPricesAndStocks(symbols);
   } catch (e) {
     errors.push(`TME fetch failed: ${(e as Error).message}`);
   }
-  const bySymbol = new Map(enhanced.map((e) => [e.product?.Symbol, e]));
+  const bySymbol = new Map(priceStocks.map((ps) => [ps.Symbol, ps]));
 
   let changed = 0;
   // Inventory-model listings (offerId) -> bulkUpdatePriceQuantity.
   const inventoryUpdates: Array<{ product: any; quantity: number; price: number }> = [];
   const now = new Date();
+  // Collect DB writes and flush them together at the end of the chunk
+  // instead of awaiting one round-trip per product (the old bottleneck).
+  const writes: Array<Promise<unknown>> = [];
 
   for (const product of slice) {
     const sym = product.supplierProductId || product.sku;
-    const info = bySymbol.get(sym);
+    const ps = bySymbol.get(sym);
 
     // Couldn't fetch this one: still bump lastSyncedAt so the cursor
-    // advances (it retries on the next day's sync), but record nothing.
-    if (!info) {
-      await storage.updateProduct(product.id, { lastSyncedAt: now });
+    // advances (it retries on the next sync), but record nothing.
+    if (!ps) {
+      writes.push(storage.updateProduct(product.id, { lastSyncedAt: now }));
       continue;
     }
 
-    const moq = info.product?.MinAmount || product.moq || 1;
-    const multiples = info.product?.Multiples || product.multiples || 1;
-    const supplierPrice = getSupplierPriceForMoq(info.price?.PriceList as any, moq);
-    const stock = info.stock?.Amount ?? product.stock ?? 0;
-    const weightGrams =
-      info.product?.Weight ?? (product.weight ? parseFloat(product.weight) : null);
+    const moq = product.moq || 1;
+    const multiples = product.multiples || 1;
+    const supplierPrice = getSupplierPriceForMoq(ps.PriceList as any, moq);
+    const stock = extractStock(ps, product.stock ?? 0);
+    const weightGrams = product.weight ? parseFloat(product.weight) : null;
 
     const pricing =
       supplierPrice > 0
@@ -104,8 +123,6 @@ export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
 
     const update: any = { lastSyncedAt: now, stock };
     if (supplierPrice > 0) update.supplierPrice = String(supplierPrice);
-    if (info.product?.MinAmount) update.moq = info.product.MinAmount;
-    if (info.product?.Multiples) update.multiples = info.product.Multiples;
     if (pricing && product.useCalculatedPrice !== false) {
       update.salePrice = String(pricing.finalPrice);
       update.calculatedPrice = String(pricing.calculatedPrice);
@@ -113,7 +130,7 @@ export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
       update.marginPercentage = String(pricing.marginPercentage);
       update.priceUpdatedAt = now;
     }
-    await storage.updateProduct(product.id, update);
+    writes.push(storage.updateProduct(product.id, update));
 
     if (priceChanged || stockChanged) {
       changed++;
@@ -131,6 +148,14 @@ export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
         });
       }
     }
+  }
+
+  // Flush this chunk's DB writes concurrently (pool-bounded) rather than
+  // serially — the main per-chunk latency win at scale.
+  if (writes.length > 0) {
+    const settled = await Promise.allSettled(writes);
+    const failedWrites = settled.filter((s) => s.status === "rejected").length;
+    if (failedWrites > 0) errors.push(`DB writes: ${failedWrites} failed`);
   }
 
   let ebayUpdated = 0;

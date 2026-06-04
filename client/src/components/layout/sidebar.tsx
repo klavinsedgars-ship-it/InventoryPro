@@ -19,12 +19,14 @@ import {
   ChevronLeft,
   ChevronRight,
   Menu,
-  MessageSquare
+  MessageSquare,
+  Activity
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
+  { name: 'Operations', href: '/ops', icon: Activity },
   { name: 'Products', href: '/products', icon: Package },
   { name: 'Orders', href: '/orders', icon: ClipboardList },
   { name: 'Messages', href: '/messages', icon: MessageSquare },

@@ -937,6 +937,40 @@ var init_storage = __esm({
       async getSyncLogs(limit = 50) {
         return await db.select().from(syncLogs).orderBy(desc(syncLogs.syncedAt)).limit(limit);
       }
+      // Ops dashboard: today's job run counts per source + error rollup,
+      // computed DB-side (not by loading rows into JS). "Today" is UTC day.
+      async getSyncLogStatsToday() {
+        const grouped = await db.execute(sql`
+      SELECT source,
+             COUNT(*)::int AS n,
+             COUNT(*) FILTER (WHERE status = 'error')::int AS errs
+      FROM sync_logs
+      WHERE synced_at >= date_trunc('day', now())
+      GROUP BY source
+    `);
+        const bySource = {};
+        let total = 0;
+        let errors = 0;
+        for (const r of grouped.rows ?? grouped) {
+          bySource[r.source] = Number(r.n);
+          total += Number(r.n);
+          errors += Number(r.errs);
+        }
+        const errRes = await db.execute(sql`
+      SELECT source, operation, message, synced_at
+      FROM sync_logs
+      WHERE status = 'error' AND synced_at >= date_trunc('day', now())
+      ORDER BY synced_at DESC
+      LIMIT 10
+    `);
+        const recentErrors = (errRes.rows ?? errRes).map((r) => ({
+          source: r.source,
+          operation: r.operation,
+          message: r.message,
+          syncedAt: r.synced_at
+        }));
+        return { bySource, total, errors, recentErrors };
+      }
       async createSyncLog(insertLog) {
         const [log] = await db.insert(syncLogs).values(insertLog).returning();
         return log;
@@ -5210,6 +5244,7 @@ var init_ebay_inventory_api = __esm({
     init_shipping_policies();
     init_stock_manager();
     init_image_processing();
+    init_storage();
     INV_BASE = "https://api.ebay.com/sell/inventory/v1";
     EbayInventoryApiService = class {
       currency = process.env.EBAY_LISTING_CURRENCY || "EUR";
@@ -5286,18 +5321,33 @@ var init_ebay_inventory_api = __esm({
         };
       }
       async req(method, path2, body) {
-        const resp = await fetch(`${INV_BASE}${path2}`, {
-          method,
-          headers: await this.headers(),
-          body: body !== void 0 ? JSON.stringify(body) : void 0
-        });
-        const text2 = await resp.text();
-        let data = null;
-        try {
-          data = text2 ? JSON.parse(text2) : null;
-        } catch {
+        const maxAttempts = 4;
+        for (let attempt = 1; ; attempt++) {
+          const resp = await fetch(`${INV_BASE}${path2}`, {
+            method,
+            headers: await this.headers(),
+            body: body !== void 0 ? JSON.stringify(body) : void 0
+          });
+          try {
+            await storage.trackApiCall("ebay");
+          } catch {
+          }
+          if ((resp.status === 429 || resp.status >= 500) && attempt < maxAttempts) {
+            const retryAfter = Number(resp.headers.get("retry-after"));
+            const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1e3 : Math.min(16e3, 1e3 * 2 ** (attempt - 1));
+            await resp.body?.cancel?.().catch(() => {
+            });
+            await new Promise((r) => setTimeout(r, waitMs));
+            continue;
+          }
+          const text2 = await resp.text();
+          let data = null;
+          try {
+            data = text2 ? JSON.parse(text2) : null;
+          } catch {
+          }
+          return { ok: resp.ok, status: resp.status, data, text: text2 };
         }
-        return { ok: resp.ok, status: resp.status, data, text: text2 };
       }
       firstEbayError(data, text2) {
         const e = data?.errors?.[0];
@@ -5964,6 +6014,7 @@ var init_dynamic_pricing = __esm({
 var ebay_lister_exports = {};
 __export(ebay_lister_exports, {
   listProductsViaInventory: () => listProductsViaInventory,
+  listProductsViaInventoryBulk: () => listProductsViaInventoryBulk,
   updateListedProductsViaInventory: () => updateListedProductsViaInventory
 });
 async function listProductsViaInventory(allProducts) {
@@ -6030,6 +6081,96 @@ async function updateListedProductsViaInventory(items) {
     }
   }
   return { updated, failed, limitHit };
+}
+async function listProductsViaInventoryBulk(allProducts) {
+  const results = [];
+  let published = 0;
+  let failed = 0;
+  let limitHit = false;
+  const products2 = allProducts.filter((p) => (p.stock ?? 0) > 0);
+  const skipped = allProducts.length - products2.length;
+  for (const p of allProducts.filter((p2) => (p2.stock ?? 0) <= 0)) {
+    results.push({ sku: p.sku, ok: false, error: "skipped: out of stock" });
+  }
+  for (let i = 0; i < products2.length && !limitHit; i += 25) {
+    const batch = products2.slice(i, i + 25);
+    const withCat = [];
+    for (const product of batch) {
+      const categoryId = await ebayInventoryApi.resolveCategory(product);
+      if (!categoryId) {
+        failed++;
+        results.push({ sku: product.sku, ok: false, error: "no category resolved" });
+        await storage.updateProduct(product.id, {
+          ebayListingStatus: "error",
+          ebayListingError: "no category resolved"
+        });
+        continue;
+      }
+      withCat.push({ product, categoryId });
+    }
+    if (withCat.length === 0) continue;
+    const productBySku = new Map(withCat.map(({ product }) => [product.sku, product]));
+    const invRes = await ebayInventoryApi.bulkCreateOrReplaceInventoryItem(withCat);
+    const offerInputs = withCat.filter(({ product }) => invRes.get(product.sku)?.ok);
+    for (const { product } of withCat) {
+      const r = invRes.get(product.sku);
+      if (r && !r.ok) {
+        failed++;
+        results.push({ sku: product.sku, ok: false, error: `inventory_item: ${r.error}` });
+        await storage.updateProduct(product.id, {
+          ebayListingStatus: "error",
+          ebayListingError: String(r.error).slice(0, 500)
+        });
+        if (LIMIT_RX.test(String(r.error))) limitHit = true;
+      }
+    }
+    if (offerInputs.length === 0) continue;
+    const offerRes = await ebayInventoryApi.bulkCreateOffer(offerInputs);
+    const toPublish = [];
+    for (const { product } of offerInputs) {
+      const r = offerRes.get(product.sku);
+      if (r?.ok && r.offerId) {
+        toPublish.push({ sku: product.sku, offerId: r.offerId });
+      } else {
+        failed++;
+        results.push({ sku: product.sku, ok: false, error: `offer: ${r?.error}` });
+        await storage.updateProduct(product.id, {
+          ebayOfferId: r?.offerId ?? null,
+          ebayListingStatus: r?.offerId ? "offer_created" : "error",
+          ebayListingError: String(r?.error).slice(0, 500)
+        });
+        if (LIMIT_RX.test(String(r?.error))) limitHit = true;
+      }
+    }
+    if (toPublish.length === 0) continue;
+    const pubRes = await ebayInventoryApi.bulkPublishOffer(toPublish);
+    for (const { sku, offerId } of toPublish) {
+      const product = productBySku.get(sku);
+      const r = pubRes.get(sku);
+      if (r?.ok && r.listingId) {
+        published++;
+        results.push({ sku, ok: true, listingId: r.listingId });
+        await storage.updateProduct(product.id, {
+          listedOnEbay: true,
+          ebayOfferId: offerId,
+          ebayListingId: r.listingId,
+          ebayItemId: r.listingId,
+          ebayListingStatus: "published",
+          ebayListingError: null
+        });
+      } else {
+        failed++;
+        results.push({ sku, ok: false, error: `publish: ${r?.error}` });
+        await storage.updateProduct(product.id, {
+          ebayOfferId: offerId,
+          ebayListingStatus: "offer_created",
+          ebayListingError: String(r?.error).slice(0, 500)
+        });
+        if (LIMIT_RX.test(String(r?.error))) limitHit = true;
+      }
+    }
+  }
+  return { attempted: allProducts.length, published, failed, limitHit, skipped, results };
 }
 var LIMIT_RX;
 var init_ebay_lister = __esm({
@@ -7426,8 +7567,14 @@ async function triggerManualSync() {
 
 // server/sync-chunk.ts
 init_storage();
-init_tme_api();
 init_dynamic_pricing();
+function extractStock(ps, fallback) {
+  if (ps.StockList && ps.StockList.length > 0) {
+    return ps.StockList.reduce((sum, w) => sum + (w.Amount || 0), 0);
+  }
+  if (typeof ps.Amount === "number") return ps.Amount;
+  return fallback;
+}
 function staleCutoff() {
   const hours = Number(process.env.SYNC_STALE_HOURS) || 12;
   return new Date(Date.now() - hours * 3600 * 1e3);
@@ -7442,28 +7589,29 @@ async function runSyncChunk(limit = 50) {
   }
   const feeConfig = await getFeeConfig("ebay");
   const symbols = slice.map((p) => p.supplierProductId || p.sku);
-  let enhanced = [];
+  let priceStocks = [];
   try {
-    enhanced = await tmeApi.getEnhancedProductInfo(symbols);
+    priceStocks = await tmeApiOptimized.getProductsPricesAndStocks(symbols);
   } catch (e) {
     errors.push(`TME fetch failed: ${e.message}`);
   }
-  const bySymbol = new Map(enhanced.map((e) => [e.product?.Symbol, e]));
+  const bySymbol = new Map(priceStocks.map((ps) => [ps.Symbol, ps]));
   let changed = 0;
   const inventoryUpdates = [];
   const now = /* @__PURE__ */ new Date();
+  const writes = [];
   for (const product of slice) {
     const sym = product.supplierProductId || product.sku;
-    const info = bySymbol.get(sym);
-    if (!info) {
-      await storage.updateProduct(product.id, { lastSyncedAt: now });
+    const ps = bySymbol.get(sym);
+    if (!ps) {
+      writes.push(storage.updateProduct(product.id, { lastSyncedAt: now }));
       continue;
     }
-    const moq = info.product?.MinAmount || product.moq || 1;
-    const multiples = info.product?.Multiples || product.multiples || 1;
-    const supplierPrice = getSupplierPriceForMoq(info.price?.PriceList, moq);
-    const stock = info.stock?.Amount ?? product.stock ?? 0;
-    const weightGrams = info.product?.Weight ?? (product.weight ? parseFloat(product.weight) : null);
+    const moq = product.moq || 1;
+    const multiples = product.multiples || 1;
+    const supplierPrice = getSupplierPriceForMoq(ps.PriceList, moq);
+    const stock = extractStock(ps, product.stock ?? 0);
+    const weightGrams = product.weight ? parseFloat(product.weight) : null;
     const pricing = supplierPrice > 0 ? calculatePriceWithFloor(supplierPrice, {
       moq,
       multiples,
@@ -7476,8 +7624,6 @@ async function runSyncChunk(limit = 50) {
     const stockChanged = (product.stock || 0) !== stock;
     const update = { lastSyncedAt: now, stock };
     if (supplierPrice > 0) update.supplierPrice = String(supplierPrice);
-    if (info.product?.MinAmount) update.moq = info.product.MinAmount;
-    if (info.product?.Multiples) update.multiples = info.product.Multiples;
     if (pricing && product.useCalculatedPrice !== false) {
       update.salePrice = String(pricing.finalPrice);
       update.calculatedPrice = String(pricing.calculatedPrice);
@@ -7485,7 +7631,7 @@ async function runSyncChunk(limit = 50) {
       update.marginPercentage = String(pricing.marginPercentage);
       update.priceUpdatedAt = now;
     }
-    await storage.updateProduct(product.id, update);
+    writes.push(storage.updateProduct(product.id, update));
     if (priceChanged || stockChanged) {
       changed++;
       if (product.listedOnEbay && product.ebayOfferId) {
@@ -7497,6 +7643,11 @@ async function runSyncChunk(limit = 50) {
         });
       }
     }
+  }
+  if (writes.length > 0) {
+    const settled = await Promise.allSettled(writes);
+    const failedWrites = settled.filter((s) => s.status === "rejected").length;
+    if (failedWrites > 0) errors.push(`DB writes: ${failedWrites} failed`);
   }
   let ebayUpdated = 0;
   if (inventoryUpdates.length > 0) {
@@ -8829,7 +8980,7 @@ async function registerRoutes(app) {
   });
   app.post("/api/ebay/inventory-list-batch", requireAuth, async (req, res) => {
     try {
-      const { listProductsViaInventory: listProductsViaInventory2 } = await Promise.resolve().then(() => (init_ebay_lister(), ebay_lister_exports));
+      const { listProductsViaInventory: listProductsViaInventory2, listProductsViaInventoryBulk: listProductsViaInventoryBulk2 } = await Promise.resolve().then(() => (init_ebay_lister(), ebay_lister_exports));
       let products2;
       if (Array.isArray(req.body?.productIds) && req.body.productIds.length) {
         products2 = (await Promise.all(req.body.productIds.map((id) => storage.getProduct(id)))).filter(Boolean);
@@ -8838,8 +8989,8 @@ async function registerRoutes(app) {
         products2 = await storage.getListingCandidates(limit);
       }
       if (!products2.length) return res.json({ success: true, attempted: 0, published: 0, failed: 0, message: "No candidates" });
-      const result = await listProductsViaInventory2(products2);
-      res.json({ success: true, ...result });
+      const result = req.body?.mode === "single" ? await listProductsViaInventory2(products2) : await listProductsViaInventoryBulk2(products2);
+      res.json({ success: true, mode: req.body?.mode === "single" ? "single" : "bulk", ...result });
     } catch (error) {
       console.error("Inventory list-batch failed:", error);
       res.status(500).json({ success: false, error: error.message });
@@ -9131,6 +9282,69 @@ async function registerRoutes(app) {
         cronCanPush: s.listedWithOfferId,
         cronSkipsLegacy: s.listedItemIdOnly,
         note: "Cron pushes price/stock to eBay only for listed products with ebay_offer_id (Inventory API). cronSkipsLegacy are listed via Trading-API ebay_item_id only and are NOT updated on eBay by the cron."
+      });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.get("/api/ops/daily", requireAuth, async (_req, res) => {
+    try {
+      const [ebayUsage, tmeUsage, queue, listings, logStats, recentLogs, allLogs] = await Promise.all([
+        storage.getApiUsage("ebay"),
+        storage.getApiUsage("tme"),
+        storage.getSyncQueueStats(),
+        storage.getEbayListingStats(),
+        storage.getSyncLogStatsToday(),
+        storage.getSyncLogs(15),
+        storage.getSyncLogs(200)
+      ]);
+      const parseDetails = (l) => {
+        try {
+          return l?.details ? JSON.parse(l.details) : {};
+        } catch {
+          return {};
+        }
+      };
+      const lastCron = allLogs.find((l) => l.source === "tme" && l.operation === "cron_sync");
+      res.json({
+        date: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
+        apiCalls: {
+          ebay: {
+            callsToday: ebayUsage?.callsToday ?? 0,
+            dailyLimit: 2e6,
+            // eBay Sell/Inventory API approved-app cap
+            lastResetAt: ebayUsage?.lastResetAt ?? null,
+            updatedAt: ebayUsage?.updatedAt ?? null
+          },
+          tme: {
+            callsToday: tmeUsage?.callsToday ?? 0,
+            dailyLimit: tmeUsage?.dailyLimit ?? 1e4,
+            lastResetAt: tmeUsage?.lastResetAt ?? null,
+            updatedAt: tmeUsage?.updatedAt ?? null
+          }
+        },
+        jobs: {
+          runsToday: logStats.bySource,
+          totalRunsToday: logStats.total,
+          errorsToday: logStats.errors,
+          recentErrors: logStats.recentErrors,
+          lastCronSync: lastCron ? { status: lastCron.status, at: lastCron.syncedAt, ...parseDetails(lastCron) } : null
+        },
+        queue,
+        listings: {
+          totalTme: listings.totalTme,
+          listedOnEbay: listings.listed,
+          listedWithOfferId: listings.listedWithOfferId,
+          listedLegacyItemIdOnly: listings.listedItemIdOnly,
+          notYetListed: Math.max(0, listings.totalTme - listings.listed)
+        },
+        recentLogs: recentLogs.map((l) => ({
+          source: l.source,
+          operation: l.operation,
+          status: l.status,
+          message: l.message,
+          syncedAt: l.syncedAt
+        }))
       });
     } catch (error) {
       res.status(500).json({ error: error.message });

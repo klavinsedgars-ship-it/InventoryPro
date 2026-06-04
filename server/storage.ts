@@ -579,6 +579,46 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(syncLogs).orderBy(desc(syncLogs.syncedAt)).limit(limit);
   }
 
+  // Ops dashboard: today's job run counts per source + error rollup,
+  // computed DB-side (not by loading rows into JS). "Today" is UTC day.
+  async getSyncLogStatsToday(): Promise<{
+    bySource: Record<string, number>;
+    total: number;
+    errors: number;
+    recentErrors: Array<{ source: string; operation: string; message: string; syncedAt: string }>;
+  }> {
+    const grouped: any = await db.execute(sql`
+      SELECT source,
+             COUNT(*)::int AS n,
+             COUNT(*) FILTER (WHERE status = 'error')::int AS errs
+      FROM sync_logs
+      WHERE synced_at >= date_trunc('day', now())
+      GROUP BY source
+    `);
+    const bySource: Record<string, number> = {};
+    let total = 0;
+    let errors = 0;
+    for (const r of (grouped.rows ?? grouped)) {
+      bySource[r.source] = Number(r.n);
+      total += Number(r.n);
+      errors += Number(r.errs);
+    }
+    const errRes: any = await db.execute(sql`
+      SELECT source, operation, message, synced_at
+      FROM sync_logs
+      WHERE status = 'error' AND synced_at >= date_trunc('day', now())
+      ORDER BY synced_at DESC
+      LIMIT 10
+    `);
+    const recentErrors = (errRes.rows ?? errRes).map((r: any) => ({
+      source: r.source,
+      operation: r.operation,
+      message: r.message,
+      syncedAt: r.synced_at,
+    }));
+    return { bySource, total, errors, recentErrors };
+  }
+
   async createSyncLog(insertLog: InsertSyncLog): Promise<SyncLog> {
     const [log] = await db
       .insert(syncLogs)

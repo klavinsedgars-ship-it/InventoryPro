@@ -744,7 +744,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // products; or { productIds: [...] } to list specific ones.
   app.post("/api/ebay/inventory-list-batch", requireAuth, async (req, res) => {
     try {
-      const { listProductsViaInventory } = await import("./ebay-lister");
+      const { listProductsViaInventory, listProductsViaInventoryBulk } = await import("./ebay-lister");
       let products;
       if (Array.isArray(req.body?.productIds) && req.body.productIds.length) {
         products = (await Promise.all(req.body.productIds.map((id: number) => storage.getProduct(id)))).filter(Boolean);
@@ -753,8 +753,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         products = await storage.getListingCandidates(limit);
       }
       if (!products.length) return res.json({ success: true, attempted: 0, published: 0, failed: 0, message: "No candidates" });
-      const result = await listProductsViaInventory(products as any);
-      res.json({ success: true, ...result });
+      // Default to the 25-SKU bulk path (the listing ramp); pass
+      // mode:"single" to force the proven one-at-a-time flow.
+      const result = req.body?.mode === "single"
+        ? await listProductsViaInventory(products as any)
+        : await listProductsViaInventoryBulk(products as any);
+      res.json({ success: true, mode: req.body?.mode === "single" ? "single" : "bulk", ...result });
     } catch (error) {
       console.error("Inventory list-batch failed:", error);
       res.status(500).json({ success: false, error: (error as Error).message });
@@ -1111,6 +1115,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
         note:
           "Cron pushes price/stock to eBay only for listed products with ebay_offer_id (Inventory API). " +
           "cronSkipsLegacy are listed via Trading-API ebay_item_id only and are NOT updated on eBay by the cron.",
+      });
+    } catch (error) {
+      res.status(500).json({ error: (error as Error).message });
+    }
+  });
+
+  // Compact daily-operations snapshot for the Operations page: API calls
+  // used today (eBay + TME, persisted), job runs/errors today, sync queue
+  // depth, eBay listing breakdown, and the most recent sync logs. All from
+  // cheap aggregate queries (no full-table scans).
+  app.get("/api/ops/daily", requireAuth, async (_req, res) => {
+    try {
+      const [ebayUsage, tmeUsage, queue, listings, logStats, recentLogs, allLogs] =
+        await Promise.all([
+          storage.getApiUsage("ebay"),
+          storage.getApiUsage("tme"),
+          storage.getSyncQueueStats(),
+          storage.getEbayListingStats(),
+          storage.getSyncLogStatsToday(),
+          storage.getSyncLogs(15),
+          storage.getSyncLogs(200),
+        ]);
+
+      const parseDetails = (l: any) => {
+        try { return l?.details ? JSON.parse(l.details) : {}; } catch { return {}; }
+      };
+      const lastCron = allLogs.find((l) => l.source === "tme" && l.operation === "cron_sync");
+
+      res.json({
+        date: new Date().toISOString().slice(0, 10),
+        apiCalls: {
+          ebay: {
+            callsToday: ebayUsage?.callsToday ?? 0,
+            dailyLimit: 2_000_000, // eBay Sell/Inventory API approved-app cap
+            lastResetAt: ebayUsage?.lastResetAt ?? null,
+            updatedAt: ebayUsage?.updatedAt ?? null,
+          },
+          tme: {
+            callsToday: tmeUsage?.callsToday ?? 0,
+            dailyLimit: tmeUsage?.dailyLimit ?? 10_000,
+            lastResetAt: tmeUsage?.lastResetAt ?? null,
+            updatedAt: tmeUsage?.updatedAt ?? null,
+          },
+        },
+        jobs: {
+          runsToday: logStats.bySource,
+          totalRunsToday: logStats.total,
+          errorsToday: logStats.errors,
+          recentErrors: logStats.recentErrors,
+          lastCronSync: lastCron
+            ? { status: lastCron.status, at: lastCron.syncedAt, ...parseDetails(lastCron) }
+            : null,
+        },
+        queue,
+        listings: {
+          totalTme: listings.totalTme,
+          listedOnEbay: listings.listed,
+          listedWithOfferId: listings.listedWithOfferId,
+          listedLegacyItemIdOnly: listings.listedItemIdOnly,
+          notYetListed: Math.max(0, listings.totalTme - listings.listed),
+        },
+        recentLogs: recentLogs.map((l) => ({
+          source: l.source,
+          operation: l.operation,
+          status: l.status,
+          message: l.message,
+          syncedAt: l.syncedAt,
+        })),
       });
     } catch (error) {
       res.status(500).json({ error: (error as Error).message });

@@ -21,6 +21,7 @@ import ImageProcessingPage from "./pages/image-processing";
 import { EbayPolicies } from "@/pages/ebay-policies";
 import { Orders } from "@/pages/orders";
 import MessagesPage from "@/pages/messages";
+import { OpsDashboard } from "@/pages/ops-dashboard";
 
 type User = {
   id: number;
@@ -62,6 +63,7 @@ function AppContent() {
   return (
     <Switch>
       <Route path="/" component={() => <Dashboard user={user} />} />
+      <Route path="/ops" component={() => <OpsDashboard user={user} />} />
       <Route path="/products" component={() => <Products user={user} />} />
       <Route path="/marketplaces" component={() => <Marketplaces user={user} />} />
       <Route path="/sync" component={() => <TMESync user={user} />} />
