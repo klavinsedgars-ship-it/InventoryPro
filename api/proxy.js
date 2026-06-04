@@ -20,6 +20,7 @@ __export(schema_exports, {
   ebayFulfillmentPolicies: () => ebayFulfillmentPolicies,
   ebayPaymentPolicies: () => ebayPaymentPolicies,
   ebayReturnPolicies: () => ebayReturnPolicies,
+  ebayTaxonomyCache: () => ebayTaxonomyCache,
   insertApiUsageTrackingSchema: () => insertApiUsageTrackingSchema,
   insertAutoMessageRuleSchema: () => insertAutoMessageRuleSchema,
   insertBulkListingJobSchema: () => insertBulkListingJobSchema,
@@ -64,7 +65,7 @@ __export(schema_exports, {
 import { pgTable, text, serial, integer, boolean, decimal, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
-var users, products, categories, marketplaceSettings, syncLogs, syncQueue, pricingTiers, shippingPolicies, apiUsageTracking, bulkListingJobs, tmeProductCache, ebayPaymentPolicies, ebayFulfillmentPolicies, ebayReturnPolicies, orders, orderItems, orderFees, orderEvents, insertUserSchema, insertProductSchema, insertCategorySchema, insertMarketplaceSettingsSchema, insertSyncLogSchema, insertSyncQueueSchema, insertPricingTierSchema, insertShippingPolicySchema, insertApiUsageTrackingSchema, insertTmeProductCacheSchema, insertBulkListingJobSchema, insertEbayPaymentPolicySchema, insertEbayFulfillmentPolicySchema, insertEbayReturnPolicySchema, insertOrderSchema, insertOrderItemSchema, insertOrderFeeSchema, insertOrderEventSchema, loginSchema, OrderStatus, messageThreads, messages, messageTemplates, autoMessageRules, scheduledMessages, insertMessageThreadSchema, insertMessageSchema, insertMessageTemplateSchema, insertAutoMessageRuleSchema, insertScheduledMessageSchema, Marketplace;
+var users, products, categories, marketplaceSettings, syncLogs, syncQueue, pricingTiers, shippingPolicies, apiUsageTracking, bulkListingJobs, tmeProductCache, ebayTaxonomyCache, ebayPaymentPolicies, ebayFulfillmentPolicies, ebayReturnPolicies, orders, orderItems, orderFees, orderEvents, insertUserSchema, insertProductSchema, insertCategorySchema, insertMarketplaceSettingsSchema, insertSyncLogSchema, insertSyncQueueSchema, insertPricingTierSchema, insertShippingPolicySchema, insertApiUsageTrackingSchema, insertTmeProductCacheSchema, insertBulkListingJobSchema, insertEbayPaymentPolicySchema, insertEbayFulfillmentPolicySchema, insertEbayReturnPolicySchema, insertOrderSchema, insertOrderItemSchema, insertOrderFeeSchema, insertOrderEventSchema, loginSchema, OrderStatus, messageThreads, messages, messageTemplates, autoMessageRules, scheduledMessages, insertMessageThreadSchema, insertMessageSchema, insertMessageTemplateSchema, insertAutoMessageRuleSchema, insertScheduledMessageSchema, Marketplace;
 var init_schema = __esm({
   "shared/schema.ts"() {
     "use strict";
@@ -247,6 +248,15 @@ var init_schema = __esm({
       // When data was fetched
       expiresAt: timestamp("expires_at").notNull()
       // When cache should be refreshed (24 hours)
+    });
+    ebayTaxonomyCache = pgTable("ebay_taxonomy_cache", {
+      id: serial("id").primaryKey(),
+      // "suggest:<treeId>:<query>" or "aspects:<treeId>:<categoryId>"
+      cacheKey: text("cache_key").notNull().unique(),
+      value: text("value").notNull(),
+      // JSON string
+      expiresAt: timestamp("expires_at").notNull(),
+      updatedAt: timestamp("updated_at").defaultNow()
     });
     ebayPaymentPolicies = pgTable("ebay_payment_policies", {
       id: serial("id").primaryKey(),
@@ -1169,6 +1179,50 @@ var init_storage = __esm({
         const now = /* @__PURE__ */ new Date();
         const result = await db.delete(tmeProductCache).where(lte(tmeProductCache.expiresAt, now));
         return result.rowCount ?? 0;
+      }
+      // eBay Taxonomy cache (category suggestions + required-aspects per
+      // category). DB-backed so it survives serverless cold starts — eliminates
+      // re-spending Taxonomy quota every time a new function instance warms up.
+      // Lazy CREATE TABLE IF NOT EXISTS avoids needing a separate migration.
+      taxonomyTableEnsured = false;
+      async ensureTaxonomyTable() {
+        if (this.taxonomyTableEnsured) return;
+        await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS ebay_taxonomy_cache (
+        id SERIAL PRIMARY KEY,
+        cache_key TEXT NOT NULL UNIQUE,
+        value TEXT NOT NULL,
+        expires_at TIMESTAMP NOT NULL,
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+        this.taxonomyTableEnsured = true;
+      }
+      async getTaxonomyCache(key) {
+        await this.ensureTaxonomyTable();
+        const now = /* @__PURE__ */ new Date();
+        const rows = await db.select().from(ebayTaxonomyCache).where(and(eq(ebayTaxonomyCache.cacheKey, key), gte(ebayTaxonomyCache.expiresAt, now))).limit(1);
+        if (rows[0]) {
+          try {
+            return JSON.parse(rows[0].value);
+          } catch {
+            return null;
+          }
+        }
+        return null;
+      }
+      async setTaxonomyCache(key, value, ttlHours = 24 * 30) {
+        await this.ensureTaxonomyTable();
+        const expiresAt = new Date(Date.now() + ttlHours * 3600 * 1e3);
+        const payload = JSON.stringify(value);
+        await db.execute(sql`
+      INSERT INTO ebay_taxonomy_cache (cache_key, value, expires_at, updated_at)
+      VALUES (${key}, ${payload}, ${expiresAt}, NOW())
+      ON CONFLICT (cache_key) DO UPDATE
+        SET value = EXCLUDED.value,
+            expires_at = EXCLUDED.expires_at,
+            updated_at = NOW()
+    `);
       }
       // Bulk Listing Jobs - track progress of bulk listing operations
       async createBulkListingJob(job) {
@@ -4537,6 +4591,12 @@ ${nameValueLists}
         if (this.categorySuggestionCache.has(key)) {
           return this.categorySuggestionCache.get(key);
         }
+        const cacheKey = `suggest:${this.siteId}:${key}`;
+        const cached = await storage.getTaxonomyCache(cacheKey);
+        if (cached) {
+          this.categorySuggestionCache.set(key, cached);
+          return cached;
+        }
         try {
           const token = await ebayOAuth.getValidAccessToken();
           const treeId = this.siteId;
@@ -4560,6 +4620,7 @@ ${nameValueLists}
           if (id) {
             const result = { id: String(id), name };
             this.categorySuggestionCache.set(key, result);
+            await storage.setTaxonomyCache(cacheKey, result);
             console.log(`\u{1F5C2}\uFE0F eBay suggested category for "${query}": ${id} (${name})`);
             return result;
           }
@@ -5249,16 +5310,23 @@ var init_ebay_inventory_api = __esm({
     EbayInventoryApiService = class {
       currency = process.env.EBAY_LISTING_CURRENCY || "EUR";
       merchantLocationKey = process.env.EBAY_MERCHANT_LOCATION_KEY || "default-location";
-      // Cache the required-aspect spec per category (one Taxonomy call each).
-      aspectCache = /* @__PURE__ */ new Map();
+      // Per-request memo to avoid duplicate DB hits inside a single batch.
+      aspectMemo = /* @__PURE__ */ new Map();
       /**
-       * Fetch the REQUIRED item aspects for a category (Taxonomy API), cached.
-       * eBay rejects publish if a category-required aspect (e.g. "Produktart")
-       * is missing, and the set differs per category — so we discover them.
+       * Fetch the REQUIRED item aspects for a category (Taxonomy API), cached in
+       * Postgres so the cache survives serverless cold starts. eBay rejects
+       * publish if a category-required aspect (e.g. "Produktart") is missing,
+       * and the set differs per category — so we discover them.
        */
       async getRequiredAspects(categoryId) {
-        if (this.aspectCache.has(categoryId)) return this.aspectCache.get(categoryId);
+        if (this.aspectMemo.has(categoryId)) return this.aspectMemo.get(categoryId);
         const treeId = process.env.EBAY_MARKETPLACE_SITE_ID || "77";
+        const cacheKey = `aspects:${treeId}:${categoryId}`;
+        const cached = await storage.getTaxonomyCache(cacheKey);
+        if (cached) {
+          this.aspectMemo.set(categoryId, cached);
+          return cached;
+        }
         try {
           const token = await ebayOAuth.getValidAccessToken();
           const url = `https://api.ebay.com/commerce/taxonomy/v1/category_tree/${treeId}/get_item_aspects_for_category?category_id=${encodeURIComponent(categoryId)}`;
@@ -5276,7 +5344,8 @@ var init_ebay_inventory_api = __esm({
             name: a.localizedAspectName,
             values: (a.aspectValues || []).map((v) => v.localizedValue)
           }));
-          this.aspectCache.set(categoryId, required);
+          this.aspectMemo.set(categoryId, required);
+          await storage.setTaxonomyCache(cacheKey, required);
           return required;
         } catch {
           return [];
@@ -6010,6 +6079,59 @@ var init_dynamic_pricing = __esm({
   }
 });
 
+// server/ebay-env.ts
+var ebay_env_exports = {};
+__export(ebay_env_exports, {
+  validateListingEnv: () => validateListingEnv
+});
+function validateListingEnv() {
+  const issues = [];
+  for (const k of ["EBAY_OAUTH_CLIENT_ID", "EBAY_OAUTH_CLIENT_SECRET", "EBAY_OAUTH_REFRESH_TOKEN"]) {
+    if (!process.env[k]) issues.push({ level: "error", key: k, message: `${k} is not set \u2014 eBay OAuth will not work.` });
+  }
+  if (!process.env.EBAY_PAYMENT_PROFILE_ID) {
+    issues.push({
+      level: "error",
+      key: "EBAY_PAYMENT_PROFILE_ID",
+      message: "EBAY_PAYMENT_PROFILE_ID is not set \u2014 every offer will fail to publish."
+    });
+  }
+  if (!process.env.EBAY_RETURN_PROFILE_ID) {
+    issues.push({
+      level: "error",
+      key: "EBAY_RETURN_PROFILE_ID",
+      message: "EBAY_RETURN_PROFILE_ID is not set \u2014 every offer will fail to publish."
+    });
+  }
+  if (!process.env.EBAY_MERCHANT_LOCATION_KEY) {
+    issues.push({
+      level: "warning",
+      key: "EBAY_MERCHANT_LOCATION_KEY",
+      message: "EBAY_MERCHANT_LOCATION_KEY unset \u2014 using 'default-location'. Listing will try to create it."
+    });
+  }
+  if (!process.env.BLOB_READ_WRITE_TOKEN && !process.env.PUBLIC_BASE_URL) {
+    issues.push({
+      level: "error",
+      key: "BLOB_READ_WRITE_TOKEN",
+      message: "Neither BLOB_READ_WRITE_TOKEN nor PUBLIC_BASE_URL is set \u2014 listings would publish with raw watermarked supplier images."
+    });
+  }
+  if (!process.env.EBAY_DEFAULT_CATEGORY_ID) {
+    issues.push({
+      level: "warning",
+      key: "EBAY_DEFAULT_CATEGORY_ID",
+      message: "EBAY_DEFAULT_CATEGORY_ID is not set \u2014 if Taxonomy fails for a product it will be skipped."
+    });
+  }
+  return { ok: issues.every((i) => i.level !== "error"), issues };
+}
+var init_ebay_env = __esm({
+  "server/ebay-env.ts"() {
+    "use strict";
+  }
+});
+
 // server/ebay-lister.ts
 var ebay_lister_exports = {};
 __export(ebay_lister_exports, {
@@ -6087,6 +6209,19 @@ async function listProductsViaInventoryBulk(allProducts) {
   let published = 0;
   let failed = 0;
   let limitHit = false;
+  const env = validateListingEnv();
+  if (!env.ok) {
+    return {
+      attempted: allProducts.length,
+      published: 0,
+      failed: 0,
+      skipped: 0,
+      limitHit: false,
+      results: [],
+      envBlocked: true,
+      envIssues: env.issues
+    };
+  }
   const products2 = allProducts.filter((p) => (p.stock ?? 0) > 0);
   const skipped = allProducts.length - products2.length;
   for (const p of allProducts.filter((p2) => (p2.stock ?? 0) <= 0)) {
@@ -6178,6 +6313,7 @@ var init_ebay_lister = __esm({
     "use strict";
     init_storage();
     init_ebay_inventory_api();
+    init_ebay_env();
     LIMIT_RX = /\blimit\b|too many|rate.?limit|2001\b|21917|exceed/i;
   }
 });
@@ -9289,6 +9425,7 @@ async function registerRoutes(app) {
   });
   app.get("/api/ops/daily", requireAuth, async (_req, res) => {
     try {
+      const { validateListingEnv: validateListingEnv2 } = await Promise.resolve().then(() => (init_ebay_env(), ebay_env_exports));
       const [ebayUsage, tmeUsage, queue, listings, logStats, recentLogs, allLogs] = await Promise.all([
         storage.getApiUsage("ebay"),
         storage.getApiUsage("tme"),
@@ -9298,6 +9435,7 @@ async function registerRoutes(app) {
         storage.getSyncLogs(15),
         storage.getSyncLogs(200)
       ]);
+      const envCheck = validateListingEnv2();
       const parseDetails = (l) => {
         try {
           return l?.details ? JSON.parse(l.details) : {};
@@ -9344,10 +9482,32 @@ async function registerRoutes(app) {
           status: l.status,
           message: l.message,
           syncedAt: l.syncedAt
-        }))
+        })),
+        listingEnv: {
+          ok: envCheck.ok,
+          rampEnabled: process.env.LISTING_RAMP_ENABLED === "true",
+          issues: envCheck.issues
+        }
       });
     } catch (error) {
       res.status(500).json({ error: error.message });
+    }
+  });
+  app.post("/api/ops/list-ramp/start", requireAuth, async (req, res) => {
+    try {
+      if (process.env.LISTING_RAMP_ENABLED !== "true") {
+        return res.status(412).json({ success: false, error: "LISTING_RAMP_ENABLED is not 'true'" });
+      }
+      const base = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
+      const secret = process.env.CRON_SECRET;
+      fetch(`${base}/api/cron/list-ramp`, {
+        method: "POST",
+        headers: secret ? { authorization: `Bearer ${secret}` } : {}
+      }).catch(() => {
+      });
+      res.json({ success: true, message: "Listing ramp started (running in background; check Operations for progress)." });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
     }
   });
   app.get("/api/marketplace-settings/:marketplace", requireAuth, async (req, res) => {
@@ -11624,6 +11784,68 @@ async function registerRoutes(app) {
   };
   app.get("/api/cron/daily-sync", cronHandler);
   app.post("/api/cron/daily-sync", cronHandler);
+  const listRampHandler = async (req, res) => {
+    const auth = req.headers["authorization"] || "";
+    const cronSecret = process.env.CRON_SECRET;
+    const isVercelCron = cronSecret && auth === `Bearer ${cronSecret}`;
+    const isAuthed = !!req.session?.userId || process.env.BYPASS_AUTH === "true";
+    if (!isVercelCron && !isAuthed) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    if (process.env.LISTING_RAMP_ENABLED !== "true") {
+      return res.json({ success: true, skipped: true, reason: "LISTING_RAMP_ENABLED not set" });
+    }
+    const env = (await Promise.resolve().then(() => (init_ebay_env(), ebay_env_exports))).validateListingEnv();
+    if (!env.ok) {
+      return res.status(412).json({ success: false, envBlocked: true, issues: env.issues });
+    }
+    const { listProductsViaInventoryBulk: listProductsViaInventoryBulk2 } = await Promise.resolve().then(() => (init_ebay_lister(), ebay_lister_exports));
+    const budgetMs = 27e4;
+    const start = Date.now();
+    const batchSize = 25;
+    let batches = 0;
+    let published = 0;
+    let failed = 0;
+    let skipped = 0;
+    let limitHit = false;
+    let lastBatchSize = 0;
+    try {
+      while (Date.now() - start < budgetMs && !limitHit) {
+        const candidates = await storage.getListingCandidates(batchSize);
+        lastBatchSize = candidates.length;
+        if (candidates.length === 0) break;
+        const r = await listProductsViaInventoryBulk2(candidates);
+        batches++;
+        published += r.published;
+        failed += r.failed;
+        skipped += r.skipped ?? 0;
+        if (r.limitHit) limitHit = true;
+      }
+      const done = !limitHit && lastBatchSize < batchSize;
+      await storage.createSyncLog({
+        source: "ebay",
+        operation: "list_ramp",
+        status: failed > 0 ? "partial" : "success",
+        message: `List ramp: ${batches} batches, ${published} published, ${failed} failed, ${skipped} skipped${limitHit ? " (limit hit)" : ""}`,
+        details: JSON.stringify({ batches, published, failed, skipped, limitHit, done })
+      });
+      if (!done && !limitHit) {
+        const base = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
+        const secret = process.env.CRON_SECRET;
+        fetch(`${base}/api/cron/list-ramp`, {
+          method: "POST",
+          headers: secret ? { authorization: `Bearer ${secret}` } : {}
+        }).catch(() => {
+        });
+      }
+      res.json({ success: true, batches, published, failed, skipped, limitHit, done, elapsedMs: Date.now() - start });
+    } catch (error) {
+      console.error("List ramp failed:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  };
+  app.get("/api/cron/list-ramp", listRampHandler);
+  app.post("/api/cron/list-ramp", listRampHandler);
   app.post("/api/sync/trigger-daily", requireAuth, async (req, res) => {
     try {
       console.log("\u{1F527} Manual daily sync triggered via API");

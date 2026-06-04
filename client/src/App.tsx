@@ -6,14 +6,10 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Dashboard } from "@/pages/dashboard";
 import { Products } from "@/pages/products";
-import { Categories } from "@/pages/categories";
 import { Marketplaces } from "@/pages/marketplaces";
-import { TMESync } from "@/pages/sync";
 import TMEBrowser from "@/pages/tme-browser";
 import { Settings } from "@/pages/settings";
 import { Reports } from "@/pages/reports";
-import { QueueManagement } from "@/pages/queue-management";
-import { TemplatePreview } from "@/pages/template-preview";
 import Configuration from "@/pages/configuration";
 import { Login } from "@/pages/login";
 import NotFound from "@/pages/not-found";
@@ -66,11 +62,8 @@ function AppContent() {
       <Route path="/ops" component={() => <OpsDashboard user={user} />} />
       <Route path="/products" component={() => <Products user={user} />} />
       <Route path="/marketplaces" component={() => <Marketplaces user={user} />} />
-      <Route path="/sync" component={() => <TMESync user={user} />} />
       <Route path="/tme-browser" component={() => <TMEBrowser user={user} />} />
       <Route path="/configuration" component={() => <Configuration user={user} />} />
-      <Route path="/queue" component={() => <QueueManagement user={user} />} />
-      <Route path="/templates" component={() => <TemplatePreview user={user} />} />
       <Route path="/reports" component={() => <Reports user={user} />} />
       <Route path="/settings" component={() => <Settings user={user} />} />
       <Route path="/image-processing" component={() => <ImageProcessingPage />} />

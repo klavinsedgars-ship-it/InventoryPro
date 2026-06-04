@@ -54,17 +54,21 @@ interface StepResult {
 export class EbayInventoryApiService {
   private currency = process.env.EBAY_LISTING_CURRENCY || "EUR";
   private merchantLocationKey = process.env.EBAY_MERCHANT_LOCATION_KEY || "default-location";
-  // Cache the required-aspect spec per category (one Taxonomy call each).
-  private aspectCache = new Map<string, { name: string; values: string[] }[]>();
+  // Per-request memo to avoid duplicate DB hits inside a single batch.
+  private aspectMemo = new Map<string, { name: string; values: string[] }[]>();
 
   /**
-   * Fetch the REQUIRED item aspects for a category (Taxonomy API), cached.
-   * eBay rejects publish if a category-required aspect (e.g. "Produktart")
-   * is missing, and the set differs per category — so we discover them.
+   * Fetch the REQUIRED item aspects for a category (Taxonomy API), cached in
+   * Postgres so the cache survives serverless cold starts. eBay rejects
+   * publish if a category-required aspect (e.g. "Produktart") is missing,
+   * and the set differs per category — so we discover them.
    */
   async getRequiredAspects(categoryId: string): Promise<{ name: string; values: string[] }[]> {
-    if (this.aspectCache.has(categoryId)) return this.aspectCache.get(categoryId)!;
+    if (this.aspectMemo.has(categoryId)) return this.aspectMemo.get(categoryId)!;
     const treeId = process.env.EBAY_MARKETPLACE_SITE_ID || "77";
+    const cacheKey = `aspects:${treeId}:${categoryId}`;
+    const cached = await storage.getTaxonomyCache(cacheKey);
+    if (cached) { this.aspectMemo.set(categoryId, cached); return cached; }
     try {
       const token = await ebayOAuth.getValidAccessToken();
       const url =
@@ -86,7 +90,8 @@ export class EbayInventoryApiService {
           name: a.localizedAspectName as string,
           values: (a.aspectValues || []).map((v: any) => v.localizedValue as string),
         }));
-      this.aspectCache.set(categoryId, required);
+      this.aspectMemo.set(categoryId, required);
+      await storage.setTaxonomyCache(cacheKey, required); // 30-day TTL
       return required;
     } catch {
       return [];

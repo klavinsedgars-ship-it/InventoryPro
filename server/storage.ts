@@ -9,6 +9,7 @@ import {
   shippingPolicies,
   apiUsageTracking,
   tmeProductCache,
+  ebayTaxonomyCache,
   bulkListingJobs,
   ebayPaymentPolicies,
   ebayFulfillmentPolicies,
@@ -912,6 +913,53 @@ export class DatabaseStorage implements IStorage {
     const result = await db.delete(tmeProductCache)
       .where(lte(tmeProductCache.expiresAt, now));
     return result.rowCount ?? 0;
+  }
+
+  // eBay Taxonomy cache (category suggestions + required-aspects per
+  // category). DB-backed so it survives serverless cold starts — eliminates
+  // re-spending Taxonomy quota every time a new function instance warms up.
+  // Lazy CREATE TABLE IF NOT EXISTS avoids needing a separate migration.
+  private taxonomyTableEnsured = false;
+  private async ensureTaxonomyTable(): Promise<void> {
+    if (this.taxonomyTableEnsured) return;
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS ebay_taxonomy_cache (
+        id SERIAL PRIMARY KEY,
+        cache_key TEXT NOT NULL UNIQUE,
+        value TEXT NOT NULL,
+        expires_at TIMESTAMP NOT NULL,
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    this.taxonomyTableEnsured = true;
+  }
+
+  async getTaxonomyCache(key: string): Promise<any | null> {
+    await this.ensureTaxonomyTable();
+    const now = new Date();
+    const rows = await db
+      .select()
+      .from(ebayTaxonomyCache)
+      .where(and(eq(ebayTaxonomyCache.cacheKey, key), gte(ebayTaxonomyCache.expiresAt, now)))
+      .limit(1);
+    if (rows[0]) {
+      try { return JSON.parse(rows[0].value); } catch { return null; }
+    }
+    return null;
+  }
+
+  async setTaxonomyCache(key: string, value: any, ttlHours = 24 * 30): Promise<void> {
+    await this.ensureTaxonomyTable();
+    const expiresAt = new Date(Date.now() + ttlHours * 3600 * 1000);
+    const payload = JSON.stringify(value);
+    await db.execute(sql`
+      INSERT INTO ebay_taxonomy_cache (cache_key, value, expires_at, updated_at)
+      VALUES (${key}, ${payload}, ${expiresAt}, NOW())
+      ON CONFLICT (cache_key) DO UPDATE
+        SET value = EXCLUDED.value,
+            expires_at = EXCLUDED.expires_at,
+            updated_at = NOW()
+    `);
   }
 
   // Bulk Listing Jobs - track progress of bulk listing operations
