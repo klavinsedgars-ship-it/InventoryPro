@@ -130,6 +130,38 @@ interface TMEBrowserProps {
   user: any;
 }
 
+// Persist the categories response across reloads so cold-start failures
+// don't leave the user with an empty tree. The server response is large
+// (~1.7k entries) but well under localStorage limits.
+const TME_CATEGORIES_CACHE_KEY = "tme-categories-cache-v1";
+
+function loadCachedCategoriesResponse(): { categories: TMECategory[] } | undefined {
+  if (typeof window === "undefined") return undefined;
+  try {
+    const raw = window.localStorage.getItem(TME_CATEGORIES_CACHE_KEY);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.categories) && parsed.categories.length > 0) {
+      return parsed;
+    }
+  } catch {
+    // ignore corrupt cache
+  }
+  return undefined;
+}
+
+function saveCachedCategoriesResponse(categories: TMECategory[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      TME_CATEGORIES_CACHE_KEY,
+      JSON.stringify({ categories })
+    );
+  } catch {
+    // quota or disabled storage — non-fatal
+  }
+}
+
 // Build hierarchical category tree from flat list
 function buildCategoryTree(categories: TMECategory[]): TMECategory[] {
   const categoryMap = new Map<string, TMECategory>();
@@ -200,11 +232,32 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // Fetch TME categories
-  const { data: categoriesData, isLoading: categoriesLoading } = useQuery({
+  // Fetch TME categories. The endpoint is slow on Vercel cold starts and
+  // the global queryClient has retry:false, so a single failure used to
+  // leave the tree empty until a manual reload. Override retry locally and
+  // hydrate from localStorage so the user sees categories instantly even
+  // when the network call is still in flight (or fails).
+  const {
+    data: categoriesData,
+    isLoading: categoriesLoading,
+    error: categoriesError,
+    refetch: refetchCategories,
+    isFetching: categoriesFetching,
+  } = useQuery({
     queryKey: ["/api/tme/categories"],
-    staleTime: 5 * 60 * 1000
+    staleTime: 5 * 60 * 1000,
+    retry: 3,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
+    initialData: loadCachedCategoriesResponse,
   });
+
+  // Persist successful responses so the next mount hydrates from cache.
+  useEffect(() => {
+    const cats = (categoriesData as any)?.categories as TMECategory[] | undefined;
+    if (cats && cats.length > 0) {
+      saveCachedCategoriesResponse(cats);
+    }
+  }, [categoriesData]);
 
   // Fetch products for selected category
   const { data: productsData, isLoading: productsLoading, refetch: refetchProducts } = useQuery({
@@ -689,6 +742,26 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                         {[...Array(10)].map((_, i) => (
                           <div key={i} className="h-8 bg-gray-200 rounded animate-pulse"></div>
                         ))}
+                      </div>
+                    ) : categoriesError && rawCategories.length === 0 ? (
+                      <div className="text-center py-6 space-y-3 px-2" data-testid="categories-error">
+                        <AlertCircle className="h-8 w-8 mx-auto text-red-500" />
+                        <p className="text-xs text-gray-700 font-medium">
+                          Failed to load categories
+                        </p>
+                        <p className="text-[10px] text-gray-500 break-words">
+                          {(categoriesError as Error)?.message || "Network error"}
+                        </p>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => refetchCategories()}
+                          disabled={categoriesFetching}
+                          data-testid="btn-retry-categories"
+                        >
+                          <RefreshCw className={`h-3 w-3 mr-1 ${categoriesFetching ? "animate-spin" : ""}`} />
+                          {categoriesFetching ? "Retrying..." : "Retry"}
+                        </Button>
                       </div>
                     ) : (
                       <div className="space-y-0.5">
