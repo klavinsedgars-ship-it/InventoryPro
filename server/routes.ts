@@ -1055,6 +1055,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Marketplace settings (fee rates, VAT, target profit, etc.)
+  app.get("/api/marketplace-settings/:marketplace", requireAuth, async (req, res) => {
+    try {
+      const rows = await storage.getMarketplaceSettings(req.params.marketplace);
+      res.json({ settings: rows });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to load marketplace settings" });
+    }
+  });
+
+  app.put("/api/marketplace-settings/:marketplace", requireAuth, async (req, res) => {
+    try {
+      const marketplace = req.params.marketplace;
+      const settings = req.body?.settings;
+      if (!Array.isArray(settings)) {
+        return res.status(400).json({ message: "settings array is required" });
+      }
+      const saved = [];
+      for (const entry of settings) {
+        if (!entry || typeof entry.setting !== "string") continue;
+        saved.push(
+          await storage.setMarketplaceSetting({
+            marketplace,
+            setting: entry.setting,
+            value: String(entry.value),
+          }),
+        );
+      }
+      res.json({ settings: saved });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to save marketplace settings" });
+    }
+  });
+
   app.post("/api/pricing/bulk-calculate", requireAuth, async (req, res) => {
     try {
       const { productIds } = req.body;

@@ -514,6 +514,25 @@ export class DatabaseStorage implements IStorage {
   }
 
   async setMarketplaceSetting(insertSetting: InsertMarketplaceSettings): Promise<MarketplaceSettings> {
+    // Upsert on (marketplace, setting): update the existing row's value, else
+    // insert. The table has no unique constraint, so do it explicitly.
+    const [existing] = await db
+      .select()
+      .from(marketplaceSettings)
+      .where(
+        and(
+          eq(marketplaceSettings.marketplace, insertSetting.marketplace),
+          eq(marketplaceSettings.setting, insertSetting.setting),
+        ),
+      );
+    if (existing) {
+      const [updated] = await db
+        .update(marketplaceSettings)
+        .set({ value: insertSetting.value })
+        .where(eq(marketplaceSettings.id, existing.id))
+        .returning();
+      return updated;
+    }
     const [setting] = await db
       .insert(marketplaceSettings)
       .values(insertSetting)
