@@ -21,6 +21,7 @@ import { ebayApi, filterBundleWords } from "./ebay-api";
 import { getShippingPolicyId } from "./shipping-policies";
 import { calculateEbayStock } from "./stock-manager";
 import { imageProcessingService } from "./image-processing";
+import { storage } from "./storage";
 
 const INV_BASE = "https://api.ebay.com/sell/inventory/v1";
 
@@ -138,15 +139,35 @@ export class EbayInventoryApiService {
     path: string,
     body?: any,
   ): Promise<{ ok: boolean; status: number; data: any; text: string }> {
-    const resp = await fetch(`${INV_BASE}${path}`, {
-      method,
-      headers: await this.headers(),
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
-    const text = await resp.text();
-    let data: any = null;
-    try { data = text ? JSON.parse(text) : null; } catch {}
-    return { ok: resp.ok, status: resp.status, data, text };
+    const maxAttempts = 4;
+    for (let attempt = 1; ; attempt++) {
+      const resp = await fetch(`${INV_BASE}${path}`, {
+        method,
+        headers: await this.headers(),
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
+      // Count every HTTP call against the daily eBay budget (used by the
+      // ops dashboard / usage endpoints). Best-effort.
+      try { await storage.trackApiCall("ebay"); } catch {}
+
+      // Retry rate-limit (429) and transient 5xx with backoff, honoring
+      // Retry-After when present. Other statuses return immediately.
+      if ((resp.status === 429 || resp.status >= 500) && attempt < maxAttempts) {
+        const retryAfter = Number(resp.headers.get("retry-after"));
+        const waitMs =
+          Number.isFinite(retryAfter) && retryAfter > 0
+            ? retryAfter * 1000
+            : Math.min(16000, 1000 * 2 ** (attempt - 1));
+        await resp.body?.cancel?.().catch(() => {});
+        await new Promise((r) => setTimeout(r, waitMs));
+        continue;
+      }
+
+      const text = await resp.text();
+      let data: any = null;
+      try { data = text ? JSON.parse(text) : null; } catch {}
+      return { ok: resp.ok, status: resp.status, data, text };
+    }
   }
 
   private firstEbayError(data: any, text: string): string {

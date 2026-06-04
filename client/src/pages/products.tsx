@@ -271,9 +271,10 @@ export function Products({ user }: ProductsProps) {
 
   const bulkListToEbayMutation = useMutation({
     mutationFn: async (productIds: number[]) => {
-      // List one product per request so the progress bar advances per item
-      // (total time is the same — the eBay calls dominate — but it moves).
-      const CHUNK = 1;
+      // 25 per request: the server lists each batch via the bulk eBay
+      // endpoints (~3 calls per 25 vs 3 per product). Progress advances per
+      // batch. Fits comfortably inside the serverless function timeout.
+      const CHUNK = 25;
       let published = 0, failed = 0, skipped = 0, done = 0, limitHit = false;
       const failures: string[] = [];
       setListProgress({ done: 0, total: productIds.length, published: 0, failed: 0 });
