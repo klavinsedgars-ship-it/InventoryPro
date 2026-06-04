@@ -9486,6 +9486,9 @@ async function registerRoutes(app) {
         listingEnv: {
           ok: envCheck.ok,
           rampEnabled: process.env.LISTING_RAMP_ENABLED === "true",
+          rampPaused: (await storage.getMarketplaceSettings("ebay")).find(
+            (s) => s.setting === "listing_ramp_paused"
+          )?.value === "true",
           issues: envCheck.issues
         }
       });
@@ -9493,11 +9496,32 @@ async function registerRoutes(app) {
       res.status(500).json({ error: error.message });
     }
   });
+  app.post("/api/ops/list-ramp/preview", requireAuth, async (req, res) => {
+    try {
+      const base = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
+      const secret = process.env.CRON_SECRET;
+      const r = await fetch(`${base}/api/cron/list-ramp?dryRun=1`, {
+        method: "POST",
+        headers: secret ? { authorization: `Bearer ${secret}` } : {}
+      });
+      const data = await r.json().catch(() => ({}));
+      res.status(r.status).json(data);
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
   app.post("/api/ops/list-ramp/start", requireAuth, async (req, res) => {
     try {
+      if (req.body?.confirm !== true) {
+        return res.status(400).json({
+          success: false,
+          error: "Live listing requires {confirm:true}. Use /preview first to see what would be listed."
+        });
+      }
       if (process.env.LISTING_RAMP_ENABLED !== "true") {
         return res.status(412).json({ success: false, error: "LISTING_RAMP_ENABLED is not 'true'" });
       }
+      await storage.setMarketplaceSetting({ marketplace: "ebay", setting: "listing_ramp_paused", value: "false" });
       const base = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
       const secret = process.env.CRON_SECRET;
       fetch(`${base}/api/cron/list-ramp`, {
@@ -9505,7 +9529,23 @@ async function registerRoutes(app) {
         headers: secret ? { authorization: `Bearer ${secret}` } : {}
       }).catch(() => {
       });
-      res.json({ success: true, message: "Listing ramp started (running in background; check Operations for progress)." });
+      res.json({ success: true, message: "Listing ramp started (background). Watch Operations for progress." });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+  app.post("/api/ops/list-ramp/pause", requireAuth, async (_req, res) => {
+    try {
+      await storage.setMarketplaceSetting({ marketplace: "ebay", setting: "listing_ramp_paused", value: "true" });
+      res.json({ success: true, message: "Ramp paused. The current chain will stop before its next batch." });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+  app.post("/api/ops/list-ramp/resume", requireAuth, async (_req, res) => {
+    try {
+      await storage.setMarketplaceSetting({ marketplace: "ebay", setting: "listing_ramp_paused", value: "false" });
+      res.json({ success: true, message: "Ramp un-paused (cron will resume on its next run)." });
     } catch (error) {
       res.status(500).json({ success: false, error: error.message });
     }
@@ -11792,17 +11832,42 @@ async function registerRoutes(app) {
     if (!isVercelCron && !isAuthed) {
       return res.status(401).json({ message: "Unauthorized" });
     }
-    if (process.env.LISTING_RAMP_ENABLED !== "true") {
+    const dryRun = req.query?.dryRun === "1" || req.query?.dryRun === "true" || req.body?.dryRun === true;
+    if (!dryRun && process.env.LISTING_RAMP_ENABLED !== "true") {
       return res.json({ success: true, skipped: true, reason: "LISTING_RAMP_ENABLED not set" });
+    }
+    const paused = (await storage.getMarketplaceSettings("ebay")).find(
+      (s) => s.setting === "listing_ramp_paused"
+    );
+    if (!dryRun && paused?.value === "true") {
+      return res.json({ success: true, skipped: true, reason: "ramp paused" });
     }
     const env = (await Promise.resolve().then(() => (init_ebay_env(), ebay_env_exports))).validateListingEnv();
     if (!env.ok) {
       return res.status(412).json({ success: false, envBlocked: true, issues: env.issues });
     }
+    const batchSize = 25;
+    if (dryRun) {
+      const candidates = await storage.getListingCandidates(batchSize);
+      const totalCandidates = (await storage.getEbayListingStats()).totalTme - (await storage.getEbayListingStats()).listed;
+      return res.json({
+        success: true,
+        dryRun: true,
+        wouldPublishNow: candidates.length,
+        totalCandidatesRemaining: Math.max(0, totalCandidates),
+        sample: candidates.map((p) => ({
+          id: p.id,
+          sku: p.sku,
+          name: p.name,
+          stock: p.stock,
+          salePrice: p.salePrice,
+          supplierPrice: p.supplierPrice
+        }))
+      });
+    }
     const { listProductsViaInventoryBulk: listProductsViaInventoryBulk2 } = await Promise.resolve().then(() => (init_ebay_lister(), ebay_lister_exports));
     const budgetMs = 27e4;
     const start = Date.now();
-    const batchSize = 25;
     let batches = 0;
     let published = 0;
     let failed = 0;
@@ -11811,6 +11876,10 @@ async function registerRoutes(app) {
     let lastBatchSize = 0;
     try {
       while (Date.now() - start < budgetMs && !limitHit) {
+        const stillPaused = (await storage.getMarketplaceSettings("ebay")).find(
+          (s) => s.setting === "listing_ramp_paused"
+        );
+        if (stillPaused?.value === "true") break;
         const candidates = await storage.getListingCandidates(batchSize);
         lastBatchSize = candidates.length;
         if (candidates.length === 0) break;

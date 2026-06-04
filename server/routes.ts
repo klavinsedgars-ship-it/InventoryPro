@@ -1188,6 +1188,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         listingEnv: {
           ok: envCheck.ok,
           rampEnabled: process.env.LISTING_RAMP_ENABLED === "true",
+          rampPaused:
+            (await storage.getMarketplaceSettings("ebay")).find(
+              (s) => s.setting === "listing_ramp_paused",
+            )?.value === "true",
           issues: envCheck.issues,
         },
       });
@@ -1196,22 +1200,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Manual trigger for the listing ramp (also runs once if you'd rather not
-  // wait for the cron). Returns immediately with this run's stats; the
-  // server self-chains until the ramp finishes or hits a rate limit.
+  // Listing-ramp manual controls. Live publishing requires {confirm:true}
+  // in the body so a single click can't ship products by accident.
+  app.post("/api/ops/list-ramp/preview", requireAuth, async (req, res) => {
+    try {
+      const base = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
+      const secret = process.env.CRON_SECRET;
+      // Synchronous call so the caller gets the candidate sample back.
+      const r = await fetch(`${base}/api/cron/list-ramp?dryRun=1`, {
+        method: "POST",
+        headers: secret ? { authorization: `Bearer ${secret}` } : {},
+      });
+      const data = await r.json().catch(() => ({}));
+      res.status(r.status).json(data);
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
   app.post("/api/ops/list-ramp/start", requireAuth, async (req, res) => {
     try {
+      if (req.body?.confirm !== true) {
+        return res.status(400).json({
+          success: false,
+          error: "Live listing requires {confirm:true}. Use /preview first to see what would be listed.",
+        });
+      }
       if (process.env.LISTING_RAMP_ENABLED !== "true") {
         return res.status(412).json({ success: false, error: "LISTING_RAMP_ENABLED is not 'true'" });
       }
+      // Clear any prior pause so this run actually proceeds.
+      await storage.setMarketplaceSetting({ marketplace: "ebay", setting: "listing_ramp_paused", value: "false" });
       const base = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
       const secret = process.env.CRON_SECRET;
-      // Fire-and-forget: the cron handler logs progress and self-chains.
       fetch(`${base}/api/cron/list-ramp`, {
         method: "POST",
         headers: secret ? { authorization: `Bearer ${secret}` } : {},
       }).catch(() => {});
-      res.json({ success: true, message: "Listing ramp started (running in background; check Operations for progress)." });
+      res.json({ success: true, message: "Listing ramp started (background). Watch Operations for progress." });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Immediate stop: set the DB pause flag. Any in-flight self-chain checks
+  // the flag before its next batch and exits cleanly (within ≤270s).
+  app.post("/api/ops/list-ramp/pause", requireAuth, async (_req, res) => {
+    try {
+      await storage.setMarketplaceSetting({ marketplace: "ebay", setting: "listing_ramp_paused", value: "true" });
+      res.json({ success: true, message: "Ramp paused. The current chain will stop before its next batch." });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  app.post("/api/ops/list-ramp/resume", requireAuth, async (_req, res) => {
+    try {
+      await storage.setMarketplaceSetting({ marketplace: "ebay", setting: "listing_ramp_paused", value: "false" });
+      res.json({ success: true, message: "Ramp un-paused (cron will resume on its next run)." });
     } catch (error) {
       res.status(500).json({ success: false, error: (error as Error).message });
     }
@@ -3987,6 +4033,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // on each product's listedOnEbay/ebayOfferId). Gated by LISTING_RAMP_ENABLED
   // so it doesn't fire by accident — Vercel still schedules it, but the
   // handler exits cleanly until the flag is set.
+  //
+  // Safety controls:
+  //  - DB kill-switch: marketplace_settings 'ebay'/'listing_ramp_paused'.
+  //    Setting it to "true" makes the next chain run exit cleanly, which
+  //    means a manual run stops within ≤270s of pausing.
+  //  - Dry-run: ?dryRun=1 or {dryRun:true}. Returns the candidate batch
+  //    that WOULD be listed (sku/name/stock/price) without calling eBay.
   const listRampHandler = async (req: any, res: any) => {
     const auth = req.headers["authorization"] || "";
     const cronSecret = process.env.CRON_SECRET;
@@ -3995,8 +4048,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!isVercelCron && !isAuthed) {
       return res.status(401).json({ message: "Unauthorized" });
     }
-    if (process.env.LISTING_RAMP_ENABLED !== "true") {
+
+    const dryRun =
+      req.query?.dryRun === "1" || req.query?.dryRun === "true" || req.body?.dryRun === true;
+
+    if (!dryRun && process.env.LISTING_RAMP_ENABLED !== "true") {
       return res.json({ success: true, skipped: true, reason: "LISTING_RAMP_ENABLED not set" });
+    }
+
+    // Kill switch: short-circuit before any eBay call.
+    const paused = (await storage.getMarketplaceSettings("ebay")).find(
+      (s) => s.setting === "listing_ramp_paused",
+    );
+    if (!dryRun && paused?.value === "true") {
+      return res.json({ success: true, skipped: true, reason: "ramp paused" });
     }
 
     const env = (await import("./ebay-env")).validateListingEnv();
@@ -4004,10 +4069,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(412).json({ success: false, envBlocked: true, issues: env.issues });
     }
 
+    const batchSize = 25;
+
+    // Dry-run: never call eBay. Return what the next batch WOULD publish.
+    if (dryRun) {
+      const candidates = await storage.getListingCandidates(batchSize);
+      const totalCandidates = (await storage.getEbayListingStats()).totalTme - (await storage.getEbayListingStats()).listed;
+      return res.json({
+        success: true,
+        dryRun: true,
+        wouldPublishNow: candidates.length,
+        totalCandidatesRemaining: Math.max(0, totalCandidates),
+        sample: candidates.map((p: any) => ({
+          id: p.id,
+          sku: p.sku,
+          name: p.name,
+          stock: p.stock,
+          salePrice: p.salePrice,
+          supplierPrice: p.supplierPrice,
+        })),
+      });
+    }
+
     const { listProductsViaInventoryBulk } = await import("./ebay-lister");
     const budgetMs = 270_000;
     const start = Date.now();
-    const batchSize = 25; // matches the bulk endpoint capacity per call
     let batches = 0;
     let published = 0;
     let failed = 0;
@@ -4016,6 +4102,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     let lastBatchSize = 0;
     try {
       while (Date.now() - start < budgetMs && !limitHit) {
+        // Re-check pause flag each batch so an in-flight chain stops on
+        // the first batch after Pause is hit.
+        const stillPaused = (await storage.getMarketplaceSettings("ebay")).find(
+          (s) => s.setting === "listing_ramp_paused",
+        );
+        if (stillPaused?.value === "true") break;
         const candidates = await storage.getListingCandidates(batchSize);
         lastBatchSize = candidates.length;
         if (candidates.length === 0) break;
