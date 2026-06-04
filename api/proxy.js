@@ -825,6 +825,32 @@ var init_storage = __esm({
         const [r] = await db.select({ c: count() }).from(products).where(eq(products.supplier, "TME"));
         return r?.c ?? 0;
       }
+      // Diagnostic: how eBay listing ids are distributed across TME products.
+      // The cron pushes price/stock to eBay only for listed products that carry
+      // an Inventory-API ebay_offer_id. Legacy Trading-API listings have only
+      // ebay_item_id and are currently skipped, so this split tells us how many
+      // changed products the cron can actually update on eBay vs silently skips.
+      async getEbayListingStats() {
+        const r = await db.execute(sql`
+      SELECT
+        COUNT(*) FILTER (WHERE supplier = 'TME') AS total_tme,
+        COUNT(*) FILTER (WHERE supplier = 'TME' AND listed_on_ebay = true) AS listed,
+        COUNT(*) FILTER (WHERE supplier = 'TME' AND listed_on_ebay = true AND ebay_offer_id IS NOT NULL) AS listed_with_offer,
+        COUNT(*) FILTER (WHERE supplier = 'TME' AND listed_on_ebay = true AND ebay_offer_id IS NULL AND ebay_item_id IS NOT NULL) AS listed_item_only,
+        COUNT(*) FILTER (WHERE supplier = 'TME' AND listed_on_ebay = true AND ebay_offer_id IS NULL AND ebay_item_id IS NULL) AS listed_neither,
+        COUNT(*) FILTER (WHERE supplier = 'TME' AND (listed_on_ebay = false OR listed_on_ebay IS NULL) AND ebay_offer_id IS NOT NULL) AS not_listed_with_offer
+      FROM products
+    `);
+        const row = (r.rows ?? r)[0] ?? {};
+        return {
+          totalTme: Number(row.total_tme ?? 0),
+          listed: Number(row.listed ?? 0),
+          listedWithOfferId: Number(row.listed_with_offer ?? 0),
+          listedItemIdOnly: Number(row.listed_item_only ?? 0),
+          listedNeither: Number(row.listed_neither ?? 0),
+          notListedWithOfferId: Number(row.not_listed_with_offer ?? 0)
+        };
+      }
       // Candidates to list on eBay: TME products, in stock, not already listed,
       // not excluded. DB-side filter + limit (no full-table load).
       async getListingCandidates(limit) {
@@ -894,6 +920,16 @@ var init_storage = __esm({
         return await db.select().from(marketplaceSettings).where(eq(marketplaceSettings.marketplace, marketplace));
       }
       async setMarketplaceSetting(insertSetting) {
+        const [existing] = await db.select().from(marketplaceSettings).where(
+          and(
+            eq(marketplaceSettings.marketplace, insertSetting.marketplace),
+            eq(marketplaceSettings.setting, insertSetting.setting)
+          )
+        );
+        if (existing) {
+          const [updated] = await db.update(marketplaceSettings).set({ value: insertSetting.value }).where(eq(marketplaceSettings.id, existing.id)).returning();
+          return updated;
+        }
         const [setting] = await db.insert(marketplaceSettings).values(insertSetting).returning();
         return setting;
       }
@@ -3639,8 +3675,19 @@ function getShippingPolicyName(weightGrams) {
   return policy?.name || DEFAULT_SHIPPING_POLICY_NAME;
 }
 function getShippingPolicyByWeight(weightGrams) {
-  const policyId = getShippingPolicyId(weightGrams);
-  return getShippingPolicyById(policyId);
+  const lightest = SHIPPING_POLICIES.find((p) => p.id === "policy_0_20") || SHIPPING_POLICIES[0] || null;
+  if (weightGrams === null || weightGrams === void 0 || weightGrams <= 0) {
+    return lightest;
+  }
+  for (const policy of SHIPPING_POLICIES) {
+    if (weightGrams >= policy.weightRange.min && weightGrams < policy.weightRange.max) {
+      return policy;
+    }
+  }
+  if (weightGrams >= 2001) {
+    return SHIPPING_POLICIES[SHIPPING_POLICIES.length - 1];
+  }
+  return lightest;
 }
 function validateShippingPolicies() {
   const errors = [];
@@ -5550,13 +5597,133 @@ var init_ebay_inventory_api = __esm({
   }
 });
 
+// server/fee-model.ts
+function resolveFeeConfig(marketplace, settingsRows) {
+  const config = { ...DEFAULT_FEE_CONFIG[marketplace] };
+  if (settingsRows) {
+    for (const row of settingsRows) {
+      const field = SETTING_KEYS[row.setting];
+      if (!field || field === "marketplace") continue;
+      const num = parseFloat(row.value);
+      if (!isNaN(num)) {
+        config[field] = num;
+      }
+    }
+  }
+  return config;
+}
+function feeFractionAndFixed(config) {
+  if (config.marketplace === "amazon") {
+    return { feePct: config.amazonReferralPct, fixed: 0 };
+  }
+  return { feePct: config.ebayFvfPct, fixed: config.ebayFixedFee };
+}
+function calculateNetProfit(input) {
+  const { marketplace, config } = input;
+  const salePrice = toNum(input.salePrice);
+  const supplierCost = toNum(input.packageSupplierCost);
+  const policy = getShippingPolicyByWeight(input.weightGrams ?? null);
+  const buyerShipping = policy ? toNum(policy.price) : 0;
+  const grossRevenue = salePrice + buyerShipping;
+  const { feePct, fixed } = feeFractionAndFixed(config);
+  const marketplaceFee = feePct * grossRevenue + fixed;
+  const actualPostageCost = buyerShipping / (1 + config.postageMarkup);
+  const vatAmount = config.vatPct * salePrice / (1 + config.vatPct);
+  const netProfit = grossRevenue - marketplaceFee - vatAmount - supplierCost - actualPostageCost - config.packagingCost;
+  const netMarginPct = grossRevenue > 0 ? netProfit / grossRevenue * 100 : 0;
+  const assumptions = [
+    `VAT ${(config.vatPct * 100).toFixed(0)}% on item price (VAT-inclusive); shipping VAT ~ washes against input VAT on postage.`,
+    `Carrier cost = band price / ${(1 + config.postageMarkup).toFixed(2)} (${(config.postageMarkup * 100).toFixed(0)}% packaging markup baked into buyer shipping).`,
+    marketplace === "amazon" ? `Amazon referral ${(config.amazonReferralPct * 100).toFixed(1)}% of item + shipping.` : `eBay FVF ${(config.ebayFvfPct * 100).toFixed(1)}% of item + shipping, plus \u20AC${config.ebayFixedFee.toFixed(2)} fixed.`
+  ];
+  return {
+    marketplace,
+    salePrice: round2(salePrice),
+    buyerShipping: round2(buyerShipping),
+    shippingBand: policy?.name ?? null,
+    grossRevenue: round2(grossRevenue),
+    marketplaceFee: round2(marketplaceFee),
+    vatAmount: round2(vatAmount),
+    supplierCost: round2(supplierCost),
+    actualPostageCost: round2(actualPostageCost),
+    packagingCost: round2(config.packagingCost),
+    netProfit: round2(netProfit),
+    netMarginPct: round2(netMarginPct),
+    meetsTarget: netProfit >= config.targetMinNetProfit - 5e-3,
+    assumptions
+  };
+}
+function calculateProfitFloorPrice(input) {
+  const { config } = input;
+  const supplierCost = toNum(input.packageSupplierCost);
+  const policy = getShippingPolicyByWeight(input.weightGrams ?? null);
+  const buyerShipping = policy ? toNum(policy.price) : 0;
+  const { feePct, fixed } = feeFractionAndFixed(config);
+  const vatFrac = config.vatPct / (1 + config.vatPct);
+  const actualPostageCost = buyerShipping / (1 + config.postageMarkup);
+  const denom = 1 - feePct - vatFrac;
+  if (denom <= 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const numerator = config.targetMinNetProfit + fixed + supplierCost + actualPostageCost + config.packagingCost - buyerShipping * (1 - feePct);
+  const price = numerator / denom;
+  return price > 0 ? price : 0;
+}
+function toNum(v) {
+  const n = typeof v === "string" ? parseFloat(v) : v;
+  return isNaN(n) ? 0 : n;
+}
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}
+var DEFAULT_FEE_CONFIG, SETTING_KEYS;
+var init_fee_model = __esm({
+  "server/fee-model.ts"() {
+    "use strict";
+    init_shipping_policies();
+    DEFAULT_FEE_CONFIG = {
+      ebay: {
+        marketplace: "ebay",
+        ebayFvfPct: 0.12,
+        ebayFixedFee: 0.35,
+        amazonReferralPct: 0.15,
+        vatPct: 0.21,
+        packagingCost: 0.3,
+        postageMarkup: 0.15,
+        targetMinNetProfit: 4
+      },
+      amazon: {
+        marketplace: "amazon",
+        ebayFvfPct: 0.12,
+        ebayFixedFee: 0.35,
+        amazonReferralPct: 0.15,
+        vatPct: 0.21,
+        packagingCost: 0.3,
+        postageMarkup: 0.15,
+        targetMinNetProfit: 4
+      }
+    };
+    SETTING_KEYS = {
+      "fee.fvf_pct": "ebayFvfPct",
+      "fee.fixed": "ebayFixedFee",
+      "fee.amazon_pct": "amazonReferralPct",
+      "fee.vat_pct": "vatPct",
+      "fee.packaging": "packagingCost",
+      "fee.postage_markup": "postageMarkup",
+      "fee.target_min_profit": "targetMinNetProfit"
+    };
+  }
+});
+
 // server/dynamic-pricing.ts
 var dynamic_pricing_exports = {};
 __export(dynamic_pricing_exports, {
   PRICING_CONFIG: () => PRICING_CONFIG,
+  applyProfitFloor: () => applyProfitFloor,
   calculateBulkPricing: () => calculateBulkPricing,
   calculateDynamicPrice: () => calculateDynamicPrice,
   calculatePackagePrice: () => calculatePackagePrice,
+  calculatePriceWithFloor: () => calculatePriceWithFloor,
   formatPrice: () => formatPrice,
   formatQuantityLabel: () => formatQuantityLabel,
   generatePricingSummary: () => generatePricingSummary,
@@ -5712,6 +5879,42 @@ function calculatePackagePrice(unitSupplierPrice, moq = 1, multiples = 1) {
     quantityLabel: formatQuantityLabel(moq)
   };
 }
+function applyProfitFloor(result, opts) {
+  if (!result.isValid) return result;
+  const floorRaw = calculateProfitFloorPrice({
+    packageSupplierCost: opts.packageSupplierCost,
+    weightGrams: opts.weightGrams,
+    marketplace: opts.marketplace,
+    config: opts.config
+  });
+  if (!isFinite(floorRaw) || floorRaw <= 0) return result;
+  let floorPrice = Math.floor(floorRaw) + 0.99;
+  if (floorPrice < floorRaw) floorPrice += 1;
+  floorPrice = Math.min(floorPrice, PRICING_CONFIG.maxPrice);
+  if (floorPrice > result.finalPrice) {
+    return {
+      ...result,
+      finalPrice: floorPrice,
+      errors: [
+        ...result.errors,
+        `Raised to \u20AC${floorPrice.toFixed(2)} to meet \u20AC${opts.config.targetMinNetProfit.toFixed(2)} net profit floor`
+      ]
+    };
+  }
+  return result;
+}
+function calculatePriceWithFloor(supplierUnitPrice, opts) {
+  const unit = typeof supplierUnitPrice === "string" ? parseFloat(supplierUnitPrice) : supplierUnitPrice;
+  const moq = opts.moq && opts.moq > 1 ? opts.moq : 1;
+  const multiples = opts.multiples && opts.multiples > 1 ? opts.multiples : 1;
+  const base = moq > 1 ? calculatePackagePrice(unit, moq, multiples) : calculateDynamicPrice(unit);
+  return applyProfitFloor(base, {
+    packageSupplierCost: unit * moq,
+    weightGrams: opts.weightGrams ?? null,
+    marketplace: opts.marketplace ?? "ebay",
+    config: opts.config
+  });
+}
 function formatQuantityLabel(quantity) {
   if (quantity <= 1) return "";
   return `${quantity}x`;
@@ -5735,6 +5938,7 @@ var PRICING_CONFIG;
 var init_dynamic_pricing = __esm({
   "server/dynamic-pricing.ts"() {
     "use strict";
+    init_fee_model();
     PRICING_CONFIG = {
       tiers: [
         // Low-cost component tiers for resistors, capacitors, etc. (reduced margins)
@@ -6406,6 +6610,22 @@ var ebayAccountApi = new EbayAccountApiService();
 
 // server/routes.ts
 init_dynamic_pricing();
+
+// server/fee-config.ts
+init_storage();
+init_fee_model();
+async function getFeeConfig(marketplace = "ebay") {
+  let rows = [];
+  try {
+    rows = await storage.getMarketplaceSettings(marketplace);
+  } catch {
+    rows = [];
+  }
+  return resolveFeeConfig(marketplace, rows);
+}
+
+// server/routes.ts
+init_fee_model();
 init_stock_manager();
 init_image_processing();
 
@@ -6955,6 +7175,7 @@ async function syncToEbay(diffs) {
   try {
     const ebayUpdates = [];
     const productsToEnd = [];
+    const feeConfig = await getFeeConfig("ebay");
     const productsToRelist = [];
     for (const diff of diffs) {
       const product = await storage.getProductBySku(diff.symbol);
@@ -6984,7 +7205,14 @@ async function syncToEbay(diffs) {
         continue;
       }
       const supplierPrice = diff.changes.newPrice || parseFloat(product.supplierPrice?.toString() || "0");
-      const pricingResult = supplierPrice > 0 ? calculateDynamicPrice(supplierPrice) : { finalPrice: parseFloat(product.salePrice?.toString() || "0") };
+      const weightGrams = product.weight ? parseFloat(product.weight) : null;
+      const pricingResult = supplierPrice > 0 ? calculatePriceWithFloor(supplierPrice, {
+        moq: product.moq ?? 1,
+        multiples: product.multiples ?? 1,
+        weightGrams,
+        marketplace: "ebay",
+        config: feeConfig
+      }) : { finalPrice: parseFloat(product.salePrice?.toString() || "0") };
       ebayUpdates.push({
         productId: product.id,
         ebayItemId: product.ebayItemId,
@@ -7212,6 +7440,7 @@ async function runSyncChunk(limit = 50) {
   if (slice.length === 0) {
     return { total, remaining: 0, processedThisChunk: 0, changed: 0, ebayUpdated: 0, done: true, errors };
   }
+  const feeConfig = await getFeeConfig("ebay");
   const symbols = slice.map((p) => p.supplierProductId || p.sku);
   let enhanced = [];
   try {
@@ -7234,7 +7463,14 @@ async function runSyncChunk(limit = 50) {
     const multiples = info.product?.Multiples || product.multiples || 1;
     const supplierPrice = getSupplierPriceForMoq(info.price?.PriceList, moq);
     const stock = info.stock?.Amount ?? product.stock ?? 0;
-    const pricing = supplierPrice > 0 ? moq > 1 ? calculatePackagePrice(supplierPrice, moq, multiples) : calculateDynamicPrice(supplierPrice) : null;
+    const weightGrams = info.product?.Weight ?? (product.weight ? parseFloat(product.weight) : null);
+    const pricing = supplierPrice > 0 ? calculatePriceWithFloor(supplierPrice, {
+      moq,
+      multiples,
+      weightGrams,
+      marketplace: "ebay",
+      config: feeConfig
+    }) : null;
     const localSupplier = parseFloat(product.supplierPrice?.toString() || "0");
     const priceChanged = supplierPrice > 0 && Math.abs(localSupplier - supplierPrice) > 0.01;
     const stockChanged = (product.stock || 0) !== stock;
@@ -8810,14 +9046,215 @@ async function registerRoutes(app) {
   });
   app.post("/api/pricing/calculate", requireAuth, async (req, res) => {
     try {
-      const { supplierPrice } = req.body;
+      const { supplierPrice, weightGrams, moq, multiples, marketplace } = req.body;
       if (!supplierPrice) {
         return res.status(400).json({ message: "Supplier price is required" });
+      }
+      if (weightGrams != null) {
+        const mp = marketplace === "amazon" ? "amazon" : "ebay";
+        const config = await getFeeConfig(mp);
+        const result2 = calculatePriceWithFloor(supplierPrice, {
+          moq: moq != null ? Number(moq) : 1,
+          multiples: multiples != null ? Number(multiples) : 1,
+          weightGrams: Number(weightGrams),
+          marketplace: mp,
+          config
+        });
+        return res.json(result2);
       }
       const result = calculateDynamicPrice(supplierPrice);
       res.json(result);
     } catch (error) {
       res.status(500).json({ message: "Failed to calculate pricing" });
+    }
+  });
+  app.post("/api/pricing/net-profit", requireAuth, async (req, res) => {
+    try {
+      const { salePrice, supplierPrice, moq, weightGrams, marketplace } = req.body;
+      if (salePrice == null || supplierPrice == null) {
+        return res.status(400).json({ message: "salePrice and supplierPrice are required" });
+      }
+      const mp = marketplace === "amazon" ? "amazon" : "ebay";
+      const config = await getFeeConfig(mp);
+      const moqNum = Number(moq) > 1 ? Number(moq) : 1;
+      const packageSupplierCost = Number(supplierPrice) * moqNum;
+      const breakdown = calculateNetProfit({
+        salePrice: Number(salePrice),
+        packageSupplierCost,
+        weightGrams: weightGrams != null ? Number(weightGrams) : null,
+        marketplace: mp,
+        config
+      });
+      res.json(breakdown);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to compute net profit" });
+    }
+  });
+  app.get("/api/__pricing-check", async (req, res) => {
+    try {
+      const supplierPrice = parseFloat(req.query.supplierPrice || "0.5");
+      const weightGrams = req.query.weight ? parseFloat(req.query.weight) : null;
+      const moq = req.query.moq ? parseInt(req.query.moq, 10) : 1;
+      const config = await getFeeConfig("ebay");
+      const tier = calculateDynamicPrice(supplierPrice);
+      const withFloor = calculatePriceWithFloor(supplierPrice, {
+        moq,
+        weightGrams,
+        marketplace: "ebay",
+        config
+      });
+      const breakdown = calculateNetProfit({
+        salePrice: withFloor.finalPrice,
+        packageSupplierCost: supplierPrice * (moq > 1 ? moq : 1),
+        weightGrams,
+        marketplace: "ebay",
+        config
+      });
+      res.json({
+        input: { supplierPrice, weightGrams, moq },
+        targetMinNetProfit: config.targetMinNetProfit,
+        tierPriceNoFloor: tier.finalPrice,
+        finalPriceWithFloor: withFloor.finalPrice,
+        floorApplied: withFloor.finalPrice > tier.finalPrice,
+        netProfitAtFinal: breakdown.netProfit,
+        note: "If floorApplied is true, the \u20AC4-net pricing is live in this deployment."
+      });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.get("/api/__ebay-id-stats", async (_req, res) => {
+    try {
+      const s = await storage.getEbayListingStats();
+      res.json({
+        ...s,
+        cronCanPush: s.listedWithOfferId,
+        cronSkipsLegacy: s.listedItemIdOnly,
+        note: "Cron pushes price/stock to eBay only for listed products with ebay_offer_id (Inventory API). cronSkipsLegacy are listed via Trading-API ebay_item_id only and are NOT updated on eBay by the cron."
+      });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+  app.get("/api/marketplace-settings/:marketplace", requireAuth, async (req, res) => {
+    try {
+      const rows = await storage.getMarketplaceSettings(req.params.marketplace);
+      res.json({ settings: rows });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to load marketplace settings" });
+    }
+  });
+  app.put("/api/marketplace-settings/:marketplace", requireAuth, async (req, res) => {
+    try {
+      const marketplace = req.params.marketplace;
+      const settings = req.body?.settings;
+      if (!Array.isArray(settings)) {
+        return res.status(400).json({ message: "settings array is required" });
+      }
+      const saved = [];
+      for (const entry of settings) {
+        if (!entry || typeof entry.setting !== "string") continue;
+        saved.push(
+          await storage.setMarketplaceSetting({
+            marketplace,
+            setting: entry.setting,
+            value: String(entry.value)
+          })
+        );
+      }
+      res.json({ settings: saved });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to save marketplace settings" });
+    }
+  });
+  app.get("/api/analytics/sales", requireAuth, async (req, res) => {
+    try {
+      const config = await getFeeConfig("ebay");
+      const vatFrac = config.vatPct / (1 + config.vatPct);
+      const round22 = (n) => Math.round(n * 100) / 100;
+      const orders2 = await storage.getOrders({});
+      const allProducts = await storage.getProducts();
+      const bySku = new Map(allProducts.map((p) => [p.sku, p]));
+      const totals = {
+        orders: 0,
+        items: 0,
+        revenue: 0,
+        shipping: 0,
+        fees: 0,
+        vat: 0,
+        supplierCost: 0,
+        postage: 0,
+        packaging: 0,
+        netProfit: 0
+      };
+      const monthlyMap = /* @__PURE__ */ new Map();
+      const mpMap = /* @__PURE__ */ new Map();
+      let usedActualFees = false;
+      for (const order of orders2) {
+        if (order.status === "cancelled") continue;
+        const items = await storage.getOrderItems(order.id);
+        const feeRows = await storage.getOrderFees(order.id);
+        const subtotal = parseFloat(order.subtotal) || 0;
+        const shipping = parseFloat(order.shippingCost) || 0;
+        const gross = subtotal + shipping;
+        const actualFee = feeRows.reduce((s, f) => s + (parseFloat(f.amount) || 0), 0);
+        const fee = actualFee > 0 ? actualFee : config.ebayFvfPct * gross + config.ebayFixedFee;
+        if (actualFee > 0) usedActualFees = true;
+        const vat = vatFrac * subtotal;
+        const postage = shipping / (1 + config.postageMarkup);
+        const packaging = config.packagingCost;
+        let supplierCost = 0;
+        let itemCount = 0;
+        for (const it of items) {
+          const prod = bySku.get(it.sku);
+          const cost = prod ? parseFloat(prod.supplierPrice) || 0 : 0;
+          supplierCost += cost * (it.quantity || 1);
+          itemCount += it.quantity || 1;
+        }
+        const netProfit = gross - fee - vat - supplierCost - postage - packaging;
+        totals.orders++;
+        totals.items += itemCount;
+        totals.revenue += subtotal;
+        totals.shipping += shipping;
+        totals.fees += fee;
+        totals.vat += vat;
+        totals.supplierCost += supplierCost;
+        totals.postage += postage;
+        totals.packaging += packaging;
+        totals.netProfit += netProfit;
+        const d = order.orderDate ? new Date(order.orderDate) : new Date(order.createdAt);
+        const month = isNaN(d.getTime()) ? "unknown" : d.toISOString().slice(0, 7);
+        const m = monthlyMap.get(month) || { month, revenue: 0, netProfit: 0, orders: 0 };
+        m.revenue += subtotal;
+        m.netProfit += netProfit;
+        m.orders++;
+        monthlyMap.set(month, m);
+        const mp = order.marketplace || "unknown";
+        const mm = mpMap.get(mp) || { marketplace: mp, orders: 0, revenue: 0, netProfit: 0 };
+        mm.orders++;
+        mm.revenue += subtotal;
+        mm.netProfit += netProfit;
+        mpMap.set(mp, mm);
+      }
+      const totalsRounded = {};
+      for (const [k, v] of Object.entries(totals)) totalsRounded[k] = round22(v);
+      totalsRounded.netMarginPct = totals.revenue > 0 ? round22(totals.netProfit / totals.revenue * 100) : 0;
+      res.json({
+        totals: totalsRounded,
+        monthly: Array.from(monthlyMap.values()).sort((a, b) => a.month.localeCompare(b.month)).map((m) => ({ ...m, revenue: round22(m.revenue), netProfit: round22(m.netProfit) })),
+        byMarketplace: Array.from(mpMap.values()).map((m) => ({
+          ...m,
+          revenue: round22(m.revenue),
+          netProfit: round22(m.netProfit)
+        })),
+        assumptions: [
+          usedActualFees ? "eBay fees use actual recorded marketplace fees where available." : `eBay fees estimated at ${(config.ebayFvfPct * 100).toFixed(1)}% + \u20AC${config.ebayFixedFee.toFixed(2)} (no actual fees recorded yet).`,
+          "Supplier cost uses the current TME cost (cost at sale time is not stored).",
+          `VAT ${(config.vatPct * 100).toFixed(0)}% on item subtotal; postage = buyer shipping / ${(1 + config.postageMarkup).toFixed(2)}.`
+        ]
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to compute sales analytics" });
     }
   });
   app.post("/api/pricing/bulk-calculate", requireAuth, async (req, res) => {
@@ -10115,13 +10552,15 @@ async function registerRoutes(app) {
         const enhancedProducts = await tmeApi.getEnhancedProductInfo(productSymbols);
         const existingProducts = await storage.getProducts();
         const existingBySku = new Map(existingProducts.map((p) => [p.sku, p]));
+        const feeConfig = await getFeeConfig("ebay");
         for (const enhanced of enhancedProducts) {
           try {
             const { product, price, stock } = enhanced;
             const moq = product.MinAmount || 1;
             const multiples = product.Multiples || 1;
-            const { getSupplierPriceForMoq: getSupplierPriceForMoq2, calculateDynamicPrice: calculateDynamicPrice2, calculatePackagePrice: calculatePackagePrice2 } = await Promise.resolve().then(() => (init_dynamic_pricing(), dynamic_pricing_exports));
+            const { getSupplierPriceForMoq: getSupplierPriceForMoq2 } = await Promise.resolve().then(() => (init_dynamic_pricing(), dynamic_pricing_exports));
             const supplierPrice = getSupplierPriceForMoq2(price?.PriceList, moq);
+            const weightGrams = product.Weight ?? null;
             let pricingResult = {
               finalPrice: supplierPrice,
               calculatedPrice: supplierPrice,
@@ -10129,7 +10568,13 @@ async function registerRoutes(app) {
               marginPercentage: 0
             };
             if (settings?.applyDynamicPricing && supplierPrice > 0) {
-              const result = moq > 1 ? calculatePackagePrice2(supplierPrice, moq, multiples) : calculateDynamicPrice2(supplierPrice);
+              const result = calculatePriceWithFloor(supplierPrice, {
+                moq,
+                multiples,
+                weightGrams,
+                marketplace: "ebay",
+                config: feeConfig
+              });
               pricingResult = {
                 finalPrice: result.finalPrice,
                 calculatedPrice: result.calculatedPrice,
@@ -10213,6 +10658,7 @@ async function registerRoutes(app) {
       let updatedCount = 0;
       let failedCount = 0;
       const errors = [];
+      const feeConfig = await getFeeConfig("ebay");
       const batchSize = 10;
       for (let i = 0; i < productSymbols.length; i += batchSize) {
         const batch = productSymbols.slice(i, i + batchSize);
@@ -10224,8 +10670,9 @@ async function registerRoutes(app) {
               const { product, price, stock } = enhanced;
               const moq = product.MinAmount || 1;
               const multiples = product.Multiples || 1;
-              const { getSupplierPriceForMoq: getSupplierPriceForMoq2, calculateDynamicPrice: calculateDynamicPrice2, calculatePackagePrice: calculatePackagePrice2 } = await Promise.resolve().then(() => (init_dynamic_pricing(), dynamic_pricing_exports));
+              const { getSupplierPriceForMoq: getSupplierPriceForMoq2 } = await Promise.resolve().then(() => (init_dynamic_pricing(), dynamic_pricing_exports));
               const supplierPrice = getSupplierPriceForMoq2(price?.PriceList, moq);
+              const weightGrams = product.Weight ?? null;
               let pricingResult = {
                 finalPrice: supplierPrice,
                 calculatedPrice: supplierPrice,
@@ -10233,7 +10680,13 @@ async function registerRoutes(app) {
                 marginPercentage: 0
               };
               if (settings.applyDynamicPricing && supplierPrice > 0) {
-                const result = moq > 1 ? calculatePackagePrice2(supplierPrice, moq, multiples) : calculateDynamicPrice2(supplierPrice);
+                const result = calculatePriceWithFloor(supplierPrice, {
+                  moq,
+                  multiples,
+                  weightGrams,
+                  marketplace: "ebay",
+                  config: feeConfig
+                });
                 pricingResult = {
                   finalPrice: result.finalPrice,
                   calculatedPrice: result.calculatedPrice,
@@ -10562,6 +11015,7 @@ async function registerRoutes(app) {
       let updatedCount = 0;
       let failedCount = 0;
       const errors = [];
+      const feeConfig = await getFeeConfig("ebay");
       const batchSize = 10;
       for (let i = 0; i < productSymbols.length; i += batchSize) {
         const batch = productSymbols.slice(i, i + batchSize);
@@ -10573,8 +11027,9 @@ async function registerRoutes(app) {
               const { product, price, stock } = enhanced;
               const moq = product.MinAmount || 1;
               const multiples = product.Multiples || 1;
-              const { getSupplierPriceForMoq: getSupplierPriceForMoq2, calculateDynamicPrice: calculateDynamicPrice2, calculatePackagePrice: calculatePackagePrice2 } = await Promise.resolve().then(() => (init_dynamic_pricing(), dynamic_pricing_exports));
+              const { getSupplierPriceForMoq: getSupplierPriceForMoq2 } = await Promise.resolve().then(() => (init_dynamic_pricing(), dynamic_pricing_exports));
               const supplierPrice = getSupplierPriceForMoq2(price?.PriceList, moq);
+              const weightGrams = product.Weight ?? null;
               let pricingResult = {
                 finalPrice: supplierPrice,
                 calculatedPrice: supplierPrice,
@@ -10582,7 +11037,13 @@ async function registerRoutes(app) {
                 marginPercentage: 0
               };
               if (settings.applyDynamicPricing && supplierPrice > 0) {
-                const result = moq > 1 ? calculatePackagePrice2(supplierPrice, moq, multiples) : calculateDynamicPrice2(supplierPrice);
+                const result = calculatePriceWithFloor(supplierPrice, {
+                  moq,
+                  multiples,
+                  weightGrams,
+                  marketplace: "ebay",
+                  config: feeConfig
+                });
                 pricingResult = {
                   finalPrice: result.finalPrice,
                   calculatedPrice: result.calculatedPrice,

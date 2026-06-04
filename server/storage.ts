@@ -403,6 +403,40 @@ export class DatabaseStorage implements IStorage {
     return r?.c ?? 0;
   }
 
+  // Diagnostic: how eBay listing ids are distributed across TME products.
+  // The cron pushes price/stock to eBay only for listed products that carry
+  // an Inventory-API ebay_offer_id. Legacy Trading-API listings have only
+  // ebay_item_id and are currently skipped, so this split tells us how many
+  // changed products the cron can actually update on eBay vs silently skips.
+  async getEbayListingStats(): Promise<{
+    totalTme: number;
+    listed: number;
+    listedWithOfferId: number;
+    listedItemIdOnly: number;
+    listedNeither: number;
+    notListedWithOfferId: number;
+  }> {
+    const r: any = await db.execute(sql`
+      SELECT
+        COUNT(*) FILTER (WHERE supplier = 'TME') AS total_tme,
+        COUNT(*) FILTER (WHERE supplier = 'TME' AND listed_on_ebay = true) AS listed,
+        COUNT(*) FILTER (WHERE supplier = 'TME' AND listed_on_ebay = true AND ebay_offer_id IS NOT NULL) AS listed_with_offer,
+        COUNT(*) FILTER (WHERE supplier = 'TME' AND listed_on_ebay = true AND ebay_offer_id IS NULL AND ebay_item_id IS NOT NULL) AS listed_item_only,
+        COUNT(*) FILTER (WHERE supplier = 'TME' AND listed_on_ebay = true AND ebay_offer_id IS NULL AND ebay_item_id IS NULL) AS listed_neither,
+        COUNT(*) FILTER (WHERE supplier = 'TME' AND (listed_on_ebay = false OR listed_on_ebay IS NULL) AND ebay_offer_id IS NOT NULL) AS not_listed_with_offer
+      FROM products
+    `);
+    const row = (r.rows ?? r)[0] ?? {};
+    return {
+      totalTme: Number(row.total_tme ?? 0),
+      listed: Number(row.listed ?? 0),
+      listedWithOfferId: Number(row.listed_with_offer ?? 0),
+      listedItemIdOnly: Number(row.listed_item_only ?? 0),
+      listedNeither: Number(row.listed_neither ?? 0),
+      notListedWithOfferId: Number(row.not_listed_with_offer ?? 0),
+    };
+  }
+
   // Candidates to list on eBay: TME products, in stock, not already listed,
   // not excluded. DB-side filter + limit (no full-table load).
   async getListingCandidates(limit: number): Promise<Product[]> {

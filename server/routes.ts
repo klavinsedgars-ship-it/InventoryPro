@@ -1094,6 +1094,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Read-only diagnostic: how eBay listing ids are distributed across TME
+  // products. The cron pushes price/stock to eBay ONLY for listed products
+  // that carry an Inventory-API ebay_offer_id; legacy Trading-API listings
+  // (ebay_item_id only) are currently skipped. Open on the deployed URL:
+  //   /api/__ebay-id-stats
+  // "cronCanPush" = listings the cron updates today; "cronSkipsLegacy" =
+  // listed products it silently skips because they have no offer id.
+  app.get("/api/__ebay-id-stats", async (_req, res) => {
+    try {
+      const s = await storage.getEbayListingStats();
+      res.json({
+        ...s,
+        cronCanPush: s.listedWithOfferId,
+        cronSkipsLegacy: s.listedItemIdOnly,
+        note:
+          "Cron pushes price/stock to eBay only for listed products with ebay_offer_id (Inventory API). " +
+          "cronSkipsLegacy are listed via Trading-API ebay_item_id only and are NOT updated on eBay by the cron.",
+      });
+    } catch (error) {
+      res.status(500).json({ error: (error as Error).message });
+    }
+  });
+
   // Marketplace settings (fee rates, VAT, target profit, etc.)
   app.get("/api/marketplace-settings/:marketplace", requireAuth, async (req, res) => {
     try {
