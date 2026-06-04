@@ -7429,7 +7429,7 @@ init_storage();
 init_tme_api();
 init_dynamic_pricing();
 function staleCutoff() {
-  const hours = Number(process.env.SYNC_STALE_HOURS) || 6;
+  const hours = Number(process.env.SYNC_STALE_HOURS) || 12;
   return new Date(Date.now() - hours * 3600 * 1e3);
 }
 async function runSyncChunk(limit = 50) {

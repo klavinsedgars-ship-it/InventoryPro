@@ -31,10 +31,12 @@ export interface SyncChunkResult {
 }
 
 // A product is "stale" if it hasn't been synced within this many hours.
-// Default 6h -> each product refreshes ~4x/day. Tune via SYNC_STALE_HOURS
-// (raise toward 24 to cut TME calls as the catalog grows to 100k).
+// Default 12h -> each product refreshes ~2x/day. Tune via SYNC_STALE_HOURS.
+// Keeps TME usage under its ~10k/day cap as the catalog grows toward 100k:
+// 100k/50*2 calls = ~4k calls/pass * 2 passes/day = ~8k/day. (Switching the
+// cron to the optimized combined endpoint would cut this ~4x further.)
 function staleCutoff(): Date {
-  const hours = Number(process.env.SYNC_STALE_HOURS) || 6;
+  const hours = Number(process.env.SYNC_STALE_HOURS) || 12;
   return new Date(Date.now() - hours * 3600 * 1000);
 }
 
