@@ -17,6 +17,9 @@ import {
   ListChecks,
   Rocket,
   ShieldAlert,
+  Eye,
+  Pause,
+  Play,
 } from "lucide-react";
 
 interface OpsProps {
@@ -55,6 +58,7 @@ interface OpsData {
   listingEnv: {
     ok: boolean;
     rampEnabled: boolean;
+    rampPaused: boolean;
     issues: Array<{ level: "error" | "warning"; key: string; message: string }>;
   };
 }
@@ -134,9 +138,29 @@ export function OpsDashboard({ user }: OpsProps) {
     refetchInterval: 60000, // auto-refresh each minute
   });
 
+  const [preview, setPreview] = useState<any>(null);
+
+  const previewRamp = useMutation({
+    mutationFn: async () => {
+      const r = await apiRequest("POST", "/api/ops/list-ramp/preview", {});
+      return r.json();
+    },
+    onSuccess: (d: any) => {
+      setPreview(d);
+      toast({
+        title: "Preview ready",
+        description:
+          d?.dryRun
+            ? `Would publish ${d.wouldPublishNow} now; ${d.totalCandidatesRemaining} candidates remaining.`
+            : d?.error || "No data",
+      });
+    },
+    onError: (e: any) => toast({ title: "Preview failed", description: e.message, variant: "destructive" }),
+  });
+
   const startRamp = useMutation({
     mutationFn: async () => {
-      const r = await apiRequest("POST", "/api/ops/list-ramp/start", {});
+      const r = await apiRequest("POST", "/api/ops/list-ramp/start", { confirm: true });
       return r.json();
     },
     onSuccess: (d: any) => {
@@ -150,6 +174,34 @@ export function OpsDashboard({ user }: OpsProps) {
     onError: (e: any) => toast({ title: "Could not start ramp", description: e.message, variant: "destructive" }),
   });
 
+  const pauseRamp = useMutation({
+    mutationFn: async () => (await apiRequest("POST", "/api/ops/list-ramp/pause", {})).json(),
+    onSuccess: (d: any) => {
+      toast({ title: "Ramp paused", description: d?.message || "Stopping after current batch." });
+      qc.invalidateQueries({ queryKey: ["/api/ops/daily"] });
+    },
+  });
+
+  const resumeRamp = useMutation({
+    mutationFn: async () => (await apiRequest("POST", "/api/ops/list-ramp/resume", {})).json(),
+    onSuccess: () => {
+      toast({ title: "Ramp un-paused" });
+      qc.invalidateQueries({ queryKey: ["/api/ops/daily"] });
+    },
+  });
+
+  const confirmAndStart = () => {
+    const n = preview?.wouldPublishNow ?? "an unknown number of";
+    const total = preview?.totalCandidatesRemaining ?? "?";
+    if (
+      window.confirm(
+        `Really start the LIVE listing ramp?\n\nThis will publish ${n} product(s) to eBay now, then self-chain through ~${total} more in batches of 25 until the catalogue is listed or you Pause.\n\nUse Preview first if you want to see what gets listed without publishing.`,
+      )
+    ) {
+      startRamp.mutate();
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
@@ -162,10 +214,25 @@ export function OpsDashboard({ user }: OpsProps) {
               <Activity className="w-4 h-4" />
               {data?.date ? `Snapshot for ${data.date} (UTC)` : "Loading…"}
             </div>
-            <div className="flex gap-2">
-              {data?.listingEnv.rampEnabled && data.listingEnv.ok && (
-                <Button size="sm" onClick={() => startRamp.mutate()} disabled={startRamp.isPending}>
-                  <Rocket className="w-4 h-4 mr-2" /> Start listing ramp
+            <div className="flex gap-2 flex-wrap">
+              {data?.listingEnv.ok && (
+                <Button variant="outline" size="sm" onClick={() => previewRamp.mutate()} disabled={previewRamp.isPending}>
+                  <Eye className="w-4 h-4 mr-2" /> Preview next batch
+                </Button>
+              )}
+              {data?.listingEnv.rampEnabled && data.listingEnv.ok && !data.listingEnv.rampPaused && (
+                <Button size="sm" onClick={confirmAndStart} disabled={startRamp.isPending}>
+                  <Rocket className="w-4 h-4 mr-2" /> Start (live, with confirm)
+                </Button>
+              )}
+              {data?.listingEnv.rampEnabled && !data.listingEnv.rampPaused && (
+                <Button variant="destructive" size="sm" onClick={() => pauseRamp.mutate()} disabled={pauseRamp.isPending}>
+                  <Pause className="w-4 h-4 mr-2" /> Pause ramp
+                </Button>
+              )}
+              {data?.listingEnv.rampPaused && (
+                <Button variant="outline" size="sm" onClick={() => resumeRamp.mutate()} disabled={resumeRamp.isPending}>
+                  <Play className="w-4 h-4 mr-2" /> Resume ramp
                 </Button>
               )}
               <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
@@ -191,10 +258,14 @@ export function OpsDashboard({ user }: OpsProps) {
                       ) : (
                         <Badge variant="outline" className="text-red-700 border-red-300">blocked</Badge>
                       )}
-                      {data.listingEnv.rampEnabled ? (
+                      {!data.listingEnv.rampEnabled && (
+                        <Badge variant="outline" className="text-gray-600 border-gray-300">ramp disabled (env)</Badge>
+                      )}
+                      {data.listingEnv.rampEnabled && data.listingEnv.rampPaused && (
+                        <Badge variant="outline" className="text-amber-700 border-amber-300">ramp paused</Badge>
+                      )}
+                      {data.listingEnv.rampEnabled && !data.listingEnv.rampPaused && (
                         <Badge variant="outline" className="text-blue-700 border-blue-300">ramp enabled</Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-gray-600 border-gray-300">ramp paused</Badge>
                       )}
                     </CardTitle>
                   </CardHeader>
@@ -207,6 +278,42 @@ export function OpsDashboard({ user }: OpsProps) {
                         <b>{i.level === "error" ? "✖" : "⚠"} {i.key}:</b> {i.message}
                       </div>
                     ))}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Preview result */}
+              {preview && (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium text-gray-500 flex items-center gap-2">
+                      <Eye className="w-4 h-4" /> Preview — would publish next
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="text-sm">
+                    {preview.error ? (
+                      <div className="text-red-700">{preview.error}</div>
+                    ) : (
+                      <>
+                        <div className="text-gray-700 mb-2">
+                          <b>{preview.wouldPublishNow}</b> products would be published in the next batch;{" "}
+                          <b>{preview.totalCandidatesRemaining}</b> total candidates remaining.
+                          {" "}<span className="text-gray-400">Nothing was sent to eBay.</span>
+                        </div>
+                        <div className="overflow-x-auto border rounded">
+                          <table className="w-full text-xs">
+                            <thead className="bg-gray-50 text-gray-500">
+                              <tr><th className="text-left p-2">SKU</th><th className="text-left p-2">Name</th><th className="text-right p-2">Stock</th><th className="text-right p-2">Sale €</th></tr>
+                            </thead>
+                            <tbody>
+                              {(preview.sample || []).map((p: any) => (
+                                <tr key={p.id} className="border-t"><td className="p-2 font-mono">{p.sku}</td><td className="p-2 truncate max-w-md">{p.name}</td><td className="p-2 text-right">{p.stock}</td><td className="p-2 text-right">{p.salePrice}</td></tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    )}
                   </CardContent>
                 </Card>
               )}
