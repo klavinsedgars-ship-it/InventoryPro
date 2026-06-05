@@ -510,19 +510,40 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteProduct(id: number): Promise<boolean> {
-    const result = await db.delete(products).where(eq(products.id, id));
-    return (result.rowCount ?? 0) > 0;
+    return await db.transaction(async (tx) => {
+      await tx.delete(syncQueue).where(eq(syncQueue.productId, id));
+      await tx
+        .update(orderItems)
+        .set({ productId: null })
+        .where(eq(orderItems.productId, id));
+      const result = await tx.delete(products).where(eq(products.id, id));
+      return (result.rowCount ?? 0) > 0;
+    });
   }
 
   async deleteProducts(ids: number[]): Promise<number> {
     if (ids.length === 0) return 0;
-    const result = await db.delete(products).where(inArray(products.id, ids));
-    return result.rowCount ?? 0;
+    return await db.transaction(async (tx) => {
+      await tx.delete(syncQueue).where(inArray(syncQueue.productId, ids));
+      await tx
+        .update(orderItems)
+        .set({ productId: null })
+        .where(inArray(orderItems.productId, ids));
+      const result = await tx.delete(products).where(inArray(products.id, ids));
+      return result.rowCount ?? 0;
+    });
   }
 
   async deleteAllProducts(): Promise<number> {
-    const result = await db.delete(products);
-    return result.rowCount ?? 0;
+    return await db.transaction(async (tx) => {
+      await tx.delete(syncQueue);
+      await tx
+        .update(orderItems)
+        .set({ productId: null })
+        .where(isNotNull(orderItems.productId));
+      const result = await tx.delete(products);
+      return result.rowCount ?? 0;
+    });
   }
 
   async getProductsByCategory(category: string): Promise<Product[]> {
