@@ -5,6 +5,7 @@ import {
   marketplaceSettings, 
   syncLogs,
   syncQueue,
+  syncJobs,
   pricingTiers,
   shippingPolicies,
   apiUsageTracking,
@@ -33,6 +34,8 @@ import {
   type InsertMarketplaceSettings,
   type SyncLog,
   type InsertSyncLog,
+  type SyncJob,
+  type InsertSyncJob,
   type SyncQueue,
   type InsertSyncQueue,
   type ShippingPolicy,
@@ -85,6 +88,7 @@ export interface IStorage {
   getProducts(): Promise<Product[]>;
   getProduct(id: number): Promise<Product | undefined>;
   getProductBySku(sku: string): Promise<Product | undefined>;
+  getProductsBySkus(skus: string[]): Promise<Product[]>;
   createProduct(product: InsertProduct): Promise<Product>;
   updateProduct(id: number, product: Partial<InsertProduct>): Promise<Product | undefined>;
   deleteProduct(id: number): Promise<boolean>;
@@ -111,6 +115,10 @@ export interface IStorage {
   // Sync Logs
   getSyncLogs(limit?: number): Promise<SyncLog[]>;
   createSyncLog(log: InsertSyncLog): Promise<SyncLog>;
+  createSyncJob(job: InsertSyncJob): Promise<SyncJob>;
+  getSyncJob(jobId: string): Promise<SyncJob | undefined>;
+  updateSyncJob(jobId: string, updates: Partial<SyncJob>): Promise<SyncJob | undefined>;
+  getActiveSyncJob(source?: string): Promise<SyncJob | undefined>;
 
   // Dashboard metrics
   getDashboardMetrics(): Promise<{
@@ -492,6 +500,11 @@ export class DatabaseStorage implements IStorage {
     return product || undefined;
   }
 
+  async getProductsBySkus(skus: string[]): Promise<Product[]> {
+    if (skus.length === 0) return [];
+    return await db.select().from(products).where(inArray(products.sku, skus));
+  }
+
   async createProduct(insertProduct: InsertProduct): Promise<Product> {
     const [product] = await db
       .insert(products)
@@ -669,6 +682,35 @@ export class DatabaseStorage implements IStorage {
       .values(insertLog)
       .returning();
     return log;
+  }
+
+  async createSyncJob(job: InsertSyncJob): Promise<SyncJob> {
+    const [created] = await db.insert(syncJobs).values(job).returning();
+    return created;
+  }
+
+  async getSyncJob(jobId: string): Promise<SyncJob | undefined> {
+    const [job] = await db.select().from(syncJobs).where(eq(syncJobs.jobId, jobId));
+    return job || undefined;
+  }
+
+  async updateSyncJob(jobId: string, updates: Partial<SyncJob>): Promise<SyncJob | undefined> {
+    const [updated] = await db
+      .update(syncJobs)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(syncJobs.jobId, jobId))
+      .returning();
+    return updated || undefined;
+  }
+
+  async getActiveSyncJob(source = "tme_browser"): Promise<SyncJob | undefined> {
+    const [job] = await db
+      .select()
+      .from(syncJobs)
+      .where(and(eq(syncJobs.source, source), inArray(syncJobs.status, ["pending", "processing"])))
+      .orderBy(desc(syncJobs.createdAt))
+      .limit(1);
+    return job || undefined;
   }
 
   // Dashboard metrics

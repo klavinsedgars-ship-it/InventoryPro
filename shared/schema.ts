@@ -94,6 +94,28 @@ export const syncQueue = pgTable("sync_queue", {
   processedAt: timestamp("processed_at"),
 });
 
+// Long-running TME import jobs. State lives in the DB (not in memory) so a
+// chunked sync survives serverless function recycling and page refreshes,
+// and the client can poll real progress instead of a fake bar.
+export const syncJobs = pgTable("sync_jobs", {
+  id: serial("id").primaryKey(),
+  jobId: text("job_id").notNull().unique(), // opaque id returned to the client
+  source: text("source").notNull().default("tme_browser"),
+  // pending | processing | completed | completed_with_errors | failed | cancelled
+  status: text("status").notNull().default("pending"),
+  total: integer("total").notNull().default(0),
+  processed: integer("processed").notNull().default(0),
+  syncedCount: integer("synced_count").notNull().default(0),
+  updatedCount: integer("updated_count").notNull().default(0),
+  failedCount: integer("failed_count").notNull().default(0),
+  symbols: text("symbols").notNull(), // JSON array of all selected TME symbols
+  settings: text("settings"), // JSON of sync settings (dynamic pricing, etc.)
+  errors: text("errors"), // JSON array of error strings (capped)
+  message: text("message"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export const pricingTiers = pgTable("pricing_tiers", {
   id: serial("id").primaryKey(),
   min: decimal("min", { precision: 10, scale: 2 }).notNull(),
@@ -365,6 +387,12 @@ export const insertSyncQueueSchema = createInsertSchema(syncQueue).omit({
   processedAt: true,
 });
 
+export const insertSyncJobSchema = createInsertSchema(syncJobs).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export const insertPricingTierSchema = createInsertSchema(pricingTiers).omit({
   id: true,
   createdAt: true,
@@ -448,6 +476,8 @@ export type MarketplaceSettings = typeof marketplaceSettings.$inferSelect;
 export type InsertMarketplaceSettings = z.infer<typeof insertMarketplaceSettingsSchema>;
 export type SyncLog = typeof syncLogs.$inferSelect;
 export type InsertSyncLog = z.infer<typeof insertSyncLogSchema>;
+export type SyncJob = typeof syncJobs.$inferSelect;
+export type InsertSyncJob = z.infer<typeof insertSyncJobSchema>;
 export type SyncQueue = typeof syncQueue.$inferSelect;
 export type InsertSyncQueue = z.infer<typeof insertSyncQueueSchema>;
 export type PricingTier = typeof pricingTiers.$inferSelect;

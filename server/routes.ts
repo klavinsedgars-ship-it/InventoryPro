@@ -37,6 +37,8 @@ import { calculateEbayStock, calculateBulkEbayStock, validateStockLimit, getReco
 import { imageProcessingService } from "./image-processing";
 import { triggerManualSync } from "./cron-jobs";
 import { runSyncChunk } from "./sync-chunk";
+import { processTmeSyncChunk } from "./tme-sync";
+import { randomUUID } from "crypto";
 import { ebayOrdersApi } from "./ebay-orders-api";
 import { ebayMessagesApi } from "./ebay-messages-api";
 import { autoMessageScheduler } from "./auto-message-scheduler";
@@ -48,6 +50,25 @@ import {
 // Type for authenticated requests
 interface AuthenticatedRequest extends Request {
   session: any;
+}
+
+// How many TME symbols to import per sync-job chunk. Kept small so each chunk
+// finishes well within the serverless function timeout.
+const TME_SYNC_CHUNK_SIZE = 100;
+
+// Shape the client polls for live sync progress.
+function syncJobProgress(job: any) {
+  return {
+    jobId: job.jobId,
+    status: job.status,
+    total: job.total,
+    processed: job.processed,
+    syncedCount: job.syncedCount,
+    updatedCount: job.updatedCount,
+    failedCount: job.failedCount,
+    message: job.message ?? null,
+    errors: job.errors ? JSON.parse(job.errors) : [],
+  };
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -3134,6 +3155,155 @@ export async function registerRoutes(app: Express): Promise<Server> {
           success: false,
           error: "Sync failed: " + (error as Error).message
         });
+      }
+    });
+
+    // ── Async chunked sync (job + polling) ──────────────────────────────────
+    // Replaces the single blocking request above for large selections. The job
+    // state lives in the DB so progress survives serverless recycling / page
+    // refreshes, and the client drives + polls real progress.
+
+    // 1) Create a job, return its id immediately (no long-running work here).
+    app.post("/api/tme/sync-job-start", async (req, res) => {
+      try {
+        const { productSymbols, settings } = req.body;
+        if (!productSymbols || !Array.isArray(productSymbols) || productSymbols.length === 0) {
+          return res.status(400).json({ success: false, error: "Product symbols array is required" });
+        }
+
+        // De-dupe symbols so total/processed math is exact.
+        const symbols = Array.from(new Set(productSymbols.map((s: any) => String(s))));
+        const jobId = randomUUID();
+
+        const job = await storage.createSyncJob({
+          jobId,
+          source: "tme_browser",
+          status: "pending",
+          total: symbols.length,
+          processed: 0,
+          syncedCount: 0,
+          updatedCount: 0,
+          failedCount: 0,
+          symbols: JSON.stringify(symbols),
+          settings: settings ? JSON.stringify(settings) : null,
+          errors: null,
+          message: `Queued ${symbols.length} products`,
+        });
+
+        console.log(`🆕 TME sync job ${jobId} created for ${symbols.length} products`);
+        res.json({ success: true, ...syncJobProgress(job), done: false });
+      } catch (error) {
+        console.error("Failed to start sync job:", error);
+        res.status(500).json({ success: false, error: (error as Error).message });
+      }
+    });
+
+    // 2) Process the next chunk of a job. Called repeatedly by the client until
+    //    `done` is true. Each call imports up to TME_SYNC_CHUNK_SIZE products.
+    app.post("/api/tme/sync-job-chunk", async (req, res) => {
+      try {
+        const { jobId } = req.body;
+        if (!jobId) return res.status(400).json({ success: false, error: "jobId is required" });
+
+        const job = await storage.getSyncJob(jobId);
+        if (!job) return res.status(404).json({ success: false, error: "Sync job not found" });
+
+        // Already finished (or cancelled) — nothing to do.
+        if (["completed", "completed_with_errors", "failed", "cancelled"].includes(job.status)) {
+          return res.json({ success: true, done: true, ...syncJobProgress(job) });
+        }
+
+        const allSymbols: string[] = JSON.parse(job.symbols);
+        const settings = job.settings ? JSON.parse(job.settings) : {};
+        const chunk = allSymbols.slice(job.processed, job.processed + TME_SYNC_CHUNK_SIZE);
+
+        if (job.status === "pending") {
+          await storage.updateSyncJob(jobId, { status: "processing" });
+        }
+
+        const r = await processTmeSyncChunk(chunk, settings);
+
+        const processed = job.processed + chunk.length;
+        const syncedCount = job.syncedCount + r.syncedCount;
+        const updatedCount = job.updatedCount + r.updatedCount;
+        const failedCount = job.failedCount + r.failedCount;
+        const prevErrors: string[] = job.errors ? JSON.parse(job.errors) : [];
+        const errors = [...prevErrors, ...r.errors].slice(0, 50); // cap stored errors
+
+        const done = processed >= allSymbols.length;
+        const status = done ? (failedCount > 0 ? "completed_with_errors" : "completed") : "processing";
+        const message = `Synced ${syncedCount} new, updated ${updatedCount}, failed ${failedCount}`;
+
+        const updated = await storage.updateSyncJob(jobId, {
+          processed,
+          syncedCount,
+          updatedCount,
+          failedCount,
+          errors: errors.length ? JSON.stringify(errors) : null,
+          status,
+          message,
+        });
+
+        if (done) {
+          await storage.createSyncLog({
+            source: "tme_browser",
+            operation: "sync_selected",
+            status: failedCount === 0 ? "success" : failedCount < allSymbols.length ? "partial" : "error",
+            message,
+            details: JSON.stringify({ jobId, syncedCount, updatedCount, failedCount }),
+          });
+          console.log(`✅ TME sync job ${jobId} ${status}: ${message}`);
+        }
+
+        res.json({ success: true, done, ...syncJobProgress(updated) });
+      } catch (error) {
+        console.error("Sync job chunk failed:", error);
+        res.status(500).json({ success: false, error: (error as Error).message });
+      }
+    });
+
+    // 3) Poll job progress (also used to resume a job after a page refresh).
+    app.get("/api/tme/sync-job-status", async (req, res) => {
+      try {
+        const jobId = String(req.query.jobId || "");
+        if (!jobId) return res.status(400).json({ success: false, error: "jobId is required" });
+        const job = await storage.getSyncJob(jobId);
+        if (!job) return res.status(404).json({ success: false, error: "Sync job not found" });
+        const done = ["completed", "completed_with_errors", "failed", "cancelled"].includes(job.status);
+        res.json({ success: true, done, ...syncJobProgress(job) });
+      } catch (error) {
+        res.status(500).json({ success: false, error: (error as Error).message });
+      }
+    });
+
+    // 4) Find an in-progress job so the UI can resume after a reload.
+    app.get("/api/tme/sync-job-active", async (_req, res) => {
+      try {
+        const job = await storage.getActiveSyncJob("tme_browser");
+        if (!job) return res.json({ success: true, active: false });
+        res.json({ success: true, active: true, ...syncJobProgress(job), done: false });
+      } catch (error) {
+        res.status(500).json({ success: false, error: (error as Error).message });
+      }
+    });
+
+    // 5) Cancel a running job (the client stops pumping chunks after this).
+    app.post("/api/tme/sync-job-cancel", async (req, res) => {
+      try {
+        const { jobId } = req.body;
+        if (!jobId) return res.status(400).json({ success: false, error: "jobId is required" });
+        const job = await storage.getSyncJob(jobId);
+        if (!job) return res.status(404).json({ success: false, error: "Sync job not found" });
+        if (["completed", "completed_with_errors", "failed"].includes(job.status)) {
+          return res.json({ success: true, done: true, ...syncJobProgress(job) });
+        }
+        const updated = await storage.updateSyncJob(jobId, {
+          status: "cancelled",
+          message: `Cancelled after ${job.processed}/${job.total}`,
+        });
+        res.json({ success: true, done: true, ...syncJobProgress(updated) });
+      } catch (error) {
+        res.status(500).json({ success: false, error: (error as Error).message });
       }
     });
 
