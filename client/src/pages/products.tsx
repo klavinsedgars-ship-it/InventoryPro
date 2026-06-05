@@ -278,9 +278,10 @@ export function Products({ user }: ProductsProps) {
       // Use the proven per-product flow (mode:"single") for the manual
       // lister — it's resilient (one failure never blocks the rest) and
       // ensures the merchant location up front. The 25-SKU bulk path is
-      // reserved for the server-side ramp. Small chunks keep the progress
-      // bar moving.
-      const CHUNK = 10;
+      // reserved for the server-side ramp. CHUNK=1 so the progress bar
+      // increments after every product instead of jumping at the end
+      // (each eBay listing is ~10–30s of sequential API calls).
+      const CHUNK = 1;
       let published = 0, failed = 0, skipped = 0, done = 0, limitHit = false;
       const failures: string[] = [];
       setListProgress({ done: 0, total: productIds.length, published: 0, failed: 0 });
