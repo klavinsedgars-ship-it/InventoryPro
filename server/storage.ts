@@ -71,7 +71,7 @@ import {
   type InsertScheduledMessage
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, gte, lte, lt, desc, asc, count, or, ilike, isNull, isNotNull, sql } from "drizzle-orm";
+import { eq, and, gte, lte, lt, desc, asc, count, or, ilike, isNull, isNotNull, sql, inArray } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 
 export interface IStorage {
@@ -88,6 +88,7 @@ export interface IStorage {
   createProduct(product: InsertProduct): Promise<Product>;
   updateProduct(id: number, product: Partial<InsertProduct>): Promise<Product | undefined>;
   deleteProduct(id: number): Promise<boolean>;
+  deleteProducts(ids: number[]): Promise<number>;
   deleteAllProducts(): Promise<number>;
   getProductsByCategory(category: string): Promise<Product[]>;
   getProductsWithFilters(filters: {
@@ -511,6 +512,12 @@ export class DatabaseStorage implements IStorage {
   async deleteProduct(id: number): Promise<boolean> {
     const result = await db.delete(products).where(eq(products.id, id));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  async deleteProducts(ids: number[]): Promise<number> {
+    if (ids.length === 0) return 0;
+    const result = await db.delete(products).where(inArray(products.id, ids));
+    return result.rowCount ?? 0;
   }
 
   async deleteAllProducts(): Promise<number> {

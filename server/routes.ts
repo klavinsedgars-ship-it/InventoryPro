@@ -1668,6 +1668,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Bulk delete by ids (single query — avoids fanning out N parallel requests
+  // that saturate the DB connection pool on large selections).
+  app.post("/api/products/bulk-delete", requireAuth, async (req, res) => {
+    try {
+      const ids = Array.isArray(req.body?.ids) ? req.body.ids : null;
+      if (!ids) {
+        return res.status(400).json({ message: "Body must include an 'ids' array" });
+      }
+      const numericIds = ids
+        .map((v: unknown) => (typeof v === "number" ? v : parseInt(String(v), 10)))
+        .filter((n: number) => Number.isInteger(n));
+      const deletedCount = await storage.deleteProducts(numericIds);
+      res.json({
+        success: true,
+        deletedCount,
+        requestedCount: numericIds.length,
+        message: `Successfully deleted ${deletedCount} products`,
+      });
+    } catch (error) {
+      console.error("Failed to bulk delete products:", error);
+      res.status(500).json({ message: "Failed to delete selected products" });
+    }
+  });
+
   // Delete all products endpoint
   app.delete("/api/products", requireAuth, async (req, res) => {
     try {

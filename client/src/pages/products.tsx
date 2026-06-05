@@ -211,15 +211,19 @@ export function Products({ user }: ProductsProps) {
 
   const deleteSelectedMutation = useMutation({
     mutationFn: async (productIds: number[]) => {
-      const results = await Promise.all(
-        productIds.map(id => apiRequest("DELETE", `/api/products/${id}`).catch(() => null))
-      );
-      return { deletedCount: results.filter(r => r !== null).length };
+      const res = await apiRequest("POST", "/api/products/bulk-delete", { ids: productIds });
+      return (await res.json()) as { deletedCount: number; requestedCount: number };
     },
-    onSuccess: (data: any) => {
+    onSuccess: (data) => {
+      const { deletedCount, requestedCount } = data;
+      const missed = Math.max(0, requestedCount - deletedCount);
       toast({
-        title: "Products Deleted",
-        description: `Successfully deleted ${data.deletedCount} selected products.`,
+        title: missed > 0 ? "Some products were not deleted" : "Products Deleted",
+        description:
+          missed > 0
+            ? `Deleted ${deletedCount} of ${requestedCount} selected products (${missed} not found).`
+            : `Successfully deleted ${deletedCount} selected products.`,
+        variant: missed > 0 ? "destructive" : "default",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
