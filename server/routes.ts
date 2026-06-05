@@ -753,12 +753,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         products = await storage.getListingCandidates(limit);
       }
       if (!products.length) return res.json({ success: true, attempted: 0, published: 0, failed: 0, message: "No candidates" });
-      // Default to the 25-SKU bulk path (the listing ramp); pass
-      // mode:"single" to force the proven one-at-a-time flow.
-      const result = req.body?.mode === "single"
-        ? await listProductsViaInventory(products as any)
-        : await listProductsViaInventoryBulk(products as any);
-      res.json({ success: true, mode: req.body?.mode === "single" ? "single" : "bulk", ...result });
+      // Default to the proven per-product flow (ensures location, resilient
+      // per item). Pass mode:"bulk" to use the 25-SKU bulk path. The server
+      // ramp calls the bulk function directly, not this route.
+      const result = req.body?.mode === "bulk"
+        ? await listProductsViaInventoryBulk(products as any)
+        : await listProductsViaInventory(products as any);
+      res.json({ success: true, mode: req.body?.mode === "bulk" ? "bulk" : "single", ...result });
     } catch (error) {
       console.error("Inventory list-batch failed:", error);
       res.status(500).json({ success: false, error: (error as Error).message });

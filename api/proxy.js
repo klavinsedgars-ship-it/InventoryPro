@@ -1198,31 +1198,36 @@ var init_storage = __esm({
     `);
         this.taxonomyTableEnsured = true;
       }
+      // Cache helpers are best-effort: a cache problem must never break listing
+      // (which depends on category resolution), so all errors are swallowed.
       async getTaxonomyCache(key) {
-        await this.ensureTaxonomyTable();
-        const now = /* @__PURE__ */ new Date();
-        const rows = await db.select().from(ebayTaxonomyCache).where(and(eq(ebayTaxonomyCache.cacheKey, key), gte(ebayTaxonomyCache.expiresAt, now))).limit(1);
-        if (rows[0]) {
-          try {
-            return JSON.parse(rows[0].value);
-          } catch {
-            return null;
-          }
+        try {
+          await this.ensureTaxonomyTable();
+          const now = /* @__PURE__ */ new Date();
+          const rows = await db.select().from(ebayTaxonomyCache).where(and(eq(ebayTaxonomyCache.cacheKey, key), gte(ebayTaxonomyCache.expiresAt, now))).limit(1);
+          if (rows[0]) return JSON.parse(rows[0].value);
+          return null;
+        } catch (e) {
+          console.warn("taxonomy cache read failed (ignored):", e.message);
+          return null;
         }
-        return null;
       }
       async setTaxonomyCache(key, value, ttlHours = 24 * 30) {
-        await this.ensureTaxonomyTable();
-        const expiresAt = new Date(Date.now() + ttlHours * 3600 * 1e3);
-        const payload = JSON.stringify(value);
-        await db.execute(sql`
-      INSERT INTO ebay_taxonomy_cache (cache_key, value, expires_at, updated_at)
-      VALUES (${key}, ${payload}, ${expiresAt}, NOW())
-      ON CONFLICT (cache_key) DO UPDATE
-        SET value = EXCLUDED.value,
-            expires_at = EXCLUDED.expires_at,
-            updated_at = NOW()
-    `);
+        try {
+          await this.ensureTaxonomyTable();
+          const expiresAt = new Date(Date.now() + ttlHours * 3600 * 1e3);
+          const payload = JSON.stringify(value);
+          await db.execute(sql`
+        INSERT INTO ebay_taxonomy_cache (cache_key, value, expires_at, updated_at)
+        VALUES (${key}, ${payload}, ${expiresAt}, NOW())
+        ON CONFLICT (cache_key) DO UPDATE
+          SET value = EXCLUDED.value,
+              expires_at = EXCLUDED.expires_at,
+              updated_at = NOW()
+      `);
+        } catch (e) {
+          console.warn("taxonomy cache write failed (ignored):", e.message);
+        }
       }
       // Bulk Listing Jobs - track progress of bulk listing operations
       async createBulkListingJob(job) {
@@ -6227,6 +6232,19 @@ async function listProductsViaInventoryBulk(allProducts) {
   for (const p of allProducts.filter((p2) => (p2.stock ?? 0) <= 0)) {
     results.push({ sku: p.sku, ok: false, error: "skipped: out of stock" });
   }
+  if (products2.length > 0) {
+    const loc = await ebayInventoryApi.ensureMerchantLocation();
+    if (!loc.ok) {
+      return {
+        attempted: allProducts.length,
+        published: 0,
+        failed: products2.length,
+        skipped,
+        limitHit: false,
+        results: products2.map((p) => ({ sku: p.sku, ok: false, error: `merchant location: ${loc.error}` }))
+      };
+    }
+  }
   for (let i = 0; i < products2.length && !limitHit; i += 25) {
     const batch = products2.slice(i, i + 25);
     const withCat = [];
@@ -9125,8 +9143,8 @@ async function registerRoutes(app) {
         products2 = await storage.getListingCandidates(limit);
       }
       if (!products2.length) return res.json({ success: true, attempted: 0, published: 0, failed: 0, message: "No candidates" });
-      const result = req.body?.mode === "single" ? await listProductsViaInventory2(products2) : await listProductsViaInventoryBulk2(products2);
-      res.json({ success: true, mode: req.body?.mode === "single" ? "single" : "bulk", ...result });
+      const result = req.body?.mode === "bulk" ? await listProductsViaInventoryBulk2(products2) : await listProductsViaInventory2(products2);
+      res.json({ success: true, mode: req.body?.mode === "bulk" ? "bulk" : "single", ...result });
     } catch (error) {
       console.error("Inventory list-batch failed:", error);
       res.status(500).json({ success: false, error: error.message });

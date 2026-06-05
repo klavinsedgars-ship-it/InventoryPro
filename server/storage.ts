@@ -934,32 +934,41 @@ export class DatabaseStorage implements IStorage {
     this.taxonomyTableEnsured = true;
   }
 
+  // Cache helpers are best-effort: a cache problem must never break listing
+  // (which depends on category resolution), so all errors are swallowed.
   async getTaxonomyCache(key: string): Promise<any | null> {
-    await this.ensureTaxonomyTable();
-    const now = new Date();
-    const rows = await db
-      .select()
-      .from(ebayTaxonomyCache)
-      .where(and(eq(ebayTaxonomyCache.cacheKey, key), gte(ebayTaxonomyCache.expiresAt, now)))
-      .limit(1);
-    if (rows[0]) {
-      try { return JSON.parse(rows[0].value); } catch { return null; }
+    try {
+      await this.ensureTaxonomyTable();
+      const now = new Date();
+      const rows = await db
+        .select()
+        .from(ebayTaxonomyCache)
+        .where(and(eq(ebayTaxonomyCache.cacheKey, key), gte(ebayTaxonomyCache.expiresAt, now)))
+        .limit(1);
+      if (rows[0]) return JSON.parse(rows[0].value);
+      return null;
+    } catch (e) {
+      console.warn("taxonomy cache read failed (ignored):", (e as Error).message);
+      return null;
     }
-    return null;
   }
 
   async setTaxonomyCache(key: string, value: any, ttlHours = 24 * 30): Promise<void> {
-    await this.ensureTaxonomyTable();
-    const expiresAt = new Date(Date.now() + ttlHours * 3600 * 1000);
-    const payload = JSON.stringify(value);
-    await db.execute(sql`
-      INSERT INTO ebay_taxonomy_cache (cache_key, value, expires_at, updated_at)
-      VALUES (${key}, ${payload}, ${expiresAt}, NOW())
-      ON CONFLICT (cache_key) DO UPDATE
-        SET value = EXCLUDED.value,
-            expires_at = EXCLUDED.expires_at,
-            updated_at = NOW()
-    `);
+    try {
+      await this.ensureTaxonomyTable();
+      const expiresAt = new Date(Date.now() + ttlHours * 3600 * 1000);
+      const payload = JSON.stringify(value);
+      await db.execute(sql`
+        INSERT INTO ebay_taxonomy_cache (cache_key, value, expires_at, updated_at)
+        VALUES (${key}, ${payload}, ${expiresAt}, NOW())
+        ON CONFLICT (cache_key) DO UPDATE
+          SET value = EXCLUDED.value,
+              expires_at = EXCLUDED.expires_at,
+              updated_at = NOW()
+      `);
+    } catch (e) {
+      console.warn("taxonomy cache write failed (ignored):", (e as Error).message);
+    }
   }
 
   // Bulk Listing Jobs - track progress of bulk listing operations

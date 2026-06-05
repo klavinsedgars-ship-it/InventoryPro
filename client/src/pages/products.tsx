@@ -271,16 +271,18 @@ export function Products({ user }: ProductsProps) {
 
   const bulkListToEbayMutation = useMutation({
     mutationFn: async (productIds: number[]) => {
-      // 25 per request: the server lists each batch via the bulk eBay
-      // endpoints (~3 calls per 25 vs 3 per product). Progress advances per
-      // batch. Fits comfortably inside the serverless function timeout.
-      const CHUNK = 25;
+      // Use the proven per-product flow (mode:"single") for the manual
+      // lister — it's resilient (one failure never blocks the rest) and
+      // ensures the merchant location up front. The 25-SKU bulk path is
+      // reserved for the server-side ramp. Small chunks keep the progress
+      // bar moving.
+      const CHUNK = 10;
       let published = 0, failed = 0, skipped = 0, done = 0, limitHit = false;
       const failures: string[] = [];
       setListProgress({ done: 0, total: productIds.length, published: 0, failed: 0 });
       for (let i = 0; i < productIds.length && !limitHit; i += CHUNK) {
         const chunk = productIds.slice(i, i + CHUNK);
-        const response = await apiRequest("POST", "/api/ebay/inventory-list-batch", { productIds: chunk });
+        const response = await apiRequest("POST", "/api/ebay/inventory-list-batch", { productIds: chunk, mode: "single" });
         const data = await response.json();
         if (!data.success) throw new Error(data.error || data.message || "Listing failed");
         published += data.published || 0;
@@ -295,13 +297,16 @@ export function Products({ user }: ProductsProps) {
     },
     onSuccess: (data: any) => {
       if (data.success) {
+        const firstError = data.failures?.[0];
         toast({
           title: data.published > 0 ? "Listed on eBay" : "Listing finished",
           description:
             `${data.published}/${data.attempted} published` +
             (data.failed ? `, ${data.failed} failed` : "") +
             (data.skipped ? `, ${data.skipped} skipped (out of stock)` : "") +
-            (data.limitHit ? " (eBay limit reached — resume later)" : ""),
+            (data.limitHit ? " (eBay limit reached — resume later)" : "") +
+            // Surface the first failure reason so the error isn't hidden.
+            (data.failed && !data.published && firstError ? `\nReason: ${firstError}` : ""),
           variant: data.failed && !data.published ? "destructive" : undefined,
         });
         if (data.failures?.length) console.warn("Listing failures:\n" + data.failures.join("\n"));
