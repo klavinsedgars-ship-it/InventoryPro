@@ -9514,16 +9514,27 @@ async function registerRoutes(app) {
       res.status(500).json({ error: error.message });
     }
   });
-  app.post("/api/ops/list-ramp/preview", requireAuth, async (req, res) => {
+  app.post("/api/ops/list-ramp/preview", requireAuth, async (_req, res) => {
     try {
-      const base = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
-      const secret = process.env.CRON_SECRET;
-      const r = await fetch(`${base}/api/cron/list-ramp?dryRun=1`, {
-        method: "POST",
-        headers: secret ? { authorization: `Bearer ${secret}` } : {}
+      const batchSize = 25;
+      const candidates = await storage.getListingCandidates(batchSize);
+      const stats = await storage.getEbayListingStats();
+      res.json({
+        success: true,
+        dryRun: true,
+        wouldPublishNow: candidates.length,
+        // Upper-bound estimate of everything still eligible (in-stock,
+        // not-listed, not-excluded count would need a separate query).
+        totalCandidatesRemaining: Math.max(0, stats.totalTme - stats.listed),
+        sample: candidates.map((p) => ({
+          id: p.id,
+          sku: p.sku,
+          name: p.name,
+          stock: p.stock,
+          salePrice: p.salePrice,
+          supplierPrice: p.supplierPrice
+        }))
       });
-      const data = await r.json().catch(() => ({}));
-      res.status(r.status).json(data);
     } catch (error) {
       res.status(500).json({ success: false, error: error.message });
     }

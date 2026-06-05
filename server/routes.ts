@@ -1203,17 +1203,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Listing-ramp manual controls. Live publishing requires {confirm:true}
   // in the body so a single click can't ship products by accident.
-  app.post("/api/ops/list-ramp/preview", requireAuth, async (req, res) => {
+  app.post("/api/ops/list-ramp/preview", requireAuth, async (_req, res) => {
     try {
-      const base = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
-      const secret = process.env.CRON_SECRET;
-      // Synchronous call so the caller gets the candidate sample back.
-      const r = await fetch(`${base}/api/cron/list-ramp?dryRun=1`, {
-        method: "POST",
-        headers: secret ? { authorization: `Bearer ${secret}` } : {},
+      // Compute inline (no internal HTTP hop) — a server-to-server fetch to
+      // our own deployment hits Vercel deployment protection on previews and
+      // returns 401. This is read-only and already behind requireAuth.
+      const batchSize = 25;
+      const candidates = await storage.getListingCandidates(batchSize);
+      const stats = await storage.getEbayListingStats();
+      res.json({
+        success: true,
+        dryRun: true,
+        wouldPublishNow: candidates.length,
+        // Upper-bound estimate of everything still eligible (in-stock,
+        // not-listed, not-excluded count would need a separate query).
+        totalCandidatesRemaining: Math.max(0, stats.totalTme - stats.listed),
+        sample: candidates.map((p: any) => ({
+          id: p.id,
+          sku: p.sku,
+          name: p.name,
+          stock: p.stock,
+          salePrice: p.salePrice,
+          supplierPrice: p.supplierPrice,
+        })),
       });
-      const data = await r.json().catch(() => ({}));
-      res.status(r.status).json(data);
     } catch (error) {
       res.status(500).json({ success: false, error: (error as Error).message });
     }
