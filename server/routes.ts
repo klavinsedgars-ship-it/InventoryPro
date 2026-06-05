@@ -4215,6 +4215,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     let chunks = 0;
     let totalChanged = 0;
     let totalEbay = 0;
+    let totalUnlisted = 0;
+    let totalRelisted = 0;
     let last: any = null;
     const allErrors: string[] = [];
     try {
@@ -4223,6 +4225,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         chunks++;
         totalChanged += last.changed;
         totalEbay += last.ebayUpdated;
+        totalUnlisted += last.ebayUnlisted ?? 0;
+        totalRelisted += last.ebayRelisted ?? 0;
         allErrors.push(...last.errors);
       } while (!last.done && Date.now() - start < budgetMs);
 
@@ -4230,20 +4234,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
         source: "tme",
         operation: "cron_sync",
         status: last?.done ? "success" : "partial",
-        message: `Cron sync: ${chunks} chunks, ${totalChanged} changed, ${totalEbay} eBay updated, ${last?.remaining ?? "?"} remaining`,
-        details: JSON.stringify({ chunks, totalChanged, totalEbay, remaining: last?.remaining, errors: allErrors.slice(0, 20) }),
+        message: `Cron sync: ${chunks} chunks, ${totalChanged} changed, ${totalEbay} eBay updated, ${totalUnlisted} unlisted (OOS), ${totalRelisted} relisted, ${last?.remaining ?? "?"} remaining`,
+        details: JSON.stringify({ chunks, totalChanged, totalEbay, totalUnlisted, totalRelisted, remaining: last?.remaining, errors: allErrors.slice(0, 20) }),
       });
 
       // Self-chain: if stale products remain, fire the next invocation
       // (fresh 300s budget) so a big catalog is fully covered without
-      // waiting for the next scheduled cron. Fire-and-forget.
+      // waiting for the next scheduled cron. Fire-and-forget — but log
+      // and persist failures so a hung chain shows up in sync_logs
+      // instead of silently leaving the rest of the catalog unsynced.
       if (!last?.done) {
         const base = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
         const secret = process.env.CRON_SECRET;
         fetch(`${base}/api/cron/daily-sync`, {
           method: "POST",
           headers: secret ? { authorization: `Bearer ${secret}` } : {},
-        }).catch(() => {});
+        })
+          .then(async (r) => {
+            if (!r.ok) {
+              const body = await r.text().catch(() => "");
+              console.error(`[cron-chain] daily-sync chain HTTP ${r.status}: ${body.slice(0, 200)}`);
+              await storage.createSyncLog({
+                source: "tme",
+                operation: "cron_sync_chain",
+                status: "error",
+                message: `Chain HTTP ${r.status}; ${last?.remaining ?? "?"} products still stale`,
+                details: JSON.stringify({ status: r.status, remaining: last?.remaining, body: body.slice(0, 500) }),
+              }).catch(() => {});
+            }
+          })
+          .catch(async (err) => {
+            console.error("[cron-chain] daily-sync chain failed:", err);
+            await storage.createSyncLog({
+              source: "tme",
+              operation: "cron_sync_chain",
+              status: "error",
+              message: `Chain fetch failed; ${last?.remaining ?? "?"} products still stale`,
+              details: JSON.stringify({ error: String(err), remaining: last?.remaining }),
+            }).catch(() => {});
+          });
       }
 
       res.json({
@@ -4252,6 +4281,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         chunks,
         totalChanged,
         ebayUpdated: totalEbay,
+        ebayUnlisted: totalUnlisted,
+        ebayRelisted: totalRelisted,
         remaining: last?.remaining ?? null,
         elapsedMs: Date.now() - start,
       });
@@ -4387,14 +4418,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Self-chain: keep going with a fresh 300s budget until the ramp is
-      // drained or a rate-limit pause is needed.
+      // drained or a rate-limit pause is needed. Log chain failures so a
+      // stuck ramp surfaces in sync_logs instead of silently halting.
       if (!done && !limitHit) {
         const base = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
         const secret = process.env.CRON_SECRET;
         fetch(`${base}/api/cron/list-ramp`, {
           method: "POST",
           headers: secret ? { authorization: `Bearer ${secret}` } : {},
-        }).catch(() => {});
+        })
+          .then(async (r) => {
+            if (!r.ok) {
+              const body = await r.text().catch(() => "");
+              console.error(`[cron-chain] list-ramp chain HTTP ${r.status}: ${body.slice(0, 200)}`);
+              await storage.createSyncLog({
+                source: "ebay",
+                operation: "list_ramp_chain",
+                status: "error",
+                message: `Chain HTTP ${r.status}; ramp halted`,
+                details: JSON.stringify({ status: r.status, body: body.slice(0, 500) }),
+              }).catch(() => {});
+            }
+          })
+          .catch(async (err) => {
+            console.error("[cron-chain] list-ramp chain failed:", err);
+            await storage.createSyncLog({
+              source: "ebay",
+              operation: "list_ramp_chain",
+              status: "error",
+              message: "Chain fetch failed; ramp halted",
+              details: JSON.stringify({ error: String(err) }),
+            }).catch(() => {});
+          });
       }
 
       res.json({ success: true, batches, published, failed, skipped, limitHit, done, elapsedMs: Date.now() - start });

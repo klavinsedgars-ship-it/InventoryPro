@@ -74,7 +74,7 @@ import {
   type InsertScheduledMessage
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, gte, lte, lt, desc, asc, count, or, ilike, isNull, isNotNull, sql, inArray } from "drizzle-orm";
+import { eq, ne, and, gte, lte, lt, desc, asc, count, or, ilike, isNull, isNotNull, sql, inArray } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 
 export interface IStorage {
@@ -461,6 +461,10 @@ export class DatabaseStorage implements IStorage {
       eq(products.listedOnEbay, false),
       gte(products.stock, 1),
       or(eq(products.excludeFromListing, false), isNull(products.excludeFromListing)),
+      // Skip products we auto-ended for being out of stock — sync-chunk
+      // re-publishes their existing offer when stock returns, so the ramp
+      // must not create a parallel offer for the same SKU.
+      or(isNull(products.ebayListingStatus), ne(products.ebayListingStatus, "ended_oos")),
     ];
     if (opts?.minPrice != null) conds.push(gte(products.salePrice, String(opts.minPrice)));
     if (opts?.maxPrice != null) conds.push(lte(products.salePrice, String(opts.maxPrice)));

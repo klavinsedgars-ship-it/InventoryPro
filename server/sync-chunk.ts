@@ -19,6 +19,11 @@ import {
   calculatePriceWithFloor,
 } from "./dynamic-pricing";
 import { getFeeConfig } from "./fee-config";
+import { ebayInventoryApi } from "./ebay-inventory-api";
+
+// Marks a listing we ended automatically because TME stock hit 0, so we can
+// tell it apart from manual unlists and auto-republish it when stock returns.
+const ENDED_OOS = "ended_oos";
 
 // Sum stock across TME warehouses (StockList), falling back to the flat
 // Amount field, then to the value we already hold in the DB.
@@ -39,6 +44,8 @@ export interface SyncChunkResult {
   processedThisChunk: number;
   changed: number; // products whose price or stock actually changed
   ebayUpdated: number; // eBay listings updated
+  ebayUnlisted: number; // listings withdrawn because stock hit 0
+  ebayRelisted: number; // listings re-published because stock returned
   done: boolean;
   errors: string[];
 }
@@ -61,7 +68,7 @@ export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
   const total = await storage.getTmeProductCount();
   const slice = (await storage.getStaleTmeProducts(limit, staleBefore)).filter((p) => p.sku);
   if (slice.length === 0) {
-    return { total, remaining: 0, processedThisChunk: 0, changed: 0, ebayUpdated: 0, done: true, errors };
+    return { total, remaining: 0, processedThisChunk: 0, changed: 0, ebayUpdated: 0, ebayUnlisted: 0, ebayRelisted: 0, done: true, errors };
   }
 
   // Resolve fee config once per chunk (drives the net-profit price floor).
@@ -84,6 +91,10 @@ export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
   let changed = 0;
   // Inventory-model listings (offerId) -> bulkUpdatePriceQuantity.
   const inventoryUpdates: Array<{ product: any; quantity: number; price: number }> = [];
+  // Listed products whose stock hit 0 -> withdraw the offer.
+  const withdrawals: any[] = [];
+  // Previously auto-ended products back in stock -> re-publish the offer.
+  const relists: any[] = [];
   const now = new Date();
   // Collect DB writes and flush them together at the end of the chunk
   // instead of awaiting one round-trip per product (the old bottleneck).
@@ -132,21 +143,30 @@ export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
     }
     writes.push(storage.updateProduct(product.id, update));
 
-    if (priceChanged || stockChanged) {
-      changed++;
-      // Inventory listings carry an offerId; push qty/price via the
-      // Inventory API (bulkUpdatePriceQuantity).
-      if (product.listedOnEbay && product.ebayOfferId) {
-        const limited =
-          product.useStockLimit && product.ebayStockLimit != null
-            ? Math.min(stock, product.ebayStockLimit)
-            : stock;
-        inventoryUpdates.push({
-          product: { ...product, stock },
-          quantity: Math.max(0, limited),
-          price: pricing ? Number(pricing.finalPrice) : parseFloat(product.salePrice) || 0,
-        });
-      }
+    if (priceChanged || stockChanged) changed++;
+
+    // Effective sellable quantity after any per-product eBay stock cap.
+    const limited =
+      product.useStockLimit && product.ebayStockLimit != null
+        ? Math.min(stock, product.ebayStockLimit)
+        : stock;
+    const hasOffer = !!product.ebayOfferId;
+
+    if (product.listedOnEbay && hasOffer && limited <= 0) {
+      // Out of stock -> withdraw the live listing (idempotent; withdrawOffer
+      // tolerates an already-ended offer). Gated on state, not on `changed`,
+      // so a previously-missed 0-stock listing is still recovered.
+      withdrawals.push(product);
+    } else if (!product.listedOnEbay && hasOffer && product.ebayListingStatus === ENDED_OOS && limited > 0) {
+      // Back in stock and we're the ones who ended it -> re-publish the offer.
+      relists.push(product);
+    } else if (product.listedOnEbay && hasOffer && (priceChanged || stockChanged)) {
+      // Still in stock with a change -> push qty/price via the Inventory API.
+      inventoryUpdates.push({
+        product: { ...product, stock },
+        quantity: Math.max(0, limited),
+        price: pricing ? Number(pricing.finalPrice) : parseFloat(product.salePrice) || 0,
+      });
     }
   }
 
@@ -170,6 +190,46 @@ export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
     }
   }
 
+  // Withdraw listings that went out of stock; mark them so we can re-list
+  // automatically (and keep the ramp from creating a duplicate offer).
+  let ebayUnlisted = 0;
+  for (const product of withdrawals) {
+    try {
+      const r = await ebayInventoryApi.withdrawOffer(product.ebayOfferId);
+      if (r.ok) {
+        ebayUnlisted++;
+        await storage.updateProduct(product.id, {
+          listedOnEbay: false,
+          ebayListingStatus: ENDED_OOS,
+        });
+      } else {
+        errors.push(`withdraw ${product.sku}: ${r.error || r.httpStatus}`);
+      }
+    } catch (e) {
+      errors.push(`withdraw ${product.sku}: ${(e as Error).message}`);
+    }
+  }
+
+  // Re-publish offers we previously auto-ended, now that stock is back.
+  let ebayRelisted = 0;
+  for (const product of relists) {
+    try {
+      const r = await ebayInventoryApi.publishOffer(product.ebayOfferId);
+      if (r.ok) {
+        ebayRelisted++;
+        await storage.updateProduct(product.id, {
+          listedOnEbay: true,
+          ebayListingStatus: "published",
+          ...(r.listingId ? { ebayListingId: r.listingId } : {}),
+        });
+      } else {
+        errors.push(`relist ${product.sku}: ${r.error || r.httpStatus}`);
+      }
+    } catch (e) {
+      errors.push(`relist ${product.sku}: ${(e as Error).message}`);
+    }
+  }
+
   const remaining = Math.max(0, (await storage.getStaleTmeProductCount(staleBefore)));
   return {
     total,
@@ -177,6 +237,8 @@ export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
     processedThisChunk: slice.length,
     changed,
     ebayUpdated,
+    ebayUnlisted,
+    ebayRelisted,
     done: remaining === 0,
     errors,
   };
