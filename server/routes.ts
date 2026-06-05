@@ -1193,6 +1193,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             (await storage.getMarketplaceSettings("ebay")).find(
               (s) => s.setting === "listing_ramp_paused",
             )?.value === "true",
+          rampPriceRange: await getRampPriceRange(),
           issues: envCheck.issues,
         },
       });
@@ -1209,15 +1210,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // our own deployment hits Vercel deployment protection on previews and
       // returns 401. This is read-only and already behind requireAuth.
       const batchSize = 25;
-      const candidates = await storage.getListingCandidates(batchSize);
-      const stats = await storage.getEbayListingStats();
+      const range = await getRampPriceRange();
+      const [candidates, totalCandidatesRemaining] = await Promise.all([
+        storage.getListingCandidates(batchSize, range),
+        storage.getListingCandidateCount(range),
+      ]);
       res.json({
         success: true,
         dryRun: true,
+        priceRange: range,
         wouldPublishNow: candidates.length,
-        // Upper-bound estimate of everything still eligible (in-stock,
-        // not-listed, not-excluded count would need a separate query).
-        totalCandidatesRemaining: Math.max(0, stats.totalTme - stats.listed),
+        totalCandidatesRemaining,
         sample: candidates.map((p: any) => ({
           id: p.id,
           sku: p.sku,
@@ -1272,6 +1275,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       await storage.setMarketplaceSetting({ marketplace: "ebay", setting: "listing_ramp_paused", value: "false" });
       res.json({ success: true, message: "Ramp un-paused (cron will resume on its next run)." });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Set the ramp sale-price band. Body: { minPrice?, maxPrice? } in the
+  // listing currency. null/"" clears a bound. Persisted, so all subsequent
+  // ramp runs (and the cron) only list products whose salePrice is in range.
+  app.post("/api/ops/list-ramp/price-range", requireAuth, async (req, res) => {
+    try {
+      const norm = (v: any): string => {
+        if (v === null || v === undefined || v === "") return "";
+        const n = Number(v);
+        return isNaN(n) || n < 0 ? "" : String(n);
+      };
+      const minVal = norm(req.body?.minPrice);
+      const maxVal = norm(req.body?.maxPrice);
+      if (minVal !== "" && maxVal !== "" && Number(minVal) > Number(maxVal)) {
+        return res.status(400).json({ success: false, error: "minPrice must be ≤ maxPrice" });
+      }
+      await storage.setMarketplaceSetting({ marketplace: "ebay", setting: "ramp_min_price", value: minVal });
+      await storage.setMarketplaceSetting({ marketplace: "ebay", setting: "ramp_max_price", value: maxVal });
+      const range = await getRampPriceRange();
+      const count = await storage.getListingCandidateCount(range);
+      res.json({ success: true, priceRange: range, matchingCandidates: count });
     } catch (error) {
       res.status(500).json({ success: false, error: (error as Error).message });
     }
@@ -4041,6 +4069,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/cron/daily-sync", cronHandler);
   app.post("/api/cron/daily-sync", cronHandler);
 
+  // Persisted ramp sale-price band (marketplace_settings ebay/ramp_min_price,
+  // ramp_max_price). Stored so every self-chained run and the scheduled cron
+  // use the same range. Empty/invalid = no bound. Hoisted so the preview and
+  // /api/ops/daily handlers (defined earlier) can use it too.
+  async function getRampPriceRange(): Promise<{ minPrice?: number; maxPrice?: number }> {
+    const settings = await storage.getMarketplaceSettings("ebay");
+    const read = (key: string) => {
+      const v = settings.find((s) => s.setting === key)?.value;
+      if (v == null || v === "" || isNaN(Number(v))) return undefined;
+      return Number(v);
+    };
+    const range: { minPrice?: number; maxPrice?: number } = {};
+    const min = read("ramp_min_price");
+    const max = read("ramp_max_price");
+    if (min !== undefined) range.minPrice = min;
+    if (max !== undefined) range.maxPrice = max;
+    return range;
+  }
+
   // Server-side listing ramp: pulls listing candidates from the DB and runs
   // them through the 25-SKU Inventory-API bulk path within a 270s budget,
   // self-chaining if more remain. Resumable across cold starts (state lives
@@ -4084,16 +4131,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     const batchSize = 25;
+    const range = await getRampPriceRange();
 
     // Dry-run: never call eBay. Return what the next batch WOULD publish.
     if (dryRun) {
-      const candidates = await storage.getListingCandidates(batchSize);
-      const totalCandidates = (await storage.getEbayListingStats()).totalTme - (await storage.getEbayListingStats()).listed;
+      const candidates = await storage.getListingCandidates(batchSize, range);
+      const totalCandidates = await storage.getListingCandidateCount(range);
       return res.json({
         success: true,
         dryRun: true,
+        priceRange: range,
         wouldPublishNow: candidates.length,
-        totalCandidatesRemaining: Math.max(0, totalCandidates),
+        totalCandidatesRemaining: totalCandidates,
         sample: candidates.map((p: any) => ({
           id: p.id,
           sku: p.sku,
@@ -4122,7 +4171,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           (s) => s.setting === "listing_ramp_paused",
         );
         if (stillPaused?.value === "true") break;
-        const candidates = await storage.getListingCandidates(batchSize);
+        const candidates = await storage.getListingCandidates(batchSize, range);
         lastBatchSize = candidates.length;
         if (candidates.length === 0) break;
         const r = await listProductsViaInventoryBulk(candidates as any);

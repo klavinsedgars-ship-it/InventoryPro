@@ -863,15 +863,25 @@ var init_storage = __esm({
       }
       // Candidates to list on eBay: TME products, in stock, not already listed,
       // not excluded. DB-side filter + limit (no full-table load).
-      async getListingCandidates(limit) {
-        return await db.select().from(products).where(
-          and(
-            eq(products.supplier, "TME"),
-            eq(products.listedOnEbay, false),
-            gte(products.stock, 1),
-            or(eq(products.excludeFromListing, false), isNull(products.excludeFromListing))
-          )
-        ).orderBy(asc(products.id)).limit(limit);
+      // Eligible-to-list products. Optional sale-price band (min/max, inclusive)
+      // lets the ramp target a price range. salePrice is the eBay list price.
+      listingCandidateConds(opts) {
+        const conds = [
+          eq(products.supplier, "TME"),
+          eq(products.listedOnEbay, false),
+          gte(products.stock, 1),
+          or(eq(products.excludeFromListing, false), isNull(products.excludeFromListing))
+        ];
+        if (opts?.minPrice != null) conds.push(gte(products.salePrice, String(opts.minPrice)));
+        if (opts?.maxPrice != null) conds.push(lte(products.salePrice, String(opts.maxPrice)));
+        return and(...conds);
+      }
+      async getListingCandidates(limit, opts) {
+        return await db.select().from(products).where(this.listingCandidateConds(opts)).orderBy(asc(products.id)).limit(limit);
+      }
+      async getListingCandidateCount(opts) {
+        const [r] = await db.select({ c: count() }).from(products).where(this.listingCandidateConds(opts));
+        return r?.c ?? 0;
       }
       // Listed products needing an eBay stock/price push (have an offer id).
       async getProductsWithOffers(limit) {
@@ -9507,6 +9517,7 @@ async function registerRoutes(app) {
           rampPaused: (await storage.getMarketplaceSettings("ebay")).find(
             (s) => s.setting === "listing_ramp_paused"
           )?.value === "true",
+          rampPriceRange: await getRampPriceRange(),
           issues: envCheck.issues
         }
       });
@@ -9517,15 +9528,17 @@ async function registerRoutes(app) {
   app.post("/api/ops/list-ramp/preview", requireAuth, async (_req, res) => {
     try {
       const batchSize = 25;
-      const candidates = await storage.getListingCandidates(batchSize);
-      const stats = await storage.getEbayListingStats();
+      const range = await getRampPriceRange();
+      const [candidates, totalCandidatesRemaining] = await Promise.all([
+        storage.getListingCandidates(batchSize, range),
+        storage.getListingCandidateCount(range)
+      ]);
       res.json({
         success: true,
         dryRun: true,
+        priceRange: range,
         wouldPublishNow: candidates.length,
-        // Upper-bound estimate of everything still eligible (in-stock,
-        // not-listed, not-excluded count would need a separate query).
-        totalCandidatesRemaining: Math.max(0, stats.totalTme - stats.listed),
+        totalCandidatesRemaining,
         sample: candidates.map((p) => ({
           id: p.id,
           sku: p.sku,
@@ -9575,6 +9588,27 @@ async function registerRoutes(app) {
     try {
       await storage.setMarketplaceSetting({ marketplace: "ebay", setting: "listing_ramp_paused", value: "false" });
       res.json({ success: true, message: "Ramp un-paused (cron will resume on its next run)." });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+  app.post("/api/ops/list-ramp/price-range", requireAuth, async (req, res) => {
+    try {
+      const norm = (v) => {
+        if (v === null || v === void 0 || v === "") return "";
+        const n = Number(v);
+        return isNaN(n) || n < 0 ? "" : String(n);
+      };
+      const minVal = norm(req.body?.minPrice);
+      const maxVal = norm(req.body?.maxPrice);
+      if (minVal !== "" && maxVal !== "" && Number(minVal) > Number(maxVal)) {
+        return res.status(400).json({ success: false, error: "minPrice must be \u2264 maxPrice" });
+      }
+      await storage.setMarketplaceSetting({ marketplace: "ebay", setting: "ramp_min_price", value: minVal });
+      await storage.setMarketplaceSetting({ marketplace: "ebay", setting: "ramp_max_price", value: maxVal });
+      const range = await getRampPriceRange();
+      const count2 = await storage.getListingCandidateCount(range);
+      res.json({ success: true, priceRange: range, matchingCandidates: count2 });
     } catch (error) {
       res.status(500).json({ success: false, error: error.message });
     }
@@ -11853,6 +11887,20 @@ async function registerRoutes(app) {
   };
   app.get("/api/cron/daily-sync", cronHandler);
   app.post("/api/cron/daily-sync", cronHandler);
+  async function getRampPriceRange() {
+    const settings = await storage.getMarketplaceSettings("ebay");
+    const read = (key) => {
+      const v = settings.find((s) => s.setting === key)?.value;
+      if (v == null || v === "" || isNaN(Number(v))) return void 0;
+      return Number(v);
+    };
+    const range = {};
+    const min = read("ramp_min_price");
+    const max = read("ramp_max_price");
+    if (min !== void 0) range.minPrice = min;
+    if (max !== void 0) range.maxPrice = max;
+    return range;
+  }
   const listRampHandler = async (req, res) => {
     const auth = req.headers["authorization"] || "";
     const cronSecret = process.env.CRON_SECRET;
@@ -11876,14 +11924,16 @@ async function registerRoutes(app) {
       return res.status(412).json({ success: false, envBlocked: true, issues: env.issues });
     }
     const batchSize = 25;
+    const range = await getRampPriceRange();
     if (dryRun) {
-      const candidates = await storage.getListingCandidates(batchSize);
-      const totalCandidates = (await storage.getEbayListingStats()).totalTme - (await storage.getEbayListingStats()).listed;
+      const candidates = await storage.getListingCandidates(batchSize, range);
+      const totalCandidates = await storage.getListingCandidateCount(range);
       return res.json({
         success: true,
         dryRun: true,
+        priceRange: range,
         wouldPublishNow: candidates.length,
-        totalCandidatesRemaining: Math.max(0, totalCandidates),
+        totalCandidatesRemaining: totalCandidates,
         sample: candidates.map((p) => ({
           id: p.id,
           sku: p.sku,
@@ -11909,7 +11959,7 @@ async function registerRoutes(app) {
           (s) => s.setting === "listing_ramp_paused"
         );
         if (stillPaused?.value === "true") break;
-        const candidates = await storage.getListingCandidates(batchSize);
+        const candidates = await storage.getListingCandidates(batchSize, range);
         lastBatchSize = candidates.length;
         if (candidates.length === 0) break;
         const r = await listProductsViaInventoryBulk2(candidates);

@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -59,6 +60,7 @@ interface OpsData {
     ok: boolean;
     rampEnabled: boolean;
     rampPaused: boolean;
+    rampPriceRange: { minPrice?: number; maxPrice?: number };
     issues: Array<{ level: "error" | "warning"; key: string; message: string }>;
   };
 }
@@ -139,6 +141,38 @@ export function OpsDashboard({ user }: OpsProps) {
   });
 
   const [preview, setPreview] = useState<any>(null);
+  const [priceMin, setPriceMin] = useState("");
+  const [priceMax, setPriceMax] = useState("");
+  const [bandInit, setBandInit] = useState(false);
+
+  // Seed the band inputs from the server once on first load.
+  useEffect(() => {
+    if (data && !bandInit) {
+      setPriceMin(data.listingEnv.rampPriceRange.minPrice?.toString() ?? "");
+      setPriceMax(data.listingEnv.rampPriceRange.maxPrice?.toString() ?? "");
+      setBandInit(true);
+    }
+  }, [data, bandInit]);
+
+  const saveBand = useMutation({
+    mutationFn: async () => {
+      const r = await apiRequest("POST", "/api/ops/list-ramp/price-range", {
+        minPrice: priceMin === "" ? null : Number(priceMin),
+        maxPrice: priceMax === "" ? null : Number(priceMax),
+      });
+      return r.json();
+    },
+    onSuccess: (d: any) => {
+      if (d?.success) {
+        toast({ title: "Price band saved", description: `${d.matchingCandidates} products now match the ramp filter.` });
+        qc.invalidateQueries({ queryKey: ["/api/ops/daily"] });
+        setPreview(null);
+      } else {
+        toast({ title: "Could not save band", description: d?.error || "Unknown error", variant: "destructive" });
+      }
+    },
+    onError: (e: any) => toast({ title: "Could not save band", description: e.message, variant: "destructive" }),
+  });
 
   const previewRamp = useMutation({
     mutationFn: async () => {
@@ -281,6 +315,41 @@ export function OpsDashboard({ user }: OpsProps) {
                   </CardContent>
                 </Card>
               )}
+
+              {/* Ramp price band */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-gray-500 flex items-center gap-2">
+                    <ListChecks className="w-4 h-4" /> Ramp price band
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-xs text-gray-500 mb-2">
+                    The ramp only lists products whose eBay sale price is in this range. Leave a field blank for no bound.
+                    {(data.listingEnv.rampPriceRange.minPrice != null || data.listingEnv.rampPriceRange.maxPrice != null) && (
+                      <span className="ml-1 text-gray-700">
+                        Current: {data.listingEnv.rampPriceRange.minPrice ?? "0"} – {data.listingEnv.rampPriceRange.maxPrice ?? "∞"} €
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-end gap-2 flex-wrap">
+                    <div>
+                      <label className="text-xs text-gray-500 block">Min €</label>
+                      <Input type="number" min="0" step="0.01" value={priceMin} onChange={(e) => setPriceMin(e.target.value)} placeholder="any" className="w-28" />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500 block">Max €</label>
+                      <Input type="number" min="0" step="0.01" value={priceMax} onChange={(e) => setPriceMax(e.target.value)} placeholder="any" className="w-28" />
+                    </div>
+                    <Button size="sm" onClick={() => saveBand.mutate()} disabled={saveBand.isPending}>Save band</Button>
+                    {(priceMin !== "" || priceMax !== "") && (
+                      <Button size="sm" variant="outline" onClick={() => { setPriceMin(""); setPriceMax(""); }}>
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
 
               {/* Preview result */}
               {preview && (

@@ -440,20 +440,35 @@ export class DatabaseStorage implements IStorage {
 
   // Candidates to list on eBay: TME products, in stock, not already listed,
   // not excluded. DB-side filter + limit (no full-table load).
-  async getListingCandidates(limit: number): Promise<Product[]> {
+  // Eligible-to-list products. Optional sale-price band (min/max, inclusive)
+  // lets the ramp target a price range. salePrice is the eBay list price.
+  private listingCandidateConds(opts?: { minPrice?: number; maxPrice?: number }) {
+    const conds = [
+      eq(products.supplier, "TME"),
+      eq(products.listedOnEbay, false),
+      gte(products.stock, 1),
+      or(eq(products.excludeFromListing, false), isNull(products.excludeFromListing)),
+    ];
+    if (opts?.minPrice != null) conds.push(gte(products.salePrice, String(opts.minPrice)));
+    if (opts?.maxPrice != null) conds.push(lte(products.salePrice, String(opts.maxPrice)));
+    return and(...conds);
+  }
+
+  async getListingCandidates(
+    limit: number,
+    opts?: { minPrice?: number; maxPrice?: number },
+  ): Promise<Product[]> {
     return await db
       .select()
       .from(products)
-      .where(
-        and(
-          eq(products.supplier, "TME"),
-          eq(products.listedOnEbay, false),
-          gte(products.stock, 1),
-          or(eq(products.excludeFromListing, false), isNull(products.excludeFromListing)),
-        ),
-      )
+      .where(this.listingCandidateConds(opts))
       .orderBy(asc(products.id))
       .limit(limit);
+  }
+
+  async getListingCandidateCount(opts?: { minPrice?: number; maxPrice?: number }): Promise<number> {
+    const [r] = await db.select({ c: count() }).from(products).where(this.listingCandidateConds(opts));
+    return r?.c ?? 0;
   }
 
   // Listed products needing an eBay stock/price push (have an offer id).
