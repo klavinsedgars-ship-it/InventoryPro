@@ -138,6 +138,24 @@ export async function listProductsViaInventoryBulk(
     results.push({ sku: p.sku, ok: false, error: "skipped: out of stock" });
   }
 
+  // The offer payload references the merchant location, so it must exist
+  // before we create offers. The single-product flow does this per call;
+  // the bulk flow must do it once up front (this was the gap that made
+  // bulk publish fail where single succeeded).
+  if (products.length > 0) {
+    const loc = await ebayInventoryApi.ensureMerchantLocation();
+    if (!loc.ok) {
+      return {
+        attempted: allProducts.length,
+        published: 0,
+        failed: products.length,
+        skipped,
+        limitHit: false,
+        results: products.map((p) => ({ sku: p.sku, ok: false, error: `merchant location: ${loc.error}` })),
+      };
+    }
+  }
+
   for (let i = 0; i < products.length && !limitHit; i += 25) {
     const batch = products.slice(i, i + 25);
 
