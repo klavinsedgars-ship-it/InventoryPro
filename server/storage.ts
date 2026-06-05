@@ -115,6 +115,7 @@ export interface IStorage {
   // Sync Logs
   getSyncLogs(limit?: number): Promise<SyncLog[]>;
   createSyncLog(log: InsertSyncLog): Promise<SyncLog>;
+  ensureSyncJobsTable(): Promise<void>;
   createSyncJob(job: InsertSyncJob): Promise<SyncJob>;
   getSyncJob(jobId: string): Promise<SyncJob | undefined>;
   updateSyncJob(jobId: string, updates: Partial<SyncJob>): Promise<SyncJob | undefined>;
@@ -272,6 +273,9 @@ export interface IStorage {
   updateScheduledMessage(id: number, message: Partial<InsertScheduledMessage>): Promise<ScheduledMessage | undefined>;
   cancelScheduledMessage(id: number): Promise<boolean>;
 }
+
+// Set once the sync_jobs table has been ensured in this process.
+let syncJobsTableEnsured = false;
 
 export class DatabaseStorage implements IStorage {
   constructor() {
@@ -684,12 +688,41 @@ export class DatabaseStorage implements IStorage {
     return log;
   }
 
+  // Create the sync_jobs table on first use so deploys don't require a manual
+  // `db:push`. CREATE TABLE IF NOT EXISTS is idempotent and additive; the
+  // in-process flag just avoids re-issuing the DDL on every call.
+  async ensureSyncJobsTable(): Promise<void> {
+    if (syncJobsTableEnsured) return;
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS sync_jobs (
+        id            SERIAL PRIMARY KEY,
+        job_id        TEXT NOT NULL UNIQUE,
+        source        TEXT NOT NULL DEFAULT 'tme_browser',
+        status        TEXT NOT NULL DEFAULT 'pending',
+        total         INTEGER NOT NULL DEFAULT 0,
+        processed     INTEGER NOT NULL DEFAULT 0,
+        synced_count  INTEGER NOT NULL DEFAULT 0,
+        updated_count INTEGER NOT NULL DEFAULT 0,
+        failed_count  INTEGER NOT NULL DEFAULT 0,
+        symbols       TEXT NOT NULL,
+        settings      TEXT,
+        errors        TEXT,
+        message       TEXT,
+        created_at    TIMESTAMP DEFAULT now(),
+        updated_at    TIMESTAMP DEFAULT now()
+      )
+    `);
+    syncJobsTableEnsured = true;
+  }
+
   async createSyncJob(job: InsertSyncJob): Promise<SyncJob> {
+    await this.ensureSyncJobsTable();
     const [created] = await db.insert(syncJobs).values(job).returning();
     return created;
   }
 
   async getSyncJob(jobId: string): Promise<SyncJob | undefined> {
+    await this.ensureSyncJobsTable();
     const [job] = await db.select().from(syncJobs).where(eq(syncJobs.jobId, jobId));
     return job || undefined;
   }
@@ -704,6 +737,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getActiveSyncJob(source = "tme_browser"): Promise<SyncJob | undefined> {
+    await this.ensureSyncJobsTable();
     const [job] = await db
       .select()
       .from(syncJobs)
