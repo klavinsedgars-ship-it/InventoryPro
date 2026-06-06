@@ -211,15 +211,19 @@ export function Products({ user }: ProductsProps) {
 
   const deleteSelectedMutation = useMutation({
     mutationFn: async (productIds: number[]) => {
-      const results = await Promise.all(
-        productIds.map(id => apiRequest("DELETE", `/api/products/${id}`).catch(() => null))
-      );
-      return { deletedCount: results.filter(r => r !== null).length };
+      const res = await apiRequest("POST", "/api/products/bulk-delete", { ids: productIds });
+      return (await res.json()) as { deletedCount: number; requestedCount: number };
     },
-    onSuccess: (data: any) => {
+    onSuccess: (data) => {
+      const { deletedCount, requestedCount } = data;
+      const missed = Math.max(0, requestedCount - deletedCount);
       toast({
-        title: "Products Deleted",
-        description: `Successfully deleted ${data.deletedCount} selected products.`,
+        title: missed > 0 ? "Some products were not deleted" : "Products Deleted",
+        description:
+          missed > 0
+            ? `Deleted ${deletedCount} of ${requestedCount} selected products (${missed} not found).`
+            : `Successfully deleted ${deletedCount} selected products.`,
+        variant: missed > 0 ? "destructive" : "default",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
@@ -274,9 +278,10 @@ export function Products({ user }: ProductsProps) {
       // Use the proven per-product flow (mode:"single") for the manual
       // lister — it's resilient (one failure never blocks the rest) and
       // ensures the merchant location up front. The 25-SKU bulk path is
-      // reserved for the server-side ramp. Small chunks keep the progress
-      // bar moving.
-      const CHUNK = 10;
+      // reserved for the server-side ramp. CHUNK=1 so the progress bar
+      // increments after every product instead of jumping at the end
+      // (each eBay listing is ~10–30s of sequential API calls).
+      const CHUNK = 1;
       let published = 0, failed = 0, skipped = 0, done = 0, limitHit = false;
       const failures: string[] = [];
       setListProgress({ done: 0, total: productIds.length, published: 0, failed: 0 });

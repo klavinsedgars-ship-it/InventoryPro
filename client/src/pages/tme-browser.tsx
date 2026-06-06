@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState, useEffect, useRef } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -208,6 +208,15 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   const [showSyncDialog, setShowSyncDialog] = useState(false);
   const [syncProgress, setSyncProgress] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [syncJobId, setSyncJobId] = useState<string | null>(null);
+  const [syncStats, setSyncStats] = useState({
+    total: 0,
+    processed: 0,
+    syncedCount: 0,
+    updatedCount: 0,
+    failedCount: 0,
+  });
+  const syncCancelRef = useRef(false);
   const [enhancedProducts, setEnhancedProducts] = useState<EnhancedProduct[]>([]);
   const [loadingEnhanced, setLoadingEnhanced] = useState(false);
   const [hideSyncedCategories, setHideSyncedCategories] = useState(false);
@@ -309,40 +318,55 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     staleTime: isSyncing ? 2000 : 30000
   });
 
-  // Sync selected products mutation
-  const syncProductsMutation = useMutation({
-    mutationFn: async (data: { productSymbols: string[]; settings: SyncSettings }) => {
-      const response = await fetch("/api/tme/sync-selected", {
+  // Apply a chunk-progress payload from the sync-job API to local UI state.
+  const applySyncProgress = (data: any) => {
+    setSyncStats({
+      total: data.total ?? 0,
+      processed: data.processed ?? 0,
+      syncedCount: data.syncedCount ?? 0,
+      updatedCount: data.updatedCount ?? 0,
+      failedCount: data.failedCount ?? 0,
+    });
+    setSyncProgress(data.total > 0 ? Math.round((data.processed / data.total) * 100) : 0);
+  };
+
+  // Drive a sync job to completion: repeatedly ask the server to process the
+  // next chunk, updating real progress each round. Returns the final payload,
+  // or null if the user cancelled. Throws on a server error.
+  const pumpSyncJob = async (jobId: string) => {
+    syncCancelRef.current = false;
+    while (!syncCancelRef.current) {
+      const res = await fetch("/api/tme/sync-job-chunk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data)
+        body: JSON.stringify({ jobId }),
       });
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Sync failed");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Sync chunk failed");
       }
-      return response.json();
-    },
-    onSuccess: (data) => {
-      toast({
-        title: "Sync completed successfully",
-        description: `${data.syncedCount || 0} new products created, ${data.updatedCount || 0} updated, ${data.failedCount || 0} failed`
-      });
-      setSelectedProducts(new Set());
-      setIsSyncing(false);
-      setSyncProgress(0);
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
-    },
-    onError: (error) => {
-      toast({
-        title: "Sync failed",
-        description: error instanceof Error ? error.message : "Unknown error",
-        variant: "destructive"
-      });
-      setIsSyncing(false);
-      setSyncProgress(0);
+      const data = await res.json();
+      applySyncProgress(data);
+      if (data.done) return data;
     }
-  });
+    return null; // cancelled
+  };
+
+  const finishSync = (final: any) => {
+    if (final.status === "cancelled") {
+      toast({
+        title: "Sync cancelled",
+        description: `Stopped at ${final.processed}/${final.total} (${final.syncedCount} new, ${final.updatedCount} updated)`,
+      });
+    } else {
+      toast({
+        title: final.failedCount > 0 ? "Sync finished with some errors" : "Sync completed successfully",
+        description: `${final.syncedCount || 0} new, ${final.updatedCount || 0} updated, ${final.failedCount || 0} failed`,
+        variant: final.failedCount > 0 ? "destructive" : "default",
+      });
+    }
+    queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+  };
 
   const rawCategories = (categoriesData as any)?.categories || [];
   
@@ -629,28 +653,90 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
 
     setIsSyncing(true);
     setSyncProgress(0);
-
-    // Simulate progress
-    const progressInterval = setInterval(() => {
-      setSyncProgress(prev => {
-        if (prev >= 90) {
-          clearInterval(progressInterval);
-          return prev;
-        }
-        return prev + 10;
-      });
-    }, 500);
+    setSyncStats({
+      total: selectedProducts.size,
+      processed: 0,
+      syncedCount: 0,
+      updatedCount: 0,
+      failedCount: 0,
+    });
 
     try {
-      await syncProductsMutation.mutateAsync({
-        productSymbols: Array.from(selectedProducts),
-        settings: syncSettings
+      // 1) Create the job (returns immediately, no long request).
+      const startRes = await fetch("/api/tme/sync-job-start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          productSymbols: Array.from(selectedProducts),
+          settings: syncSettings,
+        }),
       });
-      setSyncProgress(100);
+      if (!startRes.ok) {
+        const err = await startRes.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to start sync");
+      }
+      const startData = await startRes.json();
+      setSyncJobId(startData.jobId);
+      applySyncProgress(startData);
+
+      // 2) Drive it to completion with real progress.
+      const final = await pumpSyncJob(startData.jobId);
+      if (final) {
+        finishSync(final);
+        if (final.status !== "cancelled") setSelectedProducts(new Set());
+      }
     } catch (error) {
-      clearInterval(progressInterval);
+      toast({
+        title: "Sync failed",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSyncing(false);
+      setSyncJobId(null);
+      syncCancelRef.current = false;
     }
   };
+
+  const handleCancelSync = async () => {
+    syncCancelRef.current = true;
+    if (syncJobId) {
+      await fetch("/api/tme/sync-job-cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId: syncJobId }),
+      }).catch(() => {});
+    }
+  };
+
+  // Resume an in-progress sync after a page refresh (job state lives server-side).
+  useEffect(() => {
+    let stop = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/tme/sync-job-active");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (stop || !data.active) return;
+        setIsSyncing(true);
+        setSyncJobId(data.jobId);
+        applySyncProgress(data);
+        const final = await pumpSyncJob(data.jobId);
+        if (final && !stop) finishSync(final);
+      } catch {
+        /* no active job / network issue — ignore */
+      } finally {
+        if (!stop) {
+          setIsSyncing(false);
+          setSyncJobId(null);
+        }
+      }
+    })();
+    return () => {
+      stop = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const getProductThumbnail = (product: TMEProduct) => {
     if (product.Photo) {
@@ -1372,31 +1458,39 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                 </Tabs>
 
                 <div className="flex justify-between items-center">
-                  <Button variant="outline" onClick={() => setShowSyncDialog(false)}>
-                    Cancel
+                  <Button variant="outline" onClick={() => setShowSyncDialog(false)} disabled={isSyncing}>
+                    Close
                   </Button>
-                  <Button onClick={handleSync} disabled={isSyncing}>
-                    {isSyncing ? (
-                      <>
-                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                        Syncing...
-                      </>
-                    ) : (
-                      <>
-                        <Download className="mr-2 h-4 w-4" />
-                        Sync {selectedProducts.size} Products
-                      </>
-                    )}
-                  </Button>
+                  {isSyncing ? (
+                    <Button variant="destructive" onClick={handleCancelSync} disabled={syncCancelRef.current}>
+                      Cancel sync
+                    </Button>
+                  ) : (
+                    <Button onClick={handleSync}>
+                      <Download className="mr-2 h-4 w-4" />
+                      Sync {selectedProducts.size} Products
+                    </Button>
+                  )}
                 </div>
 
                 {isSyncing && (
                   <div className="space-y-3">
                     <Progress value={syncProgress} className="w-full" />
                     <p className="text-sm text-center text-gray-600">
-                      Syncing products... {syncProgress}%
+                      Syncing {syncStats.processed} of {syncStats.total} products... {syncProgress}%
                     </p>
-                    <div className="flex justify-center gap-4 text-xs">
+                    <div className="flex flex-wrap justify-center gap-2 text-xs">
+                      <div className="px-2 py-1 rounded bg-green-100 text-green-700">
+                        {syncStats.syncedCount} new
+                      </div>
+                      <div className="px-2 py-1 rounded bg-blue-100 text-blue-700">
+                        {syncStats.updatedCount} updated
+                      </div>
+                      {syncStats.failedCount > 0 && (
+                        <div className="px-2 py-1 rounded bg-red-100 text-red-700">
+                          {syncStats.failedCount} failed
+                        </div>
+                      )}
                       <div className="px-2 py-1 rounded bg-gray-100 text-gray-700">
                         TME calls today: {apiUsage?.usage?.callsToday ?? 0}
                         {apiUsage?.usage?.dailyLimit ? `/${apiUsage.usage.dailyLimit}` : ""}

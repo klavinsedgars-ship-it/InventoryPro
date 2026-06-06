@@ -5,6 +5,7 @@ import {
   marketplaceSettings, 
   syncLogs,
   syncQueue,
+  syncJobs,
   pricingTiers,
   shippingPolicies,
   apiUsageTracking,
@@ -33,6 +34,8 @@ import {
   type InsertMarketplaceSettings,
   type SyncLog,
   type InsertSyncLog,
+  type SyncJob,
+  type InsertSyncJob,
   type SyncQueue,
   type InsertSyncQueue,
   type ShippingPolicy,
@@ -71,7 +74,7 @@ import {
   type InsertScheduledMessage
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, gte, lte, lt, desc, asc, count, or, ilike, isNull, isNotNull, sql } from "drizzle-orm";
+import { eq, ne, and, gte, lte, lt, desc, asc, count, or, ilike, isNull, isNotNull, sql, inArray } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 
 export interface IStorage {
@@ -85,9 +88,11 @@ export interface IStorage {
   getProducts(): Promise<Product[]>;
   getProduct(id: number): Promise<Product | undefined>;
   getProductBySku(sku: string): Promise<Product | undefined>;
+  getProductsBySkus(skus: string[]): Promise<Product[]>;
   createProduct(product: InsertProduct): Promise<Product>;
   updateProduct(id: number, product: Partial<InsertProduct>): Promise<Product | undefined>;
   deleteProduct(id: number): Promise<boolean>;
+  deleteProducts(ids: number[]): Promise<number>;
   deleteAllProducts(): Promise<number>;
   getProductsByCategory(category: string): Promise<Product[]>;
   getProductsWithFilters(filters: {
@@ -110,6 +115,11 @@ export interface IStorage {
   // Sync Logs
   getSyncLogs(limit?: number): Promise<SyncLog[]>;
   createSyncLog(log: InsertSyncLog): Promise<SyncLog>;
+  ensureSyncJobsTable(): Promise<void>;
+  createSyncJob(job: InsertSyncJob): Promise<SyncJob>;
+  getSyncJob(jobId: string): Promise<SyncJob | undefined>;
+  updateSyncJob(jobId: string, updates: Partial<SyncJob>): Promise<SyncJob | undefined>;
+  getActiveSyncJob(source?: string): Promise<SyncJob | undefined>;
 
   // Dashboard metrics
   getDashboardMetrics(): Promise<{
@@ -263,6 +273,9 @@ export interface IStorage {
   updateScheduledMessage(id: number, message: Partial<InsertScheduledMessage>): Promise<ScheduledMessage | undefined>;
   cancelScheduledMessage(id: number): Promise<boolean>;
 }
+
+// Set once the sync_jobs table has been ensured in this process.
+let syncJobsTableEnsured = false;
 
 export class DatabaseStorage implements IStorage {
   constructor() {
@@ -448,6 +461,10 @@ export class DatabaseStorage implements IStorage {
       eq(products.listedOnEbay, false),
       gte(products.stock, 1),
       or(eq(products.excludeFromListing, false), isNull(products.excludeFromListing)),
+      // Skip products we auto-ended for being out of stock — sync-chunk
+      // re-publishes their existing offer when stock returns, so the ramp
+      // must not create a parallel offer for the same SKU.
+      or(isNull(products.ebayListingStatus), ne(products.ebayListingStatus, "ended_oos")),
     ];
     if (opts?.minPrice != null) conds.push(gte(products.salePrice, String(opts.minPrice)));
     if (opts?.maxPrice != null) conds.push(lte(products.salePrice, String(opts.maxPrice)));
@@ -491,6 +508,11 @@ export class DatabaseStorage implements IStorage {
     return product || undefined;
   }
 
+  async getProductsBySkus(skus: string[]): Promise<Product[]> {
+    if (skus.length === 0) return [];
+    return await db.select().from(products).where(inArray(products.sku, skus));
+  }
+
   async createProduct(insertProduct: InsertProduct): Promise<Product> {
     const [product] = await db
       .insert(products)
@@ -509,13 +531,40 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteProduct(id: number): Promise<boolean> {
-    const result = await db.delete(products).where(eq(products.id, id));
-    return (result.rowCount ?? 0) > 0;
+    return await db.transaction(async (tx) => {
+      await tx.delete(syncQueue).where(eq(syncQueue.productId, id));
+      await tx
+        .update(orderItems)
+        .set({ productId: null })
+        .where(eq(orderItems.productId, id));
+      const result = await tx.delete(products).where(eq(products.id, id));
+      return (result.rowCount ?? 0) > 0;
+    });
+  }
+
+  async deleteProducts(ids: number[]): Promise<number> {
+    if (ids.length === 0) return 0;
+    return await db.transaction(async (tx) => {
+      await tx.delete(syncQueue).where(inArray(syncQueue.productId, ids));
+      await tx
+        .update(orderItems)
+        .set({ productId: null })
+        .where(inArray(orderItems.productId, ids));
+      const result = await tx.delete(products).where(inArray(products.id, ids));
+      return result.rowCount ?? 0;
+    });
   }
 
   async deleteAllProducts(): Promise<number> {
-    const result = await db.delete(products);
-    return result.rowCount ?? 0;
+    return await db.transaction(async (tx) => {
+      await tx.delete(syncQueue);
+      await tx
+        .update(orderItems)
+        .set({ productId: null })
+        .where(isNotNull(orderItems.productId));
+      const result = await tx.delete(products);
+      return result.rowCount ?? 0;
+    });
   }
 
   async getProductsByCategory(category: string): Promise<Product[]> {
@@ -641,6 +690,65 @@ export class DatabaseStorage implements IStorage {
       .values(insertLog)
       .returning();
     return log;
+  }
+
+  // Create the sync_jobs table on first use so deploys don't require a manual
+  // `db:push`. CREATE TABLE IF NOT EXISTS is idempotent and additive; the
+  // in-process flag just avoids re-issuing the DDL on every call.
+  async ensureSyncJobsTable(): Promise<void> {
+    if (syncJobsTableEnsured) return;
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS sync_jobs (
+        id            SERIAL PRIMARY KEY,
+        job_id        TEXT NOT NULL UNIQUE,
+        source        TEXT NOT NULL DEFAULT 'tme_browser',
+        status        TEXT NOT NULL DEFAULT 'pending',
+        total         INTEGER NOT NULL DEFAULT 0,
+        processed     INTEGER NOT NULL DEFAULT 0,
+        synced_count  INTEGER NOT NULL DEFAULT 0,
+        updated_count INTEGER NOT NULL DEFAULT 0,
+        failed_count  INTEGER NOT NULL DEFAULT 0,
+        symbols       TEXT NOT NULL,
+        settings      TEXT,
+        errors        TEXT,
+        message       TEXT,
+        created_at    TIMESTAMP DEFAULT now(),
+        updated_at    TIMESTAMP DEFAULT now()
+      )
+    `);
+    syncJobsTableEnsured = true;
+  }
+
+  async createSyncJob(job: InsertSyncJob): Promise<SyncJob> {
+    await this.ensureSyncJobsTable();
+    const [created] = await db.insert(syncJobs).values(job).returning();
+    return created;
+  }
+
+  async getSyncJob(jobId: string): Promise<SyncJob | undefined> {
+    await this.ensureSyncJobsTable();
+    const [job] = await db.select().from(syncJobs).where(eq(syncJobs.jobId, jobId));
+    return job || undefined;
+  }
+
+  async updateSyncJob(jobId: string, updates: Partial<SyncJob>): Promise<SyncJob | undefined> {
+    const [updated] = await db
+      .update(syncJobs)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(syncJobs.jobId, jobId))
+      .returning();
+    return updated || undefined;
+  }
+
+  async getActiveSyncJob(source = "tme_browser"): Promise<SyncJob | undefined> {
+    await this.ensureSyncJobsTable();
+    const [job] = await db
+      .select()
+      .from(syncJobs)
+      .where(and(eq(syncJobs.source, source), inArray(syncJobs.status, ["pending", "processing"])))
+      .orderBy(desc(syncJobs.createdAt))
+      .limit(1);
+    return job || undefined;
   }
 
   // Dashboard metrics

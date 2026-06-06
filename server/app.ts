@@ -22,6 +22,23 @@ export async function createApp(): Promise<Express> {
     console.warn("⚠️  SESSION_SECRET not set; using insecure dev default");
   }
 
+  // Crons are protected by `Authorization: Bearer $CRON_SECRET`. Without it,
+  // the cron endpoints fall back to session auth, which means anyone with a
+  // valid session can trigger them — and if BYPASS_AUTH is on, anyone at all.
+  if (process.env.NODE_ENV === "production" && !process.env.CRON_SECRET) {
+    console.error(
+      "⚠️  CRON_SECRET is not set in production. Cron endpoints (daily-sync, list-ramp) " +
+        "have no Vercel-cron Bearer auth — they will only be protected by session auth.",
+    );
+  }
+  // BYPASS_AUTH turns every request into the admin user. Useful for staging
+  // demos, catastrophic in production. server/index.ts already refuses to
+  // boot in that combination locally; this catches Vercel deploys (which run
+  // server/app.ts, not server/index.ts).
+  if (process.env.NODE_ENV === "production" && process.env.BYPASS_AUTH === "true") {
+    throw new Error("BYPASS_AUTH=true is not permitted when NODE_ENV=production");
+  }
+
   app.use(
     session({
       store: new PgSession({

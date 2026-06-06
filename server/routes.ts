@@ -37,6 +37,8 @@ import { calculateEbayStock, calculateBulkEbayStock, validateStockLimit, getReco
 import { imageProcessingService } from "./image-processing";
 import { triggerManualSync } from "./cron-jobs";
 import { runSyncChunk } from "./sync-chunk";
+import { processTmeSyncChunk } from "./tme-sync";
+import { randomUUID } from "crypto";
 import { ebayOrdersApi } from "./ebay-orders-api";
 import { ebayMessagesApi } from "./ebay-messages-api";
 import { autoMessageScheduler } from "./auto-message-scheduler";
@@ -48,6 +50,25 @@ import {
 // Type for authenticated requests
 interface AuthenticatedRequest extends Request {
   session: any;
+}
+
+// How many TME symbols to import per sync-job chunk. Kept small so each chunk
+// finishes well within the serverless function timeout.
+const TME_SYNC_CHUNK_SIZE = 100;
+
+// Shape the client polls for live sync progress.
+function syncJobProgress(job: any) {
+  return {
+    jobId: job.jobId,
+    status: job.status,
+    total: job.total,
+    processed: job.processed,
+    syncedCount: job.syncedCount,
+    updatedCount: job.updatedCount,
+    failedCount: job.failedCount,
+    message: job.message ?? null,
+    errors: job.errors ? JSON.parse(job.errors) : [],
+  };
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -1668,6 +1689,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Bulk delete by ids (single query — avoids fanning out N parallel requests
+  // that saturate the DB connection pool on large selections).
+  app.post("/api/products/bulk-delete", requireAuth, async (req, res) => {
+    try {
+      const ids = Array.isArray(req.body?.ids) ? req.body.ids : null;
+      if (!ids) {
+        return res.status(400).json({ message: "Body must include an 'ids' array" });
+      }
+      const numericIds = ids
+        .map((v: unknown) => (typeof v === "number" ? v : parseInt(String(v), 10)))
+        .filter((n: number) => Number.isInteger(n));
+      const deletedCount = await storage.deleteProducts(numericIds);
+      res.json({
+        success: true,
+        deletedCount,
+        requestedCount: numericIds.length,
+        message: `Successfully deleted ${deletedCount} products`,
+      });
+    } catch (error) {
+      console.error("Failed to bulk delete products:", error);
+      res.status(500).json({ message: "Failed to delete selected products" });
+    }
+  });
+
   // Delete all products endpoint
   app.delete("/api/products", requireAuth, async (req, res) => {
     try {
@@ -3113,6 +3158,155 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     });
 
+    // ── Async chunked sync (job + polling) ──────────────────────────────────
+    // Replaces the single blocking request above for large selections. The job
+    // state lives in the DB so progress survives serverless recycling / page
+    // refreshes, and the client drives + polls real progress.
+
+    // 1) Create a job, return its id immediately (no long-running work here).
+    app.post("/api/tme/sync-job-start", async (req, res) => {
+      try {
+        const { productSymbols, settings } = req.body;
+        if (!productSymbols || !Array.isArray(productSymbols) || productSymbols.length === 0) {
+          return res.status(400).json({ success: false, error: "Product symbols array is required" });
+        }
+
+        // De-dupe symbols so total/processed math is exact.
+        const symbols = Array.from(new Set(productSymbols.map((s: any) => String(s))));
+        const jobId = randomUUID();
+
+        const job = await storage.createSyncJob({
+          jobId,
+          source: "tme_browser",
+          status: "pending",
+          total: symbols.length,
+          processed: 0,
+          syncedCount: 0,
+          updatedCount: 0,
+          failedCount: 0,
+          symbols: JSON.stringify(symbols),
+          settings: settings ? JSON.stringify(settings) : null,
+          errors: null,
+          message: `Queued ${symbols.length} products`,
+        });
+
+        console.log(`🆕 TME sync job ${jobId} created for ${symbols.length} products`);
+        res.json({ success: true, ...syncJobProgress(job), done: false });
+      } catch (error) {
+        console.error("Failed to start sync job:", error);
+        res.status(500).json({ success: false, error: (error as Error).message });
+      }
+    });
+
+    // 2) Process the next chunk of a job. Called repeatedly by the client until
+    //    `done` is true. Each call imports up to TME_SYNC_CHUNK_SIZE products.
+    app.post("/api/tme/sync-job-chunk", async (req, res) => {
+      try {
+        const { jobId } = req.body;
+        if (!jobId) return res.status(400).json({ success: false, error: "jobId is required" });
+
+        const job = await storage.getSyncJob(jobId);
+        if (!job) return res.status(404).json({ success: false, error: "Sync job not found" });
+
+        // Already finished (or cancelled) — nothing to do.
+        if (["completed", "completed_with_errors", "failed", "cancelled"].includes(job.status)) {
+          return res.json({ success: true, done: true, ...syncJobProgress(job) });
+        }
+
+        const allSymbols: string[] = JSON.parse(job.symbols);
+        const settings = job.settings ? JSON.parse(job.settings) : {};
+        const chunk = allSymbols.slice(job.processed, job.processed + TME_SYNC_CHUNK_SIZE);
+
+        if (job.status === "pending") {
+          await storage.updateSyncJob(jobId, { status: "processing" });
+        }
+
+        const r = await processTmeSyncChunk(chunk, settings);
+
+        const processed = job.processed + chunk.length;
+        const syncedCount = job.syncedCount + r.syncedCount;
+        const updatedCount = job.updatedCount + r.updatedCount;
+        const failedCount = job.failedCount + r.failedCount;
+        const prevErrors: string[] = job.errors ? JSON.parse(job.errors) : [];
+        const errors = [...prevErrors, ...r.errors].slice(0, 50); // cap stored errors
+
+        const done = processed >= allSymbols.length;
+        const status = done ? (failedCount > 0 ? "completed_with_errors" : "completed") : "processing";
+        const message = `Synced ${syncedCount} new, updated ${updatedCount}, failed ${failedCount}`;
+
+        const updated = await storage.updateSyncJob(jobId, {
+          processed,
+          syncedCount,
+          updatedCount,
+          failedCount,
+          errors: errors.length ? JSON.stringify(errors) : null,
+          status,
+          message,
+        });
+
+        if (done) {
+          await storage.createSyncLog({
+            source: "tme_browser",
+            operation: "sync_selected",
+            status: failedCount === 0 ? "success" : failedCount < allSymbols.length ? "partial" : "error",
+            message,
+            details: JSON.stringify({ jobId, syncedCount, updatedCount, failedCount }),
+          });
+          console.log(`✅ TME sync job ${jobId} ${status}: ${message}`);
+        }
+
+        res.json({ success: true, done, ...syncJobProgress(updated) });
+      } catch (error) {
+        console.error("Sync job chunk failed:", error);
+        res.status(500).json({ success: false, error: (error as Error).message });
+      }
+    });
+
+    // 3) Poll job progress (also used to resume a job after a page refresh).
+    app.get("/api/tme/sync-job-status", async (req, res) => {
+      try {
+        const jobId = String(req.query.jobId || "");
+        if (!jobId) return res.status(400).json({ success: false, error: "jobId is required" });
+        const job = await storage.getSyncJob(jobId);
+        if (!job) return res.status(404).json({ success: false, error: "Sync job not found" });
+        const done = ["completed", "completed_with_errors", "failed", "cancelled"].includes(job.status);
+        res.json({ success: true, done, ...syncJobProgress(job) });
+      } catch (error) {
+        res.status(500).json({ success: false, error: (error as Error).message });
+      }
+    });
+
+    // 4) Find an in-progress job so the UI can resume after a reload.
+    app.get("/api/tme/sync-job-active", async (_req, res) => {
+      try {
+        const job = await storage.getActiveSyncJob("tme_browser");
+        if (!job) return res.json({ success: true, active: false });
+        res.json({ success: true, active: true, ...syncJobProgress(job), done: false });
+      } catch (error) {
+        res.status(500).json({ success: false, error: (error as Error).message });
+      }
+    });
+
+    // 5) Cancel a running job (the client stops pumping chunks after this).
+    app.post("/api/tme/sync-job-cancel", async (req, res) => {
+      try {
+        const { jobId } = req.body;
+        if (!jobId) return res.status(400).json({ success: false, error: "jobId is required" });
+        const job = await storage.getSyncJob(jobId);
+        if (!job) return res.status(404).json({ success: false, error: "Sync job not found" });
+        if (["completed", "completed_with_errors", "failed"].includes(job.status)) {
+          return res.json({ success: true, done: true, ...syncJobProgress(job) });
+        }
+        const updated = await storage.updateSyncJob(jobId, {
+          status: "cancelled",
+          message: `Cancelled after ${job.processed}/${job.total}`,
+        });
+        res.json({ success: true, done: true, ...syncJobProgress(updated) });
+      } catch (error) {
+        res.status(500).json({ success: false, error: (error as Error).message });
+      }
+    });
+
     // OPTIMIZED: Sync selected TME products using combined endpoints (80% fewer API calls)
     app.post("/api/tme/sync-selected-optimized", async (req, res) => {
       try {
@@ -4021,6 +4215,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     let chunks = 0;
     let totalChanged = 0;
     let totalEbay = 0;
+    let totalUnlisted = 0;
+    let totalRelisted = 0;
     let last: any = null;
     const allErrors: string[] = [];
     try {
@@ -4029,6 +4225,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         chunks++;
         totalChanged += last.changed;
         totalEbay += last.ebayUpdated;
+        totalUnlisted += last.ebayUnlisted ?? 0;
+        totalRelisted += last.ebayRelisted ?? 0;
         allErrors.push(...last.errors);
       } while (!last.done && Date.now() - start < budgetMs);
 
@@ -4036,20 +4234,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
         source: "tme",
         operation: "cron_sync",
         status: last?.done ? "success" : "partial",
-        message: `Cron sync: ${chunks} chunks, ${totalChanged} changed, ${totalEbay} eBay updated, ${last?.remaining ?? "?"} remaining`,
-        details: JSON.stringify({ chunks, totalChanged, totalEbay, remaining: last?.remaining, errors: allErrors.slice(0, 20) }),
+        message: `Cron sync: ${chunks} chunks, ${totalChanged} changed, ${totalEbay} eBay updated, ${totalUnlisted} unlisted (OOS), ${totalRelisted} relisted, ${last?.remaining ?? "?"} remaining`,
+        details: JSON.stringify({ chunks, totalChanged, totalEbay, totalUnlisted, totalRelisted, remaining: last?.remaining, errors: allErrors.slice(0, 20) }),
       });
 
       // Self-chain: if stale products remain, fire the next invocation
       // (fresh 300s budget) so a big catalog is fully covered without
-      // waiting for the next scheduled cron. Fire-and-forget.
+      // waiting for the next scheduled cron. Fire-and-forget — but log
+      // and persist failures so a hung chain shows up in sync_logs
+      // instead of silently leaving the rest of the catalog unsynced.
       if (!last?.done) {
         const base = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
         const secret = process.env.CRON_SECRET;
         fetch(`${base}/api/cron/daily-sync`, {
           method: "POST",
           headers: secret ? { authorization: `Bearer ${secret}` } : {},
-        }).catch(() => {});
+        })
+          .then(async (r) => {
+            if (!r.ok) {
+              const body = await r.text().catch(() => "");
+              console.error(`[cron-chain] daily-sync chain HTTP ${r.status}: ${body.slice(0, 200)}`);
+              await storage.createSyncLog({
+                source: "tme",
+                operation: "cron_sync_chain",
+                status: "error",
+                message: `Chain HTTP ${r.status}; ${last?.remaining ?? "?"} products still stale`,
+                details: JSON.stringify({ status: r.status, remaining: last?.remaining, body: body.slice(0, 500) }),
+              }).catch(() => {});
+            }
+          })
+          .catch(async (err) => {
+            console.error("[cron-chain] daily-sync chain failed:", err);
+            await storage.createSyncLog({
+              source: "tme",
+              operation: "cron_sync_chain",
+              status: "error",
+              message: `Chain fetch failed; ${last?.remaining ?? "?"} products still stale`,
+              details: JSON.stringify({ error: String(err), remaining: last?.remaining }),
+            }).catch(() => {});
+          });
       }
 
       res.json({
@@ -4058,6 +4281,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         chunks,
         totalChanged,
         ebayUpdated: totalEbay,
+        ebayUnlisted: totalUnlisted,
+        ebayRelisted: totalRelisted,
         remaining: last?.remaining ?? null,
         elapsedMs: Date.now() - start,
       });
@@ -4193,14 +4418,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Self-chain: keep going with a fresh 300s budget until the ramp is
-      // drained or a rate-limit pause is needed.
+      // drained or a rate-limit pause is needed. Log chain failures so a
+      // stuck ramp surfaces in sync_logs instead of silently halting.
       if (!done && !limitHit) {
         const base = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
         const secret = process.env.CRON_SECRET;
         fetch(`${base}/api/cron/list-ramp`, {
           method: "POST",
           headers: secret ? { authorization: `Bearer ${secret}` } : {},
-        }).catch(() => {});
+        })
+          .then(async (r) => {
+            if (!r.ok) {
+              const body = await r.text().catch(() => "");
+              console.error(`[cron-chain] list-ramp chain HTTP ${r.status}: ${body.slice(0, 200)}`);
+              await storage.createSyncLog({
+                source: "ebay",
+                operation: "list_ramp_chain",
+                status: "error",
+                message: `Chain HTTP ${r.status}; ramp halted`,
+                details: JSON.stringify({ status: r.status, body: body.slice(0, 500) }),
+              }).catch(() => {});
+            }
+          })
+          .catch(async (err) => {
+            console.error("[cron-chain] list-ramp chain failed:", err);
+            await storage.createSyncLog({
+              source: "ebay",
+              operation: "list_ramp_chain",
+              status: "error",
+              message: "Chain fetch failed; ramp halted",
+              details: JSON.stringify({ error: String(err) }),
+            }).catch(() => {});
+          });
       }
 
       res.json({ success: true, batches, published, failed, skipped, limitHit, done, elapsedMs: Date.now() - start });
