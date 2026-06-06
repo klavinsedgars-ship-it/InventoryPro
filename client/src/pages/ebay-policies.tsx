@@ -43,9 +43,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 
 interface EbayPoliciesProps {
   user: any;
+  // When embedded (e.g. as a tab inside Configuration) skip the page chrome
+  // (sidebar + header) and render content only.
+  embedded?: boolean;
 }
 
-export function EbayPolicies({ user }: EbayPoliciesProps) {
+export function EbayPolicies({ user, embedded = false }: EbayPoliciesProps) {
   const { toast } = useToast();
   const queryClientHook = useQueryClient();
   const [activeTab, setActiveTab] = useState("payment");
@@ -184,12 +187,14 @@ export function EbayPolicies({ user }: EbayPoliciesProps) {
   const isLoading = loadingPayment || loadingFulfillment || loadingReturn;
 
   return (
-    <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
-      <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
-      <div className={`flex-1 flex flex-col overflow-hidden transition-all duration-200 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
-        <Header title="eBay Business Policies" />
-        <main className="flex-1 overflow-y-auto p-8">
-          <div className="max-w-7xl mx-auto space-y-6">
+    <div className={embedded ? "" : "flex h-screen bg-gray-50 dark:bg-gray-900"}>
+      {!embedded && (
+        <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+      )}
+      <div className={embedded ? "" : `flex-1 flex flex-col overflow-hidden transition-all duration-200 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
+        {!embedded && <Header title="eBay Business Policies" />}
+        <main className={embedded ? "" : "flex-1 overflow-y-auto p-8"}>
+          <div className={embedded ? "space-y-6" : "max-w-7xl mx-auto space-y-6"}>
             {/* Header */}
             <div className="flex items-center justify-between">
               <div>

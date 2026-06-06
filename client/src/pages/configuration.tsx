@@ -18,8 +18,10 @@ import {
   Plus,
   Edit,
   Trash2,
-  DollarSign
+  DollarSign,
+  FileStack
 } from "lucide-react";
+import { EbayPolicies } from "@/pages/ebay-policies";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -452,7 +454,7 @@ export default function Configuration({ user }: ConfigurationProps) {
           {/* Tabs */}
           <div className="w-full">
             <Tabs defaultValue="categories" className="w-full">
-              <TabsList className="grid w-full grid-cols-3 mb-6">
+              <TabsList className="grid w-full grid-cols-4 mb-6">
                 <TabsTrigger value="categories" className="flex items-center justify-center space-x-2 px-4 py-2">
                   <FolderTree className="h-4 w-4" />
                   <span>Categories</span>
@@ -464,6 +466,10 @@ export default function Configuration({ user }: ConfigurationProps) {
                 <TabsTrigger value="shipping" className="flex items-center justify-center space-x-2 px-4 py-2">
                   <Truck className="h-4 w-4" />
                   <span>Shipping Policies</span>
+                </TabsTrigger>
+                <TabsTrigger value="ebay-policies" className="flex items-center justify-center space-x-2 px-4 py-2">
+                  <FileStack className="h-4 w-4" />
+                  <span>eBay Policies</span>
                 </TabsTrigger>
               </TabsList>
 
@@ -1125,6 +1131,10 @@ export default function Configuration({ user }: ConfigurationProps) {
                     </DialogContent>
                   </Dialog>
                 )}
+              </TabsContent>
+
+              <TabsContent value="ebay-policies">
+                <EbayPolicies user={user} embedded />
               </TabsContent>
             </Tabs>
           </div>
