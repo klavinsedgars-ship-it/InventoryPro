@@ -97,7 +97,6 @@ export async function processTmeSyncChunk(
         description: product.Description || "",
         category: product.Category || "Electronics",
         stock: stock?.Amount || 0,
-        costPrice: String(supplierPrice),
         salePrice: String(pricingResult.finalPrice),
         supplierPrice: String(supplierPrice),
         supplier: "TME",
@@ -105,9 +104,8 @@ export async function processTmeSyncChunk(
         status: (stock?.Amount || 0) > 0 ? "active" : "inactive",
         ean: product.EAN || null,
         weight: product.Weight?.toString() || null,
-        tmeCategory: product.Category || null,
         tmeCategoryId: product.CategoryId ? String(product.CategoryId) : null,
-        tmeSymbol: product.Symbol,
+        supplierProductId: product.Symbol,
         moq,
         multiples,
       };
@@ -117,7 +115,7 @@ export async function processTmeSyncChunk(
         await storage.updateProduct(match.id, productData);
         result.updatedCount++;
       } else {
-        await storage.createProduct(productData as any);
+        await storage.createProduct(productData);
         result.syncedCount++;
       }
     } catch (itemError) {
