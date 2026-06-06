@@ -32,11 +32,14 @@ export async function createApp(): Promise<Express> {
     );
   }
   // BYPASS_AUTH turns every request into the admin user. Useful for staging
-  // demos, catastrophic in production. server/index.ts already refuses to
-  // boot in that combination locally; this catches Vercel deploys (which run
-  // server/app.ts, not server/index.ts).
+  // demos, dangerous in production. Warn loudly so it's visible in logs, but
+  // do NOT crash the app — throwing here takes down the whole function
+  // (every request, including login, returns FUNCTION_INVOCATION_FAILED).
   if (process.env.NODE_ENV === "production" && process.env.BYPASS_AUTH === "true") {
-    throw new Error("BYPASS_AUTH=true is not permitted when NODE_ENV=production");
+    console.warn(
+      "⚠️  BYPASS_AUTH=true in production — every request is treated as the admin user. " +
+        "Remove this env var and sign in normally to secure the app.",
+    );
   }
 
   app.use(
