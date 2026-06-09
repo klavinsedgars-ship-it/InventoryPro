@@ -116,16 +116,38 @@ async function processRule(
     });
   }
 
-  let ebayResult: { success: boolean; error?: string } = { success: true };
-  if (order.marketplace === 'ebay' && ebayOAuth.isOAuthConfigured()) {
-    const itemId = items[0]?.marketplaceItemId;
-    if (itemId) {
-      ebayResult = await ebayMessagesApi.sendMessageToPartner(
-        itemId,
-        order.buyerUsername,
-        body
-      );
+  // Idempotency claim: if this (rule, order) pair has already been processed,
+  // skip silently. Prevents the hourly scheduler from re-sending the SAME
+  // delayed message for a full day (daysSinceDelivery stays equal to the
+  // trigger for 24h). Atomic via a unique-index ON CONFLICT.
+  const isFirst = await storage.claimAutoMessageSend(rule.id, order.id);
+  if (!isFirst) {
+    return;
+  }
+
+  // Determine if this can actually be delivered to eBay. Without an itemId
+  // the Trading API's AddMemberMessage* would have been silently skipped and
+  // the message stored as "sent" — the original silent-no-op bug. Mark such
+  // sends as failed with a clear error so the operator can act.
+  let ebayResult: { success: boolean; error?: string };
+  if (order.marketplace === 'ebay') {
+    if (!ebayOAuth.isOAuthConfigured()) {
+      ebayResult = { success: false, error: 'eBay OAuth not configured' };
+    } else {
+      const itemId = items[0]?.marketplaceItemId;
+      if (!itemId) {
+        ebayResult = { success: false, error: 'Order has no itemId; cannot send via AddMemberMessage' };
+      } else {
+        ebayResult = await ebayMessagesApi.sendMessageToPartner(
+          itemId,
+          order.buyerUsername,
+          body
+        );
+      }
     }
+  } else {
+    // Non-eBay marketplaces aren't wired for outbound auto-messages yet.
+    ebayResult = { success: false, error: `Auto-send not implemented for marketplace: ${order.marketplace}` };
   }
 
   const messageData: InsertMessage = {
@@ -143,6 +165,7 @@ async function processRule(
   await storage.incrementTemplateUsage(rule.templateId);
 
   if (ebayResult.success) {
+    await storage.incrementRuleSentCount(rule.id);
     results.sent++;
     console.log(`Auto-message sent for rule "${rule.name}" to ${order.buyerUsername}`);
   } else {
@@ -178,9 +201,13 @@ export async function processDelayedRules(): Promise<{ processed: number; sent: 
       const daysSinceDelivery = Math.floor((Date.now() - deliveryDate.getTime()) / (1000 * 60 * 60 * 24));
 
       for (const rule of delayedRules) {
-        if (daysSinceDelivery === rule.triggerDelay) {
+        // >= instead of exact equality: if the process was down during the
+        // exact tick when daysSinceDelivery == triggerDelay, the message
+        // would have been permanently skipped. Idempotency claim inside
+        // processRule guarantees we still send at most once.
+        if (rule.triggerDelay && daysSinceDelivery >= rule.triggerDelay) {
           results.processed++;
-          
+
           const items = await storage.getOrderItems(order.id);
           await processRule(rule, {
             order,

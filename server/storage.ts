@@ -265,6 +265,7 @@ export interface IStorage {
   updateAutoMessageRule(id: number, rule: Partial<InsertAutoMessageRule>): Promise<AutoMessageRule | undefined>;
   deleteAutoMessageRule(id: number): Promise<boolean>;
   incrementRuleSentCount(id: number): Promise<void>;
+  claimAutoMessageSend(ruleId: number, orderId: number): Promise<boolean>;
 
   // Scheduled Messages
   getScheduledMessages(status?: string): Promise<ScheduledMessage[]>;
@@ -276,6 +277,7 @@ export interface IStorage {
 
 // Set once the sync_jobs table has been ensured in this process.
 let syncJobsTableEnsured = false;
+let autoMessageSendsEnsured = false;
 
 export class DatabaseStorage implements IStorage {
   constructor() {
@@ -1582,6 +1584,44 @@ export class DatabaseStorage implements IStorage {
         })
         .where(eq(autoMessageRules.id, id));
     }
+  }
+
+  // Idempotency ledger for auto-message rules: a single row per
+  // (rule_id, order_id) pair guarantees a delayed/triggered message is sent
+  // at most once per order, regardless of how many times the scheduler tick
+  // re-evaluates the trigger condition (the "fires up to 24x" bug). Runtime-
+  // created so deploys don't need a manual db:push.
+  async ensureAutoMessageSendsTable(): Promise<void> {
+    if (autoMessageSendsEnsured) return;
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS auto_message_sends (
+        id         SERIAL PRIMARY KEY,
+        rule_id    INTEGER NOT NULL,
+        order_id   INTEGER NOT NULL,
+        sent_at    TIMESTAMP DEFAULT now()
+      )
+    `);
+    await db.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS auto_message_sends_rule_order_uniq
+      ON auto_message_sends (rule_id, order_id)
+    `);
+    autoMessageSendsEnsured = true;
+  }
+
+  // Returns true if this is the FIRST time we've recorded a send for the
+  // (ruleId, orderId) pair (i.e. caller should send now); false if it's
+  // already been sent. Atomic via the unique index — ON CONFLICT DO NOTHING
+  // is the dedup primitive, no race window.
+  async claimAutoMessageSend(ruleId: number, orderId: number): Promise<boolean> {
+    await this.ensureAutoMessageSendsTable();
+    const r: any = await db.execute(sql`
+      INSERT INTO auto_message_sends (rule_id, order_id)
+      VALUES (${ruleId}, ${orderId})
+      ON CONFLICT (rule_id, order_id) DO NOTHING
+      RETURNING id
+    `);
+    const rows = r.rows ?? r;
+    return Array.isArray(rows) && rows.length > 0;
   }
 
   // Scheduled Messages

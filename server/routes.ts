@@ -5232,20 +5232,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Send to eBay if configured
-      let ebayResult: { success: boolean; error?: string } = { success: true };
-      if (thread.marketplace === 'ebay' && thread.itemId && ebayOAuth.isOAuthConfigured()) {
-        ebayResult = await ebayMessagesApi.sendMessageToPartner(
-          thread.itemId,
-          thread.buyerUsername,
-          body
-        );
-
+      // Determine if the reply can actually be delivered to eBay. The Trading
+      // API's AddMemberMessage* requires an itemId — without one the message
+      // would have been silently stored as "sent" but never transmitted (the
+      // original bug). Mark such cases as failed with a clear error so the
+      // operator knows to deliver the reply on eBay manually (or to thread it
+      // through a different message that has an item context).
+      let ebayResult: { success: boolean; error?: string };
+      if (thread.marketplace === 'ebay') {
+        if (!ebayOAuth.isOAuthConfigured()) {
+          ebayResult = { success: false, error: 'eBay OAuth not configured' };
+        } else if (!thread.itemId) {
+          ebayResult = { success: false, error: 'Thread has no eBay itemId; cannot send via AddMemberMessage. Reply on eBay directly.' };
+        } else {
+          ebayResult = await ebayMessagesApi.sendMessageToPartner(
+            thread.itemId,
+            thread.buyerUsername,
+            body
+          );
+        }
         if (!ebayResult.success) {
-          return res.status(500).json({
+          return res.status(502).json({
             success: false,
             error: `Failed to send message to eBay: ${ebayResult.error}`
           });
         }
+      } else {
+        // Non-eBay (e.g. Amazon, local-only) thread — nothing to transmit.
+        ebayResult = { success: true };
       }
 
       // Store the message
