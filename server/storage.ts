@@ -385,28 +385,58 @@ export class DatabaseStorage implements IStorage {
 
   // Stale TME products for the sync poll (DB-side, indexed by
   // products_supplier_stale_idx). Stalest first; never-synced win.
-  async getStaleTmeProducts(limit: number, staleBefore: Date): Promise<Product[]> {
+  //
+  // Tiered staleness: when both cutoffs are supplied, listed eBay products
+  // are stale if older than `listedBefore`, and everything else if older than
+  // `unlistedBefore` (default falls back to the single legacy cutoff).
+  // Rationale: in a pure-dropship model the oversell risk is TME going to 0
+  // between cron ticks while the listing still shows qty; refreshing listed
+  // SKUs ~3× more often (e.g. 4h) catches that quickly, while unlisted SKUs
+  // can drift for 48h with no customer impact — overall load drops too.
+  async getStaleTmeProducts(
+    limit: number,
+    listedBefore: Date,
+    unlistedBefore?: Date,
+  ): Promise<Product[]> {
+    const unlisted = unlistedBefore ?? listedBefore;
     return await db
       .select()
       .from(products)
       .where(
         and(
           eq(products.supplier, "TME"),
-          or(isNull(products.lastSyncedAt), lt(products.lastSyncedAt, staleBefore)),
+          or(
+            isNull(products.lastSyncedAt),
+            and(eq(products.listedOnEbay, true), lt(products.lastSyncedAt, listedBefore)),
+            and(
+              or(eq(products.listedOnEbay, false), isNull(products.listedOnEbay)),
+              lt(products.lastSyncedAt, unlisted),
+            ),
+          ),
         ),
       )
-      .orderBy(asc(products.lastSyncedAt))
+      // Listed first (priority), then stalest. Postgres treats true > false,
+      // so DESC on listed_on_ebay puts listed rows first.
+      .orderBy(desc(products.listedOnEbay), asc(products.lastSyncedAt))
       .limit(limit);
   }
 
-  async getStaleTmeProductCount(staleBefore: Date): Promise<number> {
+  async getStaleTmeProductCount(listedBefore: Date, unlistedBefore?: Date): Promise<number> {
+    const unlisted = unlistedBefore ?? listedBefore;
     const [r] = await db
       .select({ c: count() })
       .from(products)
       .where(
         and(
           eq(products.supplier, "TME"),
-          or(isNull(products.lastSyncedAt), lt(products.lastSyncedAt, staleBefore)),
+          or(
+            isNull(products.lastSyncedAt),
+            and(eq(products.listedOnEbay, true), lt(products.lastSyncedAt, listedBefore)),
+            and(
+              or(eq(products.listedOnEbay, false), isNull(products.listedOnEbay)),
+              lt(products.lastSyncedAt, unlisted),
+            ),
+          ),
         ),
       );
     return r?.c ?? 0;
