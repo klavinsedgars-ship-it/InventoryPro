@@ -503,20 +503,25 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     setEnhancedProducts([]);
   };
 
+  // All selection mutators use functional updates (prev => next) so they merge
+  // against the LIVE selection, never a stale snapshot. This is what lets
+  // selections accumulate across subcategories even while an async bulk select
+  // is in flight.
   const toggleProductSelection = (productSymbol: string) => {
-    const newSelected = new Set(selectedProducts);
-    if (newSelected.has(productSymbol)) {
-      newSelected.delete(productSymbol);
-    } else {
-      newSelected.add(productSymbol);
-    }
-    setSelectedProducts(newSelected);
+    setSelectedProducts(prev => {
+      const next = new Set(prev);
+      if (next.has(productSymbol)) next.delete(productSymbol);
+      else next.add(productSymbol);
+      return next;
+    });
   };
 
   const selectAllOnPage = () => {
-    const newSelected = new Set(selectedProducts);
-    products.forEach((p: TMEProduct) => newSelected.add(p.Symbol));
-    setSelectedProducts(newSelected);
+    setSelectedProducts(prev => {
+      const next = new Set(prev);
+      products.forEach((p: TMEProduct) => next.add(p.Symbol));
+      return next;
+    });
     toast({
       title: "Selected all on page",
       description: `Added ${products.length} products to selection`
@@ -525,9 +530,11 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
 
   const selectAllSuitable = () => {
     const suitableProducts = products.filter((p: TMEProduct) => isSuitableProduct(p));
-    const newSelected = new Set(selectedProducts);
-    suitableProducts.forEach((p: TMEProduct) => newSelected.add(p.Symbol));
-    setSelectedProducts(newSelected);
+    setSelectedProducts(prev => {
+      const next = new Set(prev);
+      suitableProducts.forEach((p: TMEProduct) => next.add(p.Symbol));
+      return next;
+    });
   };
 
   const clearSelection = () => {
@@ -559,7 +566,10 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     setBulkAbortController(controller);
     setBulkLoading(true);
     setBulkProgress(0);
-    const newSelected = new Set(selectedProducts);
+    // Collect this run's symbols locally; merge into the live selection at the
+    // end via a functional update so we never clobber selections made in other
+    // subcategories (or while this async run was in flight).
+    const collected = new Set<string>();
     let successfulPages = 0;
     let failedPages = 0;
 
@@ -585,7 +595,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
           if (response.ok) {
             const data = await response.json();
             if (data.products) {
-              data.products.forEach((p: TMEProduct) => newSelected.add(p.Symbol));
+              data.products.forEach((p: TMEProduct) => collected.add(p.Symbol));
               successfulPages++;
             }
           } else {
@@ -605,26 +615,34 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
       }
       
       if (!controller.signal.aborted) {
-        setSelectedProducts(newSelected);
+        setSelectedProducts(prev => {
+          const next = new Set(prev);
+          collected.forEach(s => next.add(s));
+          return next;
+        });
         if (failedPages > 0) {
           toast({
             title: "Partial selection complete",
-            description: `Selected ${newSelected.size} products. ${failedPages} pages failed (TME timeout). Try again later.`,
+            description: `Added ${collected.size} products. ${failedPages} pages failed (TME timeout). Try again later.`,
             variant: "destructive"
           });
         } else {
           toast({
             title: "Bulk selection complete",
-            description: `Selected ${newSelected.size} products from ${numPages} pages`
+            description: `Added ${collected.size} products from this category`
           });
         }
       }
     } catch (error: any) {
       if (error.name !== 'AbortError') {
-        setSelectedProducts(newSelected);
+        setSelectedProducts(prev => {
+          const next = new Set(prev);
+          collected.forEach(s => next.add(s));
+          return next;
+        });
         toast({
           title: "Selection stopped",
-          description: `Selected ${newSelected.size} products before error. TME API may be overloaded.`,
+          description: `Added ${collected.size} products before error. TME API may be overloaded.`,
           variant: "destructive"
         });
       }
