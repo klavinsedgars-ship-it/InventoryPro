@@ -4165,8 +4165,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // The previous self-chain via fetch() required CRON_SECRET to be set
       // correctly for *both* the inbound Vercel call AND the outbound self
       // call, which is brittle — see PR #N for the 401 chain failures it
-      // produced. With an hourly schedule, catch-up from a ~2k backlog
-      // takes a handful of cron ticks instead of one chained burst.
+      // produced. With a twice-hourly schedule (every 30 min), the daily
+      // compute budget is 48 * 270s ≈ 3.6h, plenty for the 17k catalog and
+      // ~50% headroom toward the 50k mark.
 
       res.json({
         success: true,
