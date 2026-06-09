@@ -1380,11 +1380,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const mpMap = new Map<string, { marketplace: string; orders: number; revenue: number; netProfit: number }>();
       let usedActualFees = false;
 
-      for (const order of orders) {
-        if (order.status === "cancelled") continue;
+      // Batch-load order items and fees in two queries (was 2N queries — one
+      // per order — which would time out at a few thousand orders).
+      const activeOrders = orders.filter((o) => o.status !== "cancelled");
+      const orderIds = activeOrders.map((o) => o.id);
+      const itemsByOrder = await storage.getOrderItemsByOrderIds(orderIds);
+      const feesByOrder = await storage.getOrderFeesByOrderIds(orderIds);
 
-        const items = await storage.getOrderItems(order.id);
-        const feeRows = await storage.getOrderFees(order.id);
+      for (const order of activeOrders) {
+        const items = itemsByOrder.get(order.id) ?? [];
+        const feeRows = feesByOrder.get(order.id) ?? [];
 
         const subtotal = parseFloat(order.subtotal) || 0;
         const shipping = parseFloat(order.shippingCost) || 0;
@@ -4675,13 +4680,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: filters.status
       });
 
-      // Include items for each order
-      const ordersWithItems = await Promise.all(
-        orders.map(async (order) => {
-          const items = await storage.getOrderItems(order.id);
-          return { ...order, items };
-        })
-      );
+      // Include items for each order — single batched query keyed by orderId
+      // (was N queries in Promise.all; bounded by page size but still N×RTT).
+      const itemsByOrder = await storage.getOrderItemsByOrderIds(orders.map((o) => o.id));
+      const ordersWithItems = orders.map((order) => ({
+        ...order,
+        items: itemsByOrder.get(order.id) ?? [],
+      }));
 
       res.json({
         success: true,

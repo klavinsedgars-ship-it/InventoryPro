@@ -215,11 +215,13 @@ export interface IStorage {
 
   // Order Items
   getOrderItems(orderId: number): Promise<OrderItem[]>;
+  getOrderItemsByOrderIds(orderIds: number[]): Promise<Map<number, OrderItem[]>>;
   createOrderItem(item: InsertOrderItem): Promise<OrderItem>;
   createOrderItems(items: InsertOrderItem[]): Promise<void>;
 
   // Order Fees
   getOrderFees(orderId: number): Promise<OrderFee[]>;
+  getOrderFeesByOrderIds(orderIds: number[]): Promise<Map<number, OrderFee[]>>;
   createOrderFee(fee: InsertOrderFee): Promise<OrderFee>;
   createOrderFees(fees: InsertOrderFee[]): Promise<void>;
 
@@ -367,6 +369,21 @@ export class DatabaseStorage implements IStorage {
       `CREATE INDEX IF NOT EXISTS products_offer_idx ON products (listed_on_ebay, ebay_offer_id)`,
       `CREATE INDEX IF NOT EXISTS tme_cache_expires_idx ON tme_product_cache (expires_at)`,
       `CREATE INDEX IF NOT EXISTS sync_queue_status_priority_idx ON sync_queue (status, priority, scheduled_for)`,
+      // Order child-table indexes: getOrderItems/Fees/Events filter by orderId
+      // and Postgres doesn't auto-index FKs. Without these, every order detail
+      // and the analytics rollup full-scan the child tables.
+      `CREATE INDEX IF NOT EXISTS order_items_order_idx ON order_items (order_id)`,
+      `CREATE INDEX IF NOT EXISTS order_fees_order_idx ON order_fees (order_id)`,
+      `CREATE INDEX IF NOT EXISTS order_events_order_idx ON order_events (order_id)`,
+      // Order list filters: status (orders list) + order_date (analytics).
+      `CREATE INDEX IF NOT EXISTS orders_status_idx ON orders (status)`,
+      `CREATE INDEX IF NOT EXISTS orders_date_idx ON orders (order_date)`,
+      // Messaging hot paths: messages by thread (already FK), threads by
+      // marketplace+buyer for the dedupe path, sync_logs by syncedAt for the
+      // dashboard feed.
+      `CREATE INDEX IF NOT EXISTS messages_thread_idx ON messages (thread_id)`,
+      `CREATE INDEX IF NOT EXISTS message_threads_buyer_idx ON message_threads (marketplace, buyer_username)`,
+      `CREATE INDEX IF NOT EXISTS sync_logs_synced_at_idx ON sync_logs (synced_at)`,
     ];
     for (const s of stmts) {
       await db.execute(sql.raw(s));
@@ -1320,6 +1337,20 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(orderItems).where(eq(orderItems.orderId, orderId));
   }
 
+  // Batch fetch order items by orderId list (one query instead of N).
+  // Returns a Map keyed by orderId for O(1) lookup in N+1-prone loops.
+  async getOrderItemsByOrderIds(orderIds: number[]): Promise<Map<number, OrderItem[]>> {
+    const out = new Map<number, OrderItem[]>();
+    if (orderIds.length === 0) return out;
+    const rows = await db.select().from(orderItems).where(inArray(orderItems.orderId, orderIds));
+    for (const r of rows) {
+      const arr = out.get(r.orderId) ?? [];
+      arr.push(r);
+      out.set(r.orderId, arr);
+    }
+    return out;
+  }
+
   async createOrderItem(item: InsertOrderItem): Promise<OrderItem> {
     const result = await db.insert(orderItems).values(item).returning();
     return result[0];
@@ -1334,6 +1365,18 @@ export class DatabaseStorage implements IStorage {
   // Order Fees
   async getOrderFees(orderId: number): Promise<OrderFee[]> {
     return await db.select().from(orderFees).where(eq(orderFees.orderId, orderId));
+  }
+
+  async getOrderFeesByOrderIds(orderIds: number[]): Promise<Map<number, OrderFee[]>> {
+    const out = new Map<number, OrderFee[]>();
+    if (orderIds.length === 0) return out;
+    const rows = await db.select().from(orderFees).where(inArray(orderFees.orderId, orderIds));
+    for (const r of rows) {
+      const arr = out.get(r.orderId) ?? [];
+      arr.push(r);
+      out.set(r.orderId, arr);
+    }
+    return out;
   }
 
   async createOrderFee(fee: InsertOrderFee): Promise<OrderFee> {
