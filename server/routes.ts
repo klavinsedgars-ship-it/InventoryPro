@@ -4144,6 +4144,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     let totalEbay = 0;
     let totalUnlisted = 0;
     let totalRelisted = 0;
+    let totalProcessed = 0;
+    let totalProcessedListed = 0;
     let last: any = null;
     const allErrors: string[] = [];
     try {
@@ -4154,6 +4156,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         totalEbay += last.ebayUpdated;
         totalUnlisted += last.ebayUnlisted ?? 0;
         totalRelisted += last.ebayRelisted ?? 0;
+        totalProcessed += last.processedThisChunk ?? 0;
+        totalProcessedListed += last.processedListed ?? 0;
         allErrors.push(...last.errors);
       } while (!last.done && Date.now() - start < budgetMs);
 
@@ -4161,8 +4165,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         source: "tme",
         operation: "cron_sync",
         status: last?.done ? "success" : "partial",
-        message: `Cron sync: ${chunks} chunks, ${totalChanged} changed, ${totalEbay} eBay updated, ${totalUnlisted} unlisted (OOS), ${totalRelisted} relisted, ${last?.remaining ?? "?"} remaining`,
-        details: JSON.stringify({ chunks, totalChanged, totalEbay, totalUnlisted, totalRelisted, remaining: last?.remaining, errors: allErrors.slice(0, 20) }),
+        message: `Cron sync: ${chunks} chunks, ${totalChanged} changed, ${totalEbay} eBay updated, ${totalUnlisted} unlisted (OOS), ${totalRelisted} relisted, ${totalProcessedListed}/${totalProcessed} listed, ${last?.remaining ?? "?"} remaining`,
+        details: JSON.stringify({ chunks, totalChanged, totalEbay, totalUnlisted, totalRelisted, totalProcessed, totalProcessedListed, remaining: last?.remaining, errors: allErrors.slice(0, 20) }),
       });
 
       // No HTTP self-chain: each cron tick processes as much as fits in its

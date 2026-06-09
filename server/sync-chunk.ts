@@ -42,6 +42,7 @@ export interface SyncChunkResult {
   total: number; // total TME products
   remaining: number; // TME products still not synced today (after this chunk)
   processedThisChunk: number;
+  processedListed: number; // of processedThisChunk, how many were eBay-listed
   changed: number; // products whose price or stock actually changed
   ebayUpdated: number; // eBay listings updated
   ebayUnlisted: number; // listings withdrawn because stock hit 0
@@ -51,24 +52,33 @@ export interface SyncChunkResult {
 }
 
 // A product is "stale" if it hasn't been synced within this many hours.
-// Default 12h -> each product refreshes ~2x/day. Tune via SYNC_STALE_HOURS.
-// With the optimized combined endpoint (100 symbols/call), 100k products =
-// ~1k calls/pass * 2 passes/day = ~2k/day, well under TME's ~10k/day cap.
-function staleCutoff(): Date {
-  const hours = Number(process.env.SYNC_STALE_HOURS) || 12;
-  return new Date(Date.now() - hours * 3600 * 1000);
+// Tiered: listed eBay products refresh ~3× faster than unlisted, because the
+// oversell risk (TME going to 0 between cron ticks) only matters for listed
+// SKUs. Defaults: listed 4h (≈ 6×/day) ; unlisted 48h (≈ 0.5×/day).
+//   Tune via SYNC_STALE_HOURS_LISTED / SYNC_STALE_HOURS_UNLISTED.
+//   SYNC_STALE_HOURS (legacy) is the fallback when only one var is set.
+function staleCutoffs(): { listed: Date; unlisted: Date } {
+  const legacy = Number(process.env.SYNC_STALE_HOURS) || 12;
+  const listedHours = Number(process.env.SYNC_STALE_HOURS_LISTED) || Math.min(4, legacy);
+  const unlistedHours = Number(process.env.SYNC_STALE_HOURS_UNLISTED) || Math.max(48, legacy);
+  const now = Date.now();
+  return {
+    listed: new Date(now - listedHours * 3600 * 1000),
+    unlisted: new Date(now - unlistedHours * 3600 * 1000),
+  };
 }
 
 export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
   const errors: string[] = [];
 
   // DB-side: load only the next `limit` stalest TME products (indexed),
-  // not the whole table.
-  const staleBefore = staleCutoff();
+  // not the whole table. Tiered staleness — listed first.
+  const cutoffs = staleCutoffs();
   const total = await storage.getTmeProductCount();
-  const slice = (await storage.getStaleTmeProducts(limit, staleBefore)).filter((p) => p.sku);
+  const slice = (await storage.getStaleTmeProducts(limit, cutoffs.listed, cutoffs.unlisted))
+    .filter((p) => p.sku);
   if (slice.length === 0) {
-    return { total, remaining: 0, processedThisChunk: 0, changed: 0, ebayUpdated: 0, ebayUnlisted: 0, ebayRelisted: 0, done: true, errors };
+    return { total, remaining: 0, processedThisChunk: 0, processedListed: 0, changed: 0, ebayUpdated: 0, ebayUnlisted: 0, ebayRelisted: 0, done: true, errors };
   }
 
   // Resolve fee config once per chunk (drives the net-profit price floor).
@@ -230,11 +240,15 @@ export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
     }
   }
 
-  const remaining = Math.max(0, (await storage.getStaleTmeProductCount(staleBefore)));
+  const remaining = Math.max(
+    0,
+    await storage.getStaleTmeProductCount(cutoffs.listed, cutoffs.unlisted),
+  );
   return {
     total,
     remaining,
     processedThisChunk: slice.length,
+    processedListed: slice.filter((p) => p.listedOnEbay).length,
     changed,
     ebayUpdated,
     ebayUnlisted,
