@@ -4238,42 +4238,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         details: JSON.stringify({ chunks, totalChanged, totalEbay, totalUnlisted, totalRelisted, remaining: last?.remaining, errors: allErrors.slice(0, 20) }),
       });
 
-      // Self-chain: if stale products remain, fire the next invocation
-      // (fresh 300s budget) so a big catalog is fully covered without
-      // waiting for the next scheduled cron. Fire-and-forget — but log
-      // and persist failures so a hung chain shows up in sync_logs
-      // instead of silently leaving the rest of the catalog unsynced.
-      if (!last?.done) {
-        const base = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
-        const secret = process.env.CRON_SECRET;
-        fetch(`${base}/api/cron/daily-sync`, {
-          method: "POST",
-          headers: secret ? { authorization: `Bearer ${secret}` } : {},
-        })
-          .then(async (r) => {
-            if (!r.ok) {
-              const body = await r.text().catch(() => "");
-              console.error(`[cron-chain] daily-sync chain HTTP ${r.status}: ${body.slice(0, 200)}`);
-              await storage.createSyncLog({
-                source: "tme",
-                operation: "cron_sync_chain",
-                status: "error",
-                message: `Chain HTTP ${r.status}; ${last?.remaining ?? "?"} products still stale`,
-                details: JSON.stringify({ status: r.status, remaining: last?.remaining, body: body.slice(0, 500) }),
-              }).catch(() => {});
-            }
-          })
-          .catch(async (err) => {
-            console.error("[cron-chain] daily-sync chain failed:", err);
-            await storage.createSyncLog({
-              source: "tme",
-              operation: "cron_sync_chain",
-              status: "error",
-              message: `Chain fetch failed; ${last?.remaining ?? "?"} products still stale`,
-              details: JSON.stringify({ error: String(err), remaining: last?.remaining }),
-            }).catch(() => {});
-          });
-      }
+      // No HTTP self-chain: each cron tick processes as much as fits in its
+      // 270s budget; remaining stale products catch up on the next scheduled
+      // run (lastSyncedAt cursor advances on every chunk, so it's resumable).
+      // The previous self-chain via fetch() required CRON_SECRET to be set
+      // correctly for *both* the inbound Vercel call AND the outbound self
+      // call, which is brittle — see PR #N for the 401 chain failures it
+      // produced. With an hourly schedule, catch-up from a ~2k backlog
+      // takes a handful of cron ticks instead of one chained burst.
 
       res.json({
         success: true,
@@ -4417,40 +4389,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         details: JSON.stringify({ batches, published, failed, skipped, limitHit, done }),
       });
 
-      // Self-chain: keep going with a fresh 300s budget until the ramp is
-      // drained or a rate-limit pause is needed. Log chain failures so a
-      // stuck ramp surfaces in sync_logs instead of silently halting.
-      if (!done && !limitHit) {
-        const base = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
-        const secret = process.env.CRON_SECRET;
-        fetch(`${base}/api/cron/list-ramp`, {
-          method: "POST",
-          headers: secret ? { authorization: `Bearer ${secret}` } : {},
-        })
-          .then(async (r) => {
-            if (!r.ok) {
-              const body = await r.text().catch(() => "");
-              console.error(`[cron-chain] list-ramp chain HTTP ${r.status}: ${body.slice(0, 200)}`);
-              await storage.createSyncLog({
-                source: "ebay",
-                operation: "list_ramp_chain",
-                status: "error",
-                message: `Chain HTTP ${r.status}; ramp halted`,
-                details: JSON.stringify({ status: r.status, body: body.slice(0, 500) }),
-              }).catch(() => {});
-            }
-          })
-          .catch(async (err) => {
-            console.error("[cron-chain] list-ramp chain failed:", err);
-            await storage.createSyncLog({
-              source: "ebay",
-              operation: "list_ramp_chain",
-              status: "error",
-              message: "Chain fetch failed; ramp halted",
-              details: JSON.stringify({ error: String(err) }),
-            }).catch(() => {});
-          });
-      }
+      // No HTTP self-chain: see the matching note in the daily-sync
+      // handler above. Remaining candidates are listed in subsequent
+      // scheduled ramp ticks (or by the manual "Resume ramp" control).
 
       res.json({ success: true, batches, published, failed, skipped, limitHit, done, elapsedMs: Date.now() - start });
     } catch (error) {
