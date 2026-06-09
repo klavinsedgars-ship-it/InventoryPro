@@ -39,12 +39,12 @@ export default function ShippingPolicies({ user }: ShippingPoliciesProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Fetch shipping policies
-  const { data: policiesData } = useQuery({
+  const { data: policiesData } = useQuery<any>({
     queryKey: ["/api/shipping/policies"],
   });
 
   // Fetch policy assignments
-  const { data: assignmentsData } = useQuery({
+  const { data: assignmentsData } = useQuery<any>({
     queryKey: ["/api/shipping/assignments"],
   });
 

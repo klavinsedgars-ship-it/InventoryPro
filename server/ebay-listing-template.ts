@@ -42,11 +42,13 @@ function generateTitle(product: Product, specs: ProductSpecs): string {
   const model = specs.model || specs.partNumber || '';
   const category = specs.category || 'Electronics';
   
-  // Handle multipack products - ensure quantity is in title
-  if (product.isMultipack && product.minOrderQuantity && product.minOrderQuantity > 1) {
+  // Handle multipack products - ensure quantity is in title. TME's MOQ > 1
+  // means the item is sold only in packs of that size.
+  const packQty = product.moq ?? 1;
+  if (packQty > 1) {
     // If title doesn't already contain quantity prefix, add it
     if (!name.match(/^\d+x\s/)) {
-      name = `${product.minOrderQuantity}x ${name}`;
+      name = `${packQty}x ${name}`;
     }
   }
   
@@ -121,14 +123,15 @@ function generateDescription(product: Product, specs: ProductSpecs, category: st
   // Package contents - handle multipack products
   sections.push('📦 PACKAGE CONTENTS:');
   
-  if (product.isMultipack && product.minOrderQuantity && product.minOrderQuantity > 1) {
+  const packQty = product.moq ?? 1;
+  if (packQty > 1) {
     // For multipack products, emphasize the pack quantity
     const baseProductName = product.name?.replace(/^\d+x\s/, '') || 'Electronic Component';
-    sections.push(`**THIS IS A PACK OF ${product.minOrderQuantity} PIECES**`);
-    sections.push(`• ${product.minOrderQuantity}x ${baseProductName}`);
+    sections.push(`**THIS IS A PACK OF ${packQty} PIECES**`);
+    sections.push(`• ${packQty}x ${baseProductName}`);
     sections.push(`• Sold as a complete pack only`);
     sections.push(`• Cannot be split or sold individually`);
-    const perPiecePrice = (parseFloat(product.salePrice) / product.minOrderQuantity).toFixed(2);
+    const perPiecePrice = (parseFloat(product.salePrice) / packQty).toFixed(2);
     sections.push(`• Effective price per piece: €${perPiecePrice}`);
   } else {
     // For single products

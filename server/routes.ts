@@ -741,7 +741,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const result = await ebayInventoryApi.listSingleProduct(productId, (id) => storage.getProduct(id));
       // surface the category's required-aspect spec for debugging
       const catStep = result.steps.find((s) => s.step === "category");
-      const categoryId = catStep?.data?.categoryId;
+      const categoryId = (catStep as any)?.data?.categoryId;
       const requiredAspects = categoryId ? await ebayInventoryApi.getRequiredAspects(categoryId) : [];
       res.json({ ...result, requiredAspects });
     } catch (err) {
@@ -2149,11 +2149,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         source: "ebay",
         operation: "bulk_template_sync",
         status: failed === 0 ? "success" : "partial",
-        itemsProcessed: listedProducts.length,
-        itemsSucceeded: succeeded,
-        itemsFailed: failed,
-        details: JSON.stringify({ 
-          message: `Template sync: ${succeeded} updated, ${failed} failed`,
+        message: `Template sync: ${succeeded} updated, ${failed} failed`,
+        details: JSON.stringify({
+          itemsProcessed: listedProducts.length,
+          itemsSucceeded: succeeded,
+          itemsFailed: failed,
           failedItems: results.filter(r => !r.success).slice(0, 10)
         })
       });

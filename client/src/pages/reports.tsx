@@ -20,11 +20,13 @@ export function Reports({ user }: ReportsProps) {
   const [selectedPeriod, setSelectedPeriod] = useState("12m");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  const { data: inventoryAnalytics, isLoading: inventoryLoading } = useQuery({
+  // Analytics endpoints return dynamically-shaped rollups; typed as any here
+  // (the server responses aren't strongly typed). See /api/analytics/*.
+  const { data: inventoryAnalytics, isLoading: inventoryLoading } = useQuery<any>({
     queryKey: ["/api/analytics/inventory"],
   });
 
-  const { data: salesAnalytics, isLoading: salesLoading } = useQuery({
+  const { data: salesAnalytics, isLoading: salesLoading } = useQuery<any>({
     queryKey: ["/api/analytics/sales"],
   });
 
@@ -261,7 +263,7 @@ export function Reports({ user }: ReportsProps) {
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="category" />
                         <YAxis />
-                        <Tooltip formatter={(value) => [formatCurrency(value), "Total Value"]} />
+                        <Tooltip formatter={(value) => [formatCurrency(Number(value)), "Total Value"]} />
                         <Bar dataKey="totalValue" fill="#3B82F6" />
                       </BarChart>
                     </ResponsiveContainer>
@@ -314,7 +316,7 @@ export function Reports({ user }: ReportsProps) {
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="month" />
                         <YAxis />
-                        <Tooltip formatter={(value) => [formatCurrency(value), "Revenue"]} />
+                        <Tooltip formatter={(value) => [formatCurrency(Number(value)), "Revenue"]} />
                         <Line type="monotone" dataKey="revenue" stroke="#10B981" strokeWidth={3} />
                       </LineChart>
                     </ResponsiveContainer>
