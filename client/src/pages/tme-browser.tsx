@@ -204,7 +204,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
-  const [productsPerPage] = useState(20); // TME API returns 20 products per page
+  const [productsPerPage] = useState(50); // Server aggregates 3 TME pages (20 each) into one UI page.
   const [showSyncDialog, setShowSyncDialog] = useState(false);
   const [syncProgress, setSyncProgress] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -639,6 +639,23 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
 
   const getEnhancedProductInfo = (symbol: string): EnhancedProduct | null => {
     return enhancedProducts.find(ep => ep.product.Symbol === symbol) || null;
+  };
+
+  // Price filter (Min €/Max €) is enforced client-side against rows whose
+  // prices are already loaded. Rows without a loaded price are kept visible
+  // so the user knows to click "Load Prices" to actually apply the filter.
+  // This costs zero extra TME calls beyond the prices already fetched.
+  const priceMinNum = filters.priceMin ? parseFloat(filters.priceMin) : NaN;
+  const priceMaxNum = filters.priceMax ? parseFloat(filters.priceMax) : NaN;
+  const hasPriceFilter = !Number.isNaN(priceMinNum) || !Number.isNaN(priceMaxNum);
+  const inPriceRange = (symbol: string): boolean => {
+    if (!hasPriceFilter) return true;
+    const enhanced = getEnhancedProductInfo(symbol);
+    const price = enhanced?.price?.PriceList?.[0]?.PriceValue;
+    if (price == null) return true; // unknown -> keep visible (filter not applied)
+    if (!Number.isNaN(priceMinNum) && price < priceMinNum) return false;
+    if (!Number.isNaN(priceMaxNum) && price > priceMaxNum) return false;
+    return true;
   };
 
   const handleSync = async () => {
@@ -1138,7 +1155,11 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                     <CardHeader className="py-2.5 px-4">
                       <div className="flex items-center justify-between">
                         <CardTitle className="text-base font-semibold">
-                          Products ({totalProducts.toLocaleString()} {filters.inStockOnly ? "in stock" : "total"})
+                          Products ({totalProducts.toLocaleString()} {filters.inStockOnly ? "in stock" : "total"}
+                          {hasPriceFilter && enhancedProducts.length > 0
+                            ? ` · ${products.filter((p: TMEProduct) => inPriceRange(p.Symbol)).length} shown after price filter`
+                            : ""}
+                          )
                         </CardTitle>
                         <div className="flex items-center gap-2">
                           <Button
@@ -1199,7 +1220,13 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                         </div>
                       ) : (
                         <div className="space-y-1.5">
-                          {products.map((product: TMEProduct) => {
+                          {hasPriceFilter && enhancedProducts.length === 0 && (
+                            <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 flex items-center gap-2">
+                              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                              Price filter is set, but prices aren't loaded yet. Click <strong>Load Prices</strong> to apply it.
+                            </div>
+                          )}
+                          {products.filter((product: TMEProduct) => inPriceRange(product.Symbol)).map((product: TMEProduct) => {
                             const enhanced = getEnhancedProductInfo(product.Symbol);
                             const thumbnail = getProductThumbnail(product);
                             

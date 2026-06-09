@@ -2822,14 +2822,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Get TME products by category with enhanced filtering
     app.get("/api/tme/products", async (req, res) => {
       try {
-        const { 
-          categoryId, 
-          page = "1", 
-          limit = "50", 
-          search = "", 
-          priceMin = "", 
-          priceMax = "", 
-          stockMin = "1", 
+        const {
+          categoryId,
+          page = "1",
+          limit = "50",
+          search = "",
+          priceMin = "",
+          priceMax = "",
+          stockMin = "1",
           producer = "",
           inStockOnly = "true"
         } = req.query;
@@ -2846,15 +2846,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const pageNum = parseInt(page as string);
         const limitNum = parseInt(limit as string);
 
-        // Fetch products from TME API
-        const result = await tmeApi.getProductsByCategory(categoryId as string, pageNum, limitNum);
+        // TME's Search.json returns a fixed 20 products per page — to honour
+        // a larger UI page size (e.g. 50), aggregate consecutive TME pages
+        // and slice the requested window. Each fetched TME page is one API
+        // call; cap with a sane max so a misconfigured huge limit can't
+        // burn through the rate budget.
+        const TME_PAGE = 20;
+        const MAX_LIMIT = 100;
+        const effectiveLimit = Math.min(Math.max(limitNum, 1), MAX_LIMIT);
+        const startIndex = (pageNum - 1) * effectiveLimit;
+        const firstTmePage = Math.floor(startIndex / TME_PAGE) + 1;
+        const lastTmePage = Math.floor((startIndex + effectiveLimit - 1) / TME_PAGE) + 1;
 
-        let products = result.products || [];
+        let aggregated: any[] = [];
+        let total = 0;
+        for (let p = firstTmePage; p <= lastTmePage; p++) {
+          const r = await tmeApi.getProductsByCategory(categoryId as string, p, TME_PAGE);
+          aggregated = aggregated.concat(r.products || []);
+          total = r.total || total;
+          // TME returned fewer than the page size => past the end.
+          if (!r.products || r.products.length < TME_PAGE) break;
+        }
+
+        // Trim the aggregated batch to the requested window so page math
+        // ("Page X of Y") on the client matches what's actually displayed.
+        const windowStart = startIndex - (firstTmePage - 1) * TME_PAGE;
+        let products = aggregated.slice(windowStart, windowStart + effectiveLimit);
 
         // Apply client-side filters
         if (search) {
           const searchLower = (search as string).toLowerCase();
-          products = products.filter((p: any) => 
+          products = products.filter((p: any) =>
             p.Description?.toLowerCase().includes(searchLower) ||
             p.Symbol?.toLowerCase().includes(searchLower) ||
             p.Producer?.toLowerCase().includes(searchLower)
@@ -2863,7 +2885,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         if (producer) {
           const producerLower = (producer as string).toLowerCase();
-          products = products.filter((p: any) => 
+          products = products.filter((p: any) =>
             p.Producer?.toLowerCase().includes(producerLower)
           );
         }
@@ -2871,11 +2893,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.json({
           success: true,
           products: products,
-          total: result.total,
+          total: total,
           filtered: products.length,
           page: pageNum,
-          limit: limitNum,
-          totalPages: Math.ceil(result.total / limitNum),
+          limit: effectiveLimit,
+          totalPages: Math.ceil(total / effectiveLimit),
           categoryId: categoryId
         });
 
