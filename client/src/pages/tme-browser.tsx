@@ -550,9 +550,9 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     });
   };
   
-  const bulkSelectPages = async (numPages: number) => {
+  const bulkSelectAll = async () => {
     if (!selectedCategory) return;
-    
+
     const controller = new AbortController();
     setBulkAbortController(controller);
     setBulkLoading(true);
@@ -560,16 +560,23 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     const newSelected = new Set(selectedProducts);
     let successfulPages = 0;
     let failedPages = 0;
-    
+
+    // Fetch in 100-item windows (a clean multiple of TME's native 20/page,
+    // so the server's page aggregation doesn't overlap-fetch). Page count is
+    // derived from the real product total — NOT the UI's productsPerPage — so
+    // changing the on-screen page size can never desync the bulk selection.
+    const BULK_LIMIT = 100;
+    const numPages = Math.max(1, Math.ceil(totalProducts / BULK_LIMIT));
+
     try {
       for (let page = 1; page <= numPages; page++) {
         if (controller.signal.aborted) break;
-        
+
         setBulkProgress(Math.round((page / numPages) * 100));
-        
+
         try {
           const response = await fetch(
-            `/api/tme/products?categoryId=${selectedCategory}&page=${page}&limit=20`,
+            `/api/tme/products?categoryId=${selectedCategory}&page=${page}&limit=${BULK_LIMIT}`,
             { signal: controller.signal }
           );
           
@@ -1106,10 +1113,10 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                 Select Page ({products.length})
                               </Button>
                               <Button
-                                onClick={() => bulkSelectPages(totalPages)}
+                                onClick={() => bulkSelectAll()}
                                 variant="outline"
                                 size="sm"
-                                disabled={bulkLoading || totalPages < 1}
+                                disabled={bulkLoading || totalProducts < 1}
                                 data-testid="btn-select-all-category"
                               >
                                 {bulkLoading ? `Loading ${bulkProgress}%...` : `Select All (${totalProducts})`}
