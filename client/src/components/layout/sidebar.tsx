@@ -4,13 +4,11 @@ import { cn } from "@/lib/utils";
 import {
   Package,
   LayoutDashboard,
-  ShoppingCart,
   Settings,
   Box,
   BarChart3,
   Cog,
   Search,
-  FileStack,
   ClipboardList,
   ChevronLeft,
   ChevronRight,
@@ -26,10 +24,8 @@ const navigation = [
   { name: 'Products', href: '/products', icon: Package },
   { name: 'Orders', href: '/orders', icon: ClipboardList },
   { name: 'Messages', href: '/messages', icon: MessageSquare },
-  { name: 'Analytics', href: '/marketplaces', icon: ShoppingCart },
   { name: 'TME Browser', href: '/tme-browser', icon: Search },
   { name: 'Configuration', href: '/configuration', icon: Cog },
-  { name: 'eBay Policies', href: '/ebay-policies', icon: FileStack },
   { name: 'Reports', href: '/reports', icon: BarChart3 },
 ];
 

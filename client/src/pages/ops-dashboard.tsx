@@ -25,6 +25,9 @@ import {
 
 interface OpsProps {
   user: any;
+  // When embedded (e.g. as a tab inside the Operations page) skip the page
+  // chrome (sidebar + header) and render content only.
+  embedded?: boolean;
 }
 
 interface OpsData {
@@ -130,7 +133,7 @@ const statusBadge = (status: string) => {
   );
 };
 
-export function OpsDashboard({ user }: OpsProps) {
+export function OpsDashboard({ user, embedded = false }: OpsProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -237,12 +240,16 @@ export function OpsDashboard({ user }: OpsProps) {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
-      <div className={`transition-all duration-200 ${sidebarCollapsed ? "ml-16" : "ml-64"}`}>
-        <Header title="Operations" subtitle="Daily jobs, API usage, queue and listing health at a glance" />
+    <div className={embedded ? "" : "min-h-screen bg-gray-50"}>
+      {!embedded && (
+        <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
+      )}
+      <div className={embedded ? "" : `transition-all duration-200 ${sidebarCollapsed ? "ml-16" : "ml-64"}`}>
+        {!embedded && (
+          <Header title="Operations" subtitle="Daily jobs, API usage, queue and listing health at a glance" />
+        )}
 
-        <div className="p-6 space-y-6">
+        <div className={embedded ? "space-y-6" : "p-6 space-y-6"}>
           <div className="flex items-center justify-between">
             <div className="text-sm text-gray-500 flex items-center gap-2">
               <Activity className="w-4 h-4" />
