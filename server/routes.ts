@@ -4111,10 +4111,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/sync/run", requireAuth, async (req, res) => {
     try {
       const limit = Math.min(Number(req.body?.limit) || 50, 100);
-      const result = await runSyncChunk(limit);
+      const result = await runSyncChunk(limit, "manual");
       res.json({ success: true, ...result });
     } catch (error) {
       console.error("Sync chunk failed:", error);
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Per-SKU sync audit trail for the "Sync Activity" view: what the TME->DB->
+  // eBay sync changed and whether it reached eBay. Returns a paginated slice
+  // plus a rollup over the same time window.
+  app.get("/api/sync/audit", requireAuth, async (req, res) => {
+    try {
+      const sinceHours = req.query.sinceHours ? Number(req.query.sinceHours) : 24;
+      const [data, stats] = await Promise.all([
+        storage.getSyncAudit({
+          limit: req.query.limit ? Number(req.query.limit) : 50,
+          offset: req.query.offset ? Number(req.query.offset) : 0,
+          sku: (req.query.sku as string) || undefined,
+          ebayAction: (req.query.ebayAction as string) || undefined,
+          changedOnly: req.query.changedOnly === "true",
+          sinceHours,
+        }),
+        storage.getSyncAuditStats(sinceHours),
+      ]);
+      res.json({ success: true, ...data, stats, sinceHours });
+    } catch (error) {
+      console.error("Sync audit fetch failed:", error);
       res.status(500).json({ success: false, error: (error as Error).message });
     }
   });
@@ -4142,7 +4166,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const allErrors: string[] = [];
     try {
       do {
-        last = await runSyncChunk(50);
+        last = await runSyncChunk(50, "cron");
         chunks++;
         totalChanged += last.changed;
         totalEbay += last.ebayUpdated;

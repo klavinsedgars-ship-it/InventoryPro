@@ -79,6 +79,28 @@ export const syncLogs = pgTable("sync_logs", {
   syncedAt: timestamp("synced_at").defaultNow(),
 });
 
+// Per-SKU audit trail of what the TME->DB->eBay sync actually changed. Unlike
+// syncLogs (one aggregate row per run), this records one row per product that
+// changed during a chunk, with the old/new price+stock and the resulting eBay
+// action. Powers the "Sync Activity" view: "TME changed SKU X, did it reach
+// eBay?". Written by runSyncChunk; append-only.
+export const syncAudit = pgTable("sync_audit", {
+  id: serial("id").primaryKey(),
+  productId: integer("product_id"), // FK-ish; nullable so audit survives product deletion
+  sku: text("sku").notNull(),
+  source: text("source").notNull().default("cron"), // cron | manual
+  priceChanged: boolean("price_changed").notNull().default(false),
+  stockChanged: boolean("stock_changed").notNull().default(false),
+  oldSupplierPrice: decimal("old_supplier_price", { precision: 10, scale: 2 }),
+  newSupplierPrice: decimal("new_supplier_price", { precision: 10, scale: 2 }),
+  oldStock: integer("old_stock"),
+  newStock: integer("new_stock"),
+  // none | not_listed | updated | unlisted | relisted | failed | skipped_no_offer
+  ebayAction: text("ebay_action").notNull().default("none"),
+  ebayError: text("ebay_error"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const syncQueue = pgTable("sync_queue", {
   id: serial("id").primaryKey(),
   productId: integer("product_id").references(() => products.id).notNull(),
@@ -381,6 +403,11 @@ export const insertSyncLogSchema = createInsertSchema(syncLogs).omit({
   syncedAt: true,
 });
 
+export const insertSyncAuditSchema = createInsertSchema(syncAudit).omit({
+  id: true,
+  createdAt: true,
+});
+
 export const insertSyncQueueSchema = createInsertSchema(syncQueue).omit({
   id: true,
   createdAt: true,
@@ -476,6 +503,9 @@ export type MarketplaceSettings = typeof marketplaceSettings.$inferSelect;
 export type InsertMarketplaceSettings = z.infer<typeof insertMarketplaceSettingsSchema>;
 export type SyncLog = typeof syncLogs.$inferSelect;
 export type InsertSyncLog = z.infer<typeof insertSyncLogSchema>;
+
+export type SyncAudit = typeof syncAudit.$inferSelect;
+export type InsertSyncAudit = z.infer<typeof insertSyncAuditSchema>;
 export type SyncJob = typeof syncJobs.$inferSelect;
 export type InsertSyncJob = z.infer<typeof insertSyncJobSchema>;
 export type SyncQueue = typeof syncQueue.$inferSelect;

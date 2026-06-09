@@ -2,9 +2,10 @@ import { useState } from "react";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Activity, BarChart3 } from "lucide-react";
+import { Activity, BarChart3, History } from "lucide-react";
 import { OpsDashboard } from "@/pages/ops-dashboard";
 import { Marketplaces } from "@/pages/marketplaces";
+import { SyncActivity } from "@/pages/sync-activity";
 
 interface OperationsProps {
   user: any;
@@ -27,10 +28,14 @@ export function Operations({ user }: OperationsProps) {
 
         <div className="p-6">
           <Tabs defaultValue="health" className="w-full">
-            <TabsList className="grid w-full max-w-md grid-cols-2 mb-6">
+            <TabsList className="grid w-full max-w-2xl grid-cols-3 mb-6">
               <TabsTrigger value="health" className="flex items-center justify-center gap-2">
                 <Activity className="h-4 w-4" />
                 <span>Health &amp; Sync</span>
+              </TabsTrigger>
+              <TabsTrigger value="activity" className="flex items-center justify-center gap-2">
+                <History className="h-4 w-4" />
+                <span>Sync Activity</span>
               </TabsTrigger>
               <TabsTrigger value="analytics" className="flex items-center justify-center gap-2">
                 <BarChart3 className="h-4 w-4" />
@@ -40,6 +45,9 @@ export function Operations({ user }: OperationsProps) {
 
             <TabsContent value="health">
               <OpsDashboard user={user} embedded />
+            </TabsContent>
+            <TabsContent value="activity">
+              <SyncActivity />
             </TabsContent>
             <TabsContent value="analytics">
               <Marketplaces user={user} embedded />

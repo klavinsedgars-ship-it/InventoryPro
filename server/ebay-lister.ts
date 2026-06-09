@@ -70,10 +70,16 @@ export async function listProductsViaInventory(allProducts: Product[]): Promise<
 /** Push stock/price updates for already-listed products (25-SKU bulk). */
 export async function updateListedProductsViaInventory(
   items: Array<{ product: Product; quantity: number; price: number }>,
-): Promise<{ updated: number; failed: number; limitHit: boolean }> {
+): Promise<{
+  updated: number;
+  failed: number;
+  limitHit: boolean;
+  results: Array<{ sku: string; ok: boolean; error?: string }>;
+}> {
   let updated = 0;
   let failed = 0;
   let limitHit = false;
+  const results: Array<{ sku: string; ok: boolean; error?: string }> = [];
 
   for (let i = 0; i < items.length && !limitHit; i += 25) {
     const chunk = items.slice(i, i + 25).filter((it) => it.product.ebayOfferId);
@@ -88,14 +94,17 @@ export async function updateListedProductsViaInventory(
     );
     for (const it of chunk) {
       const r = res.get(it.product.sku);
-      if (r?.ok) updated++;
-      else {
+      if (r?.ok) {
+        updated++;
+        results.push({ sku: it.product.sku, ok: true });
+      } else {
         failed++;
+        results.push({ sku: it.product.sku, ok: false, error: String(r?.error ?? "unknown") });
         if (LIMIT_RX.test(String(r?.error))) limitHit = true;
       }
     }
   }
-  return { updated, failed, limitHit };
+  return { updated, failed, limitHit, results };
 }
 
 /**

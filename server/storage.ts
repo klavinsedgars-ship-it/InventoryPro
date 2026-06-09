@@ -2,8 +2,9 @@ import {
   users, 
   products, 
   categories, 
-  marketplaceSettings, 
+  marketplaceSettings,
   syncLogs,
+  syncAudit,
   syncQueue,
   syncJobs,
   pricingTiers,
@@ -34,6 +35,8 @@ import {
   type InsertMarketplaceSettings,
   type SyncLog,
   type InsertSyncLog,
+  type SyncAudit,
+  type InsertSyncAudit,
   type SyncJob,
   type InsertSyncJob,
   type SyncQueue,
@@ -115,6 +118,29 @@ export interface IStorage {
   // Sync Logs
   getSyncLogs(limit?: number): Promise<SyncLog[]>;
   createSyncLog(log: InsertSyncLog): Promise<SyncLog>;
+
+  // Sync Audit (per-SKU change trail)
+  createSyncAuditEntries(entries: InsertSyncAudit[]): Promise<void>;
+  getSyncAudit(opts?: {
+    limit?: number;
+    offset?: number;
+    sku?: string;
+    ebayAction?: string;
+    changedOnly?: boolean;
+    sinceHours?: number;
+  }): Promise<{ rows: SyncAudit[]; total: number }>;
+  getSyncAuditStats(sinceHours?: number): Promise<{
+    changed: number;
+    priceChanged: number;
+    stockChanged: number;
+    ebayUpdated: number;
+    ebayUnlisted: number;
+    ebayRelisted: number;
+    ebayFailed: number;
+    skippedNoOffer: number;
+    lastRunAt: string | null;
+  }>;
+
   ensureSyncJobsTable(): Promise<void>;
   createSyncJob(job: InsertSyncJob): Promise<SyncJob>;
   getSyncJob(jobId: string): Promise<SyncJob | undefined>;
@@ -276,6 +302,7 @@ export interface IStorage {
 
 // Set once the sync_jobs table has been ensured in this process.
 let syncJobsTableEnsured = false;
+let syncAuditTableEnsured = false;
 
 export class DatabaseStorage implements IStorage {
   constructor() {
@@ -690,6 +717,113 @@ export class DatabaseStorage implements IStorage {
       .values(insertLog)
       .returning();
     return log;
+  }
+
+  // Create the sync_audit table on first use (same rationale as sync_jobs:
+  // deploys don't run a manual `db:push`). Indexed for the two access
+  // patterns the Activity view uses: recency and per-SKU lookup.
+  async ensureSyncAuditTable(): Promise<void> {
+    if (syncAuditTableEnsured) return;
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS sync_audit (
+        id                  SERIAL PRIMARY KEY,
+        product_id          INTEGER,
+        sku                 TEXT NOT NULL,
+        source              TEXT NOT NULL DEFAULT 'cron',
+        price_changed       BOOLEAN NOT NULL DEFAULT false,
+        stock_changed       BOOLEAN NOT NULL DEFAULT false,
+        old_supplier_price  NUMERIC(10,2),
+        new_supplier_price  NUMERIC(10,2),
+        old_stock           INTEGER,
+        new_stock           INTEGER,
+        ebay_action         TEXT NOT NULL DEFAULT 'none',
+        ebay_error          TEXT,
+        created_at          TIMESTAMP DEFAULT now()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS sync_audit_created_at_idx ON sync_audit (created_at DESC)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS sync_audit_sku_idx ON sync_audit (sku)`);
+    syncAuditTableEnsured = true;
+  }
+
+  async createSyncAuditEntries(entries: InsertSyncAudit[]): Promise<void> {
+    if (entries.length === 0) return;
+    await this.ensureSyncAuditTable();
+    // Chunk inserts so a very large sync run can't exceed parameter limits.
+    for (let i = 0; i < entries.length; i += 500) {
+      await db.insert(syncAudit).values(entries.slice(i, i + 500));
+    }
+  }
+
+  async getSyncAudit(opts: {
+    limit?: number;
+    offset?: number;
+    sku?: string;
+    ebayAction?: string;
+    changedOnly?: boolean;
+    sinceHours?: number;
+  } = {}): Promise<{ rows: SyncAudit[]; total: number }> {
+    await this.ensureSyncAuditTable();
+    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+    const offset = Math.max(opts.offset ?? 0, 0);
+    const conds: any[] = [];
+    if (opts.sku) conds.push(ilike(syncAudit.sku, `%${opts.sku}%`));
+    if (opts.ebayAction) conds.push(eq(syncAudit.ebayAction, opts.ebayAction));
+    if (opts.changedOnly) conds.push(or(eq(syncAudit.priceChanged, true), eq(syncAudit.stockChanged, true)));
+    if (opts.sinceHours) {
+      conds.push(gte(syncAudit.createdAt, new Date(Date.now() - opts.sinceHours * 3600 * 1000)));
+    }
+    const where = conds.length > 0 ? and(...conds) : undefined;
+    const rows = await db
+      .select()
+      .from(syncAudit)
+      .where(where)
+      .orderBy(desc(syncAudit.createdAt))
+      .limit(limit)
+      .offset(offset);
+    const [c] = await db.select({ c: count() }).from(syncAudit).where(where);
+    return { rows, total: c?.c ?? 0 };
+  }
+
+  async getSyncAuditStats(sinceHours = 24): Promise<{
+    changed: number;
+    priceChanged: number;
+    stockChanged: number;
+    ebayUpdated: number;
+    ebayUnlisted: number;
+    ebayRelisted: number;
+    ebayFailed: number;
+    skippedNoOffer: number;
+    lastRunAt: string | null;
+  }> {
+    await this.ensureSyncAuditTable();
+    const since = new Date(Date.now() - sinceHours * 3600 * 1000);
+    const r: any = await db.execute(sql`
+      SELECT
+        COUNT(*) FILTER (WHERE price_changed OR stock_changed)::int AS changed,
+        COUNT(*) FILTER (WHERE price_changed)::int                  AS price_changed,
+        COUNT(*) FILTER (WHERE stock_changed)::int                  AS stock_changed,
+        COUNT(*) FILTER (WHERE ebay_action = 'updated')::int        AS ebay_updated,
+        COUNT(*) FILTER (WHERE ebay_action = 'unlisted')::int       AS ebay_unlisted,
+        COUNT(*) FILTER (WHERE ebay_action = 'relisted')::int       AS ebay_relisted,
+        COUNT(*) FILTER (WHERE ebay_action = 'failed')::int         AS ebay_failed,
+        COUNT(*) FILTER (WHERE ebay_action = 'skipped_no_offer')::int AS skipped_no_offer,
+        MAX(created_at)                                             AS last_run_at
+      FROM sync_audit
+      WHERE created_at >= ${since}
+    `);
+    const row = (r.rows ?? r)[0] ?? {};
+    return {
+      changed: Number(row.changed ?? 0),
+      priceChanged: Number(row.price_changed ?? 0),
+      stockChanged: Number(row.stock_changed ?? 0),
+      ebayUpdated: Number(row.ebay_updated ?? 0),
+      ebayUnlisted: Number(row.ebay_unlisted ?? 0),
+      ebayRelisted: Number(row.ebay_relisted ?? 0),
+      ebayFailed: Number(row.ebay_failed ?? 0),
+      skippedNoOffer: Number(row.skipped_no_offer ?? 0),
+      lastRunAt: row.last_run_at ? new Date(row.last_run_at).toISOString() : null,
+    };
   }
 
   // Create the sync_jobs table on first use so deploys don't require a manual
