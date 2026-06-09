@@ -658,6 +658,13 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     return true;
   };
 
+  // A product is visible if it passes the price filter and, when "Hide synced"
+  // is on, isn't already in our catalog. "Hide synced" previously only pruned
+  // synced *categories* from the sidebar; here it also hides already-synced
+  // products so the list shows only what's left to import.
+  const isProductVisible = (symbol: string): boolean =>
+    inPriceRange(symbol) && (!hideSyncedCategories || !isProductSynced(symbol));
+
   const handleSync = async () => {
     if (selectedProducts.size === 0) {
       toast({
@@ -1156,8 +1163,8 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                       <div className="flex items-center justify-between">
                         <CardTitle className="text-base font-semibold">
                           Products ({totalProducts.toLocaleString()} {filters.inStockOnly ? "in stock" : "total"}
-                          {hasPriceFilter && enhancedProducts.length > 0
-                            ? ` · ${products.filter((p: TMEProduct) => inPriceRange(p.Symbol)).length} shown after price filter`
+                          {(hideSyncedCategories || (hasPriceFilter && enhancedProducts.length > 0))
+                            ? ` · ${products.filter((p: TMEProduct) => isProductVisible(p.Symbol)).length} shown`
                             : ""}
                           )
                         </CardTitle>
@@ -1226,7 +1233,14 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                               Price filter is set, but prices aren't loaded yet. Click <strong>Load Prices</strong> to apply it.
                             </div>
                           )}
-                          {products.filter((product: TMEProduct) => inPriceRange(product.Symbol)).map((product: TMEProduct) => {
+                          {products.filter((p: TMEProduct) => isProductVisible(p.Symbol)).length === 0 && (
+                            <div className="text-center py-8 text-sm text-gray-500">
+                              {hideSyncedCategories
+                                ? "All products on this page are already synced (hidden). Use Next to see more, or uncheck “Hide synced”."
+                                : "No products match the current filters on this page."}
+                            </div>
+                          )}
+                          {products.filter((product: TMEProduct) => isProductVisible(product.Symbol)).map((product: TMEProduct) => {
                             const enhanced = getEnhancedProductInfo(product.Symbol);
                             const thumbnail = getProductThumbnail(product);
                             
