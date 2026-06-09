@@ -45,11 +45,11 @@ export function Sidebar({ user, collapsed = false, onToggle }: SidebarProps) {
   return (
     <div className={cn(
       "fixed inset-y-0 left-0 bg-white border-r border-gray-200 z-40 transition-all duration-200",
-      collapsed ? "w-16" : "w-64"
+      collapsed ? "w-16" : "w-48"
     )}>
       <div className="flex flex-col h-full">
         {/* Logo */}
-        <div className="flex items-center justify-between px-3 py-4 border-b border-gray-200">
+        <div className="flex items-center justify-between px-3 py-3 border-b border-gray-200">
           <div className="flex items-center overflow-hidden">
             <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center flex-shrink-0">
               <Box className="w-5 h-5 text-primary-foreground" />
@@ -72,7 +72,7 @@ export function Sidebar({ user, collapsed = false, onToggle }: SidebarProps) {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
+        <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
           {navigation.map((item) => {
             const isActive = location === item.href;
             return (
@@ -80,7 +80,7 @@ export function Sidebar({ user, collapsed = false, onToggle }: SidebarProps) {
                 key={item.name}
                 href={item.href}
                 className={cn(
-                  "group flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors",
+                  "group flex items-center px-2.5 py-1.5 text-sm font-medium rounded-lg transition-colors",
                   isActive
                     ? "bg-primary/10 text-primary"
                     : "text-gray-700 hover:bg-gray-50",
@@ -90,9 +90,9 @@ export function Sidebar({ user, collapsed = false, onToggle }: SidebarProps) {
                 title={collapsed ? item.name : undefined}
               >
                 <item.icon className={cn(
-                  "h-5 w-5 flex-shrink-0",
+                  "h-4 w-4 flex-shrink-0",
                   isActive ? "text-primary" : "text-gray-400",
-                  !collapsed && "mr-3"
+                  !collapsed && "mr-2.5"
                 )} />
                 {!collapsed && item.name}
               </Link>
@@ -102,7 +102,7 @@ export function Sidebar({ user, collapsed = false, onToggle }: SidebarProps) {
 
         {/* User Profile */}
         {user && (
-          <div className={cn("p-3 border-t border-gray-200", collapsed && "px-2")}>
+          <div className={cn("p-2.5 border-t border-gray-200", collapsed && "px-2")}>
             <div className={cn("flex items-center", collapsed ? "justify-center" : "justify-between")}>
               <div className="flex items-center overflow-hidden">
                 <div className="h-8 w-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0">

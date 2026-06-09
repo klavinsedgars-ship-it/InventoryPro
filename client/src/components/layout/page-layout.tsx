@@ -20,7 +20,7 @@ export function PageLayout({ user, title, subtitle, children }: PageLayoutProps)
         onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} 
       />
       
-      <div className={`transition-all duration-200 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
+      <div className={`transition-all duration-200 ${sidebarCollapsed ? 'ml-16' : 'ml-48'}`}>
         <Header title={title} subtitle={subtitle} />
         
         <main className="p-6">
