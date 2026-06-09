@@ -1401,8 +1401,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         let supplierCost = 0;
         let itemCount = 0;
         for (const it of items) {
+          // Prefer the cost snapshotted at sale time (accurate, immune to later
+          // TME price drift); fall back to the current product price for orders
+          // imported before snapshotting existed.
+          const snapshot = (it as any).supplierCostAtSale;
           const prod = bySku.get(it.sku);
-          const cost = prod ? parseFloat(prod.supplierPrice) || 0 : 0;
+          const cost = snapshot != null
+            ? parseFloat(snapshot) || 0
+            : (prod ? parseFloat(prod.supplierPrice) || 0 : 0);
           supplierCost += cost * (it.quantity || 1);
           itemCount += it.quantity || 1;
         }
@@ -4826,6 +4832,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
         note: notes || null
       });
 
+      // Push the shipment to eBay so the order shows as fulfilled with tracking
+      // (otherwise eBay still sees it unshipped -> late-shipment defects /
+      // auto-refunds). Best-effort: a failure is recorded but doesn't roll back
+      // the local status change.
+      let ebayFulfillment: { pushed: boolean; error?: string } | undefined;
+      if (status === 'shipped' && order.marketplace === 'ebay' && order.marketplaceOrderId && trackingNumber) {
+        try {
+          const items = await storage.getOrderItems(id);
+          const lineItems = items
+            .filter((it) => it.marketplaceItemId)
+            .map((it) => ({ lineItemId: it.marketplaceItemId as string, quantity: it.quantity }));
+          await ebayOrdersApi.createShippingFulfillment(order.marketplaceOrderId, {
+            lineItems,
+            shippingCarrierCode: trackingCarrier || 'OTHER',
+            trackingNumber,
+            shippedDate: new Date().toISOString(),
+          });
+          ebayFulfillment = { pushed: true };
+          await storage.createOrderEvent({
+            orderId: id,
+            eventType: 'tracking_added',
+            note: `Shipment pushed to eBay (${trackingCarrier || 'OTHER'} ${trackingNumber})`,
+          });
+        } catch (err) {
+          ebayFulfillment = { pushed: false, error: (err as Error).message };
+          console.error(`Failed to push fulfillment to eBay for order ${order.marketplaceOrderId}:`, err);
+          await storage.createOrderEvent({
+            orderId: id,
+            eventType: 'tracking_added',
+            note: `⚠️ Failed to push shipment to eBay: ${(err as Error).message}. Add tracking on eBay manually.`,
+          });
+        }
+      }
+
       // Trigger auto-message rules for this status change
       const triggerMap: Record<string, 'order_packed' | 'order_shipped' | 'order_delivered' | null> = {
         'packed': 'order_packed',
@@ -4844,7 +4884,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({
         success: true,
-        order: updatedOrder
+        order: updatedOrder,
+        ebayFulfillment
       });
     } catch (error) {
       console.error('Failed to update order status:', error);

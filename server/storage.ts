@@ -208,6 +208,7 @@ export interface IStorage {
   }): Promise<Order[]>;
   getOrder(id: number): Promise<Order | undefined>;
   getOrderByMarketplaceId(marketplace: string, marketplaceOrderId: string): Promise<Order | undefined>;
+  ensureOrderIntegritySchema(): Promise<void>;
   createOrder(order: InsertOrder): Promise<Order>;
   updateOrder(id: number, order: Partial<InsertOrder>): Promise<Order | undefined>;
   deleteOrder(id: number): Promise<boolean>;
@@ -276,6 +277,7 @@ export interface IStorage {
 
 // Set once the sync_jobs table has been ensured in this process.
 let syncJobsTableEnsured = false;
+let orderIntegrityEnsured = false;
 
 export class DatabaseStorage implements IStorage {
   constructor() {
@@ -372,6 +374,33 @@ export class DatabaseStorage implements IStorage {
       await db.execute(sql.raw(s));
     }
     return { ok: true, statements: stmts.length };
+  }
+
+  // Idempotent schema upgrade for order integrity: the cost-at-sale column,
+  // a unique guard against duplicate marketplace orders, and indexes on the
+  // order child tables. Each statement is isolated so that a unique-index
+  // failure (e.g. pre-existing duplicate orders that must be cleaned first)
+  // doesn't block the additive column/index changes. Runs lazily on the
+  // order-sync path (no manual db:push on Vercel).
+  async ensureOrderIntegritySchema(): Promise<void> {
+    if (orderIntegrityEnsured) return;
+    const stmts = [
+      `ALTER TABLE order_items ADD COLUMN IF NOT EXISTS supplier_cost_at_sale numeric(10,2)`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS orders_marketplace_order_uniq ON orders (marketplace, marketplace_order_id)`,
+      `CREATE INDEX IF NOT EXISTS orders_status_idx ON orders (status)`,
+      `CREATE INDEX IF NOT EXISTS orders_date_idx ON orders (order_date)`,
+      `CREATE INDEX IF NOT EXISTS order_items_order_idx ON order_items (order_id)`,
+      `CREATE INDEX IF NOT EXISTS order_fees_order_idx ON order_fees (order_id)`,
+      `CREATE INDEX IF NOT EXISTS order_events_order_idx ON order_events (order_id)`,
+    ];
+    for (const s of stmts) {
+      try {
+        await db.execute(sql.raw(s));
+      } catch (e) {
+        console.warn(`ensureOrderIntegritySchema: skipped "${s.slice(0, 60)}…": ${(e as Error).message}`);
+      }
+    }
+    orderIntegrityEnsured = true;
   }
 
   // Clear all eBay listing state locally (use after ending every listing

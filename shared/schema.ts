@@ -321,6 +321,9 @@ export const orderItems = pgTable("order_items", {
   quantity: integer("quantity").notNull().default(1),
   unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
   totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
+  // Supplier (TME) cost per unit captured AT SALE TIME, so realized-profit
+  // reports don't drift when the live TME price later changes.
+  supplierCostAtSale: decimal("supplier_cost_at_sale", { precision: 10, scale: 2 }),
   
   // Marketplace-specific
   marketplaceItemId: text("marketplace_item_id"), // eBay listing ID, Amazon ASIN
