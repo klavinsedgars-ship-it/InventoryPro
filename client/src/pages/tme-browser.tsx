@@ -497,7 +497,9 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   const selectCategory = (categoryId: string) => {
     setSelectedCategory(categoryId);
     setCurrentPage(1);
-    setSelectedProducts(new Set());
+    // Selections intentionally persist across subcategories so they can be
+    // accumulated and synced in one batch (the Sync/Clear counts reflect the
+    // running total). Use "Clear" to reset. Prices are per-view, so reset them.
     setEnhancedProducts([]);
   };
 
@@ -1144,6 +1146,22 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                           </Button>
                         </div>
                       </div>
+
+                      {/* Cross-category selection hint: selections accumulate as
+                          you browse subcategories, so one Sync imports them all. */}
+                      {(() => {
+                        const selectedOnPage = products.filter((p: TMEProduct) => selectedProducts.has(p.Symbol)).length;
+                        const fromOthers = selectedProducts.size - selectedOnPage;
+                        if (fromOthers <= 0) return null;
+                        return (
+                          <div className="pt-2">
+                            <div className="rounded border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs text-blue-800">
+                              {selectedProducts.size} products selected across categories
+                              ({fromOthers} from other subcategories). Keep selecting, then click <strong>Sync</strong> to import them all at once.
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       {/* Bulk Loading Progress */}
                       {bulkLoading && (
