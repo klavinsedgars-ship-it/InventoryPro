@@ -248,52 +248,90 @@ export class TMEApiServiceOptimized {
       }
     });
 
-    this.callCount++;
-    this.callsThisMinute++;
-    this.lastCallTimestamp = Date.now();
-    
-    // Track API call in database
-    if (this.storage) {
+    // Reactive rate-limit handling: the in-memory per-minute counter above is
+    // unreliable on serverless (resets per cold start, no cross-invocation
+    // coordination), so we also retry with exponential backoff when TME
+    // actually pushes back — HTTP 429/5xx or the E_TOO_MANY_REQUESTS status —
+    // honouring a Retry-After header when present. This is what keeps the
+    // cron resilient to rate-limit blips instead of failing the whole chunk.
+    const maxRetries = 3;
+    const baseDelayMs = 1000;
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      this.callCount++;
+      this.callsThisMinute++;
+      this.lastCallTimestamp = Date.now();
+
+      // Track API call in database
+      if (this.storage) {
+        try {
+          await this.storage.trackApiCall('tme');
+        } catch (error) {
+          console.error('Failed to track API call:', error);
+        }
+      }
+
+      console.log(`📊 TME API Call #${this.callCount}: ${endpoint} (${this.callsThisMinute}/${this.rateLimitPerMinute} this minute)`);
+
       try {
-        await this.storage.trackApiCall('tme');
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+            "User-Agent": "TME-API-Client/1.0"
+          },
+          body: formData.toString(),
+        });
+
+        const responseText = await response.text();
+
+        if (!response.ok) {
+          const isRetriable = response.status === 429 || response.status >= 500;
+          if (isRetriable && attempt < maxRetries) {
+            const retryAfter = Number(response.headers.get('retry-after'));
+            const delay = retryAfter > 0
+              ? retryAfter * 1000
+              : baseDelayMs * Math.pow(2, attempt - 1) * (0.8 + Math.random() * 0.4);
+            console.log(`⏸️ HTTP ${response.status} from TME, backing off ${Math.round(delay)}ms (retry ${attempt}/${maxRetries})`);
+            await sleep(delay);
+            continue;
+          }
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = JSON.parse(responseText) as TMEApiResponse<T>;
+
+        if (data.Status !== "OK") {
+          if (data.Status === "E_TOO_MANY_REQUESTS" && attempt < maxRetries) {
+            const delay = 5000 * attempt;
+            console.log(`⏸️ TME rate limit (E_TOO_MANY_REQUESTS), waiting ${delay / 1000}s (retry ${attempt}/${maxRetries})`);
+            await sleep(delay);
+            continue;
+          }
+          console.error('❌ TME API Error:', data.ErrorMessage);
+          throw new Error(`TME API error: ${data.ErrorMessage || data.Status || "Unknown error"}`);
+        }
+
+        return data;
+
       } catch (error) {
-        console.error('Failed to track API call:', error);
+        // Deliberate HTTP/API throws above are terminal; only retry genuine
+        // network/transport failures.
+        const isHttpOrApiError = error instanceof Error && /^(HTTP \d|TME API error)/.test(error.message);
+        if (!isHttpOrApiError && attempt < maxRetries) {
+          const delay = baseDelayMs * Math.pow(2, attempt - 1) * (0.8 + Math.random() * 0.4);
+          console.log(`🔄 TME network error, retry ${attempt}/${maxRetries} after ${Math.round(delay)}ms...`);
+          await sleep(delay);
+          continue;
+        }
+        console.error(`❌ TME API request failed after ${attempt} attempt(s):`, error);
+        throw error;
       }
     }
-    
-    console.log(`📊 TME API Call #${this.callCount}: ${endpoint} (${this.callsThisMinute}/55 this minute)`);
 
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "Accept": "application/json",
-          "User-Agent": "TME-API-Client/1.0"
-        },
-        body: formData.toString(),
-      });
-
-      const responseText = await response.text();
-      
-      if (!response.ok) {
-        console.error(`❌ HTTP Error: ${response.status}`);
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = JSON.parse(responseText) as TMEApiResponse<T>;
-      
-      if (data.Status !== "OK") {
-        console.error('❌ TME API Error:', data.ErrorMessage);
-        throw new Error(`TME API error: ${data.ErrorMessage || "Unknown error"}`);
-      }
-
-      return data;
-
-    } catch (error) {
-      console.error(`❌ TME API request failed:`, error);
-      throw error;
-    }
+    throw new Error(`TME API request failed after ${maxRetries} attempts: ${endpoint}`);
   }
 
   /**

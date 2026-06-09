@@ -3116,7 +3116,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 description: product.Description || "",
                 category: product.Category || "Electronics",
                 stock: stock?.Amount || 0,
-                costPrice: String(supplierPrice),
                 salePrice: String(pricingResult.finalPrice),
                 supplierPrice: String(supplierPrice),
                 supplier: "TME",
@@ -3124,9 +3123,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 status: (stock?.Amount || 0) > 0 ? "active" : "inactive",
                 ean: product.EAN || null,
                 weight: product.Weight?.toString() || null,
-                tmeCategory: product.Category || null,
                 tmeCategoryId: product.CategoryId ? String(product.CategoryId) : null,
-                tmeSymbol: product.Symbol,
+                supplierProductId: product.Symbol,
                 moq: moq,
                 multiples: multiples
               };
@@ -3138,7 +3136,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 await storage.updateProduct(existing.id, productData);
                 updatedCount++;
               } else {
-                await storage.createProduct(productData as any);
+                await storage.createProduct(productData);
                 syncedCount++;
               }
 
@@ -3669,105 +3667,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         success: false, 
         error: "Failed to delete pricing tier" 
       });
-    }
-  });
-
-  // Product routes
-  app.get("/api/products", requireAuth, async (req, res) => {
-    try {
-      const filters = {
-        category: req.query.category as string,
-        status: req.query.status as string,
-        listedOnEbay: req.query.listedOnEbay ? req.query.listedOnEbay === 'true' : undefined,
-        listedOnAmazon: req.query.listedOnAmazon ? req.query.listedOnAmazon === 'true' : undefined,
-        minStock: req.query.minStock ? parseInt(req.query.minStock as string) : undefined,
-        maxStock: req.query.maxStock ? parseInt(req.query.maxStock as string) : undefined,
-      };
-
-      // Remove undefined values
-      const cleanFilters = Object.fromEntries(
-        Object.entries(filters).filter(([_, value]) => value !== undefined)
-      );
-
-      const products = await storage.getProductsWithFilters(cleanFilters);
-      res.json(products);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch products" });
-    }
-  });
-
-  app.get("/api/products/:id", requireAuth, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      const product = await storage.getProduct(id);
-      if (!product) {
-        return res.status(404).json({ message: "Product not found" });
-      }
-      res.json(product);
-    } catch (error) {
-      res.status(500).json({ message: "Failed to fetch product" });
-    }
-  });
-
-  app.post("/api/products", requireAuth, async (req, res) => {
-    try {
-      const productData = insertProductSchema.parse(req.body);
-
-      // Check if SKU already exists
-      const existingProduct = await storage.getProductBySku(productData.sku);
-      if (existingProduct) {
-        return res.status(400).json({ message: "Product with this SKU already exists" });
-      }
-
-      const product = await storage.createProduct(productData);
-      res.status(201).json(product);
-    } catch (error) {
-      if (error instanceof ZodError) {
-        return res.status(400).json({ message: "Invalid input", errors: error.errors });
-      }
-      res.status(500).json({ message: "Failed to create product" });
-    }
-  });
-
-  app.put("/api/products/:id", requireAuth, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-
-      // Convert number fields to strings for decimal database fields
-      const requestBody = { ...req.body };
-      const decimalFields = ['weight', 'supplierPrice', 'salePrice', 'calculatedPrice', 'marginPercentage', 'margin'];
-
-      decimalFields.forEach(field => {
-        if (requestBody[field] !== undefined && typeof requestBody[field] === 'number') {
-          requestBody[field] = String(requestBody[field]);
-        }
-      });
-
-      const updateData = insertProductSchema.partial().parse(requestBody);
-
-      const product = await storage.updateProduct(id, updateData);
-      if (!product) {
-        return res.status(404).json({ message: "Product not found" });
-      }
-      res.json(product);
-    } catch (error) {
-      if (error instanceof ZodError) {
-        return res.status(400).json({ message: "Invalid input", errors: error.errors });
-      }
-      res.status(500).json({ message: "Failed to update product" });
-    }
-  });
-
-  app.delete("/api/products/:id", requireAuth, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      const success = await storage.deleteProduct(id);
-      if (!success) {
-        return res.status(404).json({ message: "Product not found" });
-      }
-      res.json({ message: "Product deleted successfully" });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to delete product" });
     }
   });
 
