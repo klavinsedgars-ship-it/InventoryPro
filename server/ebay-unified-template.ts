@@ -249,7 +249,7 @@ function generateUnifiedHtmlDescription(product: Product, specs: any, category: 
 /**
  * Extract specifications from product data
  */
-function extractProductSpecs(product: Product): any {
+export function extractProductSpecs(product: Product): any {
   const specs: any = {};
   const text = `${product.name || ''} ${product.description || ''}`.toLowerCase();
   

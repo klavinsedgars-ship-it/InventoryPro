@@ -22,6 +22,7 @@ import { getShippingPolicyId } from "./shipping-policies";
 import { calculateEbayStock } from "./stock-manager";
 import { imageProcessingService } from "./image-processing";
 import { storage } from "./storage";
+import { extractProductSpecs } from "./ebay-unified-template";
 
 const INV_BASE = "https://api.ebay.com/sell/inventory/v1";
 
@@ -104,15 +105,71 @@ export class EbayInventoryApiService {
    * sensible value (prefer "Sonstige/Other/Nicht zutreffend", else the
    * first allowed value, else free-text "Sonstige").
    */
+  // Maps an extracted spec value to a required aspect when the aspect name
+  // matches a known shape (voltage / current / power / frequency / brand /
+  // mpn). Returns undefined if no real spec applies — caller falls back to
+  // the generic "Sonstige" choice. On a parts marketplace these mapped
+  // aspects matter for search filterability and conversion.
+  private mapSpecToAspect(
+    aspectName: string,
+    specs: ReturnType<typeof extractProductSpecs>,
+    product: Product,
+  ): string | undefined {
+    const n = aspectName.toLowerCase();
+    if (specs.voltage && /(volt|spannung|nennspannung|operating[- ]?voltage)/.test(n)) {
+      return `${specs.voltage}V`;
+    }
+    if (specs.current && /(current|strom|stromstärke|ampere|nennstrom)/.test(n)) {
+      return `${specs.current}A`;
+    }
+    if (specs.power && /(power|leistung|watt|wattage|nennleistung)/.test(n)) {
+      return `${specs.power}W`;
+    }
+    if (specs.frequency && /(frequen|takt|clock)/.test(n)) {
+      return `${specs.frequency}Hz`;
+    }
+    if (specs.temperature && /(temp|temperatur)/.test(n)) {
+      return `${specs.temperature}°C`;
+    }
+    if (specs.brand && /(brand|marke|hersteller|manufactur)/.test(n)) {
+      return specs.brand;
+    }
+    if (/(mpn|herstellernummer|teilenummer|part[- ]?number)/.test(n)) {
+      // SKU is a real, unique part number — much better than "Nicht zutreffend"
+      // for buyer search and the eBay product-identifier matcher.
+      return product.sku;
+    }
+    return undefined;
+  }
+
+  /**
+   * Build the aspects object satisfying a category's required aspects. Prefers
+   * REAL values extracted from product name/description (voltage/current/etc.),
+   * falling back to the safest accepted value for that aspect, then to a
+   * generic "Sonstige"/"Markenlos". The fallback ladder used to be the only
+   * path — every product shipped with junk aspects, which kills filterable
+   * search on a parts marketplace.
+   */
   private async buildAspects(product: Product, categoryId: string): Promise<Record<string, string[]>> {
     const aspects: Record<string, string[]> = {};
     const required = await this.getRequiredAspects(categoryId);
+    const specs = extractProductSpecs(product);
+
     for (const a of required) {
+      const mapped = this.mapSpecToAspect(a.name, specs, product);
+      if (mapped) {
+        // If the aspect has a constrained value list, only use the mapped value
+        // when it's accepted; otherwise fall through to the existing logic.
+        if (a.values.length === 0 || a.values.some((v) => v.toLowerCase() === mapped.toLowerCase())) {
+          aspects[a.name] = [mapped];
+          continue;
+        }
+      }
       const lname = a.name.toLowerCase();
       if (lname === "marke" || lname === "brand") {
-        aspects[a.name] = ["Markenlos"];
+        aspects[a.name] = [specs.brand || "Markenlos"];
       } else if (lname === "herstellernummer" || lname === "mpn") {
-        aspects[a.name] = ["Nicht zutreffend"];
+        aspects[a.name] = [product.sku];
       } else if (a.values.length > 0) {
         const generic = a.values.find((v) => /sonst|other|nicht zutreffend|n\/a/i.test(v));
         aspects[a.name] = [generic || a.values[0]];
@@ -121,8 +178,8 @@ export class EbayInventoryApiService {
       }
     }
     // Always ensure Brand/MPN present even if not flagged required
-    if (!aspects["Marke"] && !aspects["Brand"]) aspects["Marke"] = ["Markenlos"];
-    if (!aspects["Herstellernummer"] && !aspects["MPN"]) aspects["Herstellernummer"] = ["Nicht zutreffend"];
+    if (!aspects["Marke"] && !aspects["Brand"]) aspects["Marke"] = [specs.brand || "Markenlos"];
+    if (!aspects["Herstellernummer"] && !aspects["MPN"]) aspects["Herstellernummer"] = [product.sku];
     return aspects;
   }
 
@@ -216,18 +273,36 @@ export class EbayInventoryApiService {
   }
 
   /** Resolve the image URL(s) for a product (Blob-processed when available). */
+  // Resolves a product's image to the URL that ends up on the eBay offer.
+  // The TME source image carries a competitor watermark, so we try to strip
+  // it via imageProcessingService. On failure the historical behaviour was
+  // to silently ship the watermarked image — a conversion killer and a
+  // potential policy issue.
+  //
+  // REQUIRE_WATERMARK_REMOVAL=true switches to fail-closed: throws so the
+  // publish path returns an error and the listing isn't created with the
+  // watermarked image. Default stays at "best-effort fallback" to preserve
+  // the current ramp behaviour until the operator opts in.
   private async resolveImages(product: Product): Promise<string[]> {
     if (!product.imageUrl) return [];
     const fixed = product.imageUrl.startsWith("//") ? "https:" + product.imageUrl : product.imageUrl;
     const hasBlob = !!process.env.BLOB_READ_WRITE_TOKEN;
     const publicBaseUrl = process.env.PUBLIC_BASE_URL || process.env.REPL_URL;
-    if (!hasBlob && !publicBaseUrl) return [fixed];
+    const strict = process.env.REQUIRE_WATERMARK_REMOVAL === "true";
+    if (!hasBlob && !publicBaseUrl) {
+      if (strict) throw new Error("watermark removal not configured (no BLOB_READ_WRITE_TOKEN / PUBLIC_BASE_URL)");
+      return [fixed];
+    }
     try {
       const r = await imageProcessingService.removeWatermark(fixed);
       if (r.success && r.processedImageUrl) {
         return [r.processedImageUrl.startsWith("http") ? r.processedImageUrl : `${publicBaseUrl}${r.processedImageUrl}`];
       }
-    } catch { /* fall through */ }
+      if (strict) throw new Error(`watermark removal failed: ${r.error || "unknown"}`);
+    } catch (e) {
+      if (strict) throw e instanceof Error ? e : new Error(String(e));
+      /* fall through to raw image */
+    }
     return [fixed];
   }
 
