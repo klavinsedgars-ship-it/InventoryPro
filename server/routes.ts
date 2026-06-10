@@ -4136,7 +4136,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/sync/audit", requireAuth, async (req, res) => {
     try {
       const sinceHours = req.query.sinceHours ? Number(req.query.sinceHours) : 24;
-      const [data, stats] = await Promise.all([
+      const [data, stats, logs] = await Promise.all([
         storage.getSyncAudit({
           limit: req.query.limit ? Number(req.query.limit) : 50,
           offset: req.query.offset ? Number(req.query.offset) : 0,
@@ -4146,8 +4146,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
           sinceHours,
         }),
         storage.getSyncAuditStats(sinceHours),
+        storage.getSyncLogs(50),
       ]);
-      res.json({ success: true, ...data, stats, sinceHours });
+      // Per-run history (the old dashboard "Recent activity" feed), folded into
+      // this endpoint so the Sync Activity view is the single home for sync
+      // history. Only TME sync runs, with the per-run counts parsed out of the
+      // log's details JSON so the client doesn't re-parse the message string.
+      const recentRuns = logs
+        .filter((l) => (l.operation || "").includes("sync"))
+        .slice(0, 20)
+        .map((l) => {
+          let d: any = {};
+          try { d = l.details ? JSON.parse(l.details) : {}; } catch { /* non-JSON */ }
+          return {
+            status: l.status,
+            operation: l.operation,
+            message: l.message,
+            syncedAt: l.syncedAt,
+            changed: d.totalChanged ?? null,
+            ebayUpdated: d.totalEbay ?? null,
+            remaining: d.remaining ?? null,
+            processed: d.totalProcessed ?? null,
+          };
+        });
+      res.json({ success: true, ...data, stats, recentRuns, sinceHours });
     } catch (error) {
       console.error("Sync audit fetch failed:", error);
       res.status(500).json({ success: false, error: (error as Error).message });
