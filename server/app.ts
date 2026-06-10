@@ -3,6 +3,7 @@ import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import { pool } from "./db";
 import { registerRoutes } from "./routes";
+import { storage } from "./storage";
 
 const PgSession = connectPgSimple(session);
 
@@ -75,6 +76,17 @@ export async function createApp(): Promise<Express> {
   });
 
   await registerRoutes(app);
+
+  // Apply additive schema/index migrations lazily, on first boot per process.
+  // All statements are CREATE/ALTER IF NOT EXISTS so they're safe to repeat,
+  // and this stops new deploys from needing someone to hit the manual
+  // /api/__apply-migration endpoint to get the indexes the query plans rely
+  // on. Errors are logged but never block startup (a bad statement should
+  // never take down the whole app).
+  storage.applyScaleMigration().then(
+    (r) => console.log(`📐 ensureCoreSchema: ${r.statements} statement(s) applied`),
+    (e) => console.error("ensureCoreSchema failed:", e),
+  );
 
   app.use((err: any, _req: any, res: any, _next: any) => {
     const status = err.status || err.statusCode || 500;

@@ -267,6 +267,9 @@ export class EbayOrdersApiService {
     const errors: string[] = [];
     
     try {
+      // Ensure the cost-at-sale column + dedup index exist before importing.
+      await storage.ensureOrderIntegritySchema();
+
       const ordersResponse = await this.getRecentOrders(daysBack);
       console.log(`📦 Found ${ordersResponse.total} eBay orders`);
       
@@ -359,23 +362,33 @@ export class EbayOrdersApiService {
     };
     
     const order = await storage.createOrder(orderData);
-    
-    const orderItems: InsertOrderItem[] = ebayOrder.lineItems.map(item => ({
-      orderId: order.id,
-      marketplaceItemId: item.lineItemId,
-      
-      productId: null,
-      sku: item.sku || `EBAY-${item.legacyItemId}`,
-      tmeProductId: null,
-      title: item.title,
-      quantity: item.quantity,
-      
-      unitPrice: item.lineItemCost.value,
-      totalPrice: item.total.value,
-      
-      imageUrl: null
-    }));
-    
+
+    // Resolve each line item to a local product by SKU so the order is linked
+    // (enables the TME deep-link and, critically, correct profit costing) and
+    // snapshot the supplier cost at sale time so realized-profit reports don't
+    // drift when the live TME price later changes.
+    const orderItems: InsertOrderItem[] = [];
+    for (const item of ebayOrder.lineItems) {
+      const sku = item.sku || `EBAY-${item.legacyItemId}`;
+      const product = item.sku ? await storage.getProductBySku(item.sku) : undefined;
+      orderItems.push({
+        orderId: order.id,
+        marketplaceItemId: item.lineItemId,
+
+        productId: product?.id ?? null,
+        sku,
+        tmeProductId: product?.supplierProductId ?? product?.tmeProductId ?? null,
+        supplierCostAtSale: product?.supplierPrice ?? null,
+        title: item.title,
+        quantity: item.quantity,
+
+        unitPrice: item.lineItemCost.value,
+        totalPrice: item.total.value,
+
+        imageUrl: product?.imageUrl ?? null
+      });
+    }
+
     if (orderItems.length > 0) {
       await storage.createOrderItems(orderItems);
     }

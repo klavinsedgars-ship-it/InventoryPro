@@ -1380,11 +1380,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const mpMap = new Map<string, { marketplace: string; orders: number; revenue: number; netProfit: number }>();
       let usedActualFees = false;
 
-      for (const order of orders) {
-        if (order.status === "cancelled") continue;
+      // Batch-load order items and fees in two queries (was 2N queries — one
+      // per order — which would time out at a few thousand orders).
+      const activeOrders = orders.filter((o) => o.status !== "cancelled");
+      const orderIds = activeOrders.map((o) => o.id);
+      const itemsByOrder = await storage.getOrderItemsByOrderIds(orderIds);
+      const feesByOrder = await storage.getOrderFeesByOrderIds(orderIds);
 
-        const items = await storage.getOrderItems(order.id);
-        const feeRows = await storage.getOrderFees(order.id);
+      for (const order of activeOrders) {
+        const items = itemsByOrder.get(order.id) ?? [];
+        const feeRows = feesByOrder.get(order.id) ?? [];
 
         const subtotal = parseFloat(order.subtotal) || 0;
         const shipping = parseFloat(order.shippingCost) || 0;
@@ -1401,8 +1406,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         let supplierCost = 0;
         let itemCount = 0;
         for (const it of items) {
+          // Prefer the cost snapshotted at sale time (accurate, immune to later
+          // TME price drift); fall back to the current product price for orders
+          // imported before snapshotting existed.
+          const snapshot = (it as any).supplierCostAtSale;
           const prod = bySku.get(it.sku);
-          const cost = prod ? parseFloat(prod.supplierPrice) || 0 : 0;
+          const cost = snapshot != null
+            ? parseFloat(snapshot) || 0
+            : (prod ? parseFloat(prod.supplierPrice) || 0 : 0);
           supplierCost += cost * (it.quantity || 1);
           itemCount += it.quantity || 1;
         }
@@ -4111,10 +4122,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/sync/run", requireAuth, async (req, res) => {
     try {
       const limit = Math.min(Number(req.body?.limit) || 50, 100);
-      const result = await runSyncChunk(limit);
+      const result = await runSyncChunk(limit, "manual");
       res.json({ success: true, ...result });
     } catch (error) {
       console.error("Sync chunk failed:", error);
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Per-SKU sync audit trail for the "Sync Activity" view: what the TME->DB->
+  // eBay sync changed and whether it reached eBay. Returns a paginated slice
+  // plus a rollup over the same time window.
+  app.get("/api/sync/audit", requireAuth, async (req, res) => {
+    try {
+      const sinceHours = req.query.sinceHours ? Number(req.query.sinceHours) : 24;
+      const [data, stats] = await Promise.all([
+        storage.getSyncAudit({
+          limit: req.query.limit ? Number(req.query.limit) : 50,
+          offset: req.query.offset ? Number(req.query.offset) : 0,
+          sku: (req.query.sku as string) || undefined,
+          ebayAction: (req.query.ebayAction as string) || undefined,
+          changedOnly: req.query.changedOnly === "true",
+          sinceHours,
+        }),
+        storage.getSyncAuditStats(sinceHours),
+      ]);
+      res.json({ success: true, ...data, stats, sinceHours });
+    } catch (error) {
+      console.error("Sync audit fetch failed:", error);
       res.status(500).json({ success: false, error: (error as Error).message });
     }
   });
@@ -4138,16 +4173,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     let totalEbay = 0;
     let totalUnlisted = 0;
     let totalRelisted = 0;
+    let totalProcessed = 0;
+    let totalProcessedListed = 0;
     let last: any = null;
     const allErrors: string[] = [];
     try {
       do {
-        last = await runSyncChunk(50);
+        last = await runSyncChunk(50, "cron");
         chunks++;
         totalChanged += last.changed;
         totalEbay += last.ebayUpdated;
         totalUnlisted += last.ebayUnlisted ?? 0;
         totalRelisted += last.ebayRelisted ?? 0;
+        totalProcessed += last.processedThisChunk ?? 0;
+        totalProcessedListed += last.processedListed ?? 0;
         allErrors.push(...last.errors);
       } while (!last.done && Date.now() - start < budgetMs);
 
@@ -4155,8 +4194,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         source: "tme",
         operation: "cron_sync",
         status: last?.done ? "success" : "partial",
-        message: `Cron sync: ${chunks} chunks, ${totalChanged} changed, ${totalEbay} eBay updated, ${totalUnlisted} unlisted (OOS), ${totalRelisted} relisted, ${last?.remaining ?? "?"} remaining`,
-        details: JSON.stringify({ chunks, totalChanged, totalEbay, totalUnlisted, totalRelisted, remaining: last?.remaining, errors: allErrors.slice(0, 20) }),
+        message: `Cron sync: ${chunks} chunks, ${totalChanged} changed, ${totalEbay} eBay updated, ${totalUnlisted} unlisted (OOS), ${totalRelisted} relisted, ${totalProcessedListed}/${totalProcessed} listed, ${last?.remaining ?? "?"} remaining`,
+        details: JSON.stringify({ chunks, totalChanged, totalEbay, totalUnlisted, totalRelisted, totalProcessed, totalProcessedListed, remaining: last?.remaining, errors: allErrors.slice(0, 20) }),
       });
 
       // No HTTP self-chain: each cron tick processes as much as fits in its
@@ -4675,13 +4714,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: filters.status
       });
 
-      // Include items for each order
-      const ordersWithItems = await Promise.all(
-        orders.map(async (order) => {
-          const items = await storage.getOrderItems(order.id);
-          return { ...order, items };
-        })
-      );
+      // Include items for each order — single batched query keyed by orderId
+      // (was N queries in Promise.all; bounded by page size but still N×RTT).
+      const itemsByOrder = await storage.getOrderItemsByOrderIds(orders.map((o) => o.id));
+      const ordersWithItems = orders.map((order) => ({
+        ...order,
+        items: itemsByOrder.get(order.id) ?? [],
+      }));
 
       res.json({
         success: true,
@@ -4826,6 +4865,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
         note: notes || null
       });
 
+      // Push the shipment to eBay so the order shows as fulfilled with tracking
+      // (otherwise eBay still sees it unshipped -> late-shipment defects /
+      // auto-refunds). Best-effort: a failure is recorded but doesn't roll back
+      // the local status change.
+      let ebayFulfillment: { pushed: boolean; error?: string } | undefined;
+      if (status === 'shipped' && order.marketplace === 'ebay' && order.marketplaceOrderId && trackingNumber) {
+        try {
+          const items = await storage.getOrderItems(id);
+          const lineItems = items
+            .filter((it) => it.marketplaceItemId)
+            .map((it) => ({ lineItemId: it.marketplaceItemId as string, quantity: it.quantity }));
+          await ebayOrdersApi.createShippingFulfillment(order.marketplaceOrderId, {
+            lineItems,
+            shippingCarrierCode: trackingCarrier || 'OTHER',
+            trackingNumber,
+            shippedDate: new Date().toISOString(),
+          });
+          ebayFulfillment = { pushed: true };
+          await storage.createOrderEvent({
+            orderId: id,
+            eventType: 'tracking_added',
+            note: `Shipment pushed to eBay (${trackingCarrier || 'OTHER'} ${trackingNumber})`,
+          });
+        } catch (err) {
+          ebayFulfillment = { pushed: false, error: (err as Error).message };
+          console.error(`Failed to push fulfillment to eBay for order ${order.marketplaceOrderId}:`, err);
+          await storage.createOrderEvent({
+            orderId: id,
+            eventType: 'tracking_added',
+            note: `⚠️ Failed to push shipment to eBay: ${(err as Error).message}. Add tracking on eBay manually.`,
+          });
+        }
+      }
+
       // Trigger auto-message rules for this status change
       const triggerMap: Record<string, 'order_packed' | 'order_shipped' | 'order_delivered' | null> = {
         'packed': 'order_packed',
@@ -4844,7 +4917,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({
         success: true,
-        order: updatedOrder
+        order: updatedOrder,
+        ebayFulfillment
       });
     } catch (error) {
       console.error('Failed to update order status:', error);
@@ -5232,20 +5306,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Send to eBay if configured
-      let ebayResult: { success: boolean; error?: string } = { success: true };
-      if (thread.marketplace === 'ebay' && thread.itemId && ebayOAuth.isOAuthConfigured()) {
-        ebayResult = await ebayMessagesApi.sendMessageToPartner(
-          thread.itemId,
-          thread.buyerUsername,
-          body
-        );
-
+      // Determine if the reply can actually be delivered to eBay. The Trading
+      // API's AddMemberMessage* requires an itemId — without one the message
+      // would have been silently stored as "sent" but never transmitted (the
+      // original bug). Mark such cases as failed with a clear error so the
+      // operator knows to deliver the reply on eBay manually (or to thread it
+      // through a different message that has an item context).
+      let ebayResult: { success: boolean; error?: string };
+      if (thread.marketplace === 'ebay') {
+        if (!ebayOAuth.isOAuthConfigured()) {
+          ebayResult = { success: false, error: 'eBay OAuth not configured' };
+        } else if (!thread.itemId) {
+          ebayResult = { success: false, error: 'Thread has no eBay itemId; cannot send via AddMemberMessage. Reply on eBay directly.' };
+        } else {
+          ebayResult = await ebayMessagesApi.sendMessageToPartner(
+            thread.itemId,
+            thread.buyerUsername,
+            body
+          );
+        }
         if (!ebayResult.success) {
-          return res.status(500).json({
+          return res.status(502).json({
             success: false,
             error: `Failed to send message to eBay: ${ebayResult.error}`
           });
         }
+      } else {
+        // Non-eBay (e.g. Amazon, local-only) thread — nothing to transmit.
+        ebayResult = { success: true };
       }
 
       // Store the message

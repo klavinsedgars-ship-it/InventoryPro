@@ -2,8 +2,9 @@ import {
   users, 
   products, 
   categories, 
-  marketplaceSettings, 
+  marketplaceSettings,
   syncLogs,
+  syncAudit,
   syncQueue,
   syncJobs,
   pricingTiers,
@@ -34,6 +35,8 @@ import {
   type InsertMarketplaceSettings,
   type SyncLog,
   type InsertSyncLog,
+  type SyncAudit,
+  type InsertSyncAudit,
   type SyncJob,
   type InsertSyncJob,
   type SyncQueue,
@@ -115,6 +118,29 @@ export interface IStorage {
   // Sync Logs
   getSyncLogs(limit?: number): Promise<SyncLog[]>;
   createSyncLog(log: InsertSyncLog): Promise<SyncLog>;
+
+  // Sync Audit (per-SKU change trail)
+  createSyncAuditEntries(entries: InsertSyncAudit[]): Promise<void>;
+  getSyncAudit(opts?: {
+    limit?: number;
+    offset?: number;
+    sku?: string;
+    ebayAction?: string;
+    changedOnly?: boolean;
+    sinceHours?: number;
+  }): Promise<{ rows: SyncAudit[]; total: number }>;
+  getSyncAuditStats(sinceHours?: number): Promise<{
+    changed: number;
+    priceChanged: number;
+    stockChanged: number;
+    ebayUpdated: number;
+    ebayUnlisted: number;
+    ebayRelisted: number;
+    ebayFailed: number;
+    skippedNoOffer: number;
+    lastRunAt: string | null;
+  }>;
+
   ensureSyncJobsTable(): Promise<void>;
   createSyncJob(job: InsertSyncJob): Promise<SyncJob>;
   getSyncJob(jobId: string): Promise<SyncJob | undefined>;
@@ -208,6 +234,7 @@ export interface IStorage {
   }): Promise<Order[]>;
   getOrder(id: number): Promise<Order | undefined>;
   getOrderByMarketplaceId(marketplace: string, marketplaceOrderId: string): Promise<Order | undefined>;
+  ensureOrderIntegritySchema(): Promise<void>;
   createOrder(order: InsertOrder): Promise<Order>;
   updateOrder(id: number, order: Partial<InsertOrder>): Promise<Order | undefined>;
   deleteOrder(id: number): Promise<boolean>;
@@ -215,11 +242,13 @@ export interface IStorage {
 
   // Order Items
   getOrderItems(orderId: number): Promise<OrderItem[]>;
+  getOrderItemsByOrderIds(orderIds: number[]): Promise<Map<number, OrderItem[]>>;
   createOrderItem(item: InsertOrderItem): Promise<OrderItem>;
   createOrderItems(items: InsertOrderItem[]): Promise<void>;
 
   // Order Fees
   getOrderFees(orderId: number): Promise<OrderFee[]>;
+  getOrderFeesByOrderIds(orderIds: number[]): Promise<Map<number, OrderFee[]>>;
   createOrderFee(fee: InsertOrderFee): Promise<OrderFee>;
   createOrderFees(fees: InsertOrderFee[]): Promise<void>;
 
@@ -265,6 +294,7 @@ export interface IStorage {
   updateAutoMessageRule(id: number, rule: Partial<InsertAutoMessageRule>): Promise<AutoMessageRule | undefined>;
   deleteAutoMessageRule(id: number): Promise<boolean>;
   incrementRuleSentCount(id: number): Promise<void>;
+  claimAutoMessageSend(ruleId: number, orderId: number): Promise<boolean>;
 
   // Scheduled Messages
   getScheduledMessages(status?: string): Promise<ScheduledMessage[]>;
@@ -276,6 +306,9 @@ export interface IStorage {
 
 // Set once the sync_jobs table has been ensured in this process.
 let syncJobsTableEnsured = false;
+let orderIntegrityEnsured = false;
+let autoMessageSendsEnsured = false;
+let syncAuditTableEnsured = false;
 
 export class DatabaseStorage implements IStorage {
   constructor() {
@@ -367,11 +400,53 @@ export class DatabaseStorage implements IStorage {
       `CREATE INDEX IF NOT EXISTS products_offer_idx ON products (listed_on_ebay, ebay_offer_id)`,
       `CREATE INDEX IF NOT EXISTS tme_cache_expires_idx ON tme_product_cache (expires_at)`,
       `CREATE INDEX IF NOT EXISTS sync_queue_status_priority_idx ON sync_queue (status, priority, scheduled_for)`,
+      // Order child-table indexes: getOrderItems/Fees/Events filter by orderId
+      // and Postgres doesn't auto-index FKs. Without these, every order detail
+      // and the analytics rollup full-scan the child tables.
+      `CREATE INDEX IF NOT EXISTS order_items_order_idx ON order_items (order_id)`,
+      `CREATE INDEX IF NOT EXISTS order_fees_order_idx ON order_fees (order_id)`,
+      `CREATE INDEX IF NOT EXISTS order_events_order_idx ON order_events (order_id)`,
+      // Order list filters: status (orders list) + order_date (analytics).
+      `CREATE INDEX IF NOT EXISTS orders_status_idx ON orders (status)`,
+      `CREATE INDEX IF NOT EXISTS orders_date_idx ON orders (order_date)`,
+      // Messaging hot paths: messages by thread (already FK), threads by
+      // marketplace+buyer for the dedupe path, sync_logs by syncedAt for the
+      // dashboard feed.
+      `CREATE INDEX IF NOT EXISTS messages_thread_idx ON messages (thread_id)`,
+      `CREATE INDEX IF NOT EXISTS message_threads_buyer_idx ON message_threads (marketplace, buyer_username)`,
+      `CREATE INDEX IF NOT EXISTS sync_logs_synced_at_idx ON sync_logs (synced_at)`,
     ];
     for (const s of stmts) {
       await db.execute(sql.raw(s));
     }
     return { ok: true, statements: stmts.length };
+  }
+
+  // Idempotent schema upgrade for order integrity: the cost-at-sale column,
+  // a unique guard against duplicate marketplace orders, and indexes on the
+  // order child tables. Each statement is isolated so that a unique-index
+  // failure (e.g. pre-existing duplicate orders that must be cleaned first)
+  // doesn't block the additive column/index changes. Runs lazily on the
+  // order-sync path (no manual db:push on Vercel).
+  async ensureOrderIntegritySchema(): Promise<void> {
+    if (orderIntegrityEnsured) return;
+    const stmts = [
+      `ALTER TABLE order_items ADD COLUMN IF NOT EXISTS supplier_cost_at_sale numeric(10,2)`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS orders_marketplace_order_uniq ON orders (marketplace, marketplace_order_id)`,
+      `CREATE INDEX IF NOT EXISTS orders_status_idx ON orders (status)`,
+      `CREATE INDEX IF NOT EXISTS orders_date_idx ON orders (order_date)`,
+      `CREATE INDEX IF NOT EXISTS order_items_order_idx ON order_items (order_id)`,
+      `CREATE INDEX IF NOT EXISTS order_fees_order_idx ON order_fees (order_id)`,
+      `CREATE INDEX IF NOT EXISTS order_events_order_idx ON order_events (order_id)`,
+    ];
+    for (const s of stmts) {
+      try {
+        await db.execute(sql.raw(s));
+      } catch (e) {
+        console.warn(`ensureOrderIntegritySchema: skipped "${s.slice(0, 60)}…": ${(e as Error).message}`);
+      }
+    }
+    orderIntegrityEnsured = true;
   }
 
   // Clear all eBay listing state locally (use after ending every listing
@@ -385,28 +460,58 @@ export class DatabaseStorage implements IStorage {
 
   // Stale TME products for the sync poll (DB-side, indexed by
   // products_supplier_stale_idx). Stalest first; never-synced win.
-  async getStaleTmeProducts(limit: number, staleBefore: Date): Promise<Product[]> {
+  //
+  // Tiered staleness: when both cutoffs are supplied, listed eBay products
+  // are stale if older than `listedBefore`, and everything else if older than
+  // `unlistedBefore` (default falls back to the single legacy cutoff).
+  // Rationale: in a pure-dropship model the oversell risk is TME going to 0
+  // between cron ticks while the listing still shows qty; refreshing listed
+  // SKUs ~3× more often (e.g. 4h) catches that quickly, while unlisted SKUs
+  // can drift for 48h with no customer impact — overall load drops too.
+  async getStaleTmeProducts(
+    limit: number,
+    listedBefore: Date,
+    unlistedBefore?: Date,
+  ): Promise<Product[]> {
+    const unlisted = unlistedBefore ?? listedBefore;
     return await db
       .select()
       .from(products)
       .where(
         and(
           eq(products.supplier, "TME"),
-          or(isNull(products.lastSyncedAt), lt(products.lastSyncedAt, staleBefore)),
+          or(
+            isNull(products.lastSyncedAt),
+            and(eq(products.listedOnEbay, true), lt(products.lastSyncedAt, listedBefore)),
+            and(
+              or(eq(products.listedOnEbay, false), isNull(products.listedOnEbay)),
+              lt(products.lastSyncedAt, unlisted),
+            ),
+          ),
         ),
       )
-      .orderBy(asc(products.lastSyncedAt))
+      // Listed first (priority), then stalest. Postgres treats true > false,
+      // so DESC on listed_on_ebay puts listed rows first.
+      .orderBy(desc(products.listedOnEbay), asc(products.lastSyncedAt))
       .limit(limit);
   }
 
-  async getStaleTmeProductCount(staleBefore: Date): Promise<number> {
+  async getStaleTmeProductCount(listedBefore: Date, unlistedBefore?: Date): Promise<number> {
+    const unlisted = unlistedBefore ?? listedBefore;
     const [r] = await db
       .select({ c: count() })
       .from(products)
       .where(
         and(
           eq(products.supplier, "TME"),
-          or(isNull(products.lastSyncedAt), lt(products.lastSyncedAt, staleBefore)),
+          or(
+            isNull(products.lastSyncedAt),
+            and(eq(products.listedOnEbay, true), lt(products.lastSyncedAt, listedBefore)),
+            and(
+              or(eq(products.listedOnEbay, false), isNull(products.listedOnEbay)),
+              lt(products.lastSyncedAt, unlisted),
+            ),
+          ),
         ),
       );
     return r?.c ?? 0;
@@ -690,6 +795,113 @@ export class DatabaseStorage implements IStorage {
       .values(insertLog)
       .returning();
     return log;
+  }
+
+  // Create the sync_audit table on first use (same rationale as sync_jobs:
+  // deploys don't run a manual `db:push`). Indexed for the two access
+  // patterns the Activity view uses: recency and per-SKU lookup.
+  async ensureSyncAuditTable(): Promise<void> {
+    if (syncAuditTableEnsured) return;
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS sync_audit (
+        id                  SERIAL PRIMARY KEY,
+        product_id          INTEGER,
+        sku                 TEXT NOT NULL,
+        source              TEXT NOT NULL DEFAULT 'cron',
+        price_changed       BOOLEAN NOT NULL DEFAULT false,
+        stock_changed       BOOLEAN NOT NULL DEFAULT false,
+        old_supplier_price  NUMERIC(10,2),
+        new_supplier_price  NUMERIC(10,2),
+        old_stock           INTEGER,
+        new_stock           INTEGER,
+        ebay_action         TEXT NOT NULL DEFAULT 'none',
+        ebay_error          TEXT,
+        created_at          TIMESTAMP DEFAULT now()
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS sync_audit_created_at_idx ON sync_audit (created_at DESC)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS sync_audit_sku_idx ON sync_audit (sku)`);
+    syncAuditTableEnsured = true;
+  }
+
+  async createSyncAuditEntries(entries: InsertSyncAudit[]): Promise<void> {
+    if (entries.length === 0) return;
+    await this.ensureSyncAuditTable();
+    // Chunk inserts so a very large sync run can't exceed parameter limits.
+    for (let i = 0; i < entries.length; i += 500) {
+      await db.insert(syncAudit).values(entries.slice(i, i + 500));
+    }
+  }
+
+  async getSyncAudit(opts: {
+    limit?: number;
+    offset?: number;
+    sku?: string;
+    ebayAction?: string;
+    changedOnly?: boolean;
+    sinceHours?: number;
+  } = {}): Promise<{ rows: SyncAudit[]; total: number }> {
+    await this.ensureSyncAuditTable();
+    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+    const offset = Math.max(opts.offset ?? 0, 0);
+    const conds: any[] = [];
+    if (opts.sku) conds.push(ilike(syncAudit.sku, `%${opts.sku}%`));
+    if (opts.ebayAction) conds.push(eq(syncAudit.ebayAction, opts.ebayAction));
+    if (opts.changedOnly) conds.push(or(eq(syncAudit.priceChanged, true), eq(syncAudit.stockChanged, true)));
+    if (opts.sinceHours) {
+      conds.push(gte(syncAudit.createdAt, new Date(Date.now() - opts.sinceHours * 3600 * 1000)));
+    }
+    const where = conds.length > 0 ? and(...conds) : undefined;
+    const rows = await db
+      .select()
+      .from(syncAudit)
+      .where(where)
+      .orderBy(desc(syncAudit.createdAt))
+      .limit(limit)
+      .offset(offset);
+    const [c] = await db.select({ c: count() }).from(syncAudit).where(where);
+    return { rows, total: c?.c ?? 0 };
+  }
+
+  async getSyncAuditStats(sinceHours = 24): Promise<{
+    changed: number;
+    priceChanged: number;
+    stockChanged: number;
+    ebayUpdated: number;
+    ebayUnlisted: number;
+    ebayRelisted: number;
+    ebayFailed: number;
+    skippedNoOffer: number;
+    lastRunAt: string | null;
+  }> {
+    await this.ensureSyncAuditTable();
+    const since = new Date(Date.now() - sinceHours * 3600 * 1000);
+    const r: any = await db.execute(sql`
+      SELECT
+        COUNT(*) FILTER (WHERE price_changed OR stock_changed)::int AS changed,
+        COUNT(*) FILTER (WHERE price_changed)::int                  AS price_changed,
+        COUNT(*) FILTER (WHERE stock_changed)::int                  AS stock_changed,
+        COUNT(*) FILTER (WHERE ebay_action = 'updated')::int        AS ebay_updated,
+        COUNT(*) FILTER (WHERE ebay_action = 'unlisted')::int       AS ebay_unlisted,
+        COUNT(*) FILTER (WHERE ebay_action = 'relisted')::int       AS ebay_relisted,
+        COUNT(*) FILTER (WHERE ebay_action = 'failed')::int         AS ebay_failed,
+        COUNT(*) FILTER (WHERE ebay_action = 'skipped_no_offer')::int AS skipped_no_offer,
+        MAX(created_at)                                             AS last_run_at
+      FROM sync_audit
+      WHERE created_at >= ${since}
+    `);
+    const row = (r.rows ?? r)[0] ?? {};
+    return {
+      changed: Number(row.changed ?? 0),
+      priceChanged: Number(row.price_changed ?? 0),
+      stockChanged: Number(row.stock_changed ?? 0),
+      ebayUpdated: Number(row.ebay_updated ?? 0),
+      ebayUnlisted: Number(row.ebay_unlisted ?? 0),
+      ebayRelisted: Number(row.ebay_relisted ?? 0),
+      ebayFailed: Number(row.ebay_failed ?? 0),
+      skippedNoOffer: Number(row.skipped_no_offer ?? 0),
+      lastRunAt: row.last_run_at ? new Date(row.last_run_at).toISOString() : null,
+    };
   }
 
   // Create the sync_jobs table on first use so deploys don't require a manual
@@ -1320,6 +1532,20 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(orderItems).where(eq(orderItems.orderId, orderId));
   }
 
+  // Batch fetch order items by orderId list (one query instead of N).
+  // Returns a Map keyed by orderId for O(1) lookup in N+1-prone loops.
+  async getOrderItemsByOrderIds(orderIds: number[]): Promise<Map<number, OrderItem[]>> {
+    const out = new Map<number, OrderItem[]>();
+    if (orderIds.length === 0) return out;
+    const rows = await db.select().from(orderItems).where(inArray(orderItems.orderId, orderIds));
+    for (const r of rows) {
+      const arr = out.get(r.orderId) ?? [];
+      arr.push(r);
+      out.set(r.orderId, arr);
+    }
+    return out;
+  }
+
   async createOrderItem(item: InsertOrderItem): Promise<OrderItem> {
     const result = await db.insert(orderItems).values(item).returning();
     return result[0];
@@ -1334,6 +1560,18 @@ export class DatabaseStorage implements IStorage {
   // Order Fees
   async getOrderFees(orderId: number): Promise<OrderFee[]> {
     return await db.select().from(orderFees).where(eq(orderFees.orderId, orderId));
+  }
+
+  async getOrderFeesByOrderIds(orderIds: number[]): Promise<Map<number, OrderFee[]>> {
+    const out = new Map<number, OrderFee[]>();
+    if (orderIds.length === 0) return out;
+    const rows = await db.select().from(orderFees).where(inArray(orderFees.orderId, orderIds));
+    for (const r of rows) {
+      const arr = out.get(r.orderId) ?? [];
+      arr.push(r);
+      out.set(r.orderId, arr);
+    }
+    return out;
   }
 
   async createOrderFee(fee: InsertOrderFee): Promise<OrderFee> {
@@ -1582,6 +1820,44 @@ export class DatabaseStorage implements IStorage {
         })
         .where(eq(autoMessageRules.id, id));
     }
+  }
+
+  // Idempotency ledger for auto-message rules: a single row per
+  // (rule_id, order_id) pair guarantees a delayed/triggered message is sent
+  // at most once per order, regardless of how many times the scheduler tick
+  // re-evaluates the trigger condition (the "fires up to 24x" bug). Runtime-
+  // created so deploys don't need a manual db:push.
+  async ensureAutoMessageSendsTable(): Promise<void> {
+    if (autoMessageSendsEnsured) return;
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS auto_message_sends (
+        id         SERIAL PRIMARY KEY,
+        rule_id    INTEGER NOT NULL,
+        order_id   INTEGER NOT NULL,
+        sent_at    TIMESTAMP DEFAULT now()
+      )
+    `);
+    await db.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS auto_message_sends_rule_order_uniq
+      ON auto_message_sends (rule_id, order_id)
+    `);
+    autoMessageSendsEnsured = true;
+  }
+
+  // Returns true if this is the FIRST time we've recorded a send for the
+  // (ruleId, orderId) pair (i.e. caller should send now); false if it's
+  // already been sent. Atomic via the unique index — ON CONFLICT DO NOTHING
+  // is the dedup primitive, no race window.
+  async claimAutoMessageSend(ruleId: number, orderId: number): Promise<boolean> {
+    await this.ensureAutoMessageSendsTable();
+    const r: any = await db.execute(sql`
+      INSERT INTO auto_message_sends (rule_id, order_id)
+      VALUES (${ruleId}, ${orderId})
+      ON CONFLICT (rule_id, order_id) DO NOTHING
+      RETURNING id
+    `);
+    const rows = r.rows ?? r;
+    return Array.isArray(rows) && rows.length > 0;
   }
 
   // Scheduled Messages
