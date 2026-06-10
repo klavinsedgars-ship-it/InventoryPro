@@ -774,6 +774,10 @@ export const competitorSnapshots = pgTable("competitor_snapshots", {
   cheapestPrice: decimal("cheapest_price", { precision: 10, scale: 2 }),
   top3AvgPrice: decimal("top3_avg_price", { precision: 10, scale: 2 }),
   sampleCount: integer("sample_count").notNull().default(0),
+  // Browse API's total active-listing count for the query — the market-size /
+  // demand proxy (sampleCount is capped at the 10 we fetch; this is the full
+  // count). Used by the Opportunity Finder's demand band.
+  marketTotal: integer("market_total"),
   currency: text("currency").default("EUR"),
   // Computed at write time so the analytics UI doesn't have to recompute.
   // overpriced | underpriced | in_line | thin_market (1-2 samples) | no_data (0 samples)

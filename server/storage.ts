@@ -1910,6 +1910,7 @@ export class DatabaseStorage implements IStorage {
         cheapest_price     NUMERIC(10,2),
         top3_avg_price     NUMERIC(10,2),
         sample_count       INTEGER NOT NULL DEFAULT 0,
+        market_total       INTEGER,
         currency           TEXT DEFAULT 'EUR',
         signal             TEXT NOT NULL DEFAULT 'no_data',
         delta_pct          NUMERIC(6,2),
@@ -1918,6 +1919,8 @@ export class DatabaseStorage implements IStorage {
         created_at         TIMESTAMP DEFAULT now()
       )
     `);
+    // Additive column for tables created before market_total existed.
+    await db.execute(sql`ALTER TABLE competitor_snapshots ADD COLUMN IF NOT EXISTS market_total INTEGER`);
     // Latest-per-product lookup hits (product_id, created_at DESC). Signal
     // filter on its own benefits from a simple btree on signal.
     await db.execute(sql`
@@ -1986,6 +1989,7 @@ export class DatabaseStorage implements IStorage {
       cheapestPrice: r.cheapest_price,
       top3AvgPrice: r.top3_avg_price,
       sampleCount: r.sample_count,
+      marketTotal: r.market_total,
       currency: r.currency,
       signal: r.signal,
       deltaPct: r.delta_pct,
@@ -2068,6 +2072,148 @@ export class DatabaseStorage implements IStorage {
       .where(eq(competitorSnapshots.productId, productId))
       .orderBy(desc(competitorSnapshots.createdAt))
       .limit(limit);
+  }
+
+  // === Opportunity Finder ===
+  // Ranks the whole TME catalogue by an INTRINSIC opportunity score computed
+  // DB-side (no API calls, scales to 100k): margin headroom + availability +
+  // shippability + identifier quality. Demand data (eBay Browse competitor
+  // count + market price) is LEFT JOINed from the latest competitor_snapshot
+  // where one exists — so the same call shows both "is it worth listing
+  // intrinsically" and "what does the market look like" once checked.
+  //
+  // Score (0-100):
+  //   margin       up to 50  (margin_percentage, capped at 60%)
+  //   in stock         25    (binary; out-of-stock rows are excluded entirely)
+  //   weight       up to 15  (lighter = cheaper shipping = protected margin)
+  //   has EAN          10    (matchability for price comparison later)
+  private opportunityScoreSql = sql`
+    (
+      LEAST(GREATEST(COALESCE(
+        margin_percentage,
+        CASE WHEN calculated_price > 0
+             THEN (calculated_price - supplier_price) / calculated_price * 100
+             ELSE 0 END
+      ), 0), 60) / 60.0 * 50
+      + 25
+      + CASE
+          WHEN weight IS NULL THEN 7
+          WHEN weight <= 100 THEN 15
+          WHEN weight <= 500 THEN 10
+          WHEN weight <= 2000 THEN 5
+          ELSE 0 END
+      + CASE WHEN ean IS NOT NULL AND ean <> '' THEN 10 ELSE 0 END
+    )
+  `;
+
+  async getOpportunityCandidates(filter: {
+    category?: string;
+    minMargin?: number;
+    hideListed?: boolean;
+    limit: number;
+    offset: number;
+  }): Promise<{ rows: any[]; total: number }> {
+    await this.ensureCompetitorSnapshotsTable();
+    const score = this.opportunityScoreSql;
+    const whereClauses = sql`
+      p.supplier = 'TME'
+      AND p.stock > 0
+      AND (p.exclude_from_listing IS NULL OR p.exclude_from_listing = false)
+      ${filter.hideListed ? sql`AND (p.listed_on_ebay IS NULL OR p.listed_on_ebay = false)` : sql``}
+      ${filter.category ? sql`AND p.category = ${filter.category}` : sql``}
+      ${filter.minMargin != null ? sql`AND COALESCE(p.margin_percentage, 0) >= ${filter.minMargin}` : sql``}
+    `;
+
+    const countResult: any = await db.execute(sql`
+      SELECT COUNT(*)::int AS c FROM products p WHERE ${whereClauses}
+    `);
+    const total = (countResult.rows ?? countResult)?.[0]?.c ?? 0;
+
+    // LATERAL join to the latest snapshot per product for demand columns.
+    const pageResult: any = await db.execute(sql`
+      SELECT
+        p.id, p.sku, p.name, p.category, p.ean,
+        p.supplier_price, p.sale_price, p.calculated_price,
+        p.margin_percentage, p.stock, p.weight, p.listed_on_ebay,
+        ROUND(${score}::numeric, 1) AS score,
+        s.market_total      AS market_total,
+        s.cheapest_price    AS market_cheapest,
+        s.signal            AS market_signal,
+        s.created_at        AS demand_checked_at
+      FROM products p
+      LEFT JOIN LATERAL (
+        SELECT market_total, cheapest_price, signal, created_at
+        FROM competitor_snapshots cs
+        WHERE cs.product_id = p.id
+        ORDER BY cs.created_at DESC
+        LIMIT 1
+      ) s ON true
+      WHERE ${whereClauses}
+      ORDER BY score DESC, p.stock DESC
+      LIMIT ${filter.limit} OFFSET ${filter.offset}
+    `);
+    const raw = (pageResult.rows ?? pageResult) as any[];
+    const rows = raw.map((r) => ({
+      id: r.id,
+      sku: r.sku,
+      name: r.name,
+      category: r.category,
+      ean: r.ean,
+      supplierPrice: r.supplier_price,
+      salePrice: r.sale_price,
+      calculatedPrice: r.calculated_price,
+      marginPercentage: r.margin_percentage,
+      stock: r.stock,
+      weight: r.weight,
+      listedOnEbay: r.listed_on_ebay,
+      score: r.score != null ? Number(r.score) : null,
+      marketTotal: r.market_total,
+      marketCheapest: r.market_cheapest,
+      marketSignal: r.market_signal,
+      demandCheckedAt: r.demand_checked_at ? new Date(r.demand_checked_at).toISOString() : null,
+    }));
+    return { rows, total };
+  }
+
+  // Top candidates that haven't had a demand check recently — fed to the
+  // bounded "Check demand" action so Browse calls hit the best prospects
+  // first. Excludes rows checked in the last `sinceHours` to avoid re-spending
+  // quota on the same SKUs.
+  async getOpportunityCheckTargets(limit: number, sinceHours = 168): Promise<Product[]> {
+    const score = this.opportunityScoreSql;
+    const since = new Date(Date.now() - sinceHours * 3600 * 1000);
+    const result: any = await db.execute(sql`
+      SELECT p.*
+      FROM products p
+      WHERE p.supplier = 'TME'
+        AND p.stock > 0
+        AND (p.exclude_from_listing IS NULL OR p.exclude_from_listing = false)
+        AND NOT EXISTS (
+          SELECT 1 FROM competitor_snapshots cs
+          WHERE cs.product_id = p.id AND cs.created_at >= ${since}
+        )
+      ORDER BY ${score} DESC, p.stock DESC
+      LIMIT ${limit}
+    `);
+    const raw = (result.rows ?? result) as any[];
+    // Map snake_case product columns Drizzle would normally give us back as
+    // camelCase. Only the fields the repricing checkProduct touches matter.
+    return raw.map((r) => ({
+      ...r,
+      salePrice: r.sale_price,
+      supplierPrice: r.supplier_price,
+      listedOnEbay: r.listed_on_ebay,
+    })) as Product[];
+  }
+
+  async getProductCategories(): Promise<string[]> {
+    const result: any = await db.execute(sql`
+      SELECT DISTINCT category FROM products
+      WHERE supplier = 'TME' AND category IS NOT NULL AND category <> ''
+      ORDER BY category
+    `);
+    const raw = (result.rows ?? result) as any[];
+    return raw.map((r) => r.category);
   }
 
   // Scheduled Messages

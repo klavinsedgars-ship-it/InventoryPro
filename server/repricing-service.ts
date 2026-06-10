@@ -83,6 +83,7 @@ export async function checkProduct(product: Product): Promise<CheckResult> {
       cheapestPrice: null,
       top3AvgPrice: null,
       sampleCount: 0,
+      marketTotal: null,
       currency: "EUR",
       signal: "no_data",
       deltaPct: null,
@@ -127,6 +128,9 @@ export async function checkProduct(product: Product): Promise<CheckResult> {
     cheapestPrice: cheapest != null ? cheapest.toFixed(2) : null,
     top3AvgPrice: top3Avg != null ? top3Avg.toFixed(2) : null,
     sampleCount,
+    // Full active-listing count from Browse (demand proxy), independent of the
+    // 10 items we sampled for price stats.
+    marketTotal: search.total ?? null,
     currency: "EUR",
     signal,
     deltaPct: deltaPct != null ? deltaPct.toFixed(2) : null,

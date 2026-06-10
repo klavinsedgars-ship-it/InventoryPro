@@ -4264,6 +4264,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ===== Opportunity Finder =====
+  // Ranks the catalogue by intrinsic listing value (margin × availability ×
+  // shippability), enriched with eBay Browse demand where checked. Read-only;
+  // listing nothing — purely "which products are worth listing".
+
+  // Ranked candidates (whole catalogue, DB-side score), with filters.
+  app.get("/api/opportunities", requireAuth, async (req, res) => {
+    try {
+      const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+      const offset = Math.max(0, Number(req.query.offset) || 0);
+      const result = await storage.getOpportunityCandidates({
+        category: (req.query.category as string) || undefined,
+        minMargin: req.query.minMargin != null ? Number(req.query.minMargin) : undefined,
+        hideListed: req.query.hideListed === "true",
+        limit,
+        offset,
+      });
+      res.json({ success: true, ...result });
+    } catch (error) {
+      console.error("Opportunities fetch failed:", error);
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Distinct TME categories for the filter dropdown.
+  app.get("/api/opportunities/categories", requireAuth, async (_req, res) => {
+    try {
+      const categories = await storage.getProductCategories();
+      res.json({ success: true, categories });
+    } catch (error) {
+      console.error("Opportunity categories fetch failed:", error);
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Bounded demand enrichment: run eBay Browse on the top-N best-scoring
+  // candidates that haven't been checked recently, persisting competitor
+  // count + market price into competitor_snapshots. SHADOW — lists nothing.
+  app.post("/api/opportunities/check-demand", requireAuth, async (req, res) => {
+    try {
+      if (!(await import("./ebay-oauth")).ebayOAuth.isOAuthConfigured()) {
+        return res.status(412).json({ success: false, error: "eBay OAuth not configured" });
+      }
+      const n = Math.min(300, Math.max(1, Number(req.body?.limit) || 100));
+      const targets = await storage.getOpportunityCheckTargets(n);
+      if (targets.length === 0) {
+        return res.json({ success: true, checked: 0, ok: 0, failed: 0, message: "No unchecked candidates" });
+      }
+      const { checkProducts } = await import("./repricing-service");
+      const result = await checkProducts(targets, { budgetMs: 270_000, concurrency: 4 });
+      res.json({ success: true, checked: result.checked, ok: result.ok, failed: result.failed });
+    } catch (error) {
+      console.error("Opportunity demand check failed:", error);
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
   // Vercel Cron entrypoint (configured in vercel.json). Runs chunks
   // server-side within a time budget; whatever doesn't finish today is
   // picked up by the next run. Secured by CRON_SECRET when set (Vercel

@@ -19,6 +19,7 @@ import { Orders } from "@/pages/orders";
 import MessagesPage from "@/pages/messages";
 import { Operations } from "@/pages/operations";
 import { Repricing } from "@/pages/repricing";
+import { Opportunities } from "@/pages/opportunities";
 
 type User = {
   id: number;
@@ -72,6 +73,7 @@ function AppContent() {
       <Route path="/orders" component={() => <Orders user={user} />} />
       <Route path="/messages" component={() => <MessagesPage />} />
       <Route path="/repricing" component={() => <Repricing />} />
+      <Route path="/opportunities" component={() => <Opportunities />} />
       <Route component={NotFound} />
     </Switch>
   );
