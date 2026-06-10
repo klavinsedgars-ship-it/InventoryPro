@@ -63,6 +63,8 @@ interface Stats {
   avgOverpricedPct: number | null;
   avgUnderpricedPct: number | null;
   lastCheckedAt: string | null;
+  listedTotal: number;
+  listedWithEan: number;
 }
 
 const PAGE_SIZE = 50;
@@ -256,6 +258,34 @@ export function Repricing() {
         Browse API and a “market floor minus 2%” recommendation. Your actual sale
         prices are not changed and no listing is updated.
       </div>
+
+      {/* EAN coverage — match quality depends on this. Listed products without
+          an EAN fall back to SKU search, which usually returns "thin market". */}
+      {stats && stats.listedTotal > 0 && (() => {
+        const pct = (stats.listedWithEan / stats.listedTotal) * 100;
+        const missing = stats.listedTotal - stats.listedWithEan;
+        const tone = pct >= 90 ? "good" : pct >= 60 ? "warn" : "danger";
+        const cls =
+          tone === "good"
+            ? "border-green-200 bg-green-50 text-green-800"
+            : tone === "warn"
+              ? "border-amber-200 bg-amber-50 text-amber-800"
+              : "border-red-200 bg-red-50 text-red-800";
+        return (
+          <div className={`rounded-lg border px-4 py-3 text-sm ${cls}`}>
+            <strong>EAN coverage:</strong>{" "}
+            {stats.listedWithEan.toLocaleString()} of {stats.listedTotal.toLocaleString()} listed
+            products have an EAN ({pct.toFixed(0)}%).{" "}
+            {missing > 0 && (
+              <>
+                The {missing.toLocaleString()} without one fall back to SKU search and
+                usually land in <em>thin market</em>. Re-importing them via TME Browser
+                or a full sync will populate the EAN when TME has it.
+              </>
+            )}
+          </div>
+        );
+      })()}
 
       {refreshMutation.isError && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">

@@ -2005,6 +2005,8 @@ export class DatabaseStorage implements IStorage {
     avgOverpricedPct: number | null;
     avgUnderpricedPct: number | null;
     lastCheckedAt: string | null;
+    listedTotal: number;
+    listedWithEan: number;
   }> {
     await this.ensureCompetitorSnapshotsTable();
     const r: any = await db.execute(sql`
@@ -2028,6 +2030,18 @@ export class DatabaseStorage implements IStorage {
     `);
     const row = (r.rows ?? r)?.[0] ?? {};
     const num = (v: any) => (v == null ? null : Number(v));
+
+    // EAN coverage among listed products — answers "is the importer
+    // populating EAN?" right next to the analytics that depend on it.
+    // Listed-only because that's the set the repricer actually queries.
+    const eanRow: any = await db.execute(sql`
+      SELECT
+        COUNT(*) FILTER (WHERE listed_on_ebay = true)::int AS listed_total,
+        COUNT(*) FILTER (WHERE listed_on_ebay = true AND ean IS NOT NULL AND ean <> '')::int AS listed_with_ean
+      FROM products
+    `);
+    const eanData = (eanRow.rows ?? eanRow)?.[0] ?? {};
+
     return {
       totalSnapshots: row.total_snapshots ?? 0,
       productsCovered: row.products_covered ?? 0,
@@ -2041,6 +2055,8 @@ export class DatabaseStorage implements IStorage {
       avgOverpricedPct: num(row.avg_overpriced_pct),
       avgUnderpricedPct: num(row.avg_underpriced_pct),
       lastCheckedAt: row.last_checked_at ? new Date(row.last_checked_at).toISOString() : null,
+      listedTotal: eanData.listed_total ?? 0,
+      listedWithEan: eanData.listed_with_ean ?? 0,
     };
   }
 
