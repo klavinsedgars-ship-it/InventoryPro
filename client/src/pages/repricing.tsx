@@ -43,6 +43,7 @@ interface Snapshot {
   productId: number;
   sku: string;
   marketplace: string;
+  searchQuery: string;
   ourPrice: string | null;
   cheapestPrice: string | null;
   top3AvgPrice: string | null;
@@ -391,7 +392,12 @@ export function Repricing() {
               ) : (
                 rows.map((r) => (
                   <TableRow key={r.id}>
-                    <TableCell className="font-mono text-xs">{r.sku}</TableCell>
+                    <TableCell className="font-mono text-xs">
+                      {r.sku}
+                      <div className="font-sans text-[10px] text-gray-400">
+                        {r.searchQuery && r.searchQuery !== r.sku ? "matched via EAN" : "matched via SKU"}
+                      </div>
+                    </TableCell>
                     <TableCell>{money(r.ourPrice)}</TableCell>
                     <TableCell>{money(r.cheapestPrice)}</TableCell>
                     <TableCell>{money(r.top3AvgPrice)}</TableCell>

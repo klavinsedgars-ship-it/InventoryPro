@@ -63,7 +63,13 @@ function classify(ourPrice: number | null, top3Avg: number | null, sampleCount: 
 export async function checkProduct(product: Product): Promise<CheckResult> {
   const sku = product.sku;
   const ourPriceNum = product.salePrice ? parseFloat(product.salePrice) : null;
-  const search = await ebayBrowseApi.searchCheapest(sku, 10);
+  // Prefer EAN — a universal product identifier other sellers also list
+  // under — over our internal supplier SKU, which rarely matches competitor
+  // listings (and is why SKU-only search returns mostly "thin market").
+  // Fall back to SKU when the product has no EAN.
+  const ean = (product.ean || "").trim();
+  const query = ean || sku;
+  const search = await ebayBrowseApi.searchCheapest(query, 10);
 
   // Always write a snapshot — even on Browse error — so the UI can show
   // "we tried and got this error" instead of silently missing.
@@ -72,7 +78,7 @@ export async function checkProduct(product: Product): Promise<CheckResult> {
       productId: product.id,
       sku,
       marketplace: "ebay",
-      searchQuery: sku,
+      searchQuery: query,
       ourPrice: product.salePrice ?? null,
       cheapestPrice: null,
       top3AvgPrice: null,
@@ -116,7 +122,7 @@ export async function checkProduct(product: Product): Promise<CheckResult> {
     productId: product.id,
     sku,
     marketplace: "ebay",
-    searchQuery: sku,
+    searchQuery: query,
     ourPrice: product.salePrice ?? null,
     cheapestPrice: cheapest != null ? cheapest.toFixed(2) : null,
     top3AvgPrice: top3Avg != null ? top3Avg.toFixed(2) : null,
