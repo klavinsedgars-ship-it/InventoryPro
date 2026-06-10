@@ -18,6 +18,7 @@ import { EbayPolicies } from "@/pages/ebay-policies";
 import { Orders } from "@/pages/orders";
 import MessagesPage from "@/pages/messages";
 import { Operations } from "@/pages/operations";
+import { Repricing } from "@/pages/repricing";
 
 type User = {
   id: number;
@@ -70,6 +71,7 @@ function AppContent() {
       <Route path="/ebay-policies" component={() => <EbayPolicies user={user} />} />
       <Route path="/orders" component={() => <Orders user={user} />} />
       <Route path="/messages" component={() => <MessagesPage />} />
+      <Route path="/repricing" component={() => <Repricing />} />
       <Route component={NotFound} />
     </Switch>
   );

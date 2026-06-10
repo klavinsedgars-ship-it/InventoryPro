@@ -4176,6 +4176,94 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ===== Competitor repricing — SHADOW analytics =====
+  // Read-only feature: queries eBay Browse for cheapest live listings per
+  // SKU, computes signal/recommendation, stores append-only snapshots.
+  // NOTHING here ever modifies a product's salePrice or pushes to eBay.
+
+  // Latest snapshot per product, with signal/sku filters + pagination.
+  app.get("/api/repricing/snapshots", requireAuth, async (req, res) => {
+    try {
+      const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+      const offset = Math.max(0, Number(req.query.offset) || 0);
+      const result = await storage.getLatestCompetitorSnapshots({
+        signal: (req.query.signal as string) || undefined,
+        sku: (req.query.sku as string) || undefined,
+        limit,
+        offset,
+      });
+      res.json({ success: true, ...result });
+    } catch (error) {
+      console.error("Repricing snapshots fetch failed:", error);
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Summary rollup for the analytics page header.
+  app.get("/api/repricing/stats", requireAuth, async (_req, res) => {
+    try {
+      const stats = await storage.getCompetitorRepricingStats();
+      res.json({ success: true, stats });
+    } catch (error) {
+      console.error("Repricing stats fetch failed:", error);
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Manual refresh — checks competitors for the listed-on-eBay SKUs and writes
+  // a new snapshot row per SKU. SHADOW: no listing/price is modified.
+  // Bounded by the same 270s budget as the sync cron; remaining SKUs roll
+  // over to the next manual run (the UI shows the rolling latest-per-product).
+  app.post("/api/repricing/refresh", requireAuth, async (req, res) => {
+    try {
+      if (!(await import("./ebay-oauth")).ebayOAuth.isOAuthConfigured()) {
+        return res.status(412).json({ success: false, error: "eBay OAuth not configured" });
+      }
+      // Selection: explicit productIds beat the default. Default = all listed
+      // SKUs (the only ones where competitor pricing matters today).
+      const explicitIds = Array.isArray(req.body?.productIds) ? (req.body.productIds as number[]) : null;
+      const maxN = Math.min(500, Math.max(1, Number(req.body?.limit) || 200));
+      const products = explicitIds && explicitIds.length > 0
+        ? (await Promise.all(explicitIds.map((id) => storage.getProduct(id)))).filter(
+            (p): p is NonNullable<typeof p> => !!p,
+          )
+        : await storage.getListedProductsForRepricing(maxN);
+
+      if (products.length === 0) {
+        return res.json({ success: true, checked: 0, ok: 0, failed: 0, message: "No listed products to check" });
+      }
+
+      const { checkProducts } = await import("./repricing-service");
+      const result = await checkProducts(products, { budgetMs: 270_000, concurrency: 4 });
+      res.json({
+        success: true,
+        checked: result.checked,
+        ok: result.ok,
+        failed: result.failed,
+        // Don't ship the full per-product result set back over HTTP — the UI
+        // re-fetches /snapshots to render the table.
+      });
+    } catch (error) {
+      console.error("Repricing refresh failed:", error);
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Per-product snapshot history (for the future drill-down chart).
+  app.get("/api/repricing/history/:productId", requireAuth, async (req, res) => {
+    try {
+      const productId = Number(req.params.productId);
+      if (!Number.isFinite(productId)) {
+        return res.status(400).json({ success: false, error: "invalid productId" });
+      }
+      const rows = await storage.getCompetitorSnapshotHistory(productId, 100);
+      res.json({ success: true, rows });
+    } catch (error) {
+      console.error("Repricing history fetch failed:", error);
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
   // Vercel Cron entrypoint (configured in vercel.json). Runs chunks
   // server-side within a time budget; whatever doesn't finish today is
   // picked up by the next run. Secured by CRON_SECRET when set (Vercel

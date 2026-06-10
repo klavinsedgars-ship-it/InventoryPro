@@ -756,6 +756,46 @@ export type InsertAutoMessageRule = z.infer<typeof insertAutoMessageRuleSchema>;
 export type ScheduledMessage = typeof scheduledMessages.$inferSelect;
 export type InsertScheduledMessage = z.infer<typeof insertScheduledMessageSchema>;
 
+// Competitor repricing — SHADOW analytics only. Append-only snapshot of what
+// the eBay Browse API returned for a SKU at a point in time. Never read by
+// the sync/listing path; never modifies our prices. Querying "the current
+// state" means "latest row per product_id".
+export const competitorSnapshots = pgTable("competitor_snapshots", {
+  id: serial("id").primaryKey(),
+  productId: integer("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+  sku: text("sku").notNull(),
+  marketplace: text("marketplace").notNull().default("ebay"),
+  // The query string actually sent to Browse (SKU; later could be EAN).
+  searchQuery: text("search_query").notNull(),
+  // Our sale price at the time of the check — frozen so historical analysis
+  // doesn't shift under us when products.salePrice changes.
+  ourPrice: decimal("our_price", { precision: 10, scale: 2 }),
+  // Competitor stats over the result set we kept (typically top-10 cheapest).
+  cheapestPrice: decimal("cheapest_price", { precision: 10, scale: 2 }),
+  top3AvgPrice: decimal("top3_avg_price", { precision: 10, scale: 2 }),
+  sampleCount: integer("sample_count").notNull().default(0),
+  currency: text("currency").default("EUR"),
+  // Computed at write time so the analytics UI doesn't have to recompute.
+  // overpriced | underpriced | in_line | thin_market (1-2 samples) | no_data (0 samples)
+  signal: text("signal").notNull().default("no_data"),
+  // (ourPrice - top3AvgPrice) / top3AvgPrice as a percentage, signed.
+  deltaPct: decimal("delta_pct", { precision: 6, scale: 2 }),
+  // Shadow-only recommendation = max(supplierFloor, market * (1 - undercutPct)).
+  // We don't have a per-SKU profit floor cheaply here, so this is purely the
+  // "market - 2%" anchor; the UI compares it to ourPrice for the operator.
+  recommendedPrice: decimal("recommended_price", { precision: 10, scale: 2 }),
+  // Error from Browse API if the call failed for this SKU.
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertCompetitorSnapshotSchema = createInsertSchema(competitorSnapshots).omit({
+  id: true,
+  createdAt: true,
+});
+export type CompetitorSnapshot = typeof competitorSnapshots.$inferSelect;
+export type InsertCompetitorSnapshot = z.infer<typeof insertCompetitorSnapshotSchema>;
+
 export type OrderStatusType = typeof OrderStatus[keyof typeof OrderStatus];
 
 // Marketplace Enum

@@ -74,7 +74,10 @@ import {
   type AutoMessageRule,
   type InsertAutoMessageRule,
   type ScheduledMessage,
-  type InsertScheduledMessage
+  type InsertScheduledMessage,
+  competitorSnapshots,
+  type CompetitorSnapshot,
+  type InsertCompetitorSnapshot,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, ne, and, gte, lte, lt, desc, asc, count, or, ilike, isNull, isNotNull, sql, inArray } from "drizzle-orm";
@@ -296,6 +299,24 @@ export interface IStorage {
   incrementRuleSentCount(id: number): Promise<void>;
   claimAutoMessageSend(ruleId: number, orderId: number): Promise<boolean>;
 
+  // Competitor repricing (shadow analytics)
+  createCompetitorSnapshot(row: InsertCompetitorSnapshot): Promise<CompetitorSnapshot>;
+  getLatestCompetitorSnapshots(filter: {
+    signal?: string;
+    sku?: string;
+    limit: number;
+    offset: number;
+  }): Promise<{ rows: CompetitorSnapshot[]; total: number }>;
+  getCompetitorRepricingStats(): Promise<{
+    totalSnapshots: number;
+    productsCovered: number;
+    bySignal: Record<string, number>;
+    avgOverpricedPct: number | null;
+    avgUnderpricedPct: number | null;
+    lastCheckedAt: string | null;
+  }>;
+  getCompetitorSnapshotHistory(productId: number, limit: number): Promise<CompetitorSnapshot[]>;
+
   // Scheduled Messages
   getScheduledMessages(status?: string): Promise<ScheduledMessage[]>;
   getPendingScheduledMessages(): Promise<ScheduledMessage[]>;
@@ -309,6 +330,7 @@ let syncJobsTableEnsured = false;
 let orderIntegrityEnsured = false;
 let autoMessageSendsEnsured = false;
 let syncAuditTableEnsured = false;
+let competitorSnapshotsEnsured = false;
 
 export class DatabaseStorage implements IStorage {
   constructor() {
@@ -599,6 +621,17 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(products)
       .where(and(eq(products.listedOnEbay, true), isNotNull(products.ebayOfferId)))
+      .orderBy(asc(products.lastSyncedAt))
+      .limit(limit);
+  }
+
+  // Products to check for competitor pricing (shadow analytics). Listed
+  // on eBay = the only set where market comparison is actionable today.
+  async getListedProductsForRepricing(limit: number): Promise<Product[]> {
+    return await db
+      .select()
+      .from(products)
+      .where(eq(products.listedOnEbay, true))
       .orderBy(asc(products.lastSyncedAt))
       .limit(limit);
   }
@@ -1858,6 +1891,147 @@ export class DatabaseStorage implements IStorage {
     `);
     const rows = r.rows ?? r;
     return Array.isArray(rows) && rows.length > 0;
+  }
+
+  // === Competitor repricing (shadow analytics) ===
+  // Append-only snapshot table; "current state" = latest row per product_id.
+  // Created at runtime so deploys don't need a manual db:push (same pattern
+  // as sync_jobs / auto_message_sends).
+  private async ensureCompetitorSnapshotsTable(): Promise<void> {
+    if (competitorSnapshotsEnsured) return;
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS competitor_snapshots (
+        id                 SERIAL PRIMARY KEY,
+        product_id         INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        sku                TEXT NOT NULL,
+        marketplace        TEXT NOT NULL DEFAULT 'ebay',
+        search_query       TEXT NOT NULL,
+        our_price          NUMERIC(10,2),
+        cheapest_price     NUMERIC(10,2),
+        top3_avg_price     NUMERIC(10,2),
+        sample_count       INTEGER NOT NULL DEFAULT 0,
+        currency           TEXT DEFAULT 'EUR',
+        signal             TEXT NOT NULL DEFAULT 'no_data',
+        delta_pct          NUMERIC(6,2),
+        recommended_price  NUMERIC(10,2),
+        error_message      TEXT,
+        created_at         TIMESTAMP DEFAULT now()
+      )
+    `);
+    // Latest-per-product lookup hits (product_id, created_at DESC). Signal
+    // filter on its own benefits from a simple btree on signal.
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS competitor_snapshots_product_recent_idx
+      ON competitor_snapshots (product_id, created_at DESC)
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS competitor_snapshots_signal_idx
+      ON competitor_snapshots (signal, created_at DESC)
+    `);
+    competitorSnapshotsEnsured = true;
+  }
+
+  async createCompetitorSnapshot(row: InsertCompetitorSnapshot): Promise<CompetitorSnapshot> {
+    await this.ensureCompetitorSnapshotsTable();
+    const [r] = await db.insert(competitorSnapshots).values(row).returning();
+    return r;
+  }
+
+  // Latest snapshot per product, with optional filters. Uses DISTINCT ON
+  // (product_id) so we get one row per product (the newest) — Postgres can
+  // satisfy this from the (product_id, created_at DESC) index.
+  async getLatestCompetitorSnapshots(filter: {
+    signal?: string;
+    sku?: string;
+    limit: number;
+    offset: number;
+  }): Promise<{ rows: CompetitorSnapshot[]; total: number }> {
+    await this.ensureCompetitorSnapshotsTable();
+    const signalFilter = filter.signal && filter.signal !== "all" ? filter.signal : null;
+    const skuFilter = filter.sku?.trim() || null;
+
+    // Build the latest-per-product CTE once, then filter + count off it.
+    const baseSql = sql`
+      WITH latest AS (
+        SELECT DISTINCT ON (product_id) *
+        FROM competitor_snapshots
+        ORDER BY product_id, created_at DESC
+      )
+      SELECT * FROM latest
+      WHERE 1 = 1
+        ${signalFilter ? sql`AND signal = ${signalFilter}` : sql``}
+        ${skuFilter ? sql`AND sku ILIKE ${"%" + skuFilter + "%"}` : sql``}
+    `;
+    const countResult: any = await db.execute(sql`
+      SELECT COUNT(*)::int AS c FROM (${baseSql}) sub
+    `);
+    const total = (countResult.rows ?? countResult)?.[0]?.c ?? 0;
+
+    const pageResult: any = await db.execute(sql`
+      ${baseSql}
+      ORDER BY created_at DESC
+      LIMIT ${filter.limit} OFFSET ${filter.offset}
+    `);
+    const rows = (pageResult.rows ?? pageResult) as CompetitorSnapshot[];
+    return { rows, total };
+  }
+
+  // Aggregate rollup for the analytics page summary cards. Works off the
+  // same latest-per-product CTE so the numbers match the table.
+  async getCompetitorRepricingStats(): Promise<{
+    totalSnapshots: number;
+    productsCovered: number;
+    bySignal: Record<string, number>;
+    avgOverpricedPct: number | null;
+    avgUnderpricedPct: number | null;
+    lastCheckedAt: string | null;
+  }> {
+    await this.ensureCompetitorSnapshotsTable();
+    const r: any = await db.execute(sql`
+      WITH latest AS (
+        SELECT DISTINCT ON (product_id) *
+        FROM competitor_snapshots
+        ORDER BY product_id, created_at DESC
+      )
+      SELECT
+        (SELECT COUNT(*)::int FROM competitor_snapshots)                     AS total_snapshots,
+        COUNT(*)::int                                                        AS products_covered,
+        COUNT(*) FILTER (WHERE signal = 'overpriced')::int                   AS overpriced,
+        COUNT(*) FILTER (WHERE signal = 'underpriced')::int                  AS underpriced,
+        COUNT(*) FILTER (WHERE signal = 'in_line')::int                      AS in_line,
+        COUNT(*) FILTER (WHERE signal = 'thin_market')::int                  AS thin_market,
+        COUNT(*) FILTER (WHERE signal = 'no_data')::int                      AS no_data,
+        AVG(delta_pct) FILTER (WHERE signal = 'overpriced')                  AS avg_overpriced_pct,
+        AVG(delta_pct) FILTER (WHERE signal = 'underpriced')                 AS avg_underpriced_pct,
+        MAX(created_at)                                                      AS last_checked_at
+      FROM latest
+    `);
+    const row = (r.rows ?? r)?.[0] ?? {};
+    const num = (v: any) => (v == null ? null : Number(v));
+    return {
+      totalSnapshots: row.total_snapshots ?? 0,
+      productsCovered: row.products_covered ?? 0,
+      bySignal: {
+        overpriced: row.overpriced ?? 0,
+        underpriced: row.underpriced ?? 0,
+        in_line: row.in_line ?? 0,
+        thin_market: row.thin_market ?? 0,
+        no_data: row.no_data ?? 0,
+      },
+      avgOverpricedPct: num(row.avg_overpriced_pct),
+      avgUnderpricedPct: num(row.avg_underpriced_pct),
+      lastCheckedAt: row.last_checked_at ? new Date(row.last_checked_at).toISOString() : null,
+    };
+  }
+
+  async getCompetitorSnapshotHistory(productId: number, limit: number): Promise<CompetitorSnapshot[]> {
+    await this.ensureCompetitorSnapshotsTable();
+    return await db
+      .select()
+      .from(competitorSnapshots)
+      .where(eq(competitorSnapshots.productId, productId))
+      .orderBy(desc(competitorSnapshots.createdAt))
+      .limit(limit);
   }
 
   // Scheduled Messages
