@@ -1972,7 +1972,27 @@ export class DatabaseStorage implements IStorage {
       ORDER BY created_at DESC
       LIMIT ${filter.limit} OFFSET ${filter.offset}
     `);
-    const rows = (pageResult.rows ?? pageResult) as CompetitorSnapshot[];
+    // Raw db.execute returns snake_case column names; map to the camelCase
+    // CompetitorSnapshot shape the API/UI expect (Drizzle's select() would
+    // auto-map, but DISTINCT ON forces raw SQL here).
+    const raw = (pageResult.rows ?? pageResult) as any[];
+    const rows: CompetitorSnapshot[] = raw.map((r) => ({
+      id: r.id,
+      productId: r.product_id,
+      sku: r.sku,
+      marketplace: r.marketplace,
+      searchQuery: r.search_query,
+      ourPrice: r.our_price,
+      cheapestPrice: r.cheapest_price,
+      top3AvgPrice: r.top3_avg_price,
+      sampleCount: r.sample_count,
+      currency: r.currency,
+      signal: r.signal,
+      deltaPct: r.delta_pct,
+      recommendedPrice: r.recommended_price,
+      errorMessage: r.error_message,
+      createdAt: r.created_at,
+    }));
     return { rows, total };
   }
 
