@@ -46,10 +46,17 @@ interface Candidate {
   weight: string | null;
   listedOnEbay: boolean | null;
   score: number | null;
+  finalScore: number | null;
   marketTotal: number | null;
   marketCheapest: string | null;
   marketSignal: string | null;
   demandCheckedAt: string | null;
+  soldCount: number | null;
+  avgSoldPrice: string | null;
+  medianSoldPrice: string | null;
+  soldWindowDays: number | null;
+  insightsCheckedAt: string | null;
+  insightsNotApproved: boolean | null;
 }
 
 const PAGE_SIZE = 50;
@@ -141,6 +148,28 @@ export function Opportunities() {
     },
   });
 
+  const checkInsights = useMutation({
+    mutationFn: async () => {
+      const r = await fetch("/api/opportunities/check-insights", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: 50, windowDays: 30 }),
+      });
+      if (!r.ok) throw new Error((await r.text()) || `HTTP ${r.status}`);
+      return r.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/opportunities?${params.toString()}`] });
+    },
+  });
+
+  // Surface the eBay approval gate without making the operator click first.
+  const insightsStatusQ = useQuery<{ success: boolean; notApproved: boolean }>({
+    queryKey: ["/api/opportunities/insights-status"],
+    refetchInterval: 300_000,
+  });
+
   const rows = listQ.data?.rows ?? [];
   const total = listQ.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -160,38 +189,88 @@ export function Opportunities() {
             Opportunity Finder
           </h1>
           <p className="text-sm text-gray-500">
-            Which products are worth listing — ranked by margin, availability and shipping cost
-            across the whole catalogue. Click <strong>Check demand</strong> to layer in live eBay
-            competitor counts for the top candidates. Read-only; nothing is listed.
+            Which products are worth listing — ranked by margin and availability (intrinsic),
+            multiplied by sold-through from eBay Marketplace Insights when available. Read-only;
+            nothing is listed.
           </p>
         </div>
-        <Button
-          onClick={() => checkDemand.mutate()}
-          disabled={checkDemand.isPending}
-          className="bg-blue-600 hover:bg-blue-700"
-        >
-          <Search className={`mr-2 h-4 w-4 ${checkDemand.isPending ? "animate-spin" : ""}`} />
-          {checkDemand.isPending ? "Checking demand…" : "Check demand (top 100)"}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            onClick={() => checkDemand.mutate()}
+            disabled={checkDemand.isPending}
+            variant="outline"
+          >
+            <Search className={`mr-2 h-4 w-4 ${checkDemand.isPending ? "animate-spin" : ""}`} />
+            {checkDemand.isPending ? "Checking competition…" : "Check competition (top 100)"}
+          </Button>
+          <Button
+            onClick={() => checkInsights.mutate()}
+            disabled={checkInsights.isPending}
+            className="bg-blue-600 hover:bg-blue-700"
+          >
+            <Search className={`mr-2 h-4 w-4 ${checkInsights.isPending ? "animate-spin" : ""}`} />
+            {checkInsights.isPending ? "Checking sold-through…" : "Check sold-through (top 50)"}
+          </Button>
+        </div>
       </div>
 
+      {/* Approval gate — surfaces eBay's "buy.marketplace.insights" allow-list
+          requirement up-front instead of after a failed call. */}
+      {insightsStatusQ.data?.notApproved && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <strong>Marketplace Insights not enabled on your eBay app.</strong> The
+          buy.marketplace.insights scope is gated by eBay — apply at{" "}
+          <a
+            href="https://developer.ebay.com/my/keys"
+            target="_blank"
+            rel="noreferrer"
+            className="underline"
+          >
+            developer.ebay.com/my/keys
+          </a>{" "}
+          (request access to the Buy Marketplace Insights API for your production app).
+          Until then, sold-through columns will stay empty and the final score equals
+          the intrinsic score.
+        </div>
+      )}
+
       <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-        <strong>How the score works.</strong> 0–100 from margin (up to 50), in-stock (25), light
-        weight (up to 15) and having an EAN (10). Demand isn’t in the score yet — run
-        <em> Check demand</em> to see competitor counts; a <em>healthy</em> count (some, not
-        hundreds) on a high-score row is the strongest "list this" signal.
+        <strong>How the score works.</strong> <em>Intrinsic score</em> 0–100 from margin
+        (up to 50), in-stock (25), light weight (up to 15), having an EAN (10).{" "}
+        <em>Final score</em> = intrinsic × demand multiplier from sold-count: ≥50 sold
+        → 1.5×, ≥10 → 1.25×, ≥1 → 1.0×, 0 → 0.3×. Unchecked = neutral 1.0×.
       </div>
 
       {checkDemand.isError && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
           <AlertCircle className="mr-2 inline h-4 w-4" />
-          {(checkDemand.error as Error)?.message || "Demand check failed"}
+          {(checkDemand.error as Error)?.message || "Competition check failed"}
         </div>
       )}
       {checkDemand.isSuccess && checkDemand.data && (
         <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
-          Checked {checkDemand.data.checked} candidate(s): {checkDemand.data.ok} OK,{" "}
-          {checkDemand.data.failed} failed. Demand columns updated.
+          Competition: checked {checkDemand.data.checked} candidate(s), {checkDemand.data.ok} OK,{" "}
+          {checkDemand.data.failed} failed.
+        </div>
+      )}
+      {checkInsights.isError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <AlertCircle className="mr-2 inline h-4 w-4" />
+          {(checkInsights.error as Error)?.message || "Sold-through check failed"}
+        </div>
+      )}
+      {checkInsights.isSuccess && checkInsights.data && (
+        <div className={`rounded-lg border px-4 py-3 text-sm ${
+          checkInsights.data.notApproved
+            ? "border-amber-200 bg-amber-50 text-amber-800"
+            : "border-green-200 bg-green-50 text-green-800"
+        }`}>
+          {checkInsights.data.notApproved ? (
+            <>Insights returned <strong>not approved</strong> for this app. See banner above.</>
+          ) : (
+            <>Sold-through: checked {checkInsights.data.checked} candidate(s), {checkInsights.data.ok} OK,{" "}
+            {checkInsights.data.failed} failed.</>
+          )}
         </div>
       )}
 
@@ -254,7 +333,8 @@ export function Opportunities() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-14">Score</TableHead>
+                <TableHead className="w-14">Final</TableHead>
+                <TableHead className="w-14">Intrinsic</TableHead>
                 <TableHead>SKU</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Category</TableHead>
@@ -262,20 +342,20 @@ export function Opportunities() {
                 <TableHead>Our price</TableHead>
                 <TableHead>Margin</TableHead>
                 <TableHead>Stock</TableHead>
-                <TableHead>Weight</TableHead>
-                <TableHead>Demand</TableHead>
+                <TableHead>Sold (30d)</TableHead>
+                <TableHead>Competition</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {listQ.isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="py-10 text-center text-sm text-gray-500">
+                  <TableCell colSpan={11} className="py-10 text-center text-sm text-gray-500">
                     Loading…
                   </TableCell>
                 </TableRow>
               ) : rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="py-10 text-center text-sm text-gray-500">
+                  <TableCell colSpan={11} className="py-10 text-center text-sm text-gray-500">
                     No candidates match these filters. Try lowering the min margin or clearing the
                     category.
                   </TableCell>
@@ -283,7 +363,10 @@ export function Opportunities() {
               ) : (
                 rows.map((r) => (
                   <TableRow key={r.id}>
-                    <TableCell>{scoreBadge(r.score)}</TableCell>
+                    <TableCell>{scoreBadge(r.finalScore)}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="font-mono">{r.score?.toFixed(0) ?? "—"}</Badge>
+                    </TableCell>
                     <TableCell className="font-mono text-xs">
                       {r.sku}
                       {r.listedOnEbay && (
@@ -292,7 +375,7 @@ export function Opportunities() {
                         </Badge>
                       )}
                     </TableCell>
-                    <TableCell className="max-w-[260px] truncate text-sm" title={r.name}>
+                    <TableCell className="max-w-[240px] truncate text-sm" title={r.name}>
                       {r.name}
                     </TableCell>
                     <TableCell className="max-w-[140px] truncate text-xs text-gray-500" title={r.category ?? ""}>
@@ -304,8 +387,26 @@ export function Opportunities() {
                       {r.marginPercentage != null ? `${parseFloat(r.marginPercentage).toFixed(0)}%` : "—"}
                     </TableCell>
                     <TableCell className="text-sm text-gray-600">{r.stock}</TableCell>
-                    <TableCell className="text-sm text-gray-500">
-                      {r.weight != null ? `${parseFloat(r.weight).toFixed(0)}g` : "—"}
+                    <TableCell>
+                      {r.insightsCheckedAt == null ? (
+                        <span className="text-xs text-gray-400">not checked</span>
+                      ) : r.soldCount == null ? (
+                        <span className="text-xs text-gray-500">—</span>
+                      ) : (
+                        <div className="text-xs">
+                          <div className={
+                            r.soldCount >= 50 ? "text-green-700 font-medium" :
+                            r.soldCount >= 10 ? "text-green-600" :
+                            r.soldCount >= 1  ? "text-gray-700" :
+                            "text-red-600"
+                          }>
+                            {r.soldCount.toLocaleString()} sold
+                          </div>
+                          {r.medianSoldPrice && (
+                            <div className="text-gray-400">median {money(r.medianSoldPrice)}</div>
+                          )}
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell>{demandCell(r)}</TableCell>
                   </TableRow>

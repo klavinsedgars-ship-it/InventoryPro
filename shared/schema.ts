@@ -800,6 +800,39 @@ export const insertCompetitorSnapshotSchema = createInsertSchema(competitorSnaps
 export type CompetitorSnapshot = typeof competitorSnapshots.$inferSelect;
 export type InsertCompetitorSnapshot = z.infer<typeof insertCompetitorSnapshotSchema>;
 
+// Sold-through demand snapshots — parallel to competitor_snapshots, but the
+// data source is eBay Marketplace Insights (item_sales/search), which
+// returns actually-SOLD items in a recent window. This is the real demand
+// signal; competitor_snapshots is the supply-side competition signal. Both
+// are joined into the Opportunity Finder side-by-side.
+export const demandSnapshots = pgTable("demand_snapshots", {
+  id: serial("id").primaryKey(),
+  productId: integer("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+  sku: text("sku").notNull(),
+  searchQuery: text("search_query").notNull(),
+  windowDays: integer("window_days").notNull().default(30),
+  // Total sold items eBay reports for the query in the window. The API may
+  // return a higher value than the items we paged through (sample below).
+  soldCount: integer("sold_count"),
+  // Aggregates over the page of items we actually fetched.
+  sampleCount: integer("sample_count").notNull().default(0),
+  avgSoldPrice: decimal("avg_sold_price", { precision: 10, scale: 2 }),
+  medianSoldPrice: decimal("median_sold_price", { precision: 10, scale: 2 }),
+  lowSoldPrice: decimal("low_sold_price", { precision: 10, scale: 2 }),
+  highSoldPrice: decimal("high_sold_price", { precision: 10, scale: 2 }),
+  currency: text("currency").default("EUR"),
+  errorMessage: text("error_message"),
+  notApproved: boolean("not_approved").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insertDemandSnapshotSchema = createInsertSchema(demandSnapshots).omit({
+  id: true,
+  createdAt: true,
+});
+export type DemandSnapshot = typeof demandSnapshots.$inferSelect;
+export type InsertDemandSnapshot = z.infer<typeof insertDemandSnapshotSchema>;
+
 export type OrderStatusType = typeof OrderStatus[keyof typeof OrderStatus];
 
 // Marketplace Enum

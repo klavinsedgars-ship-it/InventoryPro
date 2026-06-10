@@ -21,7 +21,11 @@ const EBAY_OAUTH_SCOPES = [
   'https://api.ebay.com/oauth/api_scope/sell.marketing.readonly',
   'https://api.ebay.com/oauth/api_scope/sell.fulfillment',   // Order fulfillment
   'https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly',
-  'https://api.ebay.com/oauth/api_scope/sell.analytics.readonly'
+  'https://api.ebay.com/oauth/api_scope/sell.analytics.readonly',
+  // Marketplace Insights (Buy API beta). Requires explicit eBay allow-list
+  // for the application before calls succeed; including the scope is safe
+  // either way — OAuth just grants whatever subset the app is approved for.
+  'https://api.ebay.com/oauth/api_scope/buy.marketplace.insights'
 ].join(' ');
 
 export class EbayOAuthService {

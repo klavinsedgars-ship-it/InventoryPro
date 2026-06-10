@@ -78,6 +78,9 @@ import {
   competitorSnapshots,
   type CompetitorSnapshot,
   type InsertCompetitorSnapshot,
+  demandSnapshots,
+  type DemandSnapshot,
+  type InsertDemandSnapshot,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, ne, and, gte, lte, lt, desc, asc, count, or, ilike, isNull, isNotNull, sql, inArray } from "drizzle-orm";
@@ -331,6 +334,7 @@ let orderIntegrityEnsured = false;
 let autoMessageSendsEnsured = false;
 let syncAuditTableEnsured = false;
 let competitorSnapshotsEnsured = false;
+let demandSnapshotsEnsured = false;
 
 export class DatabaseStorage implements IStorage {
   constructor() {
@@ -2074,6 +2078,84 @@ export class DatabaseStorage implements IStorage {
       .limit(limit);
   }
 
+  // === Demand snapshots (Marketplace Insights) ===
+  private async ensureDemandSnapshotsTable(): Promise<void> {
+    if (demandSnapshotsEnsured) return;
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS demand_snapshots (
+        id                 SERIAL PRIMARY KEY,
+        product_id         INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        sku                TEXT NOT NULL,
+        search_query       TEXT NOT NULL,
+        window_days        INTEGER NOT NULL DEFAULT 30,
+        sold_count         INTEGER,
+        sample_count       INTEGER NOT NULL DEFAULT 0,
+        avg_sold_price     NUMERIC(10,2),
+        median_sold_price  NUMERIC(10,2),
+        low_sold_price     NUMERIC(10,2),
+        high_sold_price    NUMERIC(10,2),
+        currency           TEXT DEFAULT 'EUR',
+        error_message      TEXT,
+        not_approved       BOOLEAN DEFAULT false,
+        created_at         TIMESTAMP DEFAULT now()
+      )
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS demand_snapshots_product_recent_idx
+      ON demand_snapshots (product_id, created_at DESC)
+    `);
+    demandSnapshotsEnsured = true;
+  }
+
+  async createDemandSnapshot(row: InsertDemandSnapshot): Promise<DemandSnapshot> {
+    await this.ensureDemandSnapshotsTable();
+    const [r] = await db.insert(demandSnapshots).values(row).returning();
+    return r;
+  }
+
+  // Top candidates that haven't had an Insights check recently. Different
+  // cadence from Browse demand because Insights quota is more precious and
+  // sold-counts move more slowly than active-listing counts.
+  async getDemandCheckTargets(limit: number, sinceHours = 168): Promise<Product[]> {
+    const score = this.opportunityScoreSql;
+    const since = new Date(Date.now() - sinceHours * 3600 * 1000);
+    await this.ensureDemandSnapshotsTable();
+    const result: any = await db.execute(sql`
+      SELECT p.*
+      FROM products p
+      WHERE p.supplier = 'TME'
+        AND p.stock > 0
+        AND (p.exclude_from_listing IS NULL OR p.exclude_from_listing = false)
+        AND NOT EXISTS (
+          SELECT 1 FROM demand_snapshots ds
+          WHERE ds.product_id = p.id AND ds.created_at >= ${since}
+        )
+      ORDER BY ${score} DESC, p.stock DESC
+      LIMIT ${limit}
+    `);
+    const raw = (result.rows ?? result) as any[];
+    return raw.map((r) => ({
+      ...r,
+      salePrice: r.sale_price,
+      supplierPrice: r.supplier_price,
+      listedOnEbay: r.listed_on_ebay,
+    })) as Product[];
+  }
+
+  // Has the Insights API ever returned a "not approved" snapshot? Used by
+  // the UI to surface the eBay approval gate when no real data is flowing.
+  async hasInsightsApprovalIssue(): Promise<boolean> {
+    await this.ensureDemandSnapshotsTable();
+    const r: any = await db.execute(sql`
+      SELECT EXISTS (
+        SELECT 1 FROM demand_snapshots
+        WHERE not_approved = true
+          AND created_at >= NOW() - INTERVAL '24 hours'
+      ) AS issue
+    `);
+    return Boolean((r.rows ?? r)?.[0]?.issue);
+  }
+
   // === Opportunity Finder ===
   // Ranks the whole TME catalogue by an INTRINSIC opportunity score computed
   // DB-side (no API calls, scales to 100k): margin headroom + availability +
@@ -2129,17 +2211,45 @@ export class DatabaseStorage implements IStorage {
     `);
     const total = (countResult.rows ?? countResult)?.[0]?.c ?? 0;
 
-    // LATERAL join to the latest snapshot per product for demand columns.
+    // Demand multiplier (final_score = intrinsic × multiplier). Sourced from
+    // Marketplace Insights sold-count over the last window. When Insights
+    // hasn't been checked for a product yet, the multiplier is neutral (1.0)
+    // — we don't penalise un-tested candidates.
+    //   sold >= 50 -> 1.5  (proven hot)
+    //   sold >= 10 -> 1.25 (decent)
+    //   sold >= 1  -> 1.0  (some demand)
+    //   sold == 0  -> 0.3  (no proven demand, but verified)
+    //   no data    -> 1.0  (neutral)
+    const demandMultiplierSql = sql`
+      CASE
+        WHEN d.sold_count IS NULL THEN 1.0
+        WHEN d.sold_count >= 50 THEN 1.5
+        WHEN d.sold_count >= 10 THEN 1.25
+        WHEN d.sold_count >= 1  THEN 1.0
+        ELSE 0.3
+      END
+    `;
+
+    // LATERAL joins to the latest snapshot per product for BOTH demand sources:
+    //   s = competitor_snapshots (Browse — active listings, supply side)
+    //   d = demand_snapshots (Marketplace Insights — sold items, demand side)
     const pageResult: any = await db.execute(sql`
       SELECT
         p.id, p.sku, p.name, p.category, p.ean,
         p.supplier_price, p.sale_price, p.calculated_price,
         p.margin_percentage, p.stock, p.weight, p.listed_on_ebay,
         ROUND(${score}::numeric, 1) AS score,
+        ROUND((${score} * ${demandMultiplierSql})::numeric, 1) AS final_score,
         s.market_total      AS market_total,
         s.cheapest_price    AS market_cheapest,
         s.signal            AS market_signal,
-        s.created_at        AS demand_checked_at
+        s.created_at        AS demand_checked_at,
+        d.sold_count        AS sold_count,
+        d.avg_sold_price    AS avg_sold_price,
+        d.median_sold_price AS median_sold_price,
+        d.window_days       AS sold_window_days,
+        d.created_at        AS insights_checked_at,
+        d.not_approved      AS insights_not_approved
       FROM products p
       LEFT JOIN LATERAL (
         SELECT market_total, cheapest_price, signal, created_at
@@ -2148,8 +2258,15 @@ export class DatabaseStorage implements IStorage {
         ORDER BY cs.created_at DESC
         LIMIT 1
       ) s ON true
+      LEFT JOIN LATERAL (
+        SELECT sold_count, avg_sold_price, median_sold_price, window_days, created_at, not_approved
+        FROM demand_snapshots ds
+        WHERE ds.product_id = p.id
+        ORDER BY ds.created_at DESC
+        LIMIT 1
+      ) d ON true
       WHERE ${whereClauses}
-      ORDER BY score DESC, p.stock DESC
+      ORDER BY final_score DESC NULLS LAST, score DESC, p.stock DESC
       LIMIT ${filter.limit} OFFSET ${filter.offset}
     `);
     const raw = (pageResult.rows ?? pageResult) as any[];
@@ -2167,10 +2284,17 @@ export class DatabaseStorage implements IStorage {
       weight: r.weight,
       listedOnEbay: r.listed_on_ebay,
       score: r.score != null ? Number(r.score) : null,
+      finalScore: r.final_score != null ? Number(r.final_score) : null,
       marketTotal: r.market_total,
       marketCheapest: r.market_cheapest,
       marketSignal: r.market_signal,
       demandCheckedAt: r.demand_checked_at ? new Date(r.demand_checked_at).toISOString() : null,
+      soldCount: r.sold_count,
+      avgSoldPrice: r.avg_sold_price,
+      medianSoldPrice: r.median_sold_price,
+      soldWindowDays: r.sold_window_days,
+      insightsCheckedAt: r.insights_checked_at ? new Date(r.insights_checked_at).toISOString() : null,
+      insightsNotApproved: r.insights_not_approved,
     }));
     return { rows, total };
   }

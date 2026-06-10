@@ -4299,6 +4299,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Bounded sold-through check via eBay Marketplace Insights (the gated
+  // buy.marketplace.insights API). SHADOW — writes demand_snapshots only.
+  // Surfaces a specific "needs eBay approval" signal when the app isn't
+  // allow-listed, so the UI can show a real call-to-action.
+  app.post("/api/opportunities/check-insights", requireAuth, async (req, res) => {
+    try {
+      if (!(await import("./ebay-oauth")).ebayOAuth.isOAuthConfigured()) {
+        return res.status(412).json({ success: false, error: "eBay OAuth not configured" });
+      }
+      const n = Math.min(200, Math.max(1, Number(req.body?.limit) || 50));
+      const windowDays = Math.min(90, Math.max(1, Number(req.body?.windowDays) || 30));
+      const targets = await storage.getDemandCheckTargets(n);
+      if (targets.length === 0) {
+        return res.json({ success: true, checked: 0, ok: 0, failed: 0, message: "No unchecked candidates" });
+      }
+      const { checkProductsDemand } = await import("./demand-service");
+      const result = await checkProductsDemand(targets, { budgetMs: 270_000, concurrency: 3, windowDays });
+      res.json({
+        success: true,
+        checked: result.checked,
+        ok: result.ok,
+        failed: result.failed,
+        notApproved: result.notApproved,
+        windowDays,
+      });
+    } catch (error) {
+      console.error("Insights check failed:", error);
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
+  // Probe whether Insights is approved without checking many candidates.
+  // Used by the UI to surface the approval gate up-front instead of after
+  // the user clicks "Check sold-through".
+  app.get("/api/opportunities/insights-status", requireAuth, async (_req, res) => {
+    try {
+      const hasIssue = await storage.hasInsightsApprovalIssue();
+      res.json({ success: true, notApproved: hasIssue });
+    } catch (error) {
+      console.error("Insights status check failed:", error);
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
   // Bounded demand enrichment: run eBay Browse on the top-N best-scoring
   // candidates that haven't been checked recently, persisting competitor
   // count + market price into competitor_snapshots. SHADOW — lists nothing.
