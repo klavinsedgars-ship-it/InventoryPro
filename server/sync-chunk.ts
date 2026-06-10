@@ -13,6 +13,7 @@
  *     budget.
  */
 import { storage } from "./storage";
+import type { InsertSyncAudit } from "@shared/schema";
 import { tmeApiOptimized } from "./tme-api-optimized";
 import {
   getSupplierPriceForMoq,
@@ -68,7 +69,15 @@ function staleCutoffs(): { listed: Date; unlisted: Date } {
   };
 }
 
-export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
+// Per-SKU audit draft. `_intent` records the eBay action we *attempted* so the
+// outcome can be patched in once the (async) eBay calls resolve; it's stripped
+// before the row is written.
+type AuditDraft = InsertSyncAudit & { _intent: string };
+
+export async function runSyncChunk(
+  limit = 50,
+  source: "cron" | "manual" = "cron",
+): Promise<SyncChunkResult> {
   const errors: string[] = [];
 
   // DB-side: load only the next `limit` stalest TME products (indexed),
@@ -109,6 +118,9 @@ export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
   // Collect DB writes and flush them together at the end of the chunk
   // instead of awaiting one round-trip per product (the old bottleneck).
   const writes: Array<Promise<unknown>> = [];
+  // Per-SKU audit drafts, keyed by product id so eBay outcomes can be patched
+  // in once the bulk eBay calls return.
+  const audits = new Map<number, AuditDraft>();
 
   for (const product of slice) {
     const sym = product.supplierProductId || product.sku;
@@ -161,21 +173,51 @@ export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
         ? Math.min(stock, product.ebayStockLimit)
         : stock;
     const hasOffer = !!product.ebayOfferId;
+    const changedFlag = priceChanged || stockChanged;
+
+    // Default intent reflects whether a change could even reach eBay; the
+    // branches below override it when a concrete eBay action is queued.
+    let intent = "none";
+    if (changedFlag) {
+      intent = !product.listedOnEbay ? "not_listed" : hasOffer ? "update" : "skipped_no_offer";
+    }
 
     if (product.listedOnEbay && hasOffer && limited <= 0) {
       // Out of stock -> withdraw the live listing (idempotent; withdrawOffer
       // tolerates an already-ended offer). Gated on state, not on `changed`,
       // so a previously-missed 0-stock listing is still recovered.
       withdrawals.push(product);
+      intent = "unlist";
     } else if (!product.listedOnEbay && hasOffer && product.ebayListingStatus === ENDED_OOS && limited > 0) {
       // Back in stock and we're the ones who ended it -> re-publish the offer.
       relists.push(product);
+      intent = "relist";
     } else if (product.listedOnEbay && hasOffer && (priceChanged || stockChanged)) {
       // Still in stock with a change -> push qty/price via the Inventory API.
       inventoryUpdates.push({
         product: { ...product, stock },
         quantity: Math.max(0, limited),
         price: pricing ? Number(pricing.finalPrice) : parseFloat(product.salePrice) || 0,
+      });
+      intent = "update";
+    }
+
+    // Record an audit row when TME data changed, or when an eBay state action
+    // (un/relist) fires even without a price/stock delta.
+    if (changedFlag || intent === "unlist" || intent === "relist") {
+      audits.set(product.id, {
+        productId: product.id,
+        sku: product.sku,
+        source,
+        priceChanged,
+        stockChanged,
+        oldSupplierPrice: product.supplierPrice != null ? String(product.supplierPrice) : null,
+        newSupplierPrice: supplierPrice > 0 ? String(supplierPrice) : null,
+        oldStock: product.stock ?? 0,
+        newStock: stock,
+        ebayAction: "none",
+        ebayError: null,
+        _intent: intent,
       });
     }
   }
@@ -189,11 +231,13 @@ export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
   }
 
   let ebayUpdated = 0;
+  const invResultBySku = new Map<string, { ok: boolean; error?: string }>();
   if (inventoryUpdates.length > 0) {
     try {
       const { updateListedProductsViaInventory } = await import("./ebay-lister");
       const r = await updateListedProductsViaInventory(inventoryUpdates);
       ebayUpdated += r.updated;
+      for (const res of r.results) invResultBySku.set(res.sku, res);
       if (r.failed) errors.push(`eBay updates: ${r.failed} failed`);
     } catch (e) {
       errors.push(`eBay update failed: ${(e as Error).message}`);
@@ -204,6 +248,7 @@ export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
   // automatically (and keep the ramp from creating a duplicate offer).
   let ebayUnlisted = 0;
   for (const product of withdrawals) {
+    const a = audits.get(product.id);
     try {
       const r = await ebayInventoryApi.withdrawOffer(product.ebayOfferId);
       if (r.ok) {
@@ -212,17 +257,21 @@ export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
           listedOnEbay: false,
           ebayListingStatus: ENDED_OOS,
         });
+        if (a) a.ebayAction = "unlisted";
       } else {
         errors.push(`withdraw ${product.sku}: ${r.error || r.httpStatus}`);
+        if (a) { a.ebayAction = "failed"; a.ebayError = String(r.error || r.httpStatus); }
       }
     } catch (e) {
       errors.push(`withdraw ${product.sku}: ${(e as Error).message}`);
+      if (a) { a.ebayAction = "failed"; a.ebayError = (e as Error).message; }
     }
   }
 
   // Re-publish offers we previously auto-ended, now that stock is back.
   let ebayRelisted = 0;
   for (const product of relists) {
+    const a = audits.get(product.id);
     try {
       const r = await ebayInventoryApi.publishOffer(product.ebayOfferId);
       if (r.ok) {
@@ -232,14 +281,61 @@ export async function runSyncChunk(limit = 50): Promise<SyncChunkResult> {
           ebayListingStatus: "published",
           ...(r.listingId ? { ebayListingId: r.listingId } : {}),
         });
+        if (a) a.ebayAction = "relisted";
       } else {
         errors.push(`relist ${product.sku}: ${r.error || r.httpStatus}`);
+        if (a) { a.ebayAction = "failed"; a.ebayError = String(r.error || r.httpStatus); }
       }
     } catch (e) {
       errors.push(`relist ${product.sku}: ${(e as Error).message}`);
+      if (a) { a.ebayAction = "failed"; a.ebayError = (e as Error).message; }
     }
   }
 
+  // Resolve the remaining intents (un/relist were patched in-loop above) and
+  // persist the per-SKU audit trail. Best-effort: a logging failure must not
+  // fail the sync itself.
+  const auditRows: InsertSyncAudit[] = [];
+  for (const a of Array.from(audits.values())) {
+    const { _intent, ...row } = a;
+    switch (_intent) {
+      case "update": {
+        const r = invResultBySku.get(a.sku);
+        if (r?.ok) row.ebayAction = "updated";
+        else {
+          row.ebayAction = "failed";
+          row.ebayError = r?.error ?? "not attempted (eBay daily limit?)";
+        }
+        break;
+      }
+      case "skipped_no_offer":
+        row.ebayAction = "skipped_no_offer";
+        break;
+      case "not_listed":
+        row.ebayAction = "not_listed";
+        break;
+      case "unlist":
+      case "relist":
+        // Already set on the draft during the withdrawal/relist loops; if the
+        // action somehow didn't run, fall back to a failed marker.
+        if (row.ebayAction === "none") {
+          row.ebayAction = "failed";
+          row.ebayError = "eBay action not executed";
+        }
+        break;
+      default:
+        row.ebayAction = "none";
+    }
+    auditRows.push(row);
+  }
+  try {
+    await storage.createSyncAuditEntries(auditRows);
+  } catch (e) {
+    errors.push(`audit write failed: ${(e as Error).message}`);
+  }
+
+  // Tiered staleness (batch 3): count listed + unlisted against their own
+  // cutoffs, not a single staleBefore.
   const remaining = Math.max(
     0,
     await storage.getStaleTmeProductCount(cutoffs.listed, cutoffs.unlisted),
