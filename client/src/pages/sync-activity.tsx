@@ -28,6 +28,7 @@ import {
   CheckCircle2,
   XCircle,
   AlertTriangle,
+  History,
 } from "lucide-react";
 
 interface AuditRow {
@@ -46,11 +47,23 @@ interface AuditRow {
   createdAt: string;
 }
 
+interface SyncRun {
+  status: string;
+  operation: string;
+  message: string;
+  syncedAt: string;
+  changed: number | null;
+  ebayUpdated: number | null;
+  remaining: number | null;
+  processed: number | null;
+}
+
 interface AuditResponse {
   success: boolean;
   rows: AuditRow[];
   total: number;
   sinceHours: number;
+  recentRuns: SyncRun[];
   stats: {
     changed: number;
     priceChanged: number;
@@ -62,6 +75,19 @@ interface AuditResponse {
     skippedNoOffer: number;
     lastRunAt: string | null;
   };
+}
+
+// Compact "5h ago" / "23m ago" relative time.
+function ago(iso: string | null): string {
+  if (!iso) return "never";
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 0) return "just now";
+  const m = Math.floor(ms / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
 }
 
 const PAGE_SIZE = 50;
@@ -162,6 +188,87 @@ function StatCard({
   );
 }
 
+function runStatusDot(status: string) {
+  const color =
+    status === "success"
+      ? "bg-green-500"
+      : status === "partial"
+        ? "bg-amber-500"
+        : status === "error"
+          ? "bg-red-500"
+          : "bg-gray-300";
+  return <span className={`inline-block h-2 w-2 rounded-full ${color}`} />;
+}
+
+// Plain-English health line derived from the per-run history + the change
+// rollup. Answers the two questions operators actually have: "is it running?"
+// and "did anything change?" — without making them reconcile two panels.
+function HealthBanner({
+  runs,
+  lastChangeAt,
+}: {
+  runs: SyncRun[];
+  lastChangeAt: string | null;
+}) {
+  const last = runs[0];
+  if (!last) {
+    return (
+      <div className="rounded-lg border bg-gray-50 px-4 py-3 text-sm text-gray-600">
+        No sync runs recorded yet. The cron runs hourly; you can also trigger one
+        with <strong>Sync Now</strong>.
+      </div>
+    );
+  }
+
+  const remaining = last.remaining ?? 0;
+  const lastRunMs = Date.now() - new Date(last.syncedAt).getTime();
+  // Cron is hourly, so a gap beyond ~2h means it likely isn't firing.
+  const stale = lastRunMs > 2 * 3600 * 1000;
+  const errored = last.status === "error";
+
+  let tone: "good" | "warn" | "danger";
+  let headline: string;
+  if (errored) {
+    tone = "danger";
+    headline = `Last sync run failed (${ago(last.syncedAt)})`;
+  } else if (stale) {
+    tone = "warn";
+    headline = `No sync run in ${ago(last.syncedAt)} — the hourly cron may not be firing`;
+  } else if (remaining > 0) {
+    tone = "warn";
+    headline = `Syncing — last check ${ago(last.syncedAt)}, ${remaining.toLocaleString()} products still queued`;
+  } else {
+    tone = "good";
+    headline = `Sync healthy — last check ${ago(last.syncedAt)}, nothing stale`;
+  }
+
+  const toneCls =
+    tone === "good"
+      ? "border-green-200 bg-green-50 text-green-800"
+      : tone === "warn"
+        ? "border-amber-200 bg-amber-50 text-amber-800"
+        : "border-red-200 bg-red-50 text-red-800";
+
+  return (
+    <div className={`rounded-lg border px-4 py-3 ${toneCls}`}>
+      <div className="flex items-center gap-2 text-sm font-medium">
+        {tone === "good" ? (
+          <CheckCircle2 className="h-4 w-4" />
+        ) : (
+          <AlertTriangle className="h-4 w-4" />
+        )}
+        {headline}
+      </div>
+      <div className="mt-0.5 text-xs opacity-80">
+        Last actual change {ago(lastChangeAt)}
+        {lastChangeAt ? ` (${new Date(lastChangeAt).toLocaleString()})` : ""}. A run
+        with “0 changed” is normal — it means nothing was stale, not that sync is
+        broken.
+      </div>
+    </div>
+  );
+}
+
 export function SyncActivity() {
   const [windowHours, setWindowHours] = useState("24");
   const [ebayAction, setEbayAction] = useState("all");
@@ -186,8 +293,10 @@ export function SyncActivity() {
 
   const stats = data?.stats;
   const rows = data?.rows ?? [];
+  const recentRuns = data?.recentRuns ?? [];
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const windowLabel = (WINDOWS.find((w) => w.value === windowHours)?.label ?? "Last 24h").toLowerCase();
 
   // Reset to first page whenever a filter changes.
   const applyFilter = (fn: () => void) => {
@@ -197,14 +306,23 @@ export function SyncActivity() {
 
   return (
     <div className="space-y-4">
-      {/* Stat rollup */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-        <StatCard icon={<TrendingUp className="h-3.5 w-3.5" />} label="Price changes" value={stats?.priceChanged ?? 0} />
-        <StatCard icon={<Boxes className="h-3.5 w-3.5" />} label="Stock changes" value={stats?.stockChanged ?? 0} />
-        <StatCard icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="eBay updated" value={stats?.ebayUpdated ?? 0} tone="good" />
-        <StatCard icon={<AlertTriangle className="h-3.5 w-3.5" />} label="eBay unlisted" value={stats?.ebayUnlisted ?? 0} tone="warn" />
-        <StatCard icon={<XCircle className="h-3.5 w-3.5" />} label="eBay failed" value={stats?.ebayFailed ?? 0} tone="danger" />
-        <StatCard icon={<AlertTriangle className="h-3.5 w-3.5" />} label="Skipped (legacy)" value={stats?.skippedNoOffer ?? 0} tone="warn" />
+      {/* Plain-English health line — what most people are actually asking. */}
+      <HealthBanner runs={recentRuns} lastChangeAt={stats?.lastRunAt ?? null} />
+
+      {/* Stat rollup — explicitly scoped to the selected window so the totals
+          don't read as "right now". */}
+      <div>
+        <div className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-400">
+          Totals for {windowLabel}
+        </div>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+          <StatCard icon={<TrendingUp className="h-3.5 w-3.5" />} label="Price changes" value={stats?.priceChanged ?? 0} />
+          <StatCard icon={<Boxes className="h-3.5 w-3.5" />} label="Stock changes" value={stats?.stockChanged ?? 0} />
+          <StatCard icon={<CheckCircle2 className="h-3.5 w-3.5" />} label="eBay updated" value={stats?.ebayUpdated ?? 0} tone="good" />
+          <StatCard icon={<AlertTriangle className="h-3.5 w-3.5" />} label="eBay unlisted" value={stats?.ebayUnlisted ?? 0} tone="warn" />
+          <StatCard icon={<XCircle className="h-3.5 w-3.5" />} label="eBay failed" value={stats?.ebayFailed ?? 0} tone="danger" />
+          <StatCard icon={<AlertTriangle className="h-3.5 w-3.5" />} label="Skipped (legacy)" value={stats?.skippedNoOffer ?? 0} tone="warn" />
+        </div>
       </div>
 
       {(stats?.skippedNoOffer ?? 0) > 0 && (
@@ -219,10 +337,9 @@ export function SyncActivity() {
         <CardHeader className="py-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <CardTitle className="text-base">
-              Sync Activity
+              Per-SKU changes
               <span className="ml-2 text-sm font-normal text-gray-500">
-                {total.toLocaleString()} record{total === 1 ? "" : "s"}
-                {stats?.lastRunAt ? ` · last change ${new Date(stats.lastRunAt).toLocaleString()}` : ""}
+                {total.toLocaleString()} record{total === 1 ? "" : "s"} · {windowLabel}
               </span>
             </CardTitle>
             <div className="flex flex-wrap items-center gap-2">
@@ -361,6 +478,50 @@ export function SyncActivity() {
           </Button>
         </div>
       )}
+
+      {/* Per-run history — the old dashboard "Recent activity" feed, now living
+          here so there's a single home for sync history. Each row is one cron
+          (or manual) run; the table above is the per-SKU detail within them. */}
+      <Card>
+        <CardHeader className="py-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <History className="h-4 w-4 text-gray-400" />
+            Sync runs
+            <span className="text-sm font-normal text-gray-500">
+              each hourly cron / manual run
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="divide-y text-sm">
+            {recentRuns.length === 0 ? (
+              <div className="px-4 py-6 text-center text-gray-500">No sync runs recorded yet.</div>
+            ) : (
+              recentRuns.map((r, i) => (
+                <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+                  {runStatusDot(r.status)}
+                  <span className="w-16 shrink-0 text-gray-400">{ago(r.syncedAt)}</span>
+                  <span className="shrink-0 capitalize text-gray-500">{r.status}</span>
+                  <span className="truncate text-gray-700">
+                    {r.changed != null ? (
+                      <>
+                        {r.changed.toLocaleString()} changed
+                        {r.ebayUpdated != null && <> · {r.ebayUpdated} eBay updated</>}
+                        {r.remaining != null && r.remaining > 0 && (
+                          <> · <span className="text-amber-600">{r.remaining.toLocaleString()} remaining</span></>
+                        )}
+                        {r.remaining === 0 && <> · caught up</>}
+                      </>
+                    ) : (
+                      r.message
+                    )}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

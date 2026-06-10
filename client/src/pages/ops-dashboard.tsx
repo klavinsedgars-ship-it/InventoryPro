@@ -488,23 +488,14 @@ export function OpsDashboard({ user, embedded = false }: OpsProps) {
                 </Card>
               </div>
 
-              {/* Recent logs */}
+              {/* Per-run sync history + per-SKU change detail now live together
+                  in the Sync Activity tab, so there's a single home for it. */}
               <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-gray-500">Recent activity</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="divide-y text-sm">
-                    {data.recentLogs.map((l, i) => (
-                      <div key={i} className="py-2 flex items-center gap-3">
-                        <span className="text-gray-400 w-16 shrink-0">{ago(l.syncedAt)}</span>
-                        {statusBadge(l.status)}
-                        <span className="text-gray-500 shrink-0">{l.source}/{l.operation}</span>
-                        <span className="text-gray-700 truncate">{l.message}</span>
-                      </div>
-                    ))}
-                    {data.recentLogs.length === 0 && <div className="text-gray-400 py-2">No recent activity.</div>}
-                  </div>
+                <CardContent className="flex items-center justify-between gap-3 py-3 text-sm text-gray-600">
+                  <span>
+                    Sync run history and per-SKU changes are in the{" "}
+                    <strong>Sync Activity</strong> tab.
+                  </span>
                 </CardContent>
               </Card>
             </>
