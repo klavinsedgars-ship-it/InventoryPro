@@ -368,7 +368,7 @@ export class TMEApiService {
       
       // Log the structure of each key in Data
       for (const key of Object.keys(response.Data || {})) {
-        const value = response.Data[key];
+        const value = (response.Data as any)[key];
         console.log(`📋 Data.${key} type:`, typeof value, Array.isArray(value) ? `(array of ${value.length})` : '');
         if (Array.isArray(value) && value.length > 0) {
           console.log(`📋 Sample ${key}[0] keys:`, Object.keys(value[0]));
@@ -501,8 +501,8 @@ export class TMEApiService {
       });
       
       const products = response.Data?.ProductList || [];
-      const totalProducts = response.Data?.Amount || 0;
-      const pageNumber = response.Data?.PageNumber || page;
+      const totalProducts = (response.Data as any)?.Amount || 0;
+      const pageNumber = (response.Data as any)?.PageNumber || page;
       
       console.log(`✅ TME returned ${products.length} products for category ${categoryId} (page ${pageNumber}), total: ${totalProducts}`);
       

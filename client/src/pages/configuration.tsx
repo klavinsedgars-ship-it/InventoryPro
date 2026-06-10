@@ -400,7 +400,7 @@ export default function Configuration({ user }: ConfigurationProps) {
       setIsShippingDialogOpen(false);
       
       console.log("Clearing shipping form NOW");
-      setNewShippingPolicy({ name: "", description: "", id: "", weightRange: { min: 0, max: 0 } });
+      setNewShippingPolicy({ name: "", description: "", id: "", weightRange: { min: "", max: "" } });
       
       console.log("Showing shipping toast NOW");
       toast({ 

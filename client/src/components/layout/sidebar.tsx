@@ -32,7 +32,7 @@ const navigation = [
 interface SidebarProps {
   user?: {
     username: string;
-    email: string;
+    email?: string; // accepted but not rendered; optional so partial user objects pass
     role: string;
   };
   collapsed?: boolean;

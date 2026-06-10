@@ -74,7 +74,7 @@ export function Marketplaces({ user, embedded = false }: MarketplacesProps) {
     queryKey: ["/api/categories"],
   });
 
-  const { data: metrics } = useQuery({
+  const { data: metrics } = useQuery<any>({
     queryKey: ["/api/dashboard/metrics"],
   });
 
@@ -945,9 +945,9 @@ export function Marketplaces({ user, embedded = false }: MarketplacesProps) {
                   <div>
                     <div className="text-sm text-gray-600">Avg. Product Value</div>
                     <div className="text-2xl font-bold text-gray-900">
-                      {totalProducts > 0 
+                      {totalProducts > 0
                         ? formatCurrency(
-                            products.reduce((sum, p) => sum + p.salePrice, 0) / totalProducts
+                            products.reduce((sum, p) => sum + Number(p.salePrice), 0) / totalProducts
                           )
                         : formatCurrency(0)
                       }
@@ -965,7 +965,7 @@ export function Marketplaces({ user, embedded = false }: MarketplacesProps) {
                     <div className="text-sm text-gray-600">Stock Value</div>
                     <div className="text-2xl font-bold text-gray-900">
                       {formatCurrency(
-                        products.reduce((sum, p) => sum + (p.salePrice * p.stock), 0)
+                        products.reduce((sum, p) => sum + (Number(p.salePrice) * p.stock), 0)
                       )}
                     </div>
                   </div>
