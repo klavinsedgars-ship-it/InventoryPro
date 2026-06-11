@@ -10,7 +10,11 @@ interface EbayOAuthToken {
   expires_at: number; // Calculated timestamp when token expires (milliseconds)
 }
 
-// All required scopes for complete eBay API access
+// Scopes the refresh token was granted — and therefore the ONLY scopes we may
+// request on a refresh_token grant. eBay rejects the whole refresh with
+// invalid_scope if we ask for anything outside this set, which would break
+// every eBay call. Do NOT add gated/beta scopes here until the refresh token
+// has actually been re-authorized to include them.
 const EBAY_OAUTH_SCOPES = [
   'https://api.ebay.com/oauth/api_scope',                    // Base scope for Trading API
   'https://api.ebay.com/oauth/api_scope/sell.account',       // Business policies
@@ -21,11 +25,18 @@ const EBAY_OAUTH_SCOPES = [
   'https://api.ebay.com/oauth/api_scope/sell.marketing.readonly',
   'https://api.ebay.com/oauth/api_scope/sell.fulfillment',   // Order fulfillment
   'https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly',
-  'https://api.ebay.com/oauth/api_scope/sell.analytics.readonly',
-  // Marketplace Insights (Buy API beta). Requires explicit eBay allow-list
-  // for the application before calls succeed; including the scope is safe
-  // either way — OAuth just grants whatever subset the app is approved for.
-  'https://api.ebay.com/oauth/api_scope/buy.marketplace.insights'
+  'https://api.ebay.com/oauth/api_scope/sell.analytics.readonly'
+].join(' ');
+
+// Scopes advertised on the consent/authorization URL. Superset of the refresh
+// scopes: it includes the gated Marketplace Insights scope so that, AFTER eBay
+// approves the app for it, the operator can re-authorize and the refresh token
+// will carry insights too. Until that re-auth happens, including it here is
+// harmless — it only affects a fresh consent flow, never the refresh path.
+const EBAY_CONSENT_SCOPES = [
+  EBAY_OAUTH_SCOPES,
+  // Marketplace Insights (Buy API beta) — gated; requires eBay allow-list.
+  'https://api.ebay.com/oauth/api_scope/buy.marketplace.insights',
 ].join(' ');
 
 export class EbayOAuthService {
@@ -218,7 +229,7 @@ export class EbayOAuthService {
       client_id: clientId,
       redirect_uri: redirectUri,
       response_type: 'code',
-      scope: EBAY_OAUTH_SCOPES,
+      scope: EBAY_CONSENT_SCOPES,
       state: state || 'ebay_auth_state'
     });
 
