@@ -189,9 +189,19 @@ export async function runSyncChunk(
       withdrawals.push(product);
       intent = "unlist";
     } else if (!product.listedOnEbay && hasOffer && product.ebayListingStatus === ENDED_OOS && limited > 0) {
-      // Back in stock and we're the ones who ended it -> re-publish the offer.
-      relists.push(product);
-      intent = "relist";
+      // Back in stock and we're the ones who ended it -> would re-publish.
+      // SAFETY (incident 2026-06-16): TME's stock figure can include
+      // not-yet-arrived "expected" deliveries (a 0-available / 70-expected SKU
+      // reported 70 here), so an automatic relist risks selling stock TME
+      // can't ship. Suppressed by default until extractStock is corrected to
+      // exclude expected stock; set RELIST_ON_RESTOCK=true to restore the old
+      // behavior once that fix lands.
+      if (process.env.RELIST_ON_RESTOCK === "true") {
+        relists.push(product);
+        intent = "relist";
+      } else {
+        intent = "relist_suppressed";
+      }
     } else if (product.listedOnEbay && hasOffer && (priceChanged || stockChanged)) {
       // Still in stock with a change -> push qty/price via the Inventory API.
       inventoryUpdates.push({
@@ -203,8 +213,8 @@ export async function runSyncChunk(
     }
 
     // Record an audit row when TME data changed, or when an eBay state action
-    // (un/relist) fires even without a price/stock delta.
-    if (changedFlag || intent === "unlist" || intent === "relist") {
+    // (un/relist, or a suppressed relist) fires even without a price/stock delta.
+    if (changedFlag || intent === "unlist" || intent === "relist" || intent === "relist_suppressed") {
       audits.set(product.id, {
         productId: product.id,
         sku: product.sku,
@@ -322,6 +332,12 @@ export async function runSyncChunk(
           row.ebayAction = "failed";
           row.ebayError = "eBay action not executed";
         }
+        break;
+      case "relist_suppressed":
+        // Would have relisted, but auto-relist on restock is disabled because
+        // TME stock may include not-yet-arrived expected deliveries.
+        row.ebayAction = "relist_suppressed";
+        row.ebayError = "auto-relist suppressed (stock may include expected delivery)";
         break;
       default:
         row.ebayAction = "none";

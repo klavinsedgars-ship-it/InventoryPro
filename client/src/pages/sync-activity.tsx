@@ -104,6 +104,7 @@ const EBAY_ACTIONS = [
   { label: "Unlisted (OOS)", value: "unlisted" },
   { label: "Relisted", value: "relisted" },
   { label: "Failed", value: "failed" },
+  { label: "Relist suppressed (expected stock)", value: "relist_suppressed" },
   { label: "Skipped (legacy listing)", value: "skipped_no_offer" },
   { label: "Not listed", value: "not_listed" },
 ];
@@ -118,6 +119,12 @@ function ebayBadge(action: string) {
       return <Badge className="bg-amber-500 hover:bg-amber-500">Unlisted (OOS)</Badge>;
     case "failed":
       return <Badge variant="destructive">Failed</Badge>;
+    case "relist_suppressed":
+      return (
+        <Badge variant="outline" className="border-orange-300 text-orange-700">
+          Relist held (expected stock)
+        </Badge>
+      );
     case "skipped_no_offer":
       return (
         <Badge variant="outline" className="border-amber-300 text-amber-700">

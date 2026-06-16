@@ -2739,6 +2739,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     // TME API routes - Enhanced
 
+    // DIAGNOSTIC: dump the raw GetPricesAndStocks response for one symbol so we
+    // can see exactly which fields TME returns for available vs expected stock.
+    // Added for the 2026-06-16 oversell incident: a "0 available / 70 expected"
+    // SKU reported stock 70 to our sync and got relisted. We need the real
+    // field names before correcting extractStock — do NOT guess.
+    //   GET /api/tme/stock-debug?symbol=CA-HDMI11CC-0005BK
+    app.get("/api/tme/stock-debug", requireAuth, async (req, res) => {
+      try {
+        const symbol = ((req.query.symbol as string) || "").trim();
+        if (!symbol) {
+          return res.status(400).json({ success: false, error: "symbol query param required" });
+        }
+        const raw = await tmeApiOptimized.getProductsPricesAndStocks([symbol]);
+        // Return everything, untyped, so any expected/delivery fields TME sends
+        // that we don't currently model are visible.
+        res.json({ success: true, symbol, count: raw.length, raw });
+      } catch (e) {
+        res.status(500).json({ success: false, error: (e as Error).message });
+      }
+    });
+
     // Test TME API connection
     app.get("/api/tme/test", async (req, res) => {
       try {
