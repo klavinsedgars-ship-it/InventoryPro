@@ -270,13 +270,48 @@ export class EbayOrdersApiService {
       // Ensure the cost-at-sale column + dedup index exist before importing.
       await storage.ensureOrderIntegritySchema();
 
-      const ordersResponse = await this.getRecentOrders(daysBack);
-      console.log(`📦 Found ${ordersResponse.total} eBay orders`);
-      
-      for (const ebayOrder of ordersResponse.orders) {
+      // Paginate through ALL orders in the window — the previous implementation
+      // capped at 200 (eBay's per-page max) and silently dropped everything past
+      // that. At 100k listings the cap was an outright data-loss bug.
+      //
+      // Safety cap: stop after MAX_PAGES (default 100 = 20k orders) so a runaway
+      // never tries to load an unbounded history in one call. Operator can bump
+      // it via env. The cron runs hourly anyway, so even at 100k orders/window
+      // catch-up is on the next tick.
+      const fromDate = new Date();
+      fromDate.setDate(fromDate.getDate() - daysBack);
+      const toDate = new Date();
+      const PAGE_SIZE = 200;
+      const MAX_PAGES = Math.max(1, Number(process.env.EBAY_ORDER_SYNC_MAX_PAGES) || 100);
+
+      let offset = 0;
+      let pages = 0;
+      let totalReported: number | undefined;
+      let processedThisCall = 0;
+      const seenInThisRun = new Set<string>(); // de-dup if eBay double-pages
+
+      while (pages < MAX_PAGES) {
+        const ordersResponse = await this.getOrders({
+          creationDateFrom: fromDate.toISOString(),
+          creationDateTo: toDate.toISOString(),
+          limit: PAGE_SIZE,
+          offset,
+        });
+        if (totalReported == null) {
+          totalReported = ordersResponse.total;
+          console.log(`📦 eBay reports ${totalReported} orders in window — paginating`);
+        }
+        const pageOrders = ordersResponse.orders ?? [];
+        if (pageOrders.length === 0) break;
+        pages++;
+
+        for (const ebayOrder of pageOrders) {
+        if (seenInThisRun.has(ebayOrder.orderId)) continue;
+        seenInThisRun.add(ebayOrder.orderId);
+        processedThisCall++;
         try {
           const existingOrder = await storage.getOrderByMarketplaceId('ebay', ebayOrder.orderId);
-          
+
           if (existingOrder) {
             await this.updateExistingOrder(existingOrder.id, ebayOrder);
             updated++;
@@ -290,9 +325,22 @@ export class EbayOrdersApiService {
           console.error(`❌ ${errorMsg}`);
           errors.push(errorMsg);
         }
+        } // for pageOrders
+
+        // Stop when eBay returned fewer than a full page (last page) or when
+        // there's no `next` href and total is reached.
+        if (pageOrders.length < PAGE_SIZE) break;
+        offset += PAGE_SIZE;
+        if (totalReported != null && offset >= totalReported) break;
+      } // while pages
+
+      if (pages >= MAX_PAGES) {
+        const msg = `Order sync hit page cap (${MAX_PAGES} × ${PAGE_SIZE}); ${processedThisCall} processed, more remain. Increase EBAY_ORDER_SYNC_MAX_PAGES or rely on next tick to catch up.`;
+        console.warn(`⚠️  ${msg}`);
+        errors.push(msg);
       }
-      
-      console.log(`✅ eBay orders sync complete: ${synced} new, ${updated} updated, ${failed} failed`);
+
+      console.log(`✅ eBay orders sync complete: ${synced} new, ${updated} updated, ${failed} failed across ${pages} page(s)`);
       
     } catch (error) {
       const errorMsg = `eBay orders sync failed: ${(error as Error).message}`;
