@@ -4581,14 +4581,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     let skipped = 0;
     let limitHit = false;
     let lastBatchSize = 0;
+    // Proactive eBay daily-call budget. The ramp uses ~3 bulk calls per
+    // 25-SKU batch + cold-path category/aspects, so 100k listings is
+    // ~12-25k eBay calls — well under the 2M default cap but worth not
+    // burning blind. Default soft cap 80% of dailyLimit. Override via
+    // EBAY_DAILY_CALL_SOFT_CAP_PCT.
+    const softCapPct = Math.min(100, Math.max(10, Number(process.env.EBAY_DAILY_CALL_SOFT_CAP_PCT) || 80));
+    let budgetStop = false;
     try {
-      while (Date.now() - start < budgetMs && !limitHit) {
+      while (Date.now() - start < budgetMs && !limitHit && !budgetStop) {
         // Re-check pause flag each batch so an in-flight chain stops on
         // the first batch after Pause is hit.
         const stillPaused = (await storage.getMarketplaceSettings("ebay")).find(
           (s) => s.setting === "listing_ramp_paused",
         );
         if (stillPaused?.value === "true") break;
+
+        // Daily-budget check (proactive). Was reactive only — we'd find out
+        // we exceeded by getting an eBay limit error.
+        const usage = await storage.getApiUsage("ebay");
+        if (usage && usage.dailyLimit > 0 && usage.callsToday >= usage.dailyLimit * (softCapPct / 100)) {
+          budgetStop = true;
+          break;
+        }
+
         const candidates = await storage.getListingCandidates(batchSize, range);
         lastBatchSize = candidates.length;
         if (candidates.length === 0) break;
@@ -4600,21 +4616,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (r.limitHit) limitHit = true;
       }
 
-      const done = !limitHit && lastBatchSize < batchSize;
+      const done = !limitHit && !budgetStop && lastBatchSize < batchSize;
 
       await storage.createSyncLog({
         source: "ebay",
         operation: "list_ramp",
         status: failed > 0 ? "partial" : "success",
-        message: `List ramp: ${batches} batches, ${published} published, ${failed} failed, ${skipped} skipped${limitHit ? " (limit hit)" : ""}`,
-        details: JSON.stringify({ batches, published, failed, skipped, limitHit, done }),
+        message: `List ramp: ${batches} batches, ${published} published, ${failed} failed, ${skipped} skipped${limitHit ? " (limit hit)" : ""}${budgetStop ? ` (budget stop @${softCapPct}%)` : ""}`,
+        details: JSON.stringify({ batches, published, failed, skipped, limitHit, budgetStop, softCapPct, done }),
       });
 
       // No HTTP self-chain: see the matching note in the daily-sync
       // handler above. Remaining candidates are listed in subsequent
       // scheduled ramp ticks (or by the manual "Resume ramp" control).
 
-      res.json({ success: true, batches, published, failed, skipped, limitHit, done, elapsedMs: Date.now() - start });
+      res.json({ success: true, batches, published, failed, skipped, limitHit, budgetStop, done, elapsedMs: Date.now() - start });
     } catch (error) {
       console.error("List ramp failed:", error);
       res.status(500).json({ success: false, error: (error as Error).message });
