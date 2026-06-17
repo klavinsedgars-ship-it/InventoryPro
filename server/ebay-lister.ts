@@ -41,6 +41,8 @@ export async function listProductsViaInventory(allProducts: Product[]): Promise<
 
     if (r.ok && r.listingId) {
       published++;
+      // Reset the attempt counter on success so a previously-stuck SKU that
+      // we just listed manually is back in clean state.
       await storage.updateProduct(prod.id, {
         listedOnEbay: true,
         ebayOfferId: r.offerId ?? null,
@@ -48,6 +50,7 @@ export async function listProductsViaInventory(allProducts: Product[]): Promise<
         ebayItemId: r.listingId,
         ebayListingStatus: "published",
         ebayListingError: null,
+        ebayListAttempts: 0,
       });
       results.push({ sku: prod.sku, ok: true, listingId: r.listingId });
     } else {
@@ -59,6 +62,13 @@ export async function listProductsViaInventory(allProducts: Product[]): Promise<
         ebayListingStatus: status,
         ebayListingError: String(err).slice(0, 500),
       });
+      // Atomic increment so the candidate query can park this SKU after
+      // EBAY_LIST_MAX_ATTEMPTS (default 3) instead of retrying forever.
+      // Don't increment when we're stopping on a rate/call limit — that's
+      // not a SKU-level failure and would unfairly penalise the next batch.
+      if (!LIMIT_RX.test(String(err))) {
+        await storage.incrementEbayListAttempts(prod.id);
+      }
       results.push({ sku: prod.sku, ok: false, error: `${r.failedStep || ""}: ${err}`.trim() });
       if (LIMIT_RX.test(String(err))) limitHit = true;
     }
@@ -180,6 +190,7 @@ export async function listProductsViaInventoryBulk(
           ebayListingStatus: "error",
           ebayListingError: "no category resolved",
         });
+        await storage.incrementEbayListAttempts(product.id);
         continue;
       }
       withCat.push({ product, categoryId });
@@ -199,6 +210,9 @@ export async function listProductsViaInventoryBulk(
           ebayListingStatus: "error",
           ebayListingError: String(r.error).slice(0, 500),
         });
+        if (!LIMIT_RX.test(String(r.error))) {
+          await storage.incrementEbayListAttempts(product.id);
+        }
         if (LIMIT_RX.test(String(r.error))) limitHit = true;
       }
     }
@@ -219,6 +233,9 @@ export async function listProductsViaInventoryBulk(
           ebayListingStatus: r?.offerId ? "offer_created" : "error",
           ebayListingError: String(r?.error).slice(0, 500),
         });
+        if (!LIMIT_RX.test(String(r?.error))) {
+          await storage.incrementEbayListAttempts(product.id);
+        }
         if (LIMIT_RX.test(String(r?.error))) limitHit = true;
       }
     }
@@ -239,6 +256,7 @@ export async function listProductsViaInventoryBulk(
           ebayItemId: r.listingId,
           ebayListingStatus: "published",
           ebayListingError: null,
+          ebayListAttempts: 0,
         });
       } else {
         failed++;
@@ -248,6 +266,9 @@ export async function listProductsViaInventoryBulk(
           ebayListingStatus: "offer_created",
           ebayListingError: String(r?.error).slice(0, 500),
         });
+        if (!LIMIT_RX.test(String(r?.error))) {
+          await storage.incrementEbayListAttempts(product.id);
+        }
         if (LIMIT_RX.test(String(r?.error))) limitHit = true;
       }
     }

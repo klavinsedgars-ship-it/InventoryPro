@@ -419,6 +419,9 @@ export class DatabaseStorage implements IStorage {
       `ALTER TABLE products ADD COLUMN IF NOT EXISTS ebay_listing_id text`,
       `ALTER TABLE products ADD COLUMN IF NOT EXISTS ebay_listing_status text`,
       `ALTER TABLE products ADD COLUMN IF NOT EXISTS ebay_listing_error text`,
+      // Failed-attempt counter for the ramp candidate filter (see the
+      // listing-ramp infinite-retry fix). Default 0 for any pre-existing row.
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS ebay_list_attempts integer NOT NULL DEFAULT 0`,
       `CREATE INDEX IF NOT EXISTS products_supplier_stale_idx ON products (supplier, last_synced_at)`,
       `CREATE INDEX IF NOT EXISTS products_status_idx ON products (status)`,
       `CREATE INDEX IF NOT EXISTS products_ebay_idx ON products (listed_on_ebay, ebay_item_id)`,
@@ -582,6 +585,27 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
+  // Atomic increment of the ramp's failed-attempt counter. Done as an
+  // UPDATE SET … = … + 1 rather than read-then-write so concurrent bulk
+  // batches can't lose a count.
+  async incrementEbayListAttempts(productId: number): Promise<void> {
+    await db.execute(sql`
+      UPDATE products
+      SET ebay_list_attempts = ebay_list_attempts + 1
+      WHERE id = ${productId}
+    `);
+  }
+
+  async resetEbayListAttempts(opts?: { onlyErrored?: boolean }): Promise<number> {
+    const r: any = await db.execute(sql`
+      UPDATE products
+      SET ebay_list_attempts = 0
+      WHERE ebay_list_attempts > 0
+        ${opts?.onlyErrored ? sql`AND ebay_listing_status = 'error'` : sql``}
+    `);
+    return r.rowCount ?? 0;
+  }
+
   // Look up current supplier prices for a specific SKU set. Used by analytics
   // as the fallback when an order item has no snapshotted cost-at-sale.
   // Replaces a full getProducts() load that OOMs at 100k.
@@ -613,10 +637,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Candidates to list on eBay: TME products, in stock, not already listed,
-  // not excluded. DB-side filter + limit (no full-table load).
-  // Eligible-to-list products. Optional sale-price band (min/max, inclusive)
-  // lets the ramp target a price range. salePrice is the eBay list price.
+  // not excluded, and not stuck failing. DB-side filter + limit (no full-table
+  // load). Eligible-to-list products. Optional sale-price band (min/max,
+  // inclusive) lets the ramp target a price range. salePrice is the eBay
+  // list price.
   private listingCandidateConds(opts?: { minPrice?: number; maxPrice?: number }) {
+    const maxAttempts = Math.max(1, Number(process.env.EBAY_LIST_MAX_ATTEMPTS) || 3);
     const conds = [
       eq(products.supplier, "TME"),
       eq(products.listedOnEbay, false),
@@ -626,6 +652,10 @@ export class DatabaseStorage implements IStorage {
       // re-publishes their existing offer when stock returns, so the ramp
       // must not create a parallel offer for the same SKU.
       or(isNull(products.ebayListingStatus), ne(products.ebayListingStatus, "ended_oos")),
+      // Park failing SKUs after N attempts so they stop wasting eBay quota
+      // and starving fresh candidates. Operator can reset via the
+      // /api/ebay/reset-list-attempts endpoint to retry.
+      lt(products.ebayListAttempts, maxAttempts),
     ];
     if (opts?.minPrice != null) conds.push(gte(products.salePrice, String(opts.minPrice)));
     if (opts?.maxPrice != null) conds.push(lte(products.salePrice, String(opts.maxPrice)));

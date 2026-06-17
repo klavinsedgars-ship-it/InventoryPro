@@ -2043,6 +2043,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Operator-facing reset for the listing-ramp attempt counter. After the
+  // ramp parks a SKU as "errored" (>=EBAY_LIST_MAX_ATTEMPTS), this puts it
+  // back in the candidate pool so the next ramp tick re-tries it. Useful
+  // after fixing a category, image, or aspect issue. Pass {onlyErrored:true}
+  // to only reset rows whose status is 'error'; default resets all >0.
+  app.post("/api/ebay/reset-list-attempts", requireAuth, async (req, res) => {
+    try {
+      const onlyErrored = req.body?.onlyErrored === true;
+      const updated = await storage.resetEbayListAttempts({ onlyErrored });
+      res.json({ success: true, updated });
+    } catch (error) {
+      console.error("Reset list attempts failed:", error);
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
   app.post("/api/ebay/unlist", requireAuth, async (req, res) => {
     try {
       const { productId } = req.body;

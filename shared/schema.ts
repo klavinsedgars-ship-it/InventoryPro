@@ -42,6 +42,11 @@ export const products = pgTable("products", {
   ebayListingId: text("ebay_listing_id"),
   ebayListingStatus: text("ebay_listing_status"), // unlisted|inventory_created|offer_created|published|error
   ebayListingError: text("ebay_listing_error"),
+  // Failed-attempt counter for the listing ramp. Reset to 0 on a successful
+  // publish; incremented on every failure. The candidate query excludes rows
+  // ≥ EBAY_LIST_MAX_ATTEMPTS so permanently-broken SKUs stop wasting eBay
+  // quota and starving fresh candidates.
+  ebayListAttempts: integer("ebay_list_attempts").notNull().default(0),
   amazonAsin: text("amazon_asin"),
   tmeProductId: text("tme_product_id"),
   tmeCategoryId: text("tme_category_id"), // TME category ID for synced products
