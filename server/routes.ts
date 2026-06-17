@@ -1368,9 +1368,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const vatFrac = config.vatPct / (1 + config.vatPct);
       const round2 = (n: number) => Math.round(n * 100) / 100;
 
-      const orders = await storage.getOrders({});
-      const allProducts = await storage.getProducts();
-      const bySku = new Map(allProducts.map((p) => [p.sku, p]));
+      // Bound the analytics window. Default 12 months — overridable via
+      // ?months=N (max 60). Was unbounded, which loaded every order ever
+      // PLUS every product (for supplier-cost lookup) into JS.
+      const months = Math.min(60, Math.max(1, Number(req.query.months) || 12));
+      const since = new Date();
+      since.setMonth(since.getMonth() - months);
+      const orders = await storage.getOrders({ fromDate: since });
 
       const totals = {
         orders: 0, items: 0, revenue: 0, shipping: 0,
@@ -1386,6 +1390,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const orderIds = activeOrders.map((o) => o.id);
       const itemsByOrder = await storage.getOrderItemsByOrderIds(orderIds);
       const feesByOrder = await storage.getOrderFeesByOrderIds(orderIds);
+
+      // Only fetch supplier prices for SKUs actually present in these orders
+      // (typically a small fraction of the catalogue). Replaces loading all
+      // 100k products into a bySku map.
+      const skuSet = new Set<string>();
+      for (const items of Array.from(itemsByOrder.values())) {
+        for (const it of items) if (it.sku) skuSet.add(it.sku);
+      }
+      const supplierBySku = await storage.getSupplierPricesBySkus(Array.from(skuSet));
 
       for (const order of activeOrders) {
         const items = itemsByOrder.get(order.id) ?? [];
@@ -1410,10 +1423,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // TME price drift); fall back to the current product price for orders
           // imported before snapshotting existed.
           const snapshot = (it as any).supplierCostAtSale;
-          const prod = bySku.get(it.sku);
+          const fallbackPrice = supplierBySku.get(it.sku);
           const cost = snapshot != null
             ? parseFloat(snapshot) || 0
-            : (prod ? parseFloat(prod.supplierPrice) || 0 : 0);
+            : (fallbackPrice ? parseFloat(fallbackPrice) || 0 : 0);
           supplierCost += cost * (it.quantity || 1);
           itemCount += it.quantity || 1;
         }

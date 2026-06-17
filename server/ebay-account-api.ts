@@ -696,14 +696,10 @@ export class EbayAccountApiService {
         paymentsProgramOnboarded?: boolean;
       }>("GET", "/sell/account/v1/privilege");
 
-      // Calculate remaining by subtracting current listings from limit
-      // We'll get current listing stats from our database
-      const products = await storage.getProducts();
-      const listedProducts = products.filter(p => p.listedOnEbay);
-      const listedCount = listedProducts.length;
-      const listedValue = listedProducts.reduce((sum, p) => {
-        return sum + parseFloat(p.salePrice || "0");
-      }, 0);
+      // Calculate remaining by subtracting current listings from limit.
+      // DB-side aggregate — replaces a full getProducts() + JS reduce that
+      // OOMs at 100k.
+      const { count: listedCount, totalValue: listedValue } = await storage.getListedOnEbayRollup();
 
       const limitQuantity = response.sellingLimit?.quantity || 0;
       const limitAmount = parseFloat(response.sellingLimit?.amount?.value || "0");
@@ -752,13 +748,8 @@ export class EbayAccountApiService {
     error?: string;
   }> {
     try {
-      // Get current listing stats from database
-      const products = await storage.getProducts();
-      const listedProducts = products.filter(p => p.listedOnEbay);
-      const itemsListed = listedProducts.length;
-      const valueListed = listedProducts.reduce((sum, p) => {
-        return sum + parseFloat(p.salePrice || "0");
-      }, 0);
+      // Get current listing stats from the database (DB-side aggregate).
+      const { count: itemsListed, totalValue: valueListed } = await storage.getListedOnEbayRollup();
 
       // Try to get eBay API limits
       let itemLimit = 0;

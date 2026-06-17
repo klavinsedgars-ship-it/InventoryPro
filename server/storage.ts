@@ -582,6 +582,36 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
+  // Look up current supplier prices for a specific SKU set. Used by analytics
+  // as the fallback when an order item has no snapshotted cost-at-sale.
+  // Replaces a full getProducts() load that OOMs at 100k.
+  async getSupplierPricesBySkus(skus: string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (skus.length === 0) return out;
+    const rows = await db
+      .select({ sku: products.sku, supplierPrice: products.supplierPrice })
+      .from(products)
+      .where(inArray(products.sku, skus));
+    for (const r of rows) {
+      if (r.supplierPrice != null) out.set(r.sku, r.supplierPrice);
+    }
+    return out;
+  }
+
+  // Listed-on-eBay rollup used by eBay seller-limit calculators. Replaces a
+  // full storage.getProducts() + JS filter/reduce that OOMs at 100k.
+  async getListedOnEbayRollup(): Promise<{ count: number; totalValue: number }> {
+    const r: any = await db.execute(sql`
+      SELECT
+        COUNT(*)::int                                 AS c,
+        COALESCE(SUM(sale_price), 0)::float           AS v
+      FROM products
+      WHERE listed_on_ebay = true
+    `);
+    const row = (r.rows ?? r)?.[0] ?? {};
+    return { count: row.c ?? 0, totalValue: row.v ?? 0 };
+  }
+
   // Candidates to list on eBay: TME products, in stock, not already listed,
   // not excluded. DB-side filter + limit (no full-table load).
   // Eligible-to-list products. Optional sale-price band (min/max, inclusive)
@@ -1008,24 +1038,25 @@ export class DatabaseStorage implements IStorage {
     totalRevenue: number;
     outOfStock: number;
   }> {
-    const allProducts = await db.select().from(products);
-    
-    const totalProducts = allProducts.length;
-    const ebayListings = allProducts.filter(p => p.listedOnEbay).length;
-    const amazonListings = allProducts.filter(p => p.listedOnAmazon).length;
-    const outOfStock = allProducts.filter(p => p.stock === 0).length;
-    
-    const totalRevenue = allProducts.reduce((sum, product) => {
-      const price = parseFloat(product.salePrice) || 0;
-      return sum + (price * product.stock);
-    }, 0);
-
+    // DB-side aggregate — the previous version loaded every product row into
+    // JS just to count/reduce, which OOMs the dashboard endpoint at 100k.
+    // Single query, no row materialization.
+    const r: any = await db.execute(sql`
+      SELECT
+        COUNT(*)::int                                          AS total_products,
+        COUNT(*) FILTER (WHERE listed_on_ebay = true)::int     AS ebay_listings,
+        COUNT(*) FILTER (WHERE listed_on_amazon = true)::int   AS amazon_listings,
+        COUNT(*) FILTER (WHERE stock = 0)::int                 AS out_of_stock,
+        COALESCE(SUM(sale_price * stock), 0)::float            AS total_revenue
+      FROM products
+    `);
+    const row = (r.rows ?? r)?.[0] ?? {};
     return {
-      totalProducts,
-      ebayListings,
-      amazonListings,
-      totalRevenue: Math.round(totalRevenue),
-      outOfStock
+      totalProducts: row.total_products ?? 0,
+      ebayListings: row.ebay_listings ?? 0,
+      amazonListings: row.amazon_listings ?? 0,
+      totalRevenue: Math.round(row.total_revenue ?? 0),
+      outOfStock: row.out_of_stock ?? 0,
     };
   }
 
