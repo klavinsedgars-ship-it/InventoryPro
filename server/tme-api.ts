@@ -487,6 +487,21 @@ export class TMEApiService {
     }
   }
 
+  // Raw single TME Search page for a category, in-stock only. No keyword/mock
+  // fallback — returns exactly what TME has (empty when past the end), so a
+  // caller can page until exhausted and trust the result. TME pages are a
+  // fixed 20; `hasMore` is true only when a full page came back.
+  async getCategoryPageRaw(categoryId: string, page: number): Promise<{ products: TMEProduct[]; total: number; hasMore: boolean }> {
+    const response = await this.makeRequest<any>("/Products/Search.json", {
+      SearchCategory: categoryId,
+      SearchWithStock: "1",
+      SearchPage: String(page),
+    });
+    const products: TMEProduct[] = response.Data?.ProductList || [];
+    const total = (response.Data as any)?.Amount || 0;
+    return { products, total, hasMore: products.length >= 20 };
+  }
+
   // Get products by category with pagination using TME Search API with SearchCategory filter
   async getProductsByCategory(categoryId: string, page: number = 1, limit: number = 20): Promise<{products: TMEProduct[], total: number}> {
     console.log(`🔍 Getting products for category ${categoryId}, page ${page}, limit ${limit}`);

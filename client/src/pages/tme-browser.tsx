@@ -448,6 +448,15 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   const categories = leafCategories;
   const products = (productsData as any)?.products || [];
   const totalProducts = (productsData as any)?.total || 0;
+
+  // Symbols already in our DB (by TME symbol == product.sku). "Hide synced"
+  // uses this to drop already-synced products from the grid so you only see
+  // NEW products to add — the reliable, per-product meaning of "synced"
+  // (category-level coverage isn't computable; see notes).
+  const syncedSymbols = new Set(((existingProducts as any[]) || []).map((p: any) => p.sku));
+  const visibleProducts: TMEProduct[] = hideSyncedCategories
+    ? products.filter((p: TMEProduct) => !syncedSymbols.has(p.Symbol))
+    : products;
   const totalPages = Math.ceil(totalProducts / productsPerPage);
 
   // Enhanced product loading
@@ -537,17 +546,17 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
 
   const selectAllOnPage = () => {
     const newSelected = new Set(selectedProducts);
-    products.forEach((p: TMEProduct) => newSelected.add(p.Symbol));
+    visibleProducts.forEach((p: TMEProduct) => newSelected.add(p.Symbol));
     setSelectedProducts(newSelected);
-    rememberDetails(products);
+    rememberDetails(visibleProducts);
     toast({
       title: "Selected all on page",
-      description: `Added ${products.length} products to selection`
+      description: `Added ${visibleProducts.length} products to selection`
     });
   };
 
   const selectAllSuitable = () => {
-    const suitableProducts = products.filter((p: TMEProduct) => isSuitableProduct(p));
+    const suitableProducts = visibleProducts.filter((p: TMEProduct) => isSuitableProduct(p));
     const newSelected = new Set(selectedProducts);
     suitableProducts.forEach((p: TMEProduct) => newSelected.add(p.Symbol));
     setSelectedProducts(newSelected);
@@ -577,96 +586,56 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     });
   };
   
-  const bulkSelectPages = async (numPages: number) => {
+  // "Select All": pull EVERY in-stock product for the category in one request.
+  // The server (/api/tme/category-all) pages TME until exhausted with no
+  // window-slicing and no keyword/mock fallback, so the selection actually
+  // matches the category — fixing the old "200 shown, 70 selected" bug where
+  // the page-window math under-fetched.
+  const bulkSelectPages = async () => {
     if (!selectedCategory) return;
-    
+
     const controller = new AbortController();
     setBulkAbortController(controller);
     setBulkLoading(true);
     setBulkProgress(0);
-    const newSelected = new Set(selectedProducts);
-    const newDetails = new Map(selectedDetails);
-    let successfulPages = 0;
-    let failedPages = 0;
-    
+
     try {
-      for (let page = 1; page <= numPages; page++) {
-        if (controller.signal.aborted) break;
+      const params = new URLSearchParams({ categoryId: selectedCategory });
+      if (filters.search) params.append('search', filters.search);
+      if (filters.priceMin) params.append('priceMin', filters.priceMin);
+      if (filters.priceMax) params.append('priceMax', filters.priceMax);
+      if (filters.producer) params.append('producer', filters.producer);
 
-        setBulkProgress(Math.round((page / numPages) * 100));
+      const response = await fetch(`/api/tme/category-all?${params.toString()}`, {
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      if (controller.signal.aborted) return;
 
-        try {
-          // Mirror the main grid query EXACTLY: same page size (productsPerPage)
-          // and same active filters. The server window is (page-1)*limit, so a
-          // smaller limit here than the UI's would only cover part of the range
-          // — the old hard-coded limit=20 with numPages=totalPages(@50) fetched
-          // just 3*20=60 of e.g. 103 products. It also dropped the in-stock /
-          // search / producer filters, selecting items not in the current view.
-          const params = new URLSearchParams({
-            categoryId: selectedCategory,
-            page: page.toString(),
-            limit: productsPerPage.toString(),
-          });
-          if (filters.search) params.append('search', filters.search);
-          if (filters.priceMin) params.append('priceMin', filters.priceMin);
-          if (filters.priceMax) params.append('priceMax', filters.priceMax);
-          if (filters.stockMin) params.append('stockMin', filters.stockMin);
-          if (filters.producer) params.append('producer', filters.producer);
-          params.append('inStockOnly', filters.inStockOnly.toString());
-          const response = await fetch(
-            `/api/tme/products?${params.toString()}`,
-            { signal: controller.signal }
-          );
-          
-          if (response.ok) {
-            const data = await response.json();
-            if (data.products) {
-              data.products.forEach((p: TMEProduct) => {
-                newSelected.add(p.Symbol);
-                newDetails.set(p.Symbol, p);
-              });
-              successfulPages++;
-            }
-          } else {
-            failedPages++;
-            console.warn(`Page ${page} failed with status ${response.status}`);
-          }
-        } catch (pageError: any) {
-          if (pageError.name === 'AbortError') throw pageError;
-          failedPages++;
-          console.warn(`Page ${page} failed:`, pageError.message);
-        }
-        
-        // Small delay to avoid rate limiting
-        if (page < numPages && !controller.signal.aborted) {
-          await new Promise(resolve => setTimeout(resolve, 300));
-        }
-      }
-      
-      if (!controller.signal.aborted) {
-        setSelectedProducts(newSelected);
-        setSelectedDetails(newDetails);
-        if (failedPages > 0) {
-          toast({
-            title: "Partial selection complete",
-            description: `Selected ${newSelected.size} products. ${failedPages} pages failed (TME timeout). Try again later.`,
-            variant: "destructive"
-          });
-        } else {
-          toast({
-            title: "Bulk selection complete",
-            description: `Selected ${newSelected.size} products from ${numPages} pages`
-          });
-        }
-      }
+      const newSelected = new Set(selectedProducts);
+      const newDetails = new Map(selectedDetails);
+      const before = newSelected.size;
+      (data.products || []).forEach((p: TMEProduct) => {
+        newSelected.add(p.Symbol);
+        newDetails.set(p.Symbol, p);
+      });
+      setSelectedProducts(newSelected);
+      setSelectedDetails(newDetails);
+
+      const added = newSelected.size - before;
+      toast({
+        title: data.truncated ? "Bulk selection capped" : "Bulk selection complete",
+        description: data.truncated
+          ? `Category is large — capped at ${data.fetched} products. Added ${added} new (total ${newSelected.size}).`
+          : `Selected all ${data.filtered} in this category — added ${added} new (total ${newSelected.size}).`,
+      });
     } catch (error: any) {
       if (error.name !== 'AbortError') {
-        setSelectedProducts(newSelected);
-        setSelectedDetails(newDetails);
         toast({
-          title: "Selection stopped",
-          description: `Selected ${newSelected.size} products before error. TME API may be overloaded.`,
-          variant: "destructive"
+          title: "Select All failed",
+          description: error.message || "TME API may be overloaded — try again.",
+          variant: "destructive",
         });
       }
     } finally {
@@ -1146,19 +1115,19 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                 onClick={selectAllOnPage}
                                 variant="outline"
                                 size="sm"
-                                disabled={products.length === 0}
+                                disabled={visibleProducts.length === 0}
                                 data-testid="btn-select-page"
                               >
-                                Select Page ({products.length})
+                                Select Page ({visibleProducts.length})
                               </Button>
                               <Button
-                                onClick={() => bulkSelectPages(totalPages)}
+                                onClick={() => bulkSelectPages()}
                                 variant="outline"
                                 size="sm"
-                                disabled={bulkLoading || totalPages < 1}
+                                disabled={bulkLoading || totalProducts < 1}
                                 data-testid="btn-select-all-category"
                               >
-                                {bulkLoading ? `Loading ${bulkProgress}%...` : `Select All (${totalProducts})`}
+                                {bulkLoading ? "Selecting all…" : `Select All (${totalProducts})`}
                               </Button>
                             </div>
                           )}
@@ -1210,7 +1179,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                         <CardTitle className="text-base font-semibold">
                           Products ({totalProducts.toLocaleString()} {filters.inStockOnly ? "in stock" : "total"}
                           {hasPriceFilter && enhancedProducts.length > 0
-                            ? ` · ${products.filter((p: TMEProduct) => inPriceRange(p.Symbol)).length} shown after price filter`
+                            ? ` · ${visibleProducts.filter((p: TMEProduct) => inPriceRange(p.Symbol)).length} shown after price filter`
                             : ""}
                           )
                         </CardTitle>
@@ -1266,10 +1235,14 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                             <div key={i} className="h-20 bg-gray-200 rounded animate-pulse"></div>
                           ))}
                         </div>
-                      ) : products.length === 0 ? (
+                      ) : visibleProducts.length === 0 ? (
                         <div className="text-center py-8">
                           <Package className="h-10 w-10 mx-auto mb-3 text-gray-400" />
-                          <p className="text-sm text-gray-500">No products found</p>
+                          <p className="text-sm text-gray-500">
+                            {products.length > 0 && hideSyncedCategories
+                              ? "All products on this page are already synced. Untick \"Hide synced\" to see them."
+                              : "No products found"}
+                          </p>
                         </div>
                       ) : (
                         <div className="space-y-1.5">
@@ -1279,7 +1252,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                               Price filter is set, but prices aren't loaded yet. Click <strong>Load Prices</strong> to apply it.
                             </div>
                           )}
-                          {products.filter((product: TMEProduct) => inPriceRange(product.Symbol)).map((product: TMEProduct) => {
+                          {visibleProducts.filter((product: TMEProduct) => inPriceRange(product.Symbol)).map((product: TMEProduct) => {
                             const enhanced = getEnhancedProductInfo(product.Symbol);
                             const thumbnail = getProductThumbnail(product);
                             

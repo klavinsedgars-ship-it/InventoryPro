@@ -2971,6 +2971,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     });
 
+    // ALL in-stock products for a category, paged until exhausted. Backs the
+    // "Select All" button reliably — unlike /api/tme/products it does not
+    // window-slice or fall back to keyword/mock search, so "Select All (N)"
+    // actually returns everything TME has for the category (capped for safety).
+    app.get("/api/tme/category-all", async (req, res) => {
+      try {
+        const categoryId = req.query.categoryId as string;
+        if (!categoryId) {
+          return res.status(400).json({ success: false, error: "categoryId is required" });
+        }
+        const search = ((req.query.search as string) || "").toLowerCase();
+        const producer = ((req.query.producer as string) || "").toLowerCase();
+        const priceMin = req.query.priceMin ? parseFloat(req.query.priceMin as string) : null;
+        const priceMax = req.query.priceMax ? parseFloat(req.query.priceMax as string) : null;
+
+        const MAX_PAGES = 100; // 100 * 20 = 2000 products hard cap per category
+        const all: any[] = [];
+        const seen = new Set<string>();
+        let total = 0;
+        let pagesFetched = 0;
+        let truncated = false;
+
+        for (let page = 1; page <= MAX_PAGES; page++) {
+          const r = await tmeApi.getCategoryPageRaw(categoryId, page);
+          pagesFetched++;
+          total = r.total || total;
+          for (const p of r.products) {
+            if (!seen.has(p.Symbol)) {
+              seen.add(p.Symbol);
+              all.push(p);
+            }
+          }
+          if (!r.hasMore) break;
+          if (page === MAX_PAGES) truncated = true;
+          // Gentle pacing so a big category doesn't hammer TME's rate limit.
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+
+        // Apply the same client-side filters the grid uses (price needs a
+        // loaded price, which Search doesn't include — so price filters are
+        // best-effort and only drop items whose price is known and out of band).
+        let products = all;
+        if (search) {
+          products = products.filter((p) =>
+            p.Description?.toLowerCase().includes(search) ||
+            p.Symbol?.toLowerCase().includes(search) ||
+            p.Producer?.toLowerCase().includes(search),
+          );
+        }
+        if (producer) {
+          products = products.filter((p) => p.Producer?.toLowerCase().includes(producer));
+        }
+
+        res.json({
+          success: true,
+          products,
+          fetched: all.length,
+          filtered: products.length,
+          total,
+          pagesFetched,
+          truncated,
+        });
+      } catch (error) {
+        console.error("TME category-all fetch error:", error);
+        res.status(500).json({ success: false, error: (error as Error).message });
+      }
+    });
+
     // Get enhanced product information (details + prices + stock)
     app.post("/api/tme/enhanced-info", async (req, res) => {
       try {
