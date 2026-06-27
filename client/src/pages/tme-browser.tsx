@@ -203,6 +203,10 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>("");
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
+  // Product objects for everything in selectedProducts, kept so the selection
+  // panel can render items chosen in OTHER categories/pages (the grid only
+  // holds the current page). Source of truth for selection display.
+  const [selectedDetails, setSelectedDetails] = useState<Map<string, TMEProduct>>(new Map());
   const [currentPage, setCurrentPage] = useState(1);
   const [productsPerPage] = useState(50); // Server aggregates 3 TME pages (20 each) into one UI page.
   const [showSyncDialog, setShowSyncDialog] = useState(false);
@@ -497,16 +501,35 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   const selectCategory = (categoryId: string) => {
     setSelectedCategory(categoryId);
     setCurrentPage(1);
-    setSelectedProducts(new Set());
+    // NOTE: do NOT clear selectedProducts here. Selection accumulates across
+    // categories/subcategories so the operator can assemble one big sync from
+    // many subcategories. Enhanced (per-category) pricing data is still reset.
     setEnhancedProducts([]);
+  };
+
+  // Remember product objects for a set of selected symbols so the selection
+  // panel can show items from categories/pages no longer on screen.
+  const rememberDetails = (prods: TMEProduct[]) => {
+    setSelectedDetails((prev) => {
+      const next = new Map(prev);
+      for (const p of prods) next.set(p.Symbol, p);
+      return next;
+    });
   };
 
   const toggleProductSelection = (productSymbol: string) => {
     const newSelected = new Set(selectedProducts);
     if (newSelected.has(productSymbol)) {
       newSelected.delete(productSymbol);
+      setSelectedDetails((prev) => {
+        const next = new Map(prev);
+        next.delete(productSymbol);
+        return next;
+      });
     } else {
       newSelected.add(productSymbol);
+      const prod = products.find((p: TMEProduct) => p.Symbol === productSymbol);
+      if (prod) rememberDetails([prod]);
     }
     setSelectedProducts(newSelected);
   };
@@ -515,6 +538,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     const newSelected = new Set(selectedProducts);
     products.forEach((p: TMEProduct) => newSelected.add(p.Symbol));
     setSelectedProducts(newSelected);
+    rememberDetails(products);
     toast({
       title: "Selected all on page",
       description: `Added ${products.length} products to selection`
@@ -526,10 +550,12 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     const newSelected = new Set(selectedProducts);
     suitableProducts.forEach((p: TMEProduct) => newSelected.add(p.Symbol));
     setSelectedProducts(newSelected);
+    rememberDetails(suitableProducts);
   };
 
   const clearSelection = () => {
     setSelectedProducts(new Set());
+    setSelectedDetails(new Map());
   };
 
   // Bulk load multiple pages and select all products
@@ -558,6 +584,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     setBulkLoading(true);
     setBulkProgress(0);
     const newSelected = new Set(selectedProducts);
+    const newDetails = new Map(selectedDetails);
     let successfulPages = 0;
     let failedPages = 0;
     
@@ -576,7 +603,10 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
           if (response.ok) {
             const data = await response.json();
             if (data.products) {
-              data.products.forEach((p: TMEProduct) => newSelected.add(p.Symbol));
+              data.products.forEach((p: TMEProduct) => {
+                newSelected.add(p.Symbol);
+                newDetails.set(p.Symbol, p);
+              });
               successfulPages++;
             }
           } else {
@@ -597,6 +627,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
       
       if (!controller.signal.aborted) {
         setSelectedProducts(newSelected);
+        setSelectedDetails(newDetails);
         if (failedPages > 0) {
           toast({
             title: "Partial selection complete",
@@ -613,6 +644,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     } catch (error: any) {
       if (error.name !== 'AbortError') {
         setSelectedProducts(newSelected);
+        setSelectedDetails(newDetails);
         toast({
           title: "Selection stopped",
           description: `Selected ${newSelected.size} products before error. TME API may be overloaded.`,
@@ -700,7 +732,10 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
       const final = await pumpSyncJob(startData.jobId);
       if (final) {
         finishSync(final);
-        if (final.status !== "cancelled") setSelectedProducts(new Set());
+        if (final.status !== "cancelled") {
+          setSelectedProducts(new Set());
+          setSelectedDetails(new Map());
+        }
       }
     } catch (error) {
       toast({
@@ -1375,7 +1410,11 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                     <ScrollArea className="h-[400px]">
                       <div className="space-y-2">
                         {Array.from(selectedProducts).map(symbol => {
-                          const product = products.find((p: TMEProduct) => p.Symbol === symbol);
+                          // Prefer the remembered detail (covers items selected
+                          // in other categories/pages); fall back to the current
+                          // grid for the freshest copy.
+                          const product = selectedDetails.get(symbol)
+                            || products.find((p: TMEProduct) => p.Symbol === symbol);
                           const enhanced = getEnhancedProductInfo(symbol);
 
                           if (!product) return null;
