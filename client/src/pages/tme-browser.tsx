@@ -591,12 +591,29 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     try {
       for (let page = 1; page <= numPages; page++) {
         if (controller.signal.aborted) break;
-        
+
         setBulkProgress(Math.round((page / numPages) * 100));
-        
+
         try {
+          // Mirror the main grid query EXACTLY: same page size (productsPerPage)
+          // and same active filters. The server window is (page-1)*limit, so a
+          // smaller limit here than the UI's would only cover part of the range
+          // — the old hard-coded limit=20 with numPages=totalPages(@50) fetched
+          // just 3*20=60 of e.g. 103 products. It also dropped the in-stock /
+          // search / producer filters, selecting items not in the current view.
+          const params = new URLSearchParams({
+            categoryId: selectedCategory,
+            page: page.toString(),
+            limit: productsPerPage.toString(),
+          });
+          if (filters.search) params.append('search', filters.search);
+          if (filters.priceMin) params.append('priceMin', filters.priceMin);
+          if (filters.priceMax) params.append('priceMax', filters.priceMax);
+          if (filters.stockMin) params.append('stockMin', filters.stockMin);
+          if (filters.producer) params.append('producer', filters.producer);
+          params.append('inStockOnly', filters.inStockOnly.toString());
           const response = await fetch(
-            `/api/tme/products?categoryId=${selectedCategory}&page=${page}&limit=20`,
+            `/api/tme/products?${params.toString()}`,
             { signal: controller.signal }
           );
           
