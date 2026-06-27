@@ -408,26 +408,27 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     return !category.children || category.children.length === 0;
   };
   
-  // Filter tree to hide only synced leaf categories (not parents)
+  // Filter the tree for "Hide synced". Two rules, applied bottom-up:
+  //   1. A leaf that's directly synced is hidden.
+  //   2. A parent whose children ALL get hidden (a fully-synced branch) is
+  //      hidden too — the old version kept these empty parent shells, which is
+  //      why "Hide synced" looked like it did nothing (e.g. Diodes/Transistors
+  //      are parents, never leaves, so nothing ever disappeared).
+  // Partially-synced parents stay, showing only their remaining unsynced
+  // children — so what's left is exactly the paths to un-synced categories.
   const filterSyncedLeaves = (categories: TMECategory[]): TMECategory[] => {
-    return categories
-      .filter(cat => {
-        // Only hide if it's a leaf AND directly synced
-        if (isLeafCategory(cat) && isCategoryDirectlySynced(cat)) {
-          return false; // Hide this synced leaf
-        }
-        return true; // Keep parents and non-synced leaves
-      })
-      .map(cat => {
-        // Recursively filter children
-        if (cat.children && cat.children.length > 0) {
-          return {
-            ...cat,
-            children: filterSyncedLeaves(cat.children)
-          };
-        }
-        return cat;
-      });
+    const result: TMECategory[] = [];
+    for (const cat of categories) {
+      if (!isLeafCategory(cat)) {
+        const filteredChildren = filterSyncedLeaves(cat.children!);
+        if (filteredChildren.length === 0) continue; // whole branch synced → drop
+        result.push({ ...cat, children: filteredChildren });
+      } else {
+        if (isCategoryDirectlySynced(cat)) continue; // synced leaf → drop
+        result.push(cat);
+      }
+    }
+    return result;
   };
   
   // Toggle category expansion
