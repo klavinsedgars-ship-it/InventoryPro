@@ -192,7 +192,14 @@ export async function processDelayedRules(): Promise<{ processed: number; sent: 
 
     console.log(`Processing ${delayedRules.length} delayed auto-message rules`);
 
-    const deliveredOrders = await storage.getOrders({ status: 'delivered' });
+    // Bound the scan: eBay messaging is only allowed within 90 days of the
+    // order, and this runs hourly, so a 120-day window (buffer for delivery
+    // lag) covers every order that could still be eligible without loading the
+    // whole delivered-orders history as it accumulates.
+    const deliveredOrders = await storage.getOrders({
+      status: 'delivered',
+      fromDate: new Date(Date.now() - 120 * 24 * 60 * 60 * 1000),
+    });
     
     for (const order of deliveredOrders) {
       if (!order.deliveredAt) continue;
