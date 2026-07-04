@@ -4570,6 +4570,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/cron/daily-sync", cronHandler);
   app.post("/api/cron/daily-sync", cronHandler);
 
+  // Auto-message cron: sends delayed (days-after-delivery) rule messages and
+  // due one-off scheduled messages. Needed because the setInterval scheduler
+  // only runs on a long-lived server, which Vercel isn't — so without this
+  // these messages never sent. Same CRON_SECRET-or-session auth as daily-sync.
+  const autoMessagesHandler = async (req: any, res: any) => {
+    const auth = req.headers["authorization"] || "";
+    const cronSecret = process.env.CRON_SECRET;
+    const isVercelCron = cronSecret && auth === `Bearer ${cronSecret}`;
+    const isAuthed = !!req.session?.userId || process.env.BYPASS_AUTH === "true";
+    if (!isVercelCron && !isAuthed) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    try {
+      const [delayed, scheduled] = await Promise.all([
+        autoMessageScheduler.processDelayedRules(),
+        autoMessageScheduler.processScheduledMessages(),
+      ]);
+      const errors = [...delayed.errors, ...scheduled.errors];
+      await storage.createSyncLog({
+        source: "messages",
+        operation: "auto_messages",
+        status: errors.length === 0 ? "success" : "partial",
+        message: `Auto-messages: delayed ${delayed.sent}/${delayed.processed}, scheduled ${scheduled.sent}/${scheduled.processed}${errors.length ? `, ${errors.length} errors` : ""}`,
+        details: JSON.stringify({ delayed, scheduled, errors: errors.slice(0, 20) }),
+      });
+      res.json({ success: true, delayed, scheduled });
+    } catch (error) {
+      console.error("Auto-messages cron failed:", error);
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  };
+  app.get("/api/cron/auto-messages", autoMessagesHandler);
+  app.post("/api/cron/auto-messages", autoMessagesHandler);
+
   // Persisted ramp sale-price band (marketplace_settings ebay/ramp_min_price,
   // ramp_max_price). Stored so every self-chained run and the scheduled cron
   // use the same range. Empty/invalid = no bound. Hoisted so the preview and

@@ -226,6 +226,63 @@ export async function processDelayedRules(): Promise<{ processed: number; sent: 
   }
 }
 
+// Send one-off scheduled messages whose time has come (status=pending,
+// scheduledFor <= now). Runs from the /api/cron/auto-messages endpoint on
+// Vercel (the setInterval scheduler below only runs on a long-lived server,
+// which Vercel isn't). Each message is marked sent/failed so it's processed
+// at most once.
+export async function processScheduledMessages(): Promise<{ processed: number; sent: number; errors: string[] }> {
+  const results = { processed: 0, sent: 0, errors: [] as string[] };
+  try {
+    const due = await storage.getPendingScheduledMessages();
+    for (const sm of due) {
+      results.processed++;
+      try {
+        const template = await storage.getMessageTemplate(sm.templateId);
+        if (!template) {
+          await storage.updateScheduledMessage(sm.id, { status: 'failed', errorMessage: 'Template not found' });
+          results.errors.push(`Scheduled msg ${sm.id}: template ${sm.templateId} not found`);
+          continue;
+        }
+        const order = sm.orderId ? await storage.getOrder(sm.orderId) : undefined;
+        const body = ebayMessagesApi.renderTemplate(template.body, {
+          buyer_name: sm.buyerUsername || 'Customer',
+          order_id: order?.marketplaceOrderId || (order ? `#${order.id}` : ''),
+          item_title: 'Your item',
+          tracking_number: order?.trackingNumber || 'Not yet available',
+          shop_name: 'Our Store',
+        });
+
+        // Deliver via eBay. Without an itemId the Trading API can't send, so
+        // mark failed rather than silently "sent" (the silent-no-op bug).
+        let ebayResult: { success: boolean; error?: string };
+        if (!sm.itemId) {
+          ebayResult = { success: false, error: 'No itemId on scheduled message' };
+        } else if (!ebayOAuth.isOAuthConfigured()) {
+          ebayResult = { success: false, error: 'eBay OAuth not configured' };
+        } else {
+          ebayResult = await ebayMessagesApi.sendMessageToPartner(sm.itemId, sm.buyerUsername, body);
+        }
+
+        if (ebayResult.success) {
+          await storage.updateScheduledMessage(sm.id, { status: 'sent', sentAt: new Date() });
+          await storage.incrementTemplateUsage(sm.templateId);
+          results.sent++;
+        } else {
+          await storage.updateScheduledMessage(sm.id, { status: 'failed', errorMessage: ebayResult.error });
+          results.errors.push(`Scheduled msg ${sm.id}: ${ebayResult.error}`);
+        }
+      } catch (e) {
+        await storage.updateScheduledMessage(sm.id, { status: 'failed', errorMessage: (e as Error).message });
+        results.errors.push(`Scheduled msg ${sm.id}: ${(e as Error).message}`);
+      }
+    }
+  } catch (e) {
+    results.errors.push((e as Error).message);
+  }
+  return results;
+}
+
 let schedulerInterval: NodeJS.Timeout | null = null;
 
 export function startAutoMessageScheduler(): void {
@@ -259,6 +316,7 @@ export function stopAutoMessageScheduler(): void {
 export const autoMessageScheduler = {
   processAutoMessageTrigger,
   processDelayedRules,
+  processScheduledMessages,
   startAutoMessageScheduler,
   stopAutoMessageScheduler,
 };

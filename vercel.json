@@ -12,6 +12,7 @@
   ],
   "crons": [
     { "path": "/api/cron/daily-sync", "schedule": "0 * * * *" },
-    { "path": "/api/cron/list-ramp", "schedule": "30 */6 * * *" }
+    { "path": "/api/cron/list-ramp", "schedule": "30 */6 * * *" },
+    { "path": "/api/cron/auto-messages", "schedule": "15 * * * *" }
   ]
 }
