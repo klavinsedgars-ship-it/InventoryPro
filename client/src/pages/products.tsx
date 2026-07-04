@@ -66,6 +66,7 @@ export function Products({ user }: ProductsProps) {
   const [marketplaceFilter, setMarketplaceFilter] = useState<string>("all");
   const [moqFilter, setMoqFilter] = useState<string>("all");
   const [itemsPerPage, setItemsPerPage] = useState<number>(250);
+  const [currentPage, setCurrentPage] = useState(1);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   // Click-to-sort on Price / TME-stock columns
   const [sortField, setSortField] = useState<"price" | "stock" | null>(null);
@@ -89,12 +90,44 @@ export function Products({ user }: ProductsProps) {
   const [bulkListingProgress, setBulkListingProgress] = useState<BulkListingJob | null>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const { data: products = [], isLoading } = useQuery<Product[]>({
-    queryKey: ["/api/products", { 
-      category: selectedCategory && selectedCategory !== "all" ? selectedCategory : undefined,
-      status: selectedStatus && selectedStatus !== "all" ? selectedStatus : undefined 
-    }],
+  // Server-side pagination + filtering (was: download the whole table and
+  // filter/sort in the browser — dies at 100k). All filters live in the URL so
+  // the default fetcher actually uses them (a query key with object params was
+  // silently ignored, re-fetching the full list per filter combo).
+  const productsParams = new URLSearchParams({
+    limit: String(itemsPerPage),
+    offset: String((currentPage - 1) * itemsPerPage),
+    sortDir,
   });
+  if (searchTerm) productsParams.set("search", searchTerm);
+  if (selectedCategory !== "all") productsParams.set("category", selectedCategory);
+  if (selectedStatus !== "all") productsParams.set("status", selectedStatus);
+  productsParams.set("priceMin", String(priceRange[0]));
+  productsParams.set("priceMax", String(priceRange[1]));
+  if (stockFilter !== "all") productsParams.set("stock", stockFilter);
+  if (marketplaceFilter !== "all") productsParams.set("marketplace", marketplaceFilter);
+  if (moqFilter !== "all") productsParams.set("moq", moqFilter);
+  if (sortField) productsParams.set("sortField", sortField);
+
+  const { data: pagedData, isLoading } = useQuery<{ products: Product[]; total: number }>({
+    queryKey: [`/api/products/paged?${productsParams.toString()}`],
+  });
+  const products = pagedData?.products ?? [];
+  const productsTotal = pagedData?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(productsTotal / itemsPerPage));
+
+  // Filters changed -> back to page 1 and clear the now-offscreen selection.
+  useEffect(() => {
+    setCurrentPage(1);
+    setSelectedProducts(new Set());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchTerm, selectedCategory, selectedStatus, priceRange, stockFilter, marketplaceFilter, moqFilter, sortField, sortDir, itemsPerPage]);
+
+  // Selection is page-scoped (only the current page is loaded), so clear it
+  // when the page changes.
+  useEffect(() => {
+    setSelectedProducts(new Set());
+  }, [currentPage]);
 
   const { data: categories = [] } = useQuery<Category[]>({
     queryKey: ["/api/categories"],
@@ -504,57 +537,9 @@ export function Products({ user }: ProductsProps) {
     },
   });
 
-  // Enhanced filtering logic
-  const filteredProducts = products.filter(product => {
-    // Text search
-    const matchesSearch = !searchTerm || 
-      product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      product.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (product.ean && product.ean.toLowerCase().includes(searchTerm.toLowerCase()));
-
-    // Category filter
-    const matchesCategory = selectedCategory === "all" || product.category === selectedCategory;
-
-    // Status filter
-    const matchesStatus = selectedStatus === "all" || product.status === selectedStatus;
-
-    // Price range filter
-    const productPrice = parseFloat(product.salePrice);
-    const matchesPrice = productPrice >= priceRange[0] && productPrice <= priceRange[1];
-
-    // Stock filter
-    const matchesStock = stockFilter === "all" || 
-      (stockFilter === "low" && product.stock < 5 && product.stock > 0) ||
-      (stockFilter === "high" && product.stock > 5) ||
-      (stockFilter === "out" && product.stock === 0) ||
-      (stockFilter === "available" && product.stock > 0);
-
-    // Marketplace filter
-    const matchesMarketplace = marketplaceFilter === "all" ||
-      (marketplaceFilter === "listed" && (product.listedOnEbay || product.listedOnAmazon)) ||
-      (marketplaceFilter === "ebay" && product.listedOnEbay) ||
-      (marketplaceFilter === "amazon" && product.listedOnAmazon) ||
-      (marketplaceFilter === "unlisted" && !product.listedOnEbay && !product.listedOnAmazon);
-
-    const matchesMoq = moqFilter === "all" ||
-      (moqFilter === "single" && (!product.moq || product.moq === 1)) ||
-      (moqFilter === "multipack" && product.moq && product.moq > 1);
-
-    return matchesSearch && matchesCategory && matchesStatus && 
-           matchesPrice && matchesStock && matchesMarketplace && matchesMoq;
-  });
-
-  // Optional sort by Price (salePrice) or TME stock, then paginate.
-  const sortedProducts = sortField
-    ? [...filteredProducts].sort((a, b) => {
-        const av = sortField === "price" ? parseFloat(a.salePrice) || 0 : a.stock ?? 0;
-        const bv = sortField === "price" ? parseFloat(b.salePrice) || 0 : b.stock ?? 0;
-        return sortDir === "desc" ? bv - av : av - bv;
-      })
-    : filteredProducts;
-
-  // Paginate products based on itemsPerPage
-  const displayedProducts = sortedProducts.slice(0, itemsPerPage);
+  // Filtering, sorting and pagination now happen server-side (see the
+  // /api/products/paged query above); `products` IS the current page.
+  const displayedProducts = products;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -571,7 +556,7 @@ export function Products({ user }: ProductsProps) {
                     variant="destructive" 
                     size="sm"
                     className="h-7 text-xs px-2"
-                    disabled={products.length === 0 || deleteAllMutation.isPending}
+                    disabled={productsTotal === 0 || deleteAllMutation.isPending}
                     data-testid="button-delete-all"
                   >
                     <Trash2 className="w-3 h-3 mr-1" />
@@ -582,7 +567,7 @@ export function Products({ user }: ProductsProps) {
                   <AlertDialogHeader>
                     <AlertDialogTitle>Delete All Products?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      This will permanently delete all {products.length} products from your inventory. 
+                      This will permanently delete all {productsTotal} products from your inventory. 
                       This action cannot be undone.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
@@ -871,7 +856,7 @@ export function Products({ user }: ProductsProps) {
                   ))}
                 </div>
               </div>
-            ) : filteredProducts.length === 0 ? (
+            ) : productsTotal === 0 && !isLoading ? (
               <div className="p-8 text-center">
                 <p className="text-gray-500">
                   {searchTerm || selectedCategory || selectedStatus 
@@ -882,12 +867,33 @@ export function Products({ user }: ProductsProps) {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                {/* Products count indicator */}
-                <div className="px-4 py-2 bg-gray-50 border-b text-xs text-gray-600">
-                  Showing {displayedProducts.length} of {filteredProducts.length} products
-                  {filteredProducts.length > displayedProducts.length && (
-                    <span className="text-gray-400 ml-1">(increase limit to see more)</span>
-                  )}
+                {/* Products count + server-side pagination controls */}
+                <div className="px-4 py-2 bg-gray-50 border-b text-xs text-gray-600 flex items-center justify-between gap-3">
+                  <span>
+                    Showing {productsTotal === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1}
+                    –{(currentPage - 1) * itemsPerPage + displayedProducts.length} of {productsTotal.toLocaleString()}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span>Page {currentPage} of {totalPages}</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-6 px-2"
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                      disabled={currentPage <= 1 || isLoading}
+                    >
+                      Previous
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-6 px-2"
+                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                      disabled={currentPage >= totalPages || isLoading}
+                    >
+                      Next
+                    </Button>
+                  </div>
                 </div>
                 <table className="w-full divide-y divide-gray-200 table-fixed">
                   <thead className="bg-gray-50">

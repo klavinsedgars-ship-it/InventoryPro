@@ -1627,6 +1627,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Server-side paginated + filtered products (Products page). Returns the page
+  // rows + the total matching count so the page never downloads the whole
+  // catalogue. Left the legacy array endpoint below untouched (other callers
+  // still use it).
+  app.get("/api/products/paged", requireAuth, async (req, res) => {
+    try {
+      const q = req.query;
+      const limit = Math.min(1000, Math.max(1, Number(q.limit) || 250));
+      const offset = Math.max(0, Number(q.offset) || 0);
+      const sortField = q.sortField === "price" || q.sortField === "stock" ? q.sortField : null;
+      const result = await storage.getProductsPaged({
+        search: (q.search as string) || undefined,
+        category: (q.category as string) || undefined,
+        status: (q.status as string) || undefined,
+        priceMin: q.priceMin != null && q.priceMin !== "" ? Number(q.priceMin) : undefined,
+        priceMax: q.priceMax != null && q.priceMax !== "" ? Number(q.priceMax) : undefined,
+        stock: (q.stock as string) || undefined,
+        marketplace: (q.marketplace as string) || undefined,
+        moq: (q.moq as string) || undefined,
+        sortField,
+        sortDir: q.sortDir === "asc" ? "asc" : "desc",
+        limit,
+        offset,
+      });
+      res.json({ products: result.rows, total: result.total, limit, offset });
+    } catch (error) {
+      console.error("Paged products fetch failed:", error);
+      res.status(500).json({ message: "Failed to fetch products" });
+    }
+  });
+
   // Product routes
   app.get("/api/products", requireAuth, async (req, res) => {
     try {

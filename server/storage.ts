@@ -848,6 +848,62 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(products).orderBy(desc(products.createdAt));
   }
 
+  // Server-side paginated + filtered product listing for the Products page.
+  // Replaces the old "download the whole table and filter in the browser"
+  // pattern so the page scales to 100k. Every filter the UI offers is applied
+  // in SQL; returns the page rows plus the total matching count.
+  async getProductsPaged(f: {
+    search?: string;
+    category?: string;
+    status?: string;
+    priceMin?: number;
+    priceMax?: number;
+    stock?: string;        // low | high | out | available
+    marketplace?: string;  // listed | ebay | amazon | unlisted
+    moq?: string;          // single | multipack
+    sortField?: "price" | "stock" | null;
+    sortDir?: "asc" | "desc";
+    limit: number;
+    offset: number;
+  }): Promise<{ rows: Product[]; total: number }> {
+    const conds: any[] = [sql`TRUE`];
+    if (f.search) {
+      const q = `%${f.search}%`;
+      conds.push(sql`(name ILIKE ${q} OR sku ILIKE ${q} OR ean ILIKE ${q})`);
+    }
+    if (f.category && f.category !== "all") conds.push(sql`category = ${f.category}`);
+    if (f.status && f.status !== "all") conds.push(sql`status = ${f.status}`);
+    if (f.priceMin != null) conds.push(sql`sale_price >= ${f.priceMin}`);
+    if (f.priceMax != null) conds.push(sql`sale_price <= ${f.priceMax}`);
+    if (f.stock === "low") conds.push(sql`stock > 0 AND stock < 5`);
+    else if (f.stock === "high") conds.push(sql`stock > 5`);
+    else if (f.stock === "out") conds.push(sql`stock = 0`);
+    else if (f.stock === "available") conds.push(sql`stock > 0`);
+    if (f.marketplace === "listed") conds.push(sql`(listed_on_ebay = true OR listed_on_amazon = true)`);
+    else if (f.marketplace === "ebay") conds.push(sql`listed_on_ebay = true`);
+    else if (f.marketplace === "amazon") conds.push(sql`listed_on_amazon = true`);
+    else if (f.marketplace === "unlisted") conds.push(sql`(listed_on_ebay IS NOT TRUE AND listed_on_amazon IS NOT TRUE)`);
+    if (f.moq === "single") conds.push(sql`(moq IS NULL OR moq = 1)`);
+    else if (f.moq === "multipack") conds.push(sql`moq > 1`);
+    const where = sql.join(conds, sql` AND `);
+
+    const dir = f.sortDir === "asc" ? sql.raw("ASC") : sql.raw("DESC");
+    const orderBy =
+      f.sortField === "price" ? sql`sale_price ${dir}`
+      : f.sortField === "stock" ? sql`stock ${dir}`
+      : sql`created_at DESC`; // default: latest synced first
+
+    const countRes: any = await db.execute(sql`SELECT COUNT(*)::int AS c FROM products WHERE ${where}`);
+    const total = (countRes.rows ?? countRes)[0]?.c ?? 0;
+
+    const rows = await db.select().from(products)
+      .where(where)
+      .orderBy(orderBy)
+      .limit(f.limit)
+      .offset(f.offset);
+    return { rows, total };
+  }
+
   // Category methods
   async getCategories(): Promise<Category[]> {
     return await db.select().from(categories);
