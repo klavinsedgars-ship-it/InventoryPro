@@ -49,7 +49,7 @@ import type { MessageThread, Message, MessageTemplate, AutoMessageRule } from "@
 
 export default function MessagesPage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
-  const [selectedThread, setSelectedThread] = useState<MessageThread | null>(null);
+  const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [replyText, setReplyText] = useState("");
@@ -79,14 +79,22 @@ export default function MessagesPage() {
     thread: MessageThread;
     messages: Message[];
   }>({
-    queryKey: ['/api/messages/threads', selectedThread?.id],
+    queryKey: ['/api/messages/threads', selectedThreadId],
     queryFn: async () => {
-      if (!selectedThread) return { thread: null, messages: [] };
-      const res = await fetch(`/api/messages/threads/${selectedThread.id}`);
+      if (!selectedThreadId) return { thread: null, messages: [] };
+      const res = await fetch(`/api/messages/threads/${selectedThreadId}`);
       return res.json();
     },
-    enabled: !!selectedThread
+    enabled: !!selectedThreadId
   });
+
+  // Derive the selected thread from LIVE data (detail endpoint first, then the
+  // list) instead of a stale snapshot — otherwise star/read toggles in the
+  // header never reflect the new state after the mutation refetches.
+  const selectedThread: MessageThread | null =
+    messagesData?.thread
+    ?? (threadsData?.threads ?? []).find((t) => t.id === selectedThreadId)
+    ?? null;
 
   const { data: templatesData } = useQuery<{ templates: MessageTemplate[] }>({
     queryKey: ['/api/messages/templates']
@@ -281,7 +289,7 @@ export default function MessagesPage() {
                     {threads.map((thread) => (
                       <button
                         key={thread.id}
-                        onClick={() => setSelectedThread(thread)}
+                        onClick={() => setSelectedThreadId(thread.id)}
                         className={`w-full p-3 text-left hover:bg-gray-50 transition-colors ${
                           selectedThread?.id === thread.id ? 'bg-primary/5 border-l-2 border-primary' : ''
                         } ${!thread.isRead ? 'bg-blue-50/50' : ''}`}
@@ -329,7 +337,7 @@ export default function MessagesPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => setSelectedThread(null)}
+                          onClick={() => setSelectedThreadId(null)}
                           className="lg:hidden"
                           data-testid="btn-back-to-list"
                         >
