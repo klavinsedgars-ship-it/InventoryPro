@@ -29,7 +29,9 @@ import {
   generatePricingSummary,
   validatePricingConfig,
   formatPrice,
-  calculatePriceWithFloor
+  calculatePriceWithFloor,
+  setActivePricingTiers,
+  dbTiersToPricingTiers
 } from "./dynamic-pricing";
 import { getFeeConfig } from "./fee-config";
 import { calculateNetProfit } from "./fee-model";
@@ -3612,6 +3614,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Apply dynamic pricing to all products
   app.post("/api/pricing/apply-bulk", requireAuth, async (req, res) => {
     try {
+      // Use the operator's current DB tiers for the recalculation.
+      setActivePricingTiers(dbTiersToPricingTiers(await storage.getPricingTiers()));
       // Get all products
       const products = await storage.getProducts();
 
@@ -3676,6 +3680,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         marginPercentage: marginPercentage.toString()
       });
 
+      // Reload the active tier set so the recalculation below (and every later
+      // pricing call) uses the new tier — calculations read DB tiers now.
+      setActivePricingTiers(dbTiersToPricingTiers(await storage.getPricingTiers()));
+
       // Trigger recalculation for all affected products
       const products = await storage.getProducts();
       let updatedCount = 0;
@@ -3729,11 +3737,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       if (!updatedTier) {
-        return res.status(404).json({ 
-          success: false, 
-          error: "Pricing tier not found" 
+        return res.status(404).json({
+          success: false,
+          error: "Pricing tier not found"
         });
       }
+
+      // Reload active tiers so the edit is reflected in the recalculation.
+      setActivePricingTiers(dbTiersToPricingTiers(await storage.getPricingTiers()));
 
       // Trigger recalculation for all products in this tier range
       const products = await storage.getProducts();
@@ -3956,6 +3967,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Apply dynamic pricing to all products
   app.post("/api/pricing/apply-bulk", requireAuth, async (req, res) => {
     try {
+      // Use the operator's current DB tiers for the recalculation.
+      setActivePricingTiers(dbTiersToPricingTiers(await storage.getPricingTiers()));
       // Get all products
       const products = await storage.getProducts();
 

@@ -63,6 +63,34 @@ export const PRICING_CONFIG: PricingConfig = {
   roundingRule: "nearest_99"
 };
 
+// The tier set the calculations actually use. Defaults to the canonical
+// PRICING_CONFIG so behavior is unchanged until a caller loads DB tiers.
+// Entry points (the sync cron, the "recalculate all" routes) call
+// setActivePricingTiers(dbTiersToPricingTiers(await storage.getPricingTiers()))
+// so edits made in the Configuration UI take effect. min/max/rounding stay on
+// PRICING_CONFIG — only the per-band tiers are editable.
+let activeTiers: PricingTier[] = PRICING_CONFIG.tiers;
+
+export function setActivePricingTiers(tiers: PricingTier[] | null | undefined): void {
+  activeTiers = tiers && tiers.length > 0 ? tiers : PRICING_CONFIG.tiers;
+}
+
+/** Map pricing_tiers DB rows (decimal strings) to numeric PricingTier[]. */
+export function dbTiersToPricingTiers(
+  rows: Array<{ min: string; max: string; multiplier: string; label: string; marginPercentage: string }>,
+): PricingTier[] {
+  return rows
+    .map((r) => ({
+      min: parseFloat(r.min),
+      max: parseFloat(r.max),
+      multiplier: parseFloat(r.multiplier),
+      label: r.label,
+      marginPercentage: parseFloat(r.marginPercentage),
+    }))
+    .filter((t) => Number.isFinite(t.min) && Number.isFinite(t.max) && Number.isFinite(t.multiplier))
+    .sort((a, b) => a.min - b.min);
+}
+
 /**
  * Calculate dynamic price based on supplier cost and pricing tiers
  */
@@ -86,7 +114,7 @@ export function calculateDynamicPrice(supplierPrice: number | string): PriceCalc
   }
 
   // Find appropriate pricing tier
-  const tier = PRICING_CONFIG.tiers.find(t => numericPrice >= t.min && numericPrice <= t.max);
+  const tier = activeTiers.find(t => numericPrice >= t.min && numericPrice <= t.max);
   
   if (!tier) {
     return {
@@ -169,14 +197,14 @@ export function calculateBulkPricing(products: Array<{ id: number, supplierPrice
  * Get pricing tier information for a given supplier price
  */
 export function getPricingTierInfo(supplierPrice: number): PricingTier | null {
-  return PRICING_CONFIG.tiers.find(t => supplierPrice >= t.min && supplierPrice <= t.max) || null;
+  return activeTiers.find(t => supplierPrice >= t.min && supplierPrice <= t.max) || null;
 }
 
 /**
  * Get all available pricing tiers
  */
 export function getPricingTiers(): PricingTier[] {
-  return PRICING_CONFIG.tiers;
+  return activeTiers;
 }
 
 /**

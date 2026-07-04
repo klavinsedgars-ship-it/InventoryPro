@@ -88,6 +88,12 @@ export async function createApp(): Promise<Express> {
     (e) => console.error("ensureCoreSchema failed:", e),
   );
 
+  // One-time: align DB pricing tiers to the canonical config before the
+  // calculations begin reading DB tiers, so wiring them up doesn't reprice.
+  storage.ensurePricingTiersAligned().catch((e) =>
+    console.error("ensurePricingTiersAligned failed:", e),
+  );
+
   app.use((err: any, _req: any, res: any, _next: any) => {
     const status = err.status || err.statusCode || 500;
     console.error("[express-error]", err);

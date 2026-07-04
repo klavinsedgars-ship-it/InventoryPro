@@ -85,6 +85,7 @@ import {
 import { db } from "./db";
 import { eq, ne, and, gte, lte, lt, desc, asc, count, or, ilike, isNull, isNotNull, sql, inArray } from "drizzle-orm";
 import bcrypt from "bcryptjs";
+import { PRICING_CONFIG } from "./dynamic-pricing";
 
 export interface IStorage {
   // Users
@@ -1177,6 +1178,27 @@ export class DatabaseStorage implements IStorage {
   async getPricingTiers(): Promise<PricingTier[]> {
     const result = await db.select().from(pricingTiers).orderBy(asc(pricingTiers.min));
     return result;
+  }
+
+  // One-time alignment: replace the DB pricing_tiers with the canonical
+  // PRICING_CONFIG so that when the calculations start reading DB tiers (they
+  // previously ignored them), nothing reprices. Guarded by a flag so it runs
+  // exactly once — subsequent edits made in the Configuration UI are preserved.
+  // The old DB seed was missing every sub-€1 band, which would have left cheap
+  // components with no tier match.
+  async ensurePricingTiersAligned(): Promise<void> {
+    const flags = await db.select().from(marketplaceSettings)
+      .where(and(eq(marketplaceSettings.marketplace, "pricing"), eq(marketplaceSettings.setting, "tiers_aligned_v1")));
+    if (flags.length > 0 && flags[0].value === "true") return;
+    await db.delete(pricingTiers);
+    for (const t of PRICING_CONFIG.tiers) {
+      await db.insert(pricingTiers).values({
+        min: String(t.min), max: String(t.max), multiplier: String(t.multiplier),
+        label: t.label, marginPercentage: String(t.marginPercentage),
+      });
+    }
+    await db.insert(marketplaceSettings).values({ marketplace: "pricing", setting: "tiers_aligned_v1", value: "true" });
+    console.log(`📐 pricing tiers aligned to PRICING_CONFIG (${PRICING_CONFIG.tiers.length} tiers)`);
   }
 
   async createPricingTier(tier: InsertPricingTier): Promise<PricingTier> {

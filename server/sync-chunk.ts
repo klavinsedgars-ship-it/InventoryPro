@@ -18,6 +18,8 @@ import { tmeApiOptimized } from "./tme-api-optimized";
 import {
   getSupplierPriceForMoq,
   calculatePriceWithFloor,
+  setActivePricingTiers,
+  dbTiersToPricingTiers,
 } from "./dynamic-pricing";
 import { getFeeConfig } from "./fee-config";
 import { ebayInventoryApi } from "./ebay-inventory-api";
@@ -92,6 +94,11 @@ export async function runSyncChunk(
 
   // Resolve fee config once per chunk (drives the net-profit price floor).
   const feeConfig = await getFeeConfig("ebay");
+
+  // Load the operator's DB pricing tiers so Configuration-UI edits take effect
+  // (calculations previously ignored them). Falls back to the built-in config
+  // if the table is empty.
+  setActivePricingTiers(dbTiersToPricingTiers(await storage.getPricingTiers()));
 
   const symbols = slice.map((p) => p.supplierProductId || p.sku);
   // Optimized client: one combined GetPricesAndStocks call per 100 symbols
