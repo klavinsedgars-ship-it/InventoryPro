@@ -1,13 +1,8 @@
 import type { Express } from "express";
 import { storage } from "../storage";
-import { ebayApi } from "../ebay-api";
 import { ebayInventoryApi } from "../ebay-inventory-api";
 import { ebayOAuth } from "../ebay-oauth";
 import { ebayAccountApi } from "../ebay-account-api";
-import { tmeApi } from "../tme-api";
-import { calculateEbayStock } from "../stock-manager";
-import { findValidEbayCategory, getCategoryNameById } from "../ebay-category-finder";
-import { findBestCategoryForProduct } from "../product-category-matcher";
 
 /**
  * Diagnostic, migration, and one-off maintenance endpoints (all prefixed
