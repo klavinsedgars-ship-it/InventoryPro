@@ -103,7 +103,20 @@ export async function runSyncChunk(
   try {
     priceStocks = await tmeApiOptimized.getProductsPricesAndStocks(symbols);
   } catch (e) {
+    // TME fetch failed for the whole chunk (outage / rate-limit exhausted).
+    // Abort WITHOUT touching lastSyncedAt so these products stay stale and get
+    // retried next run, and surface the error rather than logging a fake
+    // success. done:true stops this tick's loop from hammering a down TME;
+    // the next scheduled cron retries.
     errors.push(`TME fetch failed: ${(e as Error).message}`);
+    const remaining = Math.max(
+      0,
+      await storage.getStaleTmeProductCount(cutoffs.listed, cutoffs.unlisted),
+    );
+    return {
+      total, remaining, processedThisChunk: 0, processedListed: 0, changed: 0,
+      ebayUpdated: 0, ebayUnlisted: 0, ebayRelisted: 0, done: true, errors,
+    };
   }
   const bySymbol = new Map(priceStocks.map((ps) => [ps.Symbol, ps]));
 

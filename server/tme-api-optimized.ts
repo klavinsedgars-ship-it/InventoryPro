@@ -472,8 +472,12 @@ export class TMEApiServiceOptimized {
 
       return results;
     } catch (error) {
+      // Propagate instead of returning [] — a swallowed error made a TME
+      // outage look like an empty-but-successful response, so the cron would
+      // bump lastSyncedAt on every product and report success while prices/
+      // stock silently went stale. Callers must handle the throw.
       console.error('Failed to get prices and stocks:', error);
-      return [];
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 

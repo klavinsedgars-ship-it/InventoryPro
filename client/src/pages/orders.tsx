@@ -112,11 +112,17 @@ export function Orders({ user }: OrdersProps) {
   });
 
   const syncEbayMutation = useMutation({
-    mutationFn: (daysBack: number) => apiRequest("POST", "/api/orders/sync/ebay", { daysBack }),
+    // apiRequest returns a raw Response — parse it so the toast can read the
+    // real fields (was showing "Synced undefined new orders").
+    mutationFn: async (daysBack: number) => {
+      const res = await apiRequest("POST", "/api/orders/sync/ebay", { daysBack });
+      return res.json();
+    },
     onSuccess: (data: any) => {
       toast({
         title: "Orders Synced",
-        description: data.message || `Synced ${data.synced} new orders`,
+        description: data.message
+          || `Synced ${data.synced ?? 0} new, updated ${data.updated ?? 0}`,
       });
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/orders/stats"] });

@@ -4522,7 +4522,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.createSyncLog({
         source: "tme",
         operation: "cron_sync",
-        status: last?.done ? "success" : "partial",
+        // A run with errors is NOT a success even if the loop finished (a TME
+        // outage now aborts with done:true + errors instead of faking success).
+        status: last?.done && allErrors.length === 0 ? "success" : "partial",
         message: `Cron sync: ${chunks} chunks, ${totalChanged} changed, ${totalEbay} eBay updated, ${totalUnlisted} unlisted (OOS), ${totalRelisted} relisted, ${totalProcessedListed}/${totalProcessed} listed, ${last?.remaining ?? "?"} remaining`,
         details: JSON.stringify({ chunks, totalChanged, totalEbay, totalUnlisted, totalRelisted, totalProcessed, totalProcessedListed, remaining: last?.remaining, errors: allErrors.slice(0, 20) }),
       });

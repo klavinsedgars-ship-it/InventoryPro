@@ -10,6 +10,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
+import { AppShell } from "@/components/layout/app-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -181,7 +182,8 @@ export function Opportunities() {
   };
 
   return (
-    <div className="p-6 space-y-4 max-w-screen-2xl mx-auto">
+    <AppShell>
+      <div className="p-6 space-y-4 max-w-screen-2xl mx-auto">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-semibold">
@@ -435,7 +437,8 @@ export function Opportunities() {
           </Button>
         </div>
       )}
-    </div>
+      </div>
+    </AppShell>
   );
 }
 
