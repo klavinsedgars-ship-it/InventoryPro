@@ -30,6 +30,19 @@ export function Reports({ user }: ReportsProps) {
     queryKey: ["/api/analytics/sales"],
   });
 
+  // The server returns { totals, monthly, byMarketplace } — adapt to the
+  // shapes this page renders (marketplacePerformance.{ebay,amazon}, monthlyRevenue).
+  const _byMp: Array<{ marketplace: string; orders: number; revenue: number }> =
+    salesAnalytics?.byMarketplace ?? [];
+  const _mp = (name: string) => {
+    const m = _byMp.find((x) => x.marketplace === name);
+    const orders = m?.orders ?? 0;
+    const revenue = m?.revenue ?? 0;
+    return { orders, revenue, avgOrderValue: orders > 0 ? revenue / orders : 0 };
+  };
+  const marketplacePerformance = { ebay: _mp("ebay"), amazon: _mp("amazon") };
+  const monthlyRevenue = (salesAnalytics?.monthly ?? []) as any[];
+
   const isLoading = inventoryLoading || salesLoading;
 
   return (
@@ -239,8 +252,8 @@ export function Reports({ user }: ReportsProps) {
                       <div>
                         <p className="text-sm font-medium text-gray-600">Monthly Revenue</p>
                         <p className="text-2xl font-bold text-gray-900">
-                          {salesAnalytics?.marketplacePerformance 
-                            ? formatCurrency((salesAnalytics.marketplacePerformance.ebay.revenue + salesAnalytics.marketplacePerformance.amazon.revenue) / 12)
+                          {marketplacePerformance 
+                            ? formatCurrency((marketplacePerformance.ebay.revenue + marketplacePerformance.amazon.revenue) / 12)
                             : '$0'
                           }
                         </p>
@@ -312,7 +325,7 @@ export function Reports({ user }: ReportsProps) {
                   </CardHeader>
                   <CardContent>
                     <ResponsiveContainer width="100%" height={300}>
-                      <LineChart data={salesAnalytics?.monthlyRevenue || []}>
+                      <LineChart data={monthlyRevenue || []}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="month" />
                         <YAxis />
@@ -334,15 +347,15 @@ export function Reports({ user }: ReportsProps) {
                         <div>
                           <h4 className="font-semibold text-orange-900">eBay</h4>
                           <p className="text-sm text-orange-700">
-                            {salesAnalytics?.marketplacePerformance?.ebay?.orders || 0} orders
+                            {marketplacePerformance?.ebay?.orders || 0} orders
                           </p>
                         </div>
                         <div className="text-right">
                           <p className="text-lg font-bold text-orange-900">
-                            {formatCurrency(salesAnalytics?.marketplacePerformance?.ebay?.revenue || 0)}
+                            {formatCurrency(marketplacePerformance?.ebay?.revenue || 0)}
                           </p>
                           <p className="text-sm text-orange-700">
-                            Avg: {formatCurrency(salesAnalytics?.marketplacePerformance?.ebay?.avgOrderValue || 0)}
+                            Avg: {formatCurrency(marketplacePerformance?.ebay?.avgOrderValue || 0)}
                           </p>
                         </div>
                       </div>
@@ -351,15 +364,15 @@ export function Reports({ user }: ReportsProps) {
                         <div>
                           <h4 className="font-semibold text-blue-900">Amazon</h4>
                           <p className="text-sm text-blue-700">
-                            {salesAnalytics?.marketplacePerformance?.amazon?.orders || 0} orders
+                            {marketplacePerformance?.amazon?.orders || 0} orders
                           </p>
                         </div>
                         <div className="text-right">
                           <p className="text-lg font-bold text-blue-900">
-                            {formatCurrency(salesAnalytics?.marketplacePerformance?.amazon?.revenue || 0)}
+                            {formatCurrency(marketplacePerformance?.amazon?.revenue || 0)}
                           </p>
                           <p className="text-sm text-blue-700">
-                            Avg: {formatCurrency(salesAnalytics?.marketplacePerformance?.amazon?.avgOrderValue || 0)}
+                            Avg: {formatCurrency(marketplacePerformance?.amazon?.avgOrderValue || 0)}
                           </p>
                         </div>
                       </div>

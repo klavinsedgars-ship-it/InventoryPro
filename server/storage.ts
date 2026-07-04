@@ -586,6 +586,57 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
+  // Inventory analytics for the Reports page — all DB-side aggregates so it
+  // scales (was a nonexistent endpoint, so the page showed permanent zeros).
+  async getInventoryAnalytics(): Promise<{
+    categoryBreakdown: Array<{ category: string; totalValue: number; count: number }>;
+    statusBreakdown: { active: number; inactive: number; outOfStock: number; lowStock: number };
+    topProducts: Array<{ name: string; sku: string; value: number; margin: number }>;
+    lowStockAlerts: Array<{ name: string; sku: string; category: string; stock: number }>;
+  }> {
+    const num = (v: any) => Number(v ?? 0);
+    const cat: any = await db.execute(sql`
+      SELECT category,
+             COALESCE(SUM(sale_price * stock), 0)::float8 AS total_value,
+             COUNT(*)::int AS count
+      FROM products
+      GROUP BY category
+      ORDER BY total_value DESC
+      LIMIT 20
+    `);
+    const status: any = await db.execute(sql`
+      SELECT
+        COUNT(*) FILTER (WHERE status = 'active')::int          AS active,
+        COUNT(*) FILTER (WHERE status = 'inactive')::int        AS inactive,
+        COUNT(*) FILTER (WHERE stock <= 0)::int                 AS out_of_stock,
+        COUNT(*) FILTER (WHERE stock > 0 AND stock <= 5)::int   AS low_stock
+      FROM products
+    `);
+    const top: any = await db.execute(sql`
+      SELECT name, sku,
+             (sale_price * stock)::float8 AS value,
+             COALESCE(margin_percentage, 0)::float8 AS margin
+      FROM products
+      WHERE stock > 0
+      ORDER BY value DESC
+      LIMIT 5
+    `);
+    const low: any = await db.execute(sql`
+      SELECT name, sku, category, stock
+      FROM products
+      WHERE stock > 0 AND stock <= 5
+      ORDER BY stock ASC
+      LIMIT 10
+    `);
+    const sRow = (status.rows ?? status)[0] ?? {};
+    return {
+      categoryBreakdown: (cat.rows ?? cat).map((r: any) => ({ category: r.category ?? "Uncategorized", totalValue: num(r.total_value), count: num(r.count) })),
+      statusBreakdown: { active: num(sRow.active), inactive: num(sRow.inactive), outOfStock: num(sRow.out_of_stock), lowStock: num(sRow.low_stock) },
+      topProducts: (top.rows ?? top).map((r: any) => ({ name: r.name, sku: r.sku, value: num(r.value), margin: num(r.margin) })),
+      lowStockAlerts: (low.rows ?? low).map((r: any) => ({ name: r.name, sku: r.sku, category: r.category ?? "", stock: num(r.stock) })),
+    };
+  }
+
   // Atomic increment of the ramp's failed-attempt counter. Done as an
   // UPDATE SET … = … + 1 rather than read-then-write so concurrent bulk
   // batches can't lose a count.

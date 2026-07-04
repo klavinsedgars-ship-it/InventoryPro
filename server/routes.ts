@@ -1362,6 +1362,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Inventory analytics for the Reports page (DB-side aggregates).
+  app.get("/api/analytics/inventory", requireAuth, async (_req, res) => {
+    try {
+      const data = await storage.getInventoryAnalytics();
+      res.json(data);
+    } catch (error) {
+      console.error("Inventory analytics failed:", error);
+      res.status(500).json({ message: "Failed to fetch inventory analytics" });
+    }
+  });
+
   // Realized sales & real profit (revenue − eBay fees − VAT − supplier cost
   // − postage − packaging), aggregated from synced orders.
   app.get("/api/analytics/sales", requireAuth, async (req, res) => {
