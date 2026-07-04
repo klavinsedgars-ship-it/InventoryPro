@@ -26,5 +26,8 @@ jobs:
       - name: Type-check (tsc --noEmit)
         run: npx tsc --noEmit
 
+      - name: Unit tests (pricing / fee / stock math)
+        run: npm test
+
       - name: Build (client + server bundles)
         run: npm run build

@@ -23,23 +23,11 @@ import {
 } from "./dynamic-pricing";
 import { getFeeConfig } from "./fee-config";
 import { ebayInventoryApi } from "./ebay-inventory-api";
+import { extractStock, staleCutoffs } from "./sync-utils";
 
 // Marks a listing we ended automatically because TME stock hit 0, so we can
 // tell it apart from manual unlists and auto-republish it when stock returns.
 const ENDED_OOS = "ended_oos";
-
-// Sum stock across TME warehouses (StockList), falling back to the flat
-// Amount field, then to the value we already hold in the DB.
-function extractStock(
-  ps: { StockList?: Array<{ Amount: number }>; Amount?: number },
-  fallback: number,
-): number {
-  if (ps.StockList && ps.StockList.length > 0) {
-    return ps.StockList.reduce((sum, w) => sum + (w.Amount || 0), 0);
-  }
-  if (typeof ps.Amount === "number") return ps.Amount;
-  return fallback;
-}
 
 export interface SyncChunkResult {
   total: number; // total TME products
@@ -52,23 +40,6 @@ export interface SyncChunkResult {
   ebayRelisted: number; // listings re-published because stock returned
   done: boolean;
   errors: string[];
-}
-
-// A product is "stale" if it hasn't been synced within this many hours.
-// Tiered: listed eBay products refresh ~3× faster than unlisted, because the
-// oversell risk (TME going to 0 between cron ticks) only matters for listed
-// SKUs. Defaults: listed 4h (≈ 6×/day) ; unlisted 48h (≈ 0.5×/day).
-//   Tune via SYNC_STALE_HOURS_LISTED / SYNC_STALE_HOURS_UNLISTED.
-//   SYNC_STALE_HOURS (legacy) is the fallback when only one var is set.
-function staleCutoffs(): { listed: Date; unlisted: Date } {
-  const legacy = Number(process.env.SYNC_STALE_HOURS) || 12;
-  const listedHours = Number(process.env.SYNC_STALE_HOURS_LISTED) || Math.min(4, legacy);
-  const unlistedHours = Number(process.env.SYNC_STALE_HOURS_UNLISTED) || Math.max(48, legacy);
-  const now = Date.now();
-  return {
-    listed: new Date(now - listedHours * 3600 * 1000),
-    unlisted: new Date(now - unlistedHours * 3600 * 1000),
-  };
 }
 
 // Per-SKU audit draft. `_intent` records the eBay action we *attempted* so the
