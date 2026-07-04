@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { requireAuth } from "./middleware/auth";
 import { 
   insertProductSchema, 
   insertUserSchema, 
@@ -80,27 +81,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // the seeded admin (looked up by username, since the auto-generated id
   // depends on insert order and varies per DB). Intended for demo/staging
   // only; never set this in real production.
-  const requireAuth = async (req: any, res: any, next: any) => {
-    if (process.env.BYPASS_AUTH === 'true') {
-      if (!req.session?.userId) {
-        try {
-          const admin = await storage.getUserByUsername('admin');
-          if (admin) {
-            req.session.userId = admin.id;
-          }
-        } catch (err) {
-          console.error('BYPASS_AUTH admin lookup failed:', err);
-        }
-      }
-      return next();
-    }
-
-    if (!req.session?.userId) {
-      return res.status(401).json({ message: "Authentication required" });
-    }
-    next();
-  };
-
   // Auth routes
   app.post("/api/auth/login", async (req, res) => {
     try {
