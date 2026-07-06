@@ -16,7 +16,8 @@ import {
   MessageSquare,
   Activity,
   Scale,
-  Target
+  Target,
+  TrendingUp
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -28,6 +29,7 @@ const navigation = [
   { name: 'Messages', href: '/messages', icon: MessageSquare },
   { name: 'TME Browser', href: '/tme-browser', icon: Search },
   { name: 'Opportunities', href: '/opportunities', icon: Target },
+  { name: 'Market Research', href: '/market-research', icon: TrendingUp },
   { name: 'Repricing', href: '/repricing', icon: Scale },
   { name: 'Configuration', href: '/configuration', icon: Cog },
   { name: 'Reports', href: '/reports', icon: BarChart3 },
