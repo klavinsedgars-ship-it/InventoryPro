@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { requireAuth } from "../middleware/auth";
 import { storage } from "../storage";
 import { ebayInsightsApi } from "../ebay-insights-api";
+import { ebayOAuth } from "../ebay-oauth";
 import { researchMarket } from "../market-research-service";
 
 /**
@@ -25,6 +26,30 @@ export function registerResearchRoutes(app: Express) {
     } catch (error) {
       res.status(500).json({ success: false, error: (error as Error).message });
     }
+  });
+
+  // Kick off the Insights re-consent flow. Redirects the operator to eBay's
+  // consent screen requesting the gated buy.marketplace.insights scope (via
+  // EBAY_CONSENT_SCOPES). After approving, eBay redirects to the RuName URL
+  // with ?code=... which is exchanged at /api/__ebay-exchange to mint a
+  // refresh token that CARRIES the scope. Add ?raw=1 to get the URL as JSON
+  // instead of an immediate redirect.
+  //
+  // NOTE: this only produces a working token once eBay has APPROVED your app
+  // for the Marketplace Insights API — consent alone isn't enough.
+  app.get("/api/research/insights-connect", requireAuth, (req, res) => {
+    const ruName = process.env.EBAY_RUNAME || "";
+    if (!ruName) {
+      return res.status(400).json({
+        success: false,
+        error: "EBAY_RUNAME is not set. Set it to your eBay RuName (the OAuth redirect) and retry.",
+      });
+    }
+    const url = ebayOAuth.generateAuthUrl(ruName, "insights_consent");
+    if (String((req.query as any)?.raw) === "1") {
+      return res.json({ success: true, consentUrl: url, ruName });
+    }
+    res.redirect(url);
   });
 
   // Local product categories for the dropdown (same source the Opportunity
