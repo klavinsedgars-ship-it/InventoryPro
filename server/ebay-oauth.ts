@@ -15,7 +15,7 @@ interface EbayOAuthToken {
 // invalid_scope if we ask for anything outside this set, which would break
 // every eBay call. Do NOT add gated/beta scopes here until the refresh token
 // has actually been re-authorized to include them.
-const EBAY_OAUTH_SCOPES = [
+const EBAY_BASE_SCOPES = [
   'https://api.ebay.com/oauth/api_scope',                    // Base scope for Trading API
   'https://api.ebay.com/oauth/api_scope/sell.account',       // Business policies
   'https://api.ebay.com/oauth/api_scope/sell.account.readonly',
@@ -25,18 +25,29 @@ const EBAY_OAUTH_SCOPES = [
   'https://api.ebay.com/oauth/api_scope/sell.marketing.readonly',
   'https://api.ebay.com/oauth/api_scope/sell.fulfillment',   // Order fulfillment
   'https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly',
-  'https://api.ebay.com/oauth/api_scope/sell.analytics.readonly'
+  'https://api.ebay.com/oauth/api_scope/sell.analytics.readonly',
+];
+
+// Marketplace Insights (Buy API beta) — gated; requires an eBay allow-list.
+const INSIGHTS_SCOPE = 'https://api.ebay.com/oauth/api_scope/buy.marketplace.insights';
+
+// Scopes requested on every token REFRESH. eBay rejects a refresh whose scope
+// isn't a subset of what the refresh token was granted, so insights is included
+// ONLY when EBAY_INSIGHTS_ENABLED=true. Flip that on *after* (a) eBay approves
+// your app for Marketplace Insights AND (b) you've re-consented via
+// /api/research/insights-connect so the refresh token actually carries the
+// scope — otherwise the refresh fails invalid_scope and every eBay call breaks.
+const EBAY_OAUTH_SCOPES = [
+  ...EBAY_BASE_SCOPES,
+  ...(process.env.EBAY_INSIGHTS_ENABLED === 'true' ? [INSIGHTS_SCOPE] : []),
 ].join(' ');
 
-// Scopes advertised on the consent/authorization URL. Superset of the refresh
-// scopes: it includes the gated Marketplace Insights scope so that, AFTER eBay
-// approves the app for it, the operator can re-authorize and the refresh token
-// will carry insights too. Until that re-auth happens, including it here is
-// harmless — it only affects a fresh consent flow, never the refresh path.
+// Scopes advertised on the consent/authorization URL. Always includes insights
+// so a re-consent grants it; harmless before approval since it only affects a
+// fresh consent flow, never the refresh path.
 const EBAY_CONSENT_SCOPES = [
-  EBAY_OAUTH_SCOPES,
-  // Marketplace Insights (Buy API beta) — gated; requires eBay allow-list.
-  'https://api.ebay.com/oauth/api_scope/buy.marketplace.insights',
+  ...EBAY_BASE_SCOPES,
+  INSIGHTS_SCOPE,
 ].join(' ');
 
 export class EbayOAuthService {
