@@ -52,6 +52,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       (req.session as any).userId = user.id;
+      // Marks a session as established by a real password login. Destructive
+      // endpoints (requireRealAuth) demand this, so BYPASS_AUTH — which sets
+      // userId without a login — can never authorize a delete-everything call.
+      (req.session as any).viaLogin = true;
       const { password: _, ...userWithoutPassword } = user;
       res.json({ user: userWithoutPassword });
     } catch (error) {

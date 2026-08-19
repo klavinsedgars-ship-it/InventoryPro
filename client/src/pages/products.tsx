@@ -109,7 +109,12 @@ export function Products({ user }: ProductsProps) {
   if (moqFilter !== "all") productsParams.set("moq", moqFilter);
   if (sortField) productsParams.set("sortField", sortField);
 
-  const { data: pagedData, isLoading } = useQuery<{ products: Product[]; total: number }>({
+  const {
+    data: pagedData,
+    isLoading,
+    isError: productsError,
+    error: productsErrorObj,
+  } = useQuery<{ products: Product[]; total: number }>({
     queryKey: [`/api/products/paged?${productsParams.toString()}`],
   });
   const products = pagedData?.products ?? [];
@@ -856,11 +861,24 @@ export function Products({ user }: ProductsProps) {
                   ))}
                 </div>
               </div>
+            ) : productsError ? (
+              /* A failed fetch used to render as "No products found", which made
+                 a database outage look like the catalogue had been wiped. Say
+                 plainly that loading failed, and show the reason. */
+              <div className="p-8 text-center">
+                <p className="font-medium text-red-600">Couldn’t load products.</p>
+                <p className="mt-1 text-sm text-gray-500">
+                  This is a loading error, not an empty catalogue — your products are still there.
+                </p>
+                <p className="mt-2 break-words font-mono text-xs text-gray-400">
+                  {(productsErrorObj as Error)?.message || "Request failed"}
+                </p>
+              </div>
             ) : productsTotal === 0 && !isLoading ? (
               <div className="p-8 text-center">
                 <p className="text-gray-500">
-                  {searchTerm || selectedCategory || selectedStatus 
-                    ? "No products found matching your filters." 
+                  {searchTerm || selectedCategory || selectedStatus
+                    ? "No products found matching your filters."
                     : "No products found. Add your first product to get started."
                   }
                 </p>

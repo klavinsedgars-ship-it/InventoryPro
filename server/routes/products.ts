@@ -1,8 +1,39 @@
 import type { Express } from "express";
 import { storage } from "../storage";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, requireRealAuth } from "../middleware/auth";
 import { insertProductSchema } from "@shared/schema";
 import { ZodError } from "zod";
+
+/**
+ * Record a product deletion in sync_logs. Deletions previously left no trace
+ * beyond a console.log, so a catalogue that shrank was impossible to explain
+ * after the fact. Best-effort: an audit failure must not fail the delete.
+ */
+async function logDeletion(
+  req: any,
+  kind: "delete_all" | "bulk_delete",
+  deletedCount: number,
+  scope: string,
+): Promise<void> {
+  try {
+    await storage.createSyncLog({
+      source: "system",
+      operation: `products_${kind}`,
+      status: "success",
+      message: `${deletedCount} product(s) deleted (${scope}) by user ${req.session?.userId ?? "unknown"} from ${req.ip ?? "unknown ip"}`,
+      details: JSON.stringify({
+        deletedCount,
+        scope,
+        userId: req.session?.userId ?? null,
+        ip: req.ip ?? null,
+        userAgent: req.headers?.["user-agent"] ?? null,
+        at: new Date().toISOString(),
+      }),
+    });
+  } catch (e) {
+    console.error("Failed to write deletion audit log:", e);
+  }
+}
 
 // Product CRUD + paged listing + bulk delete. Extracted from routes.ts
 // (behaviour unchanged).
@@ -135,7 +166,7 @@ export function registerProductRoutes(app: Express): void {
 
   // Bulk delete by ids (single query — avoids fanning out N parallel requests
   // that saturate the DB connection pool on large selections).
-  app.post("/api/products/bulk-delete", requireAuth, async (req, res) => {
+  app.post("/api/products/bulk-delete", requireRealAuth, async (req, res) => {
     try {
       const ids = Array.isArray(req.body?.ids) ? req.body.ids : null;
       if (!ids) {
@@ -145,6 +176,7 @@ export function registerProductRoutes(app: Express): void {
         .map((v: unknown) => (typeof v === "number" ? v : parseInt(String(v), 10)))
         .filter((n: number) => Number.isInteger(n));
       const deletedCount = await storage.deleteProducts(numericIds);
+      await logDeletion(req, "bulk_delete", deletedCount, `${numericIds.length} requested`);
       res.json({
         success: true,
         deletedCount,
@@ -157,12 +189,14 @@ export function registerProductRoutes(app: Express): void {
     }
   });
 
-  // Delete all products endpoint
-  app.delete("/api/products", requireAuth, async (req, res) => {
+  // Delete all products endpoint. requireRealAuth (not requireAuth): wiping the
+  // entire catalogue must never be reachable through BYPASS_AUTH.
+  app.delete("/api/products", requireRealAuth, async (req, res) => {
     try {
       const deletedCount = await storage.deleteAllProducts();
       console.log(`Deleted all products: ${deletedCount} items removed`);
-      res.json({ 
+      await logDeletion(req, "delete_all", deletedCount, "entire catalogue");
+      res.json({
         success: true, 
         deletedCount,
         message: `Successfully deleted ${deletedCount} products` 
