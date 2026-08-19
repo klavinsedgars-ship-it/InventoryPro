@@ -56,6 +56,8 @@ interface SyncRun {
   ebayUpdated: number | null;
   remaining: number | null;
   processed: number | null;
+  error: string | null;
+  errorCount?: number;
 }
 
 interface AuditResponse {
@@ -64,6 +66,7 @@ interface AuditResponse {
   total: number;
   sinceHours: number;
   recentRuns: SyncRun[];
+  lastError: string | null;
   stats: {
     changed: number;
     priceChanged: number;
@@ -231,13 +234,17 @@ function HealthBanner({
   const lastRunMs = Date.now() - new Date(last.syncedAt).getTime();
   // Cron is hourly, so a gap beyond ~2h means it likely isn't firing.
   const stale = lastRunMs > 2 * 3600 * 1000;
-  const errored = last.status === "error";
+  // A "partial" run that carries an error is a real failure (e.g. TME refused
+  // the call, so the chunk aborted and nothing synced) — not benign "queued".
+  const errored = last.status === "error" || (last.status === "partial" && !!last.error);
 
   let tone: "good" | "warn" | "danger";
   let headline: string;
   if (errored) {
     tone = "danger";
-    headline = `Last sync run failed (${ago(last.syncedAt)})`;
+    headline = last.error
+      ? `Sync isn’t updating — the ${ago(last.syncedAt)} run errored before processing anything`
+      : `Last sync run failed (${ago(last.syncedAt)})`;
   } else if (stale) {
     tone = "warn";
     headline = `No sync run in ${ago(last.syncedAt)} — the hourly cron may not be firing`;
@@ -266,12 +273,28 @@ function HealthBanner({
         )}
         {headline}
       </div>
-      <div className="mt-0.5 text-xs opacity-80">
-        Last actual change {ago(lastChangeAt)}
-        {lastChangeAt ? ` (${new Date(lastChangeAt).toLocaleString()})` : ""}. A run
-        with “0 changed” is normal — it means nothing was stale, not that sync is
-        broken.
-      </div>
+      {errored && last.error ? (
+        <div className="mt-2 space-y-1">
+          <div className="text-xs font-medium opacity-90">
+            Reason reported by the sync (fix this to resume updates):
+          </div>
+          <div className="overflow-x-auto rounded bg-red-100/70 px-2 py-1.5 font-mono text-xs text-red-900">
+            {last.error}
+          </div>
+          <div className="text-xs opacity-80">
+            The catalogue can’t update until this clears. If it mentions TME
+            auth/token/signature, refresh your TME credentials in the host env;
+            open <code>/api/__tme-check</code> for the raw TME response.
+          </div>
+        </div>
+      ) : (
+        <div className="mt-0.5 text-xs opacity-80">
+          Last actual change {ago(lastChangeAt)}
+          {lastChangeAt ? ` (${new Date(lastChangeAt).toLocaleString()})` : ""}. A run
+          with “0 changed” is normal — it means nothing was stale, not that sync is
+          broken.
+        </div>
+      )}
     </div>
   );
 }
@@ -509,7 +532,7 @@ export function SyncActivity() {
                   {runStatusDot(r.status)}
                   <span className="w-16 shrink-0 text-gray-400">{ago(r.syncedAt)}</span>
                   <span className="shrink-0 capitalize text-gray-500">{r.status}</span>
-                  <span className="truncate text-gray-700">
+                  <span className="min-w-0 flex-1 truncate text-gray-700">
                     {r.changed != null ? (
                       <>
                         {r.changed.toLocaleString()} changed
@@ -523,6 +546,14 @@ export function SyncActivity() {
                       r.message
                     )}
                   </span>
+                  {r.error && (
+                    <span
+                      className="max-w-[45%] shrink-0 truncate font-mono text-xs text-red-600"
+                      title={r.errorCount && r.errorCount > 1 ? `${r.error} (+${r.errorCount - 1} more)` : r.error}
+                    >
+                      ⚠ {r.error}
+                    </span>
+                  )}
                 </div>
               ))
             )}

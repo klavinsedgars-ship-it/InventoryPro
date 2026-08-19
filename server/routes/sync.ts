@@ -200,6 +200,7 @@ export function registerSyncRoutes(app: Express) {
         .map((l) => {
           let d: any = {};
           try { d = l.details ? JSON.parse(l.details) : {}; } catch { /* non-JSON */ }
+          const errs = Array.isArray(d.errors) ? d.errors.map(String) : [];
           return {
             status: l.status,
             operation: l.operation,
@@ -209,9 +210,16 @@ export function registerSyncRoutes(app: Express) {
             ebayUpdated: d.totalEbay ?? null,
             remaining: d.remaining ?? null,
             processed: d.totalProcessed ?? null,
+            // Surface the actual failure reason (e.g. the TME error) so the UI
+            // can show WHY a run is "partial" instead of a bare status dot.
+            error: errs.length ? errs[0] : null,
+            errorCount: errs.length,
           };
         });
-      res.json({ success: true, ...data, stats, recentRuns, sinceHours });
+      // Most recent run that carries an error — drives the health banner so a
+      // failing TME sync reads as a failure, not benign "still queued".
+      const lastError = recentRuns.find((r) => r.error)?.error ?? null;
+      res.json({ success: true, ...data, stats, recentRuns, lastError, sinceHours });
     } catch (error) {
       console.error("Sync audit fetch failed:", error);
       res.status(500).json({ success: false, error: (error as Error).message });
