@@ -226,6 +226,45 @@ export function registerSyncRoutes(app: Express) {
     }
   });
 
+  // Circuit breaker: when TME is failing, the full sync aborts every run
+  // without making progress — but it still hits the DB (stale-product query,
+  // counts, pricing tiers, fee config) every hour for nothing. That wasted
+  // load helped get the database suspended. So after a TME-failed run, back
+  // off for SYNC_TME_BACKOFF_HOURS (default 3) before the cron tries again.
+  // The backoff clock is based on the last real ATTEMPT (operation
+  // "cron_sync"), never on the cheap skip markers, so it can't extend itself
+  // forever. Manual "Sync Now" (/api/sync/run) and ?force=1 bypass it.
+  async function tmeBackoff(): Promise<{
+    skip: boolean;
+    hoursLeft: number;
+    lastError: string | null;
+    remaining: number | null;
+  }> {
+    const none = { skip: false, hoursLeft: 0, lastError: null, remaining: null };
+    try {
+      const backoffH = Number(process.env.SYNC_TME_BACKOFF_HOURS) || 3;
+      const logs = await storage.getSyncLogs(10);
+      const lastAttempt = logs.find(
+        (l) => l.source === "tme" && l.operation === "cron_sync",
+      );
+      if (!lastAttempt || lastAttempt.status === "success") return none;
+      let errors: string[] = [];
+      let remaining: number | null = null;
+      try {
+        const d = lastAttempt.details ? JSON.parse(lastAttempt.details) : {};
+        errors = Array.isArray(d.errors) ? d.errors.map(String) : [];
+        remaining = d.remaining ?? null;
+      } catch { /* non-JSON details */ }
+      const tmeErr = errors.find((e) => /TME fetch failed/i.test(e)) || null;
+      if (!tmeErr) return none;
+      const age = Date.now() - new Date(lastAttempt.syncedAt as any).getTime();
+      const leftMs = backoffH * 3_600_000 - age;
+      return { skip: leftMs > 0, hoursLeft: Math.ceil(leftMs / 3_600_000), lastError: tmeErr, remaining };
+    } catch {
+      return none; // never let the breaker itself block a sync
+    }
+  }
+
   // Vercel Cron entrypoint (configured in vercel.json). Runs chunks
   // server-side within a time budget; whatever doesn't finish today is
   // picked up by the next run. Secured by CRON_SECRET when set (Vercel
@@ -238,6 +277,31 @@ export function registerSyncRoutes(app: Express) {
     if (!isVercelCron && !isAuthed) {
       return res.status(401).json({ message: "Unauthorized" });
     }
+
+    // Skip the DB-heavy sync while TME is down (unless forced). Writes a cheap
+    // "cron_sync_skipped" marker — carrying the TME error + queue depth forward
+    // — so the Sync Activity view still shows the cron is alive and why it's
+    // holding, without re-running the full pass.
+    const force = String(req.query?.force) === "1";
+    if (!force) {
+      const bo = await tmeBackoff();
+      if (bo.skip) {
+        await storage.createSyncLog({
+          source: "tme",
+          operation: "cron_sync_skipped",
+          status: "partial",
+          message: `Skipped — TME still failing, backing off ~${bo.hoursLeft}h before retrying (Sync Now or ?force=1 overrides).`,
+          details: JSON.stringify({
+            skipped: true,
+            reason: "tme_backoff",
+            remaining: bo.remaining,
+            errors: bo.lastError ? [bo.lastError] : [],
+          }),
+        });
+        return res.json({ success: true, skipped: true, reason: "tme_backoff", hoursLeft: bo.hoursLeft });
+      }
+    }
+
     const budgetMs = 270_000; // Vercel Pro maxDuration is 300s
     const start = Date.now();
     let chunks = 0;
