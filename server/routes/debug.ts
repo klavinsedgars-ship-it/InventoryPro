@@ -12,6 +12,76 @@ import { ebayAccountApi } from "../ebay-account-api";
  * review). Behaviour is identical to the previous inline handlers.
  */
 export function registerDebugRoutes(app: Express) {
+  /**
+   * Which database is THIS deployment actually talking to, and what's in it?
+   *
+   * Written during the 2026-08 outage, when it was impossible to tell whether
+   * the app was pointed at the production catalogue, a dev copy, or a
+   * suspended database — the answer lived in host dashboards nobody could
+   * cross-check quickly. Reports the connection TARGET (host/database only —
+   * never user or password), the live product count, whether rows have been
+   * deleted (id gap), and which runtime has been writing sync logs:
+   *   cron_sync            -> Vercel serverless crons
+   *   daily_sync_complete  -> a long-lived server (Replit) in-process scheduler
+   * so two deployments sharing (or not sharing) a database is obvious at a glance.
+   */
+  app.get("/api/__db-info", async (_req, res) => {
+    const raw =
+      process.env.DATABASE_URL ||
+      process.env.NEON_DATABASE_URL ||
+      process.env.POSTGRES_URL ||
+      "";
+    let target: any = { configured: !!raw };
+    try {
+      if (raw) {
+        const u = new URL(raw);
+        target = {
+          configured: true,
+          host: u.hostname, // credentials deliberately omitted
+          database: u.pathname.replace(/^\//, ""),
+          pooled: /-pooler\./.test(u.hostname),
+          provider: /neon\.tech/.test(u.hostname) ? "neon" : "other",
+        };
+      }
+    } catch {
+      target = { configured: true, host: "(unparseable DATABASE_URL)" };
+    }
+
+    try {
+      const { db } = await import("../db");
+      const { sql } = await import("drizzle-orm");
+      const q = async (text: string) => {
+        const r: any = await db.execute(sql.raw(text));
+        return r.rows ?? r;
+      };
+      const [products, ops, dbName] = await Promise.all([
+        q("SELECT COUNT(*)::int AS rows, MIN(id)::int AS min_id, MAX(id)::int AS max_id FROM products"),
+        q(`SELECT operation, COUNT(*)::int AS runs, MAX(synced_at) AS last_run
+            FROM sync_logs GROUP BY operation ORDER BY MAX(synced_at) DESC LIMIT 12`),
+        q("SELECT current_database() AS db, inet_server_addr()::text AS server"),
+      ]);
+      const p = products[0] ?? {};
+      // A max id far above the row count means rows were deleted at some point.
+      const deletedEstimate =
+        p.max_id != null && p.rows != null ? Math.max(0, p.max_id - p.rows) : null;
+      res.json({
+        ok: true,
+        target,
+        connected: dbName[0] ?? null,
+        products: { rows: p.rows ?? 0, minId: p.min_id ?? null, maxId: p.max_id ?? null, deletedEstimate },
+        syncLogsByOperation: ops,
+        writtenBy: {
+          vercelCron: ops.some((o: any) => o.operation === "cron_sync"),
+          longLivedServer: ops.some((o: any) => o.operation === "daily_sync_complete"),
+        },
+        time: new Date().toISOString(),
+      });
+    } catch (err) {
+      // A failure here IS the answer when the database is unreachable.
+      res.status(503).json({ ok: false, target, error: (err as Error).message });
+    }
+  });
+
   // Diagnostic endpoint - no auth required, no DB access.
   // Use to verify which commit is actually running and whether
   // BYPASS_AUTH is being read by the function.
