@@ -82,6 +82,92 @@ export function registerDebugRoutes(app: Express) {
     }
   });
 
+  /**
+   * WHERE IS THE DATA? Probes EVERY database credential present in the
+   * environment — not just the one db.ts happens to pick — and reports what
+   * each one contains.
+   *
+   * Written because a provider/integration can silently overwrite DATABASE_URL
+   * (pointing the app at a new, empty database) while the real production data
+   * sits untouched behind a *different* env var that nothing reads any more.
+   * From the outside both look identical: "the CRM is down / empty".
+   *
+   * Never returns credentials — host and database name only.
+   */
+  app.get("/api/__db-probe", async (_req, res) => {
+    const VARS = [
+      "DATABASE_URL",
+      "DATABASE_URL_UNPOOLED",
+      "NEON_DATABASE_URL",
+      "POSTGRES_URL",
+      "POSTGRES_URL_NON_POOLING",
+      "POSTGRES_PRISMA_URL",
+      "POSTGRES_URL_NO_SSL",
+    ];
+
+    // Group env vars by the database they actually point at, so N aliases of
+    // one database are probed once and obvious duplicates collapse.
+    const byTarget = new Map<string, { vars: string[]; url: string; host: string; database: string }>();
+    for (const name of VARS) {
+      const raw = process.env[name];
+      if (!raw) continue;
+      try {
+        const u = new URL(raw);
+        const key = `${u.hostname.replace(/-pooler\./, ".")}${u.pathname}`;
+        const hit = byTarget.get(key);
+        if (hit) hit.vars.push(name);
+        else byTarget.set(key, { vars: [name], url: raw, host: u.hostname, database: u.pathname.replace(/^\//, "") });
+      } catch { /* unparseable value */ }
+    }
+
+    const { Pool, neonConfig } = await import("@neondatabase/serverless");
+    const ws = (await import("ws")).default;
+    (neonConfig as any).webSocketConstructor = ws;
+
+    const results = await Promise.all(
+      Array.from(byTarget.values()).map(async (t) => {
+        const base = { vars: t.vars, host: t.host, database: t.database };
+        const pool = new Pool({ connectionString: t.url });
+        try {
+          const q = async (text: string) => (await pool.query(text)).rows;
+          const [prod, logs, tables] = await Promise.all([
+            q("SELECT COUNT(*)::int AS rows, MAX(id)::int AS max_id, MAX(last_synced_at) AS last_sync FROM products")
+              .catch((e) => [{ error: e.message }]),
+            q("SELECT operation, COUNT(*)::int AS runs, MAX(synced_at) AS last_run FROM sync_logs GROUP BY operation ORDER BY MAX(synced_at) DESC LIMIT 6")
+              .catch(() => []),
+            q("SELECT COUNT(*)::int AS n FROM information_schema.tables WHERE table_schema='public'")
+              .catch(() => [{ n: null }]),
+          ]);
+          return {
+            ...base,
+            reachable: true,
+            tables: tables[0]?.n ?? null,
+            products: prod[0] ?? null,
+            recentSyncOperations: logs,
+          };
+        } catch (e) {
+          return { ...base, reachable: false, error: (e as Error).message };
+        } finally {
+          try { await pool.end(); } catch { /* ignore */ }
+        }
+      }),
+    );
+
+    // Which one is the app actually using? (db.ts precedence order.)
+    const active =
+      process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.POSTGRES_URL || "";
+    let activeHost: string | null = null;
+    try { activeHost = active ? new URL(active).hostname : null; } catch { /* ignore */ }
+
+    res.json({
+      ok: true,
+      activeHost,
+      note: "The app uses DATABASE_URL, else NEON_DATABASE_URL, else POSTGRES_URL. If a target below holds your data but is NOT activeHost, repoint DATABASE_URL at it.",
+      targets: results,
+      time: new Date().toISOString(),
+    });
+  });
+
   // Diagnostic endpoint - no auth required, no DB access.
   // Use to verify which commit is actually running and whether
   // BYPASS_AUTH is being read by the function.
