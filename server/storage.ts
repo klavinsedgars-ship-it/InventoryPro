@@ -339,10 +339,16 @@ let demandSnapshotsEnsured = false;
 
 export class DatabaseStorage implements IStorage {
   constructor() {
-    this.initializeDatabase();
+    this.seedDefaults();
   }
 
-  private async initializeDatabase() {
+  /**
+   * Idempotent default-row seeding: admin user, starter categories, pricing
+   * tiers. Runs at construction (original behavior) and is public so the
+   * schema-reset bootstrap can re-seed a freshly provisioned database.
+   * Assumes tables exist — schema creation is /api/__schema-reset's job.
+   */
+  async seedDefaults() {
     try {
       // Create default admin user if it doesn't exist
       const existingAdmin = await this.getUserByUsername("admin");

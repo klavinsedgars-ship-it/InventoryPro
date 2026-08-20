@@ -168,6 +168,107 @@ export function registerDebugRoutes(app: Express) {
     });
   });
 
+  /**
+   * FACTORY-RESET the connected database to the CURRENT schema, then seed
+   * defaults (admin user, categories, pricing tiers).
+   *
+   * Exists because the app cannot otherwise provision its own tables: the
+   * base schema historically came from a manual `drizzle-kit push` on the dev
+   * box, which cannot run on Vercel. When the app is pointed at a brand-new
+   * (or stale-schema) database, this endpoint brings it to exactly what the
+   * running code expects — schema from server/schema-bootstrap-sql.ts
+   * (generated from shared/schema.ts) plus the applyScaleMigration indexes.
+   *
+   * DESTRUCTIVE: drops schema `public`. Two interlocks, both required:
+   *   1. env ALLOW_SCHEMA_RESET=true  (set it, run this once, REMOVE it)
+   *   2. query ?confirm=RESET
+   * GET without confirm reports status + row counts without touching anything.
+   */
+  app.get("/api/__schema-reset", async (req, res) => {
+    const armed = process.env.ALLOW_SCHEMA_RESET === "true";
+    const { db } = await import("../db");
+    const { sql } = await import("drizzle-orm");
+    const q = async (text: string) => {
+      const r: any = await db.execute(sql.raw(text));
+      return r.rows ?? r;
+    };
+
+    // Dry-run status for GET without ?confirm=RESET.
+    if (req.query.confirm !== "RESET") {
+      let state: any = {};
+      try {
+        const t = await q(`SELECT COUNT(*)::int AS n FROM information_schema.tables WHERE table_schema='public'`);
+        let productRows: number | string = "n/a";
+        try { productRows = (await q(`SELECT COUNT(*)::int AS n FROM products`))[0].n; } catch { productRows = "table missing"; }
+        state = { tables: t[0].n, productRows };
+      } catch (e) {
+        state = { error: (e as Error).message };
+      }
+      return res.json({
+        armed,
+        wouldApplyStatements: (await import("../schema-bootstrap-sql")).SCHEMA_STATEMENTS.length,
+        currentDatabase: state,
+        howTo: armed
+          ? "Call again with ?confirm=RESET to WIPE this database and provision the current schema."
+          : "Set ALLOW_SCHEMA_RESET=true in the environment (and redeploy) to arm this endpoint.",
+      });
+    }
+
+    if (!armed) {
+      return res.status(403).json({
+        ok: false,
+        error: "Not armed. Set ALLOW_SCHEMA_RESET=true in the environment, redeploy, then retry. Remove the var afterwards.",
+      });
+    }
+
+    try {
+      const { SCHEMA_STATEMENTS } = await import("../schema-bootstrap-sql");
+      console.warn("⚠️  SCHEMA RESET requested — dropping schema public and re-provisioning.");
+
+      await q(`DROP SCHEMA public CASCADE`);
+      await q(`CREATE SCHEMA public`);
+
+      let applied = 0;
+      for (const stmt of SCHEMA_STATEMENTS) {
+        await q(stmt);
+        applied++;
+      }
+
+      // Post-DDL: performance indexes + the incremental columns the runtime
+      // self-migrations manage, so a fresh DB matches a long-lived one.
+      await storage.applyScaleMigration();
+      await storage.ensureOrderIntegritySchema();
+      // Session store table (connect-pg-simple would lazily recreate it, but
+      // do it now so the first login after reset doesn't race).
+      await q(`CREATE TABLE IF NOT EXISTS user_sessions (
+        sid varchar NOT NULL COLLATE "default" PRIMARY KEY,
+        sess json NOT NULL,
+        expire timestamp(6) NOT NULL)`);
+      await q(`CREATE INDEX IF NOT EXISTS user_sessions_expire_idx ON user_sessions (expire)`);
+
+      // Seed defaults: admin user, categories, pricing tiers.
+      await storage.seedDefaults();
+
+      const tables = await q(`SELECT COUNT(*)::int AS n FROM information_schema.tables WHERE table_schema='public'`);
+      const admin = await q(`SELECT COUNT(*)::int AS n FROM users WHERE username='admin'`);
+      res.json({
+        ok: true,
+        droppedAndRecreated: true,
+        schemaStatements: applied,
+        tables: tables[0].n,
+        adminSeeded: admin[0].n === 1,
+        next: [
+          "REMOVE ALLOW_SCHEMA_RESET from the environment and redeploy",
+          "Log in as admin / admin123 and CHANGE THE PASSWORD",
+          "Re-import the catalogue via TME Browser",
+        ],
+      });
+    } catch (err) {
+      console.error("Schema reset failed:", err);
+      res.status(500).json({ ok: false, error: (err as Error).message });
+    }
+  });
+
   // Diagnostic endpoint - no auth required, no DB access.
   // Use to verify which commit is actually running and whether
   // BYPASS_AUTH is being read by the function.
