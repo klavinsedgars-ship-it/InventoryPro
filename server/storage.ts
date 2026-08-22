@@ -191,7 +191,7 @@ export interface IStorage {
 
   // API Usage Tracking
   getApiUsage(provider?: string): Promise<ApiUsageTracking | undefined>;
-  trackApiCall(provider: string): Promise<void>;
+  trackApiCall(provider: string): Promise<{ callsToday: number; dailyLimit: number } | undefined>;
   resetApiUsageIfNewDay(provider: string): Promise<void>;
 
   // TME Product Cache - PostgreSQL-based caching for 150k+ products
@@ -1362,31 +1362,55 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async trackApiCall(provider: string): Promise<void> {
+  // Per-provider daily call limits, env-overridable. The old code stamped
+  // EVERY provider's row with 10000 — so the eBay listing-ramp budget guard
+  // (which reads this row) throttled against TME's default instead of eBay's
+  // real ~2M/day cap, while the UI displayed a hardcoded 2M. The TME figure
+  // itself is a legacy assumption — confirm the real quota with TME and set
+  // TME_DAILY_LIMIT accordingly (0 disables the cap).
+  private providerDailyLimit(provider: string): number {
+    if (provider === "tme") {
+      const v = Number(process.env.TME_DAILY_LIMIT);
+      return Number.isFinite(v) && v >= 0 ? v : 10000;
+    }
+    if (provider === "ebay") {
+      const v = Number(process.env.EBAY_DAILY_LIMIT);
+      return Number.isFinite(v) && v >= 0 ? v : 2_000_000;
+    }
+    return 10000;
+  }
+
+  async trackApiCall(provider: string): Promise<{ callsToday: number; dailyLimit: number } | undefined> {
     const existing = await this.getApiUsage(provider);
-    
+    const configuredLimit = this.providerDailyLimit(provider);
+
     if (existing) {
       const lastReset = new Date(existing.lastResetAt || new Date());
       const now = new Date();
       const isNewDay = lastReset.toDateString() !== now.toDateString();
-      
+
       if (isNewDay) {
+        // Self-heal the stored limit on the daily reset so env changes (and
+        // the old wrong 10000-for-ebay rows) converge without a migration.
         await db.update(apiUsageTracking)
-          .set({ callsToday: 1, lastResetAt: now, updatedAt: now })
+          .set({ callsToday: 1, dailyLimit: configuredLimit, lastResetAt: now, updatedAt: now })
           .where(eq(apiUsageTracking.provider, provider));
+        return { callsToday: 1, dailyLimit: configuredLimit };
       } else {
         await db.update(apiUsageTracking)
           .set({ callsToday: existing.callsToday + 1, updatedAt: now })
           .where(eq(apiUsageTracking.provider, provider));
+        return { callsToday: existing.callsToday + 1, dailyLimit: existing.dailyLimit ?? configuredLimit };
       }
     } else {
       await db.insert(apiUsageTracking).values({
         provider,
         callsToday: 1,
-        dailyLimit: 10000,
+        dailyLimit: configuredLimit,
         lastResetAt: new Date(),
         updatedAt: new Date()
       });
+      return { callsToday: 1, dailyLimit: configuredLimit };
     }
   }
 

@@ -263,11 +263,18 @@ export class TMEApiServiceOptimized {
       this.callsThisMinute++;
       this.lastCallTimestamp = Date.now();
 
-      // Track API call in database
+      // Track API call in database — and enforce the daily cap from the DB
+      // counter, which is the only one that survives serverless cold starts
+      // (the in-memory this.callCount check resets per instance and never
+      // actually fired on Vercel). Limit comes from TME_DAILY_LIMIT (0 = off).
       if (this.storage) {
         try {
-          await this.storage.trackApiCall('tme');
+          const usage = await this.storage.trackApiCall('tme');
+          if (usage && usage.dailyLimit > 0 && usage.callsToday > usage.dailyLimit) {
+            throw new Error(`TME daily limit reached: ${usage.callsToday}/${usage.dailyLimit} calls today — resumes after midnight (set TME_DAILY_LIMIT to adjust)`);
+          }
         } catch (error) {
+          if ((error as Error).message?.includes('TME daily limit reached')) throw error;
           console.error('Failed to track API call:', error);
         }
       }

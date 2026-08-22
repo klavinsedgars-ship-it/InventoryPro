@@ -37,7 +37,10 @@ export function registerOpsRoutes(app: Express) {
         apiCalls: {
           ebay: {
             callsToday: ebayUsage?.callsToday ?? 0,
-            dailyLimit: 2_000_000, // eBay Sell/Inventory API approved-app cap
+            // Read the enforced limit from the DB row (self-healed daily from
+            // EBAY_DAILY_LIMIT) instead of displaying a hardcoded 2M that the
+            // budget guard didn't actually use.
+            dailyLimit: ebayUsage?.dailyLimit ?? 2_000_000,
             lastResetAt: ebayUsage?.lastResetAt ?? null,
             updatedAt: ebayUsage?.updatedAt ?? null,
           },
