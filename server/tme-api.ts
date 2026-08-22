@@ -638,8 +638,12 @@ export class TMEApiService {
 
       return response.Data.ProductList || [];
     } catch (error) {
+      // Propagate instead of returning [] — a swallowed failure here made a
+      // TME auth/permission error look like "0 products found", so imports
+      // reported success while importing nothing (the invisible-failure bug
+      // behind the empty TME Browser syncs).
       console.error('Failed to get product details:', error);
-      return [];
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 
@@ -688,8 +692,10 @@ export class TMEApiService {
 
       return response.Data.ProductList || [];
     } catch (error) {
+      // Propagate — see getProductDetails. Swallowing this made price/stock
+      // failures indistinguishable from "product has no price data".
       console.error('Failed to get prices and stocks:', error);
-      return [];
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 
@@ -760,7 +766,11 @@ export class TMEApiService {
           await new Promise(resolve => setTimeout(resolve, 500));
         }
       } catch (error) {
+        // Abort the whole call — a TME failure must reach the caller as an
+        // error, not as a shorter (or empty) result set. The old log-and-
+        // continue turned auth/permission failures into "Synced 0, failed 0".
         console.error(`Failed to get enhanced info for batch ${batchNum}:`, error);
+        throw error instanceof Error ? error : new Error(String(error));
       }
     }
 

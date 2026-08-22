@@ -269,6 +269,106 @@ export function registerDebugRoutes(app: Express) {
     }
   });
 
+  /**
+   * FULL SYSTEM SELF-CHECK — one URL that answers "is everything actually
+   * working, and if not, which exact piece is broken?"
+   *
+   * Probes, in order: database (connection, tables, key row counts, a real
+   * write+delete), TME API (each endpoint separately, so a v2 permission
+   * denial on GetProducts shows up even while Search still works — the exact
+   * failure mode that made imports complete with 0 products), eBay OAuth
+   * (token refresh), and env inventory. Finishes with a human-readable
+   * verdict list. Diagnostic-only: the one write it makes is deleted again.
+   */
+  app.get("/api/__system-check", async (_req, res) => {
+    const verdicts: string[] = [];
+    const report: any = { time: new Date().toISOString() };
+
+    // ---- Database ----
+    try {
+      const { db } = await import("../db");
+      const { sql } = await import("drizzle-orm");
+      const q = async (text: string) => {
+        const r: any = await db.execute(sql.raw(text));
+        return r.rows ?? r;
+      };
+      const raw = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.POSTGRES_URL || "";
+      let host = null;
+      try { host = raw ? new URL(raw).hostname : null; } catch { /* unparseable */ }
+      const tables = (await q(`SELECT COUNT(*)::int AS n FROM information_schema.tables WHERE table_schema='public'`))[0].n;
+      const counts: Record<string, number | string> = {};
+      for (const t of ["products", "users", "categories", "pricing_tiers", "sync_jobs", "sync_logs", "sync_audit"]) {
+        try { counts[t] = (await q(`SELECT COUNT(*)::int AS n FROM ${t}`))[0].n; }
+        catch (e) { counts[t] = `ERROR: ${(e as Error).message.slice(0, 60)}`; }
+      }
+      // Write test: insert a probe log row, then remove it.
+      let writeOk = false;
+      try {
+        const ins: any = await q(`INSERT INTO sync_logs (source, operation, status, message) VALUES ('system','self_check','success','write probe') RETURNING id`);
+        const id = (ins[0] ?? {}).id;
+        if (id != null) { await q(`DELETE FROM sync_logs WHERE id = ${Number(id)}`); writeOk = true; }
+      } catch (e) {
+        verdicts.push(`DB writes failing: ${(e as Error).message.slice(0, 100)}`);
+      }
+      report.database = { ok: true, host, tables, counts, writeOk };
+      if (tables < 28) verdicts.push(`Only ${tables} tables — schema incomplete, run /api/__schema-reset`);
+      if (counts.users === 0) verdicts.push("No users — admin missing; seeding did not run");
+    } catch (e) {
+      report.database = { ok: false, error: (e as Error).message };
+      verdicts.push(`DATABASE UNREACHABLE: ${(e as Error).message.slice(0, 120)}`);
+    }
+
+    // ---- TME API, endpoint by endpoint ----
+    const { tmeApi } = await import("../tme-api");
+    const PROBE_SYMBOL = "1N4148";
+    const tme: any = {};
+    try {
+      const s = await tmeApi.searchProducts("1N4148", 1);
+      tme.search = { ok: true, results: s.length };
+    } catch (e) { tme.search = { ok: false, error: (e as Error).message.slice(0, 160) }; }
+    try {
+      const d = await (tmeApi as any).getProductDetails([PROBE_SYMBOL]);
+      tme.getProducts = { ok: true, results: d.length };
+    } catch (e) { tme.getProducts = { ok: false, error: (e as Error).message.slice(0, 160) }; }
+    try {
+      const p = await (tmeApi as any).getPricesAndStocks([PROBE_SYMBOL]);
+      tme.getPricesAndStocks = { ok: true, results: p.length };
+    } catch (e) { tme.getPricesAndStocks = { ok: false, error: (e as Error).message.slice(0, 160) }; }
+    report.tme = tme;
+    if (!tme.search.ok && !tme.getProducts.ok) {
+      verdicts.push("TME API fully down/denied — imports and sync cannot work. Check TME_TOKEN/TME_APPLICATION_SECRET (v2 tokens: developers.tme.eu).");
+    } else if (!tme.getProducts.ok || !tme.getPricesAndStocks.ok) {
+      verdicts.push("TME partially denied: Search works but product-data endpoints fail — imports will fail. Your token likely lacks v2 API permissions; regenerate at developers.tme.eu.");
+    }
+
+    // ---- eBay OAuth ----
+    try {
+      await ebayOAuth.getValidAccessToken();
+      report.ebay = { ok: true, tokenRefresh: "working" };
+    } catch (e) {
+      report.ebay = { ok: false, error: (e as Error).message.slice(0, 160) };
+      verdicts.push(`eBay OAuth failing: listings/orders/messages sync will not work (${(e as Error).message.slice(0, 80)})`);
+    }
+
+    // ---- Env inventory ----
+    report.env = {
+      database: !!(process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.POSTGRES_URL),
+      staleNeonVar: !!process.env.NEON_DATABASE_URL,
+      tmeCreds: !!(process.env.TME_TOKEN && process.env.TME_APPLICATION_SECRET),
+      ebayCreds: !!((process.env.EBAY_OAUTH_CLIENT_ID || process.env.EBAY_APP_ID) && (process.env.EBAY_OAUTH_REFRESH_TOKEN || process.env.EBAY_REFRESH_TOKEN)),
+      cronSecret: !!process.env.CRON_SECRET,
+      bypassAuth: process.env.BYPASS_AUTH === "true",
+      schemaResetArmed: process.env.ALLOW_SCHEMA_RESET === "true",
+    };
+    if (report.env.bypassAuth) verdicts.push("BYPASS_AUTH is ON — the app has no login; remove it in production");
+    if (report.env.schemaResetArmed) verdicts.push("ALLOW_SCHEMA_RESET is still armed — remove it now that the reset is done");
+    if (report.env.staleNeonVar) verdicts.push("NEON_DATABASE_URL still set — delete it (stale fallback caused the August outage)");
+
+    report.healthy = verdicts.length === 0;
+    report.verdicts = verdicts.length ? verdicts : ["All checks passed."];
+    res.json(report);
+  });
+
   // Diagnostic endpoint - no auth required, no DB access.
   // Use to verify which commit is actually running and whether
   // BYPASS_AUTH is being read by the function.

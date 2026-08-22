@@ -53,6 +53,18 @@ export async function processTmeSyncChunk(
     return result;
   }
 
+  // Symbols TME returned no product data for must surface as failures, not
+  // silently shrink the result. (A missing symbol after a SUCCESSFUL call
+  // means TME doesn't know it or access to it is denied.)
+  const returned = new Set(enhancedProducts.map((e: any) => e?.product?.Symbol));
+  const missing = symbols.filter((s) => !returned.has(s));
+  if (missing.length > 0) {
+    result.failedCount += missing.length;
+    result.errors.push(
+      `TME returned no data for ${missing.length} symbol(s): ${missing.slice(0, 5).join(", ")}${missing.length > 5 ? "…" : ""}`,
+    );
+  }
+
   // Look up only the products in this chunk (not the whole catalog).
   const existing = await storage.getProductsBySkus(symbols);
   const existingBySku = new Map(existing.map((p) => [p.sku, p]));
