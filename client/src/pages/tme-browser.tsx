@@ -369,7 +369,17 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
         variant: final.failedCount > 0 ? "destructive" : "default",
       });
     }
-    queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+    // Predicate, not a key prefix: the Products page's key is the single
+    // string "/api/products/paged?…", which ["/api/products"] does NOT match
+    // (react-query compares array elements, not substrings). With the app's
+    // staleTime: Infinity, the old invalidation left Products showing a
+    // permanently cached (possibly empty) list after every sync.
+    queryClient.invalidateQueries({
+      predicate: (q) => {
+        const k = String(q.queryKey[0] ?? "");
+        return k.startsWith("/api/products") || k.startsWith("/api/dashboard");
+      },
+    });
   };
 
   const rawCategories = (categoriesData as any)?.categories || [];
