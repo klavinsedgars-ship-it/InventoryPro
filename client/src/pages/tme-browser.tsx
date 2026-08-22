@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { invalidateProductViews } from "@/lib/queryClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -369,17 +370,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
         variant: final.failedCount > 0 ? "destructive" : "default",
       });
     }
-    // Predicate, not a key prefix: the Products page's key is the single
-    // string "/api/products/paged?…", which ["/api/products"] does NOT match
-    // (react-query compares array elements, not substrings). With the app's
-    // staleTime: Infinity, the old invalidation left Products showing a
-    // permanently cached (possibly empty) list after every sync.
-    queryClient.invalidateQueries({
-      predicate: (q) => {
-        const k = String(q.queryKey[0] ?? "");
-        return k.startsWith("/api/products") || k.startsWith("/api/dashboard");
-      },
-    });
+    invalidateProductViews();
   };
 
   const rawCategories = (categoriesData as any)?.categories || [];

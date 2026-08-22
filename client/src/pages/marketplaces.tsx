@@ -25,7 +25,7 @@ import {
   Zap
 } from "lucide-react";
 import { formatCurrency, formatNumber } from "@/lib/utils";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, invalidateProductViews } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Product, Category } from "@shared/schema";
 
@@ -156,7 +156,7 @@ export function Marketplaces({ user, embedded = false }: MarketplacesProps) {
         description: data.message || "Sync completed successfully",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/sync/status"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      invalidateProductViews();
     },
     onError: (error: any) => {
       toast({
@@ -178,7 +178,7 @@ export function Marketplaces({ user, embedded = false }: MarketplacesProps) {
         description: data.message || `Updated ${data.result?.succeeded || 0} listings`,
       });
       queryClient.invalidateQueries({ queryKey: ["/api/sync/status"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      invalidateProductViews();
     },
     onError: (error: any) => {
       toast({

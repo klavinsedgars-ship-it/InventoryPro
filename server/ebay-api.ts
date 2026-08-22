@@ -352,10 +352,20 @@ export class EbayApiService {
               processedImageUrls = [absoluteImageUrl];
               console.log(`✅ Watermark removed, using processed image: ${absoluteImageUrl}`);
             } else {
+              // Honor the same fail-closed switch as the Inventory-API path
+              // (ebay-inventory-api.ts): with REQUIRE_WATERMARK_REMOVAL=true a
+              // failed watermark removal must BLOCK the listing, not silently
+              // publish the raw watermarked supplier image.
+              if (process.env.REQUIRE_WATERMARK_REMOVAL === 'true') {
+                throw new Error(`watermark removal failed and REQUIRE_WATERMARK_REMOVAL is set: ${imageResult.error}`);
+              }
               console.log(`⚠️ Watermark removal failed, using original image: ${imageResult.error}`);
               processedImageUrls = [fixedImageUrl];
             }
           } catch (error) {
+            if (process.env.REQUIRE_WATERMARK_REMOVAL === 'true') {
+              throw error instanceof Error ? error : new Error(String(error));
+            }
             console.warn(`⚠️ Image processing failed, using original: ${error}`);
             processedImageUrls = [fixedImageUrl];
           }
@@ -453,40 +463,24 @@ export class EbayApiService {
         const itemId = itemIdMatch ? itemIdMatch[1] : null;
         
         if (!itemId) {
-          // Check if the response contains warnings but is actually successful
+          // Ack=Success/Warning WITHOUT an ItemID is NOT a listing. The old
+          // code fabricated a `DEMO_<timestamp>` item id here, marked the
+          // product listedOnEbay=true, and logged success — permanently
+          // poisoning the DB with a bogus id that every later revise/end call
+          // choked on. Treat it as the failure it is; keep the raw response
+          // in the log so the actual warning is inspectable.
           const ackMatch = response.match(/<Ack>(.*?)<\/Ack>/);
-          const isSuccess = ackMatch && (ackMatch[1] === 'Success' || ackMatch[1] === 'Warning');
-          
-          if (isSuccess) {
-            // If it's success with warnings, create a mock item ID to show the integration works
-            const mockItemId = `DEMO_${Date.now()}`;
-            console.log("eBay API: Success with warnings, using demo item ID:", mockItemId);
-            
-            // Update product with demo eBay listing status
-            await storage.updateProduct(productId, {
-              listedOnEbay: true,
-              ebayItemId: mockItemId
-            });
-
-            // Log the successful integration test
+          if (ackMatch && (ackMatch[1] === 'Success' || ackMatch[1] === 'Warning')) {
+            const msg = `eBay returned Ack=${ackMatch[1]} but no ItemID — listing NOT created`;
+            console.error(msg);
             await storage.createSyncLog({
               source: "ebay",
               operation: "product_listing",
-              status: "success",
-              message: `eBay API integration successful - demo listing for "${product.name}"`,
-              details: JSON.stringify({
-                productId,
-                itemId: mockItemId,
-                note: "OAuth authentication and API calls working correctly",
-                listingData
-              })
+              status: "error",
+              message: `${msg} for "${product.name}"`,
+              details: JSON.stringify({ productId, response: response.slice(0, 2000) }),
             });
-
-            return {
-              success: true,
-              itemId: mockItemId,
-              message: `eBay API integration successful! OAuth token and API calls working. Demo listing created for "${product.name}"`
-            };
+            return { success: false, message: msg, errors: [msg] };
           }
           
           // Parse each <Errors> block individually, then prefer the one

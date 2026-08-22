@@ -58,7 +58,7 @@ export default function MessagesPage() {
   const [showAutoRulesDialog, setShowAutoRulesDialog] = useState(false);
   const { toast } = useToast();
 
-  const { data: threadsData, isLoading: threadsLoading, refetch: refetchThreads } = useQuery<{
+  const { data: threadsData, isLoading: threadsLoading, isError: threadsError, error: threadsErrorObj, refetch: refetchThreads } = useQuery<{
     threads: MessageThread[];
     unreadCount: number;
   }>({
@@ -70,7 +70,10 @@ export default function MessagesPage() {
         if (statusFilter === 'unread') params.append('isRead', 'false');
         else params.append('status', statusFilter);
       }
-      const res = await fetch(`/api/messages/threads?${params}`);
+      // res.ok check: a 401/500 must surface as an error, not render as an
+      // empty inbox ("No messages found").
+      const res = await fetch(`/api/messages/threads?${params}`, { credentials: 'include' });
+      if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
       return res.json();
     }
   });
@@ -82,7 +85,8 @@ export default function MessagesPage() {
     queryKey: ['/api/messages/threads', selectedThreadId],
     queryFn: async () => {
       if (!selectedThreadId) return { thread: null, messages: [] };
-      const res = await fetch(`/api/messages/threads/${selectedThreadId}`);
+      const res = await fetch(`/api/messages/threads/${selectedThreadId}`, { credentials: 'include' });
+      if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
       return res.json();
     },
     enabled: !!selectedThreadId
@@ -162,7 +166,13 @@ export default function MessagesPage() {
       return res.json();
     },
     onSuccess: () => {
+      // The open thread's header reads from the DETAIL query (selectedThread
+      // prefers messagesData.thread), so refetch it too — refetchThreads alone
+      // left the read/star icons stale while a thread was open. The status
+      // query drives the sidebar unread badge.
       refetchThreads();
+      refetchMessages();
+      queryClient.invalidateQueries({ queryKey: ['/api/messages/status'] });
     }
   });
 
@@ -173,6 +183,7 @@ export default function MessagesPage() {
     },
     onSuccess: () => {
       refetchThreads();
+      refetchMessages();
     }
   });
 
@@ -277,6 +288,14 @@ export default function MessagesPage() {
                 {threadsLoading ? (
                   <div className="flex items-center justify-center py-8">
                     <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+                  </div>
+                ) : threadsError ? (
+                  /* A failed fetch must not render as an empty inbox. */
+                  <div className="flex flex-col items-center justify-center py-12">
+                    <p className="text-sm font-medium text-red-600">Couldn't load messages.</p>
+                    <p className="mt-1 max-w-[90%] break-words text-center font-mono text-xs text-gray-400">
+                      {(threadsErrorObj as Error)?.message || "Request failed"}
+                    </p>
                   </div>
                 ) : threads.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-12 text-gray-500">

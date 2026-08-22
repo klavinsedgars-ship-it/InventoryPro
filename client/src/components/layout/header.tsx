@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { RefreshCw, Bell } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, invalidateProductViews } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -44,7 +44,7 @@ export function Header({ title, subtitle, actions }: HeaderProps) {
         description: `${totalChanged} products changed, ${totalEbay} eBay listings updated.`,
       });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      invalidateProductViews();
       queryClient.invalidateQueries({ queryKey: ["/api/tme/usage"] });
     } catch (err: any) {
       toast({

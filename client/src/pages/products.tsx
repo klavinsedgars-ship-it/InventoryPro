@@ -29,7 +29,7 @@ import {
   ExternalLink, Settings, RefreshCw, Loader2
 } from "lucide-react";
 import { getStatusColor, formatCurrency } from "@/lib/utils";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, invalidateProductViews } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Product, Category } from "@shared/schema";
 
@@ -177,7 +177,7 @@ export function Products({ user }: ProductsProps) {
                 title: "Bulk Listing Completed",
                 description: `${data.job.succeeded} of ${data.job.total} products listed successfully.`,
               });
-              queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+              invalidateProductViews();
               queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
             } else {
               toast({
@@ -215,7 +215,7 @@ export function Products({ user }: ProductsProps) {
         title: "Product Deleted",
         description: "The product has been deleted successfully.",
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      invalidateProductViews();
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
     },
     onError: (error: any) => {
@@ -234,7 +234,7 @@ export function Products({ user }: ProductsProps) {
         title: "All Products Deleted",
         description: `Successfully deleted ${data.deletedCount || 0} products.`,
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      invalidateProductViews();
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
       setSelectedProducts(new Set());
     },
@@ -263,7 +263,7 @@ export function Products({ user }: ProductsProps) {
             : `Successfully deleted ${deletedCount} selected products.`,
         variant: missed > 0 ? "destructive" : "default",
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      invalidateProductViews();
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
       setSelectedProducts(new Set());
     },
@@ -353,7 +353,7 @@ export function Products({ user }: ProductsProps) {
           variant: data.failed && !data.published ? "destructive" : undefined,
         });
         if (data.failures?.length) console.warn("Listing failures:\n" + data.failures.join("\n"));
-        queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+        invalidateProductViews();
         queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
         setSelectedProducts(new Set());
       } else {
@@ -398,7 +398,7 @@ export function Products({ user }: ProductsProps) {
           variant: "destructive",
         });
       }
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      invalidateProductViews();
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
     },
     onError: (error: any) => {
@@ -462,7 +462,7 @@ export function Products({ user }: ProductsProps) {
         });
       }
       setSelectedProducts(new Set());
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      invalidateProductViews();
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
     },
     onError: (error: any) => {
@@ -485,6 +485,7 @@ export function Products({ user }: ProductsProps) {
           title: "eBay Listing Updated",
           description: "Product details successfully synced to eBay marketplace.",
         });
+        invalidateProductViews();
       } else {
         toast({
           title: "Update Failed",
@@ -531,7 +532,7 @@ export function Products({ user }: ProductsProps) {
         description: `${selectedProducts.size} products listed on Amazon.`,
       });
       setSelectedProducts(new Set());
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      invalidateProductViews();
     },
     onError: (error: any) => {
       toast({
@@ -604,7 +605,7 @@ export function Products({ user }: ProductsProps) {
               <Button 
                 variant="outline" 
                 size="sm"
-                onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/products"] })}
+                onClick={() => invalidateProductViews()}
                 data-testid="btn-refresh"
               >
                 <RefreshCw className="w-4 h-4" />

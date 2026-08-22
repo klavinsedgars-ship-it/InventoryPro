@@ -132,7 +132,22 @@ export function Settings({ user }: SettingsProps) {
       return res.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/marketplace-settings/ebay"] });
+      // Fee changes alter server-computed profit everywhere — refresh every
+      // view that shows money, not just the settings form itself (the old
+      // single-key invalidation left Products/repricing/opportunities on the
+      // previous FVF/VAT numbers despite the toast's promise).
+      queryClient.invalidateQueries({
+        predicate: (q) => {
+          const k = String(q.queryKey[0] ?? "");
+          return (
+            k.startsWith("/api/marketplace-settings") ||
+            k.startsWith("/api/products") ||
+            k.startsWith("/api/dashboard") ||
+            k.startsWith("/api/repricing") ||
+            k.startsWith("/api/opportunities")
+          );
+        },
+      });
       toast({
         title: "Fees & Pricing saved",
         description: "New rates apply to future syncs and the per-product profit breakdown.",

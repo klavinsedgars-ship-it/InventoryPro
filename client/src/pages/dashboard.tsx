@@ -61,11 +61,11 @@ function statusVariant(status: string): "default" | "secondary" | "destructive" 
 export function Dashboard({ user }: DashboardProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  const { data: metrics } = useQuery<DashboardMetrics>({
+  const { data: metrics, isError: metricsError, error: metricsErrorObj } = useQuery<DashboardMetrics>({
     queryKey: ["/api/dashboard/metrics"],
   });
 
-  const { data: ops } = useQuery<OpsDaily>({
+  const { data: ops, isError: opsError } = useQuery<OpsDaily>({
     queryKey: ["/api/ops/daily"],
     refetchInterval: 60_000,
   });
@@ -117,6 +117,19 @@ export function Dashboard({ user }: DashboardProps) {
         />
 
         <div className="p-6 space-y-6">
+          {/* A failed metrics fetch must not render as an empty install:
+              "0 products, no sync" and "the dashboard can't load" are very
+              different situations (see the August outage). */}
+          {(metricsError || opsError) && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+              <strong>Dashboard data failed to load</strong> — the numbers below may be blank or stale,
+              not zero.{" "}
+              <span className="font-mono text-xs">
+                {(metricsErrorObj as Error)?.message || "Request failed"}
+              </span>
+            </div>
+          )}
+
           {/* Stat cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             {cards.map((card) => (

@@ -11,7 +11,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { insertProductSchema, type Product, type Category } from "@shared/schema";
 import { z } from "zod";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, invalidateProductViews } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
 const productFormSchema = insertProductSchema.extend({
@@ -186,7 +186,7 @@ export function ProductModal({ isOpen, onClose, product }: ProductModalProps) {
         title: "Product Created",
         description: "The product has been created successfully.",
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      invalidateProductViews();
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
       onClose();
     },
@@ -206,7 +206,7 @@ export function ProductModal({ isOpen, onClose, product }: ProductModalProps) {
         title: "Product Updated",
         description: "The product has been updated successfully.",
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      invalidateProductViews();
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
       onClose();
     },

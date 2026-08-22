@@ -21,7 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, invalidateProductViews } from "@/lib/queryClient";
 import type { Product } from "@shared/schema";
 
 const editListingSchema = z.object({
@@ -107,7 +107,7 @@ export function EditBeforeListingModal({
       return response.json();
     },
     onSuccess: (response: any) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      invalidateProductViews();
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/metrics"] });
       onOpenChange(false);
       

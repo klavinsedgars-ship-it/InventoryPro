@@ -86,10 +86,12 @@ export function EbayPolicies({ user, embedded = false }: EbayPoliciesProps) {
       return response.json();
     },
     onSuccess: (data) => {
-      queryClientHook.invalidateQueries({ queryKey: ["/api/ebay/business-policies"] });
-      queryClientHook.invalidateQueries({ queryKey: ["/api/ebay/business-policies/payment"] });
-      queryClientHook.invalidateQueries({ queryKey: ["/api/ebay/business-policies/fulfillment"] });
-      queryClientHook.invalidateQueries({ queryKey: ["/api/ebay/business-policies/return"] });
+      // Prefix predicate covers /payment, /fulfillment, /return AND /status
+      // (the old exact-key list included a "/api/ebay/business-policies" key
+      // that matches no query, and missed /status entirely).
+      queryClientHook.invalidateQueries({
+        predicate: (q) => String(q.queryKey[0] ?? "").startsWith("/api/ebay/business-policies"),
+      });
       toast({
         title: "Policies Synced",
         description: `Synced ${data.result?.payment?.synced || 0} payment, ${data.result?.fulfillment?.synced || 0} shipping, ${data.result?.return?.synced || 0} return policies from eBay`,

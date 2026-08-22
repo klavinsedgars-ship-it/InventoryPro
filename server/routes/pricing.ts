@@ -118,6 +118,9 @@ export function registerPricingRoutes(app: Express) {
       let updatedCount = 0;
       let errors: string[] = [];
 
+      const bulkFeeConfig = await getFeeConfig("ebay");
+      setActivePricingTiers(dbTiersToPricingTiers(await storage.getPricingTiers()));
+
       for (const productId of productIds) {
         try {
           const product = await storage.getProduct(productId);
@@ -126,16 +129,26 @@ export function registerPricingRoutes(app: Express) {
             continue;
           }
 
-          const pricingResult = calculateDynamicPrice(parseFloat(product.supplierPrice));
-
-          if (!pricingResult.isValid) {
-            errors.push(`Product ${productId}: ${pricingResult.errors.join(', ')}`);
+          const supplierPrice = parseFloat(product.supplierPrice);
+          if (!Number.isFinite(supplierPrice) || supplierPrice <= 0) {
+            errors.push(`Product ${productId}: no valid supplier price`);
             continue;
           }
 
+          // Full pipeline (MOQ package + net-profit floor), same as every
+          // other pricing path — calculateDynamicPrice alone underpriced
+          // MOQ>1 products by ~1/MOQ.
+          const pricingResult = calculatePriceWithFloor(supplierPrice, {
+            moq: product.moq || 1,
+            multiples: product.multiples || 1,
+            weightGrams: product.weight ? parseFloat(product.weight) : null,
+            marketplace: "ebay",
+            config: bulkFeeConfig,
+          });
+
           // Update product with calculated pricing
           const updateData: any = {
-            calculatedPrice: pricingResult.finalPrice.toString(),
+            calculatedPrice: pricingResult.calculatedPrice.toString(),
             marginTier: pricingResult.marginTier,
             marginPercentage: pricingResult.marginPercentage.toString(),
             priceUpdatedAt: new Date(),
@@ -214,6 +227,7 @@ export function registerPricingRoutes(app: Express) {
     try {
       // Use the operator's current DB tiers for the recalculation.
       setActivePricingTiers(dbTiersToPricingTiers(await storage.getPricingTiers()));
+      const feeConfig = await getFeeConfig("ebay");
       // Get all products
       const products = await storage.getProducts();
 
@@ -225,16 +239,21 @@ export function registerPricingRoutes(app: Express) {
 
       for (const product of validProducts) {
         try {
-          const pricingResult = calculateDynamicPrice(parseFloat(product.supplierPrice));
-
-          if (!pricingResult.isValid) {
-            errors.push(`Product ${product.name}: ${pricingResult.errors.join(', ')}`);
-            continue;
-          }
+          // calculatePriceWithFloor, not calculateDynamicPrice: the bare tier
+          // calculation ignores MOQ package multiplication and the net-profit
+          // floor, so MOQ>1 products were bulk-repriced at ~1/MOQ of the
+          // correct package price — under cost.
+          const pricingResult = calculatePriceWithFloor(parseFloat(product.supplierPrice), {
+            moq: product.moq || 1,
+            multiples: product.multiples || 1,
+            weightGrams: product.weight ? parseFloat(product.weight) : null,
+            marketplace: "ebay",
+            config: feeConfig,
+          });
 
           // Update product with calculated pricing
           await storage.updateProduct(product.id, {
-            calculatedPrice: pricingResult.finalPrice.toString(),
+            calculatedPrice: pricingResult.calculatedPrice.toString(),
             marginTier: pricingResult.marginTier,
             marginPercentage: pricingResult.marginPercentage.toString(),
             priceUpdatedAt: new Date(),

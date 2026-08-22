@@ -212,9 +212,11 @@ export function Repricing() {
       return r.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/repricing/stats"] });
+      // Prefix predicate so every snapshots page/filter refreshes, not just
+      // the exact params in scope (exact-key form left other filter combos
+      // stale until the 60s refetchInterval caught up).
       queryClient.invalidateQueries({
-        queryKey: [`/api/repricing/snapshots?${params.toString()}`],
+        predicate: (q) => String(q.queryKey[0] ?? "").startsWith("/api/repricing"),
       });
     },
   });

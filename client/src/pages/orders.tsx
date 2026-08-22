@@ -27,7 +27,7 @@ import {
   Truck, CheckCircle, Clock, XCircle, RotateCcw, 
   Printer, MapPin, Copy, ChevronDown, ChevronRight,
   ShoppingBag, Box, ClipboardCheck, History, DollarSign,
-  User, StickyNote, Check
+  User, StickyNote, Check, AlertTriangle
 } from "lucide-react";
 import { SiEbay, SiAmazon } from "react-icons/si";
 import { formatCurrency } from "@/lib/utils";
@@ -84,13 +84,19 @@ export function Orders({ user }: OrdersProps) {
   // Build the API URL with status filter
   const ordersUrl = statusFilter ? `/api/orders?status=${statusFilter}` : '/api/orders';
 
-  const { data: ordersData, isLoading, refetch } = useQuery<{
+  const { data: ordersData, isLoading, isError: ordersError, error: ordersErrorObj, refetch } = useQuery<{
     success: boolean;
     orders: OrderWithDetails[];
     total: number;
   }>({
     queryKey: ["/api/orders", statusFilter],
-    queryFn: () => fetch(ordersUrl, { credentials: 'include' }).then(res => res.json()),
+    // res.ok check matters: without it a 401/500 parsed as JSON and rendered
+    // as "no orders" — a failed fetch must be an error, not an empty inbox.
+    queryFn: async () => {
+      const res = await fetch(ordersUrl, { credentials: 'include' });
+      if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
+      return res.json();
+    },
   });
 
   const { data: statsData } = useQuery<{
@@ -126,6 +132,7 @@ export function Orders({ user }: OrdersProps) {
       });
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/orders/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders/sync/status"] });
     },
     onError: (error: any) => {
       toast({
@@ -309,6 +316,15 @@ export function Orders({ user }: OrdersProps) {
                 {isLoading ? (
                   <div className="p-8 text-center">
                     <Loader2 className="w-6 h-6 animate-spin mx-auto text-gray-400" />
+                  </div>
+                ) : ordersError ? (
+                  /* A failed fetch must never masquerade as "All packed!" */
+                  <div className="p-8 text-center">
+                    <AlertTriangle className="w-10 h-10 mx-auto text-red-400 mb-2" />
+                    <p className="text-sm font-medium text-red-600">Couldn't load orders.</p>
+                    <p className="mt-1 break-words font-mono text-xs text-gray-400">
+                      {(ordersErrorObj as Error)?.message || "Request failed"}
+                    </p>
                   </div>
                 ) : filteredOrders.length === 0 ? (
                   <div className="p-8 text-center">

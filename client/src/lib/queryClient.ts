@@ -55,3 +55,25 @@ export const queryClient = new QueryClient({
     },
   },
 });
+
+/**
+ * Invalidate every query that shows product data, by PREFIX MATCH on the key
+ * string. Use this instead of invalidateQueries({queryKey: ["/api/products"]}):
+ * that form only matches keys whose first array element is exactly
+ * "/api/products", silently missing the Products page's real key
+ * "/api/products/paged?…" — with the app-wide staleTime: Infinity, every such
+ * mutation left the table permanently stale (delete/list/edit/sync all looked
+ * like no-ops until a hard reload).
+ */
+export function invalidateProductViews() {
+  queryClient.invalidateQueries({
+    predicate: (q) => {
+      const k = String(q.queryKey[0] ?? "");
+      return (
+        k.startsWith("/api/products") ||
+        k.startsWith("/api/dashboard") ||
+        k.startsWith("/api/stock")
+      );
+    },
+  });
+}

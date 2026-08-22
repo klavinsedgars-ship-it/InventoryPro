@@ -133,6 +133,14 @@ export function Opportunities() {
     queryKey: [`/api/opportunities?${params.toString()}`],
   });
 
+  // Invalidate EVERY opportunities page/filter combination, not just the
+  // params in scope right now — the exact-key form left page 2 / other
+  // filters serving pre-check cached rows forever (staleTime: Infinity).
+  const invalidateOpportunities = () =>
+    queryClient.invalidateQueries({
+      predicate: (q) => String(q.queryKey[0] ?? "").startsWith("/api/opportunities"),
+    });
+
   const checkDemand = useMutation({
     mutationFn: async () => {
       const r = await fetch("/api/opportunities/check-demand", {
@@ -145,7 +153,7 @@ export function Opportunities() {
       return r.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/opportunities?${params.toString()}`] });
+      invalidateOpportunities();
     },
   });
 
@@ -161,7 +169,7 @@ export function Opportunities() {
       return r.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/opportunities?${params.toString()}`] });
+      invalidateOpportunities();
     },
   });
 

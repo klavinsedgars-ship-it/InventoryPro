@@ -494,15 +494,15 @@ export function registerTmeRoutes(app: Express): void {
                 };
               }
 
-              // Prepare product data
-              const productData = {
+              // Prepare product data. Price fields are added below ONLY when
+              // TME returned a usable price — writing the fallback 0 here
+              // overwrote good prices on every TME data hiccup.
+              const productData: any = {
                 name: product.Description || product.Symbol,
                 sku: product.Symbol,
                 description: product.Description || "",
                 category: product.Category || "Electronics",
                 stock: stock?.Amount || 0,
-                salePrice: String(pricingResult.finalPrice),
-                supplierPrice: String(supplierPrice),
                 supplier: "TME",
                 imageUrl: product.Photo || null,
                 status: (stock?.Amount || 0) > 0 ? "active" : "inactive",
@@ -514,6 +514,11 @@ export function registerTmeRoutes(app: Express): void {
                 multiples: multiples
               };
 
+              if (supplierPrice > 0) {
+                productData.supplierPrice = String(supplierPrice);
+                productData.salePrice = String(pricingResult.finalPrice);
+              }
+
               // Check if product already exists by SKU
               const existing = existingBySku.get(product.Symbol);
 
@@ -521,6 +526,11 @@ export function registerTmeRoutes(app: Express): void {
                 await storage.updateProduct(existing.id, productData);
                 updatedCount++;
               } else {
+                if (supplierPrice <= 0) {
+                  productData.supplierPrice = "0";
+                  productData.salePrice = "0";
+                  productData.status = "inactive";
+                }
                 await storage.createProduct(productData);
                 syncedCount++;
               }
@@ -795,15 +805,21 @@ export function registerTmeRoutes(app: Express): void {
                   calculatedPrice: String(Number(pricingResult.calculatedPrice)),
                   marginTier: pricingResult.marginTier,
                   marginPercentage: String(Number(pricingResult.marginPercentage)),
-                  stock: stock?.Amount || 100,
+                  // No stock data means ZERO sellable units, not 100 — the old
+                  // `|| 100` fabricated inventory and oversold. Same for
+                  // weight: inventing 10 g drove the wrong shipping band.
+                  stock: stock?.Amount ?? 0,
                   moq: moq,
                   multiples: multiples,
-                  status: "active" as const,
-                  weight: String(Number(product.Weight) || 10),
+                  status: ((stock?.Amount ?? 0) > 0 ? "active" : "inactive") as "active" | "inactive",
+                  weight: Number(product.Weight) > 0 ? String(Number(product.Weight)) : null,
                   imageUrl: product.Photo ? (product.Photo.startsWith('//') ? `https:${product.Photo}` : product.Photo) : null,
                   dataSheetUrl: product.DataSheet ? `https://www.tme.eu${product.DataSheet}` : null,
                   productUrl: product.ProductInformationPage ? `https://www.tme.eu${product.ProductInformationPage}` : null,
-                  supplier: "tme" as const,
+                  // MUST be uppercase: the cron's stale-product query filters
+                  // supplier = 'TME'; lowercase rows fell out of the hourly
+                  // sync forever.
+                  supplier: "TME" as const,
                   supplierProductId: product.Symbol,
                   useStockLimit: settings.useStockLimit || false,
                   ebayStockLimit: settings.useStockLimit ? settings.ebayStockLimit : null

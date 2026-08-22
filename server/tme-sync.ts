@@ -115,14 +115,12 @@ export async function processTmeSyncChunk(
         };
       }
 
-      const productData = {
+      const productData: any = {
         name: product.Description || product.Symbol,
         sku: product.Symbol,
         description: product.Description || "",
         category: product.Category || "Electronics",
         stock: stock?.Amount || 0,
-        salePrice: String(pricingResult.finalPrice),
-        supplierPrice: String(supplierPrice),
         supplier: "TME",
         imageUrl: product.Photo || null,
         status: (stock?.Amount || 0) > 0 ? "active" : "inactive",
@@ -134,11 +132,26 @@ export async function processTmeSyncChunk(
         multiples,
       };
 
+      // Only write price fields when TME actually returned a usable price.
+      // getSupplierPriceForMoq returns 0 when PriceList is missing/empty, and
+      // unconditionally writing that overwrote a previously GOOD price with
+      // "0" (and salePrice with 0) whenever TME had a data hiccup.
+      if (supplierPrice > 0) {
+        productData.supplierPrice = String(supplierPrice);
+        productData.salePrice = String(pricingResult.finalPrice);
+      }
+
       const match = existingBySku.get(product.Symbol);
       if (match) {
         await storage.updateProduct(match.id, productData);
         result.updatedCount++;
       } else {
+        // New product with no price: create it, but never as sellable.
+        if (supplierPrice <= 0) {
+          productData.supplierPrice = "0";
+          productData.salePrice = "0";
+          productData.status = "inactive";
+        }
         await storage.createProduct(productData);
         result.syncedCount++;
       }

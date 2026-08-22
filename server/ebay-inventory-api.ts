@@ -385,6 +385,12 @@ export class EbayInventoryApiService {
 
   /** Create an offer; if one already exists for the SKU, reuse its id. */
   async createOffer(product: Product, categoryId: string): Promise<StepResult & { offerId?: string }> {
+    // Never create/refresh an offer at 0.00: a null/NaN salePrice parsed to 0
+    // and published a live listing at zero. Fail loudly instead.
+    const guardPrice = parseFloat(product.salePrice as any);
+    if (!Number.isFinite(guardPrice) || guardPrice <= 0) {
+      return { step: "offer", ok: false, error: `refusing to create offer for ${product.sku} at invalid price "${product.salePrice}"` };
+    }
     const payload = await this.buildOffer(product, categoryId);
     const r = await this.req("POST", `/offer`, payload);
     if (r.ok && r.data?.offerId) return { step: "offer", ok: true, httpStatus: r.status, offerId: r.data.offerId };
@@ -441,8 +447,15 @@ export class EbayInventoryApiService {
     const out = new Map<string, { ok: boolean; offerId?: string; error?: string }>();
     const requests = [];
     for (const { product, categoryId } of items.slice(0, 25)) {
+      // Same zero-price guard as createOffer: never offer a SKU at 0.00.
+      const p = parseFloat(product.salePrice as any);
+      if (!Number.isFinite(p) || p <= 0) {
+        out.set(product.sku, { ok: false, error: `invalid price "${product.salePrice}" — offer not created` });
+        continue;
+      }
       requests.push(await this.buildOffer(product, categoryId));
     }
+    if (requests.length === 0) return out;
     const r = await this.req("POST", `/bulk_create_offer`, { requests });
     const responses = r.data?.responses || [];
     for (const resp of responses) {
@@ -488,7 +501,15 @@ export class EbayInventoryApiService {
     items: Array<{ sku: string; offerId: string; quantity: number; price: number }>,
   ): Promise<Map<string, { ok: boolean; error?: string }>> {
     const out = new Map<string, { ok: boolean; error?: string }>();
-    const requests = items.slice(0, 25).map((it) => ({
+    // Guard: a NaN/zero price here repriced a LIVE listing to "0.00"/"NaN".
+    // Refuse those items individually; the rest of the batch proceeds.
+    const valid = items.slice(0, 25).filter((it) => {
+      if (Number.isFinite(it.price) && it.price > 0) return true;
+      out.set(it.sku, { ok: false, error: `invalid price ${it.price} — update refused` });
+      return false;
+    });
+    if (valid.length === 0) return out;
+    const requests = valid.map((it) => ({
       sku: it.sku,
       shipToLocationAvailability: { quantity: Math.max(0, it.quantity) },
       offers: [{ offerId: it.offerId, availableQuantity: Math.max(0, it.quantity), price: { value: it.price.toFixed(2), currency: this.currency } }],
@@ -500,7 +521,8 @@ export class EbayInventoryApiService {
       out.set(resp.sku, { ok, error: ok ? undefined : this.firstEbayError(resp, JSON.stringify(resp)) });
     }
     if (!r.ok && responses.length === 0) {
-      for (const it of items.slice(0, 25)) out.set(it.sku, { ok: false, error: this.firstEbayError(r.data, r.text) });
+      // Only the items actually sent — don't clobber the per-item refusals.
+      for (const it of valid) out.set(it.sku, { ok: false, error: this.firstEbayError(r.data, r.text) });
     }
     return out;
   }

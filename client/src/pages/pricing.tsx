@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, invalidateProductViews } from "@/lib/queryClient";
 import { Calculator, TrendingUp, Package, DollarSign, Settings, Download } from "lucide-react";
 import type { Product } from "@shared/schema";
 
@@ -68,7 +68,7 @@ export function Pricing({ user }: PricingProps) {
         title: "Pricing Updated",
         description: `Successfully updated ${response.updatedCount} of ${response.totalProducts} products.`,
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      invalidateProductViews();
       setSelectedProducts([]);
     },
     onError: (error: any) => {
