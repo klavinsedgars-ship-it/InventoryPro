@@ -9,7 +9,12 @@
 
 import { storage } from "./storage";
 import { tmeApi } from "./tme-api";
-import { calculatePriceWithFloor, getSupplierPriceForMoq } from "./dynamic-pricing";
+import {
+  calculatePriceWithFloor,
+  getSupplierPriceForMoq,
+  setActivePricingTiers,
+  dbTiersToPricingTiers,
+} from "./dynamic-pricing";
 import { getFeeConfig } from "./fee-config";
 
 export interface TmeSyncSettings {
@@ -70,6 +75,13 @@ export async function processTmeSyncChunk(
   const existingBySku = new Map(existing.map((p) => [p.sku, p]));
 
   const feeConfig = await getFeeConfig("ebay");
+
+  // Load the operator's DB pricing tiers (Configuration UI) — module state
+  // resets per serverless invocation, so this must happen on EVERY import
+  // path, not just the cron. Without it, browser imports priced with the
+  // built-in config tiers and the next cron re-sync silently repriced them
+  // with the DB tiers.
+  setActivePricingTiers(dbTiersToPricingTiers(await storage.getPricingTiers()));
 
   for (const enhanced of enhancedProducts) {
     try {
