@@ -776,6 +776,33 @@ export class EbayApiService {
 </EndItemRequest>`;
   }
 
+  /**
+   * Fetch one page of the seller's ACTIVE listings via GetMyeBaySelling.
+   * Covers every live listing regardless of how it was created (Inventory API
+   * or legacy Trading API) — the basis for reconciling eBay reality against
+   * the local DB after a rebuild. Returns lightweight entries + paging info.
+   */
+  async getMyActiveListings(page: number = 1, entriesPerPage: number = 200): Promise<{
+    items: Array<{ itemId: string; sku: string | null; title: string; price: number | null; quantity: number | null }>;
+    totalPages: number;
+    totalEntries: number;
+  }> {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ActiveList>
+    <Include>true</Include>
+    <Pagination>
+      <EntriesPerPage>${entriesPerPage}</EntriesPerPage>
+      <PageNumber>${page}</PageNumber>
+    </Pagination>
+  </ActiveList>
+</GetMyeBaySellingRequest>`;
+    const response = await this.makeTradingApiRequest(xml, 'GetMyeBaySelling');
+    const { assertTradingAck, parseActiveListings } = await import('./ebay-xml');
+    assertTradingAck(response, 'GetMyeBaySelling failed');
+    return parseActiveListings(response);
+  }
+
   private async makeTradingApiRequest(xmlBody: string, callName: string = 'AddFixedPriceItem'): Promise<string> {
     const tradingUrl = this.isProduction ? this.tradingApiUrl : this.sandboxTradingApiUrl;
     console.log("Using eBay environment:", this.isProduction ? "PRODUCTION" : "SANDBOX");

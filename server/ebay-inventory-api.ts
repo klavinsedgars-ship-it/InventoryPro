@@ -406,6 +406,22 @@ export class EbayInventoryApiService {
     return { step: "offer", ok: false, httpStatus: r.status, error: this.firstEbayError(r.data, r.text) };
   }
 
+  /**
+   * Look up the existing offer for a SKU (used by reconciliation to recover
+   * offerIds for listings the DB has lost track of). Returns null when the
+   * SKU has no Inventory-API offer — e.g. a legacy Trading-API listing.
+   */
+  async getOfferBySku(sku: string): Promise<{ offerId: string; listingId: string | null; status: string | null } | null> {
+    const r = await this.req("GET", `/offer?sku=${encodeURIComponent(sku)}`);
+    const offer = r.data?.offers?.[0];
+    if (!r.ok || !offer?.offerId) return null;
+    return {
+      offerId: offer.offerId,
+      listingId: offer.listing?.listingId ?? null,
+      status: offer.status ?? null,
+    };
+  }
+
   async publishOffer(offerId: string): Promise<StepResult & { listingId?: string }> {
     const r = await this.req("POST", `/offer/${offerId}/publish`, {});
     if (r.ok && r.data?.listingId) return { step: "publish", ok: true, httpStatus: r.status, listingId: r.data.listingId };

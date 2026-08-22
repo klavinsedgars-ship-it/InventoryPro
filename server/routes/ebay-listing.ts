@@ -12,6 +12,27 @@ import { calculateEbayStock } from "../stock-manager";
  * identical to the previous inline handlers.
  */
 export function registerEbayListingRoutes(app: Express) {
+  // Reconcile the DB against what is ACTUALLY live on the eBay account.
+  // Dry-run by default (reports matches/orphans, changes nothing);
+  // ?apply=1 restores local listing state (listedOnEbay/itemId/offerId) for
+  // matched SKUs and clears flags for DB-ghosts. Reads eBay, never writes to
+  // it. Run this BEFORE any bulk re-listing after a database rebuild —
+  // otherwise live listings are invisible to the sync (oversell risk) and
+  // re-listing the same SKUs creates duplicates.
+  app.get("/api/ebay/reconcile", requireAuth, async (req, res) => {
+    try {
+      const { reconcileEbayListings } = await import("../ebay-reconcile");
+      const report = await reconcileEbayListings({
+        apply: String(req.query.apply) === "1",
+        maxPages: req.query.maxPages ? Number(req.query.maxPages) : undefined,
+      });
+      res.json(report);
+    } catch (error) {
+      console.error("eBay reconcile failed:", error);
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  });
+
   app.post("/api/ebay/list", requireAuth, async (req, res) => {
     try {
       const { productId, listingDetails } = req.body;
