@@ -231,6 +231,12 @@ export function registerTmeRoutes(app: Express): void {
     // "Select All" button reliably — unlike /api/tme/products it does not
     // window-slice or fall back to keyword/mock search, so "Select All (N)"
     // actually returns everything TME has for the category (capped for safety).
+    // Fetch a WINDOW of a category's products for Select All. The old shape
+    // crawled the whole category in ONE request — 77+ sequential TME calls
+    // for a big category, minutes of dead air with no progress, and a
+    // serverless-timeout death sentence past ~200 pages. Now the client
+    // drives it window-by-window (startPage + pages), getting live progress,
+    // a responsive Cancel, and no function-timeout ceiling on category size.
     app.get("/api/tme/category-all", async (req, res) => {
       try {
         const categoryId = req.query.categoryId as string;
@@ -239,17 +245,17 @@ export function registerTmeRoutes(app: Express): void {
         }
         const search = ((req.query.search as string) || "").toLowerCase();
         const producer = ((req.query.producer as string) || "").toLowerCase();
-        const priceMin = req.query.priceMin ? parseFloat(req.query.priceMin as string) : null;
-        const priceMax = req.query.priceMax ? parseFloat(req.query.priceMax as string) : null;
+        const startPage = Math.max(1, parseInt(String(req.query.startPage || "1"), 10) || 1);
+        const pages = Math.min(25, Math.max(1, parseInt(String(req.query.pages || "10"), 10) || 10));
 
-        const MAX_PAGES = 100; // 100 * 20 = 2000 products hard cap per category
         const all: any[] = [];
         const seen = new Set<string>();
         let total = 0;
         let pagesFetched = 0;
-        let truncated = false;
+        let hasMore = false;
+        let page = startPage;
 
-        for (let page = 1; page <= MAX_PAGES; page++) {
+        for (; page < startPage + pages; page++) {
           const r = await tmeApi.getCategoryPageRaw(categoryId, page);
           pagesFetched++;
           total = r.total || total;
@@ -259,15 +265,14 @@ export function registerTmeRoutes(app: Express): void {
               all.push(p);
             }
           }
-          if (!r.hasMore) break;
-          if (page === MAX_PAGES) truncated = true;
+          if (!r.hasMore) { hasMore = false; break; }
+          hasMore = true;
           // Gentle pacing so a big category doesn't hammer TME's rate limit.
           await new Promise((resolve) => setTimeout(resolve, 250));
         }
 
-        // Apply the same client-side filters the grid uses (price needs a
-        // loaded price, which Search doesn't include — so price filters are
-        // best-effort and only drop items whose price is known and out of band).
+        // Apply the same client-side filters the grid uses (price filtering
+        // needs loaded prices, which Search doesn't include — handled client-side).
         let products = all;
         if (search) {
           products = products.filter((p) =>
@@ -287,7 +292,8 @@ export function registerTmeRoutes(app: Express): void {
           filtered: products.length,
           total,
           pagesFetched,
-          truncated,
+          hasMore,
+          nextPage: hasMore ? page : null,
         });
       } catch (error) {
         console.error("TME category-all fetch error:", error);

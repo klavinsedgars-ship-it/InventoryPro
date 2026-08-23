@@ -592,6 +592,12 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   // window-slicing and no keyword/mock fallback, so the selection actually
   // matches the category — fixing the old "200 shown, 70 selected" bug where
   // the page-window math under-fetched.
+  // Select All, chunked: fetch the category in 10-page windows (~200
+  // products per request) instead of one giant crawl. The old single-request
+  // version spent 2-3+ minutes of dead air on big categories (77+ sequential
+  // TME calls server-side), showed 0% progress the whole time, ignored Cancel
+  // until the end, and died on the serverless timeout past ~4k products.
+  const SELECT_ALL_CAP = 5000; // safety cap on selected products per run
   const bulkSelectPages = async () => {
     if (!selectedCategory) return;
 
@@ -600,43 +606,66 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     setBulkLoading(true);
     setBulkProgress(0);
 
+    const newSelected = new Set(selectedProducts);
+    const newDetails = new Map(selectedDetails);
+    const before = newSelected.size;
+    let fetched = 0;
+    let total = 0;
+    let capped = false;
+
     try {
-      const params = new URLSearchParams({ categoryId: selectedCategory });
-      if (filters.search) params.append('search', filters.search);
-      if (filters.priceMin) params.append('priceMin', filters.priceMin);
-      if (filters.priceMax) params.append('priceMax', filters.priceMax);
-      if (filters.producer) params.append('producer', filters.producer);
+      let startPage: number | null = 1;
+      while (startPage != null) {
+        const params = new URLSearchParams({
+          categoryId: selectedCategory,
+          startPage: String(startPage),
+          pages: "10",
+        });
+        if (filters.search) params.append('search', filters.search);
+        if (filters.producer) params.append('producer', filters.producer);
 
-      const response = await fetch(`/api/tme/category-all?${params.toString()}`, {
-        signal: controller.signal,
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
-      if (controller.signal.aborted) return;
+        const response: Response = await fetch(`/api/tme/category-all?${params.toString()}`, {
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data: any = await response.json();
+        if (controller.signal.aborted) return;
 
-      const newSelected = new Set(selectedProducts);
-      const newDetails = new Map(selectedDetails);
-      const before = newSelected.size;
-      (data.products || []).forEach((p: TMEProduct) => {
-        newSelected.add(p.Symbol);
-        newDetails.set(p.Symbol, p);
-      });
-      setSelectedProducts(newSelected);
-      setSelectedDetails(newDetails);
+        (data.products || []).forEach((p: TMEProduct) => {
+          newSelected.add(p.Symbol);
+          newDetails.set(p.Symbol, p);
+        });
+        fetched += data.fetched || 0;
+        total = data.total || total;
 
+        // Live feedback: selection count + progress bar advance per window.
+        setSelectedProducts(new Set(newSelected));
+        setSelectedDetails(new Map(newDetails));
+        setBulkProgress(total > 0 ? Math.min(99, Math.round((fetched / total) * 100)) : 0);
+
+        if (newSelected.size - before >= SELECT_ALL_CAP) { capped = true; break; }
+        startPage = data.hasMore ? data.nextPage : null;
+      }
+
+      setBulkProgress(100);
       const added = newSelected.size - before;
       toast({
-        title: data.truncated ? "Bulk selection capped" : "Bulk selection complete",
-        description: data.truncated
-          ? `Category is large — capped at ${data.fetched} products. Added ${added} new (total ${newSelected.size}).`
-          : `Selected all ${data.filtered} in this category — added ${added} new (total ${newSelected.size}).`,
+        title: capped ? "Selection capped" : "Bulk selection complete",
+        description: capped
+          ? `Stopped at the ${SELECT_ALL_CAP.toLocaleString()}-product safety cap — added ${added} (total ${newSelected.size}). Narrow the category or sync this batch first.`
+          : `Selected ${added} product(s) — total ${newSelected.size}.`,
       });
     } catch (error: any) {
       if (error.name !== 'AbortError') {
         toast({
           title: "Select All failed",
-          description: error.message || "TME API may be overloaded — try again.",
+          description: `${error.message || "TME API may be overloaded"} — ${newSelected.size - before} selected so far are kept.`,
           variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Select All cancelled",
+          description: `${newSelected.size - before} product(s) selected before cancelling are kept.`,
         });
       }
     } finally {
