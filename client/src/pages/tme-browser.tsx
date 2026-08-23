@@ -1430,7 +1430,11 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                   <TabsContent value="preview" className="space-y-4">
                     <ScrollArea className="h-[400px]">
                       <div className="space-y-2">
-                        {Array.from(selectedProducts).map(symbol => {
+                        {/* Cap the rendered rows — a 1,500+ selection made this
+                            dialog crawl, and every row beyond the viewport is
+                            identical anyway. All selected products sync
+                            regardless of what's rendered here. */}
+                        {Array.from(selectedProducts).slice(0, 100).map(symbol => {
                           // Prefer the remembered detail (covers items selected
                           // in other categories/pages); fall back to the current
                           // grid for the freshest copy.
@@ -1471,12 +1475,22 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                   </div>
                                 )}
                                 {!enhanced && (
-                                  <div className="text-xs text-gray-400">Loading...</div>
+                                  /* Honest label: nothing is "loading" here —
+                                     price/stock appear only after "Load
+                                     Prices", and the sync fetches fresh
+                                     price/stock for every product anyway. */
+                                  <div className="text-xs text-gray-400">price &amp; stock fetched at sync</div>
                                 )}
                               </div>
                             </div>
                           );
                         })}
+                        {selectedProducts.size > 100 && (
+                          <div className="rounded border border-dashed p-3 text-center text-sm text-gray-500">
+                            …and {(selectedProducts.size - 100).toLocaleString()} more selected — all{" "}
+                            {selectedProducts.size.toLocaleString()} will be synced.
+                          </div>
+                        )}
                       </div>
                     </ScrollArea>
                   </TabsContent>
