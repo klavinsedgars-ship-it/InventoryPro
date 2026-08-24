@@ -655,9 +655,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   async resetEbayListAttempts(opts?: { onlyErrored?: boolean }): Promise<number> {
+    // Also clear the recorded failure: once a SKU is requeued, the previous
+    // error is history. Leaving it behind kept /api/ops/list-ramp/failures
+    // reporting long-fixed problems and made 'error' status stick to products
+    // that subsequently listed fine.
     const r: any = await db.execute(sql`
       UPDATE products
-      SET ebay_list_attempts = 0
+      SET ebay_list_attempts = 0,
+          ebay_listing_error = NULL,
+          ebay_listing_status = CASE WHEN ebay_listing_status = 'error' THEN NULL ELSE ebay_listing_status END
       WHERE ebay_list_attempts > 0
         ${opts?.onlyErrored ? sql`AND ebay_listing_status = 'error'` : sql``}
     `);

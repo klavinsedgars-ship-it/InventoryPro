@@ -304,16 +304,27 @@ export function registerEbayListingRoutes(app: Express) {
   // back in the candidate pool so the next ramp tick re-tries it. Useful
   // after fixing a category, image, or aspect issue. Pass {onlyErrored:true}
   // to only reset rows whose status is 'error'; default resets all >0.
-  app.post("/api/ebay/reset-list-attempts", requireAuth, async (req, res) => {
+  // Accepts GET as well as POST: this is an operator recovery action normally
+  // run straight from the browser URL bar after fixing a listing blocker, and
+  // a browser can only issue GET. Reads onlyErrored from the body (POST) or
+  // the query string (GET). Idempotent — it only clears attempt counters.
+  const resetListAttemptsHandler = async (req: any, res: any) => {
     try {
-      const onlyErrored = req.body?.onlyErrored === true;
+      const onlyErrored = req.body?.onlyErrored === true || String(req.query?.onlyErrored) === "true";
       const updated = await storage.resetEbayListAttempts({ onlyErrored });
-      res.json({ success: true, updated });
+      res.json({
+        success: true,
+        updated,
+        onlyErrored,
+        next: "Trigger the ramp (Operations → list-ramp) or wait for the next scheduled tick.",
+      });
     } catch (error) {
       console.error("Reset list attempts failed:", error);
       res.status(500).json({ success: false, error: (error as Error).message });
     }
-  });
+  };
+  app.post("/api/ebay/reset-list-attempts", requireAuth, resetListAttemptsHandler);
+  app.get("/api/ebay/reset-list-attempts", requireAuth, resetListAttemptsHandler);
 
   app.post("/api/ebay/unlist", requireAuth, async (req, res) => {
     try {
