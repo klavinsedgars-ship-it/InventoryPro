@@ -479,9 +479,14 @@ export function registerSyncRoutes(app: Express) {
     // burning blind. Default soft cap 80% of dailyLimit. Override via
     // EBAY_DAILY_CALL_SOFT_CAP_PCT.
     const softCapPct = Math.min(100, Math.max(10, Number(process.env.EBAY_DAILY_CALL_SOFT_CAP_PCT) || 80));
+    // Optional throttle for a controlled run: ?maxBatches=1 lists ONE batch
+    // (25 products) and stops, so a first run after a fix can be verified on
+    // eBay before letting the ramp go wide. Unset = run the full time budget.
+    const maxBatches = Number(req.query?.maxBatches ?? req.body?.maxBatches) || 0;
     let budgetStop = false;
     try {
       while (Date.now() - start < budgetMs && !limitHit && !budgetStop) {
+        if (maxBatches > 0 && batches >= maxBatches) break;
         // Re-check pause flag each batch so an in-flight chain stops on
         // the first batch after Pause is hit.
         const stillPaused = (await storage.getMarketplaceSettings("ebay")).find(
@@ -508,7 +513,9 @@ export function registerSyncRoutes(app: Express) {
         if (r.limitHit) limitHit = true;
       }
 
-      const done = !limitHit && !budgetStop && lastBatchSize < batchSize;
+      // A maxBatches stop is NOT "done" — candidates remain by definition.
+      const cappedEarly = maxBatches > 0 && batches >= maxBatches;
+      const done = !limitHit && !budgetStop && !cappedEarly && lastBatchSize < batchSize;
 
       // Surface WHY listings failed directly in the activity feed. The old
       // summary reported only "N failed", so a systemic blocker (wrong
