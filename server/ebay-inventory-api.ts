@@ -330,8 +330,21 @@ export class EbayInventoryApiService {
     const weightG = product.weight ? parseFloat(product.weight) : 0;
     const aspects = await this.buildAspects(product, categoryId);
 
+    const qty = Math.max(0, stock);
     return {
-      availability: { shipToLocationAvailability: { quantity: Math.max(0, stock) } },
+      // availabilityDistributions is REQUIRED by bulk_create_or_replace_
+      // inventory_item (the single PUT /inventory_item accepts a bare
+      // quantity). Without it eBay rejects every item in the batch with
+      // "valid quantity and location information must be provided" — which
+      // is why single-product listing worked while the whole ramp failed.
+      availability: {
+        shipToLocationAvailability: {
+          quantity: qty,
+          availabilityDistributions: [
+            { merchantLocationKey: this.merchantLocationKey, quantity: qty },
+          ],
+        },
+      },
       condition: "NEW",
       product: {
         title,
