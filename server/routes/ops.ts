@@ -93,6 +93,43 @@ export function registerOpsRoutes(app: Express) {
 
   // Listing-ramp manual controls. Live publishing requires {confirm:true}
   // in the body so a single click can't ship products by accident.
+  // WHY did listings fail? The ramp's sync log only carries counts
+  // ("275 failed"), but every failure is persisted per-product in
+  // products.ebay_listing_error. This groups those errors by normalised
+  // message with counts + sample SKUs, so one request answers "what is
+  // actually blocking my listings" instead of guessing.
+  app.get("/api/ops/list-ramp/failures", requireAuth, async (_req, res) => {
+    try {
+      const { db } = await import("../db");
+      const { sql } = await import("drizzle-orm");
+      const r: any = await db.execute(sql`
+        SELECT
+          -- Collapse ids/numbers so the same failure groups together.
+          regexp_replace(left(ebay_listing_error, 180), '[0-9]{3,}', 'N', 'g') AS reason,
+          COUNT(*)::int AS count,
+          (array_agg(sku ORDER BY id))[1:5] AS sample_skus,
+          MAX(ebay_list_attempts)::int AS max_attempts
+        FROM products
+        WHERE ebay_listing_error IS NOT NULL AND ebay_listing_error <> ''
+        GROUP BY 1
+        ORDER BY 2 DESC
+        LIMIT 25
+      `);
+      const groups = (r.rows ?? r) as Array<{ reason: string; count: number; sample_skus: string[]; max_attempts: number }>;
+      const totalRow: any = await db.execute(sql`
+        SELECT COUNT(*)::int AS n FROM products
+        WHERE ebay_listing_error IS NOT NULL AND ebay_listing_error <> ''`);
+      res.json({
+        success: true,
+        totalWithErrors: (totalRow.rows ?? totalRow)[0]?.n ?? 0,
+        groups,
+        hint: "Fix the top reason, then clear attempts via /api/ebay/reset-list-attempts and let the ramp retry.",
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
   app.post("/api/ops/list-ramp/preview", requireAuth, async (_req, res) => {
     try {
       // Compute inline (no internal HTTP hop) — a server-to-server fetch to

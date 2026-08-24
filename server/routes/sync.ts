@@ -510,12 +510,34 @@ export function registerSyncRoutes(app: Express) {
 
       const done = !limitHit && !budgetStop && lastBatchSize < batchSize;
 
+      // Surface WHY listings failed directly in the activity feed. The old
+      // summary reported only "N failed", so a systemic blocker (wrong
+      // marketplace policy, missing location, category rejection) looked
+      // identical to random per-item problems and required digging.
+      let topErrors: Array<{ reason: string; count: number }> = [];
+      if (failed > 0) {
+        try {
+          const { db } = await import("../db");
+          const { sql } = await import("drizzle-orm");
+          const q: any = await db.execute(sql`
+            SELECT regexp_replace(left(ebay_listing_error, 140), '[0-9]{3,}', 'N', 'g') AS reason,
+                   COUNT(*)::int AS count
+            FROM products
+            WHERE ebay_listing_error IS NOT NULL AND ebay_listing_error <> ''
+            GROUP BY 1 ORDER BY 2 DESC LIMIT 3`);
+          topErrors = (q.rows ?? q) as Array<{ reason: string; count: number }>;
+        } catch { /* diagnostic only */ }
+      }
+      const topReason = topErrors[0]
+        ? ` — top error: "${topErrors[0].reason.slice(0, 110)}" (${topErrors[0].count})`
+        : "";
+
       await storage.createSyncLog({
         source: "ebay",
         operation: "list_ramp",
         status: failed > 0 ? "partial" : "success",
-        message: `List ramp: ${batches} batches, ${published} published, ${failed} failed, ${skipped} skipped${limitHit ? " (limit hit)" : ""}${budgetStop ? ` (budget stop @${softCapPct}%)` : ""}`,
-        details: JSON.stringify({ batches, published, failed, skipped, limitHit, budgetStop, softCapPct, done }),
+        message: `List ramp: ${batches} batches, ${published} published, ${failed} failed, ${skipped} skipped${limitHit ? " (limit hit)" : ""}${budgetStop ? ` (budget stop @${softCapPct}%)` : ""}${topReason}`,
+        details: JSON.stringify({ batches, published, failed, skipped, limitHit, budgetStop, softCapPct, done, topErrors }),
       });
 
       // No HTTP self-chain: see the matching note in the daily-sync
