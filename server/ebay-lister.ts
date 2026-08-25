@@ -208,7 +208,7 @@ export async function listProductsViaInventoryBulk(
         results.push({ sku: product.sku, ok: false, error: `inventory_item: ${r.error}` });
         await storage.updateProduct(product.id, {
           ebayListingStatus: "error",
-          ebayListingError: String(r.error).slice(0, 500),
+          ebayListingError: `inventory_item: ${String(r.error)}`.slice(0, 500),
         });
         if (!LIMIT_RX.test(String(r.error))) {
           await storage.incrementEbayListAttempts(product.id);
@@ -231,7 +231,7 @@ export async function listProductsViaInventoryBulk(
         await storage.updateProduct(product.id, {
           ebayOfferId: r?.offerId ?? null,
           ebayListingStatus: r?.offerId ? "offer_created" : "error",
-          ebayListingError: String(r?.error).slice(0, 500),
+          ebayListingError: `offer: ${String(r?.error)}`.slice(0, 500),
         });
         if (!LIMIT_RX.test(String(r?.error))) {
           await storage.incrementEbayListAttempts(product.id);
@@ -264,7 +264,7 @@ export async function listProductsViaInventoryBulk(
         await storage.updateProduct(product.id, {
           ebayOfferId: offerId,
           ebayListingStatus: "offer_created",
-          ebayListingError: String(r?.error).slice(0, 500),
+          ebayListingError: `publish: ${String(r?.error)}`.slice(0, 500),
         });
         if (!LIMIT_RX.test(String(r?.error))) {
           await storage.incrementEbayListAttempts(product.id);

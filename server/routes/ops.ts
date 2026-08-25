@@ -108,14 +108,17 @@ export function registerOpsRoutes(app: Express) {
           regexp_replace(left(ebay_listing_error, 180), '[0-9]{3,}', 'N', 'g') AS reason,
           COUNT(*)::int AS count,
           (array_agg(sku ORDER BY id))[1:5] AS sample_skus,
-          MAX(ebay_list_attempts)::int AS max_attempts
+          MAX(ebay_list_attempts)::int AS max_attempts,
+          -- One VERBATIM example: the normalised reason above hides the eBay
+          -- errorId and the parameters array, which name the offending field.
+          (array_agg(ebay_listing_error ORDER BY id))[1] AS sample_full_error
         FROM products
         WHERE ebay_listing_error IS NOT NULL AND ebay_listing_error <> ''
         GROUP BY 1
         ORDER BY 2 DESC
         LIMIT 25
       `);
-      const groups = (r.rows ?? r) as Array<{ reason: string; count: number; sample_skus: string[]; max_attempts: number }>;
+      const groups = (r.rows ?? r) as Array<{ reason: string; count: number; sample_skus: string[]; max_attempts: number; sample_full_error: string }>;
       const totalRow: any = await db.execute(sql`
         SELECT COUNT(*)::int AS n FROM products
         WHERE ebay_listing_error IS NOT NULL AND ebay_listing_error <> ''`);
