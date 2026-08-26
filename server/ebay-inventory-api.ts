@@ -23,6 +23,7 @@ import { calculateEbayStock } from "./stock-manager";
 import { imageProcessingService } from "./image-processing";
 import { storage } from "./storage";
 import { extractProductSpecs } from "./ebay-unified-template";
+import { eanForListing, noIdentifierValue } from "./ebay-identifiers";
 
 const INV_BASE = "https://api.ebay.com/sell/inventory/v1";
 
@@ -433,7 +434,13 @@ export class EbayInventoryApiService {
         aspects,
         imageUrls: images,
         brand: "Markenlos",
-        mpn: "Nicht zutreffend",
+        mpn: noIdentifierValue(),
+        // EAN was never sent, so eBay failed EVERY publish with 25002 "Das
+        // Feld EAN fehlt" — the offer was created, then rejected at the last
+        // step. TME supplies an EAN for many parts; for the rest, eBay's
+        // accepted "no identifier" value is required, and omitting the field
+        // entirely is not the same thing as declaring there is none.
+        ean: eanForListing(product.ean),
       },
       packageWeightAndSize: weightG > 0 ? { weight: { value: weightG, unit: "GRAM" } } : undefined,
     };

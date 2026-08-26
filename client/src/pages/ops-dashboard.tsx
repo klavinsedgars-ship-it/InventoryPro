@@ -21,6 +21,7 @@ import {
   Eye,
   Pause,
   Play,
+  RotateCcw,
 } from "lucide-react";
 
 interface OpsProps {
@@ -227,6 +228,35 @@ export function OpsDashboard({ user, embedded = false }: OpsProps) {
     },
   });
 
+  // After a systemic blocker is fixed, every SKU the ramp parked is still
+  // parked: the candidate query skips anything at EBAY_LIST_MAX_ATTEMPTS. This
+  // was only reachable by hand-calling the endpoint.
+  const requeueFailed = useMutation({
+    mutationFn: async () =>
+      (await apiRequest("POST", "/api/ebay/reset-list-attempts", { onlyErrored: true })).json(),
+    onSuccess: (d: any) => {
+      toast({
+        title: d?.success ? "Failed listings requeued" : "Could not requeue",
+        description: d?.success
+          ? `${d.updated} product(s) back in the ramp queue.`
+          : d?.error || "Unknown error",
+        variant: d?.success ? undefined : "destructive",
+      });
+      qc.invalidateQueries({ queryKey: ["/api/ops/daily"] });
+    },
+    onError: (e: any) => toast({ title: "Could not requeue", description: e.message, variant: "destructive" }),
+  });
+
+  const confirmAndRequeue = () => {
+    if (
+      window.confirm(
+        "Put previously-failed listings back in the ramp queue?\n\nUse this after fixing the cause of the failures — otherwise they will simply fail again and re-park.",
+      )
+    ) {
+      requeueFailed.mutate();
+    }
+  };
+
   const confirmAndStart = () => {
     const n = preview?.wouldPublishNow ?? "an unknown number of";
     const total = preview?.totalCandidatesRemaining ?? "?";
@@ -276,6 +306,9 @@ export function OpsDashboard({ user, embedded = false }: OpsProps) {
                   <Play className="w-4 h-4 mr-2" /> Resume ramp
                 </Button>
               )}
+              <Button variant="outline" size="sm" onClick={confirmAndRequeue} disabled={requeueFailed.isPending}>
+                <RotateCcw className="w-4 h-4 mr-2" /> Requeue failed
+              </Button>
               <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
                 <RefreshCw className={`w-4 h-4 mr-2 ${isFetching ? "animate-spin" : ""}`} /> Refresh
               </Button>
