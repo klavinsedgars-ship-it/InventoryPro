@@ -136,6 +136,89 @@ export function registerTmeRoutes(app: Express): void {
       }
     });
 
+    /**
+     * Score products for LISTING-WORTHINESS using the real fee model.
+     *
+     * With a finite eBay listing allowance, which products you list matters
+     * far more than how many. A product is only worth a listing slot if, after
+     * eBay fees, VAT and the weight-based postage band, it still clears the
+     * net-profit target — and if it has enough stock not to go out of stock
+     * immediately. This answers that per product, and returns WHY when the
+     * answer is no, so the operator learns which categories are worth mining.
+     *
+     * Costs no TME quota: it scores data the browser already fetched.
+     * Body: { products: [{ symbol, supplierPrice, weightGrams, moq, multiples, stock }],
+     *         minStock?, minNetProfit? }
+     */
+    app.post("/api/tme/score", requireAuth, async (req, res) => {
+      try {
+        const list = Array.isArray(req.body?.products) ? req.body.products : [];
+        if (list.length === 0) return res.json({ success: true, results: [], summary: { scored: 0, worthListing: 0 } });
+
+        const config = await getFeeConfig("ebay");
+        const { calculateNetProfit } = await import("../fee-model");
+        const minStock = Number(req.body?.minStock) >= 0 ? Number(req.body.minStock) : 10;
+        const minNetProfit = Number(req.body?.minNetProfit) > 0
+          ? Number(req.body.minNetProfit)
+          : config.targetMinNetProfit;
+
+        const results = list.slice(0, 500).map((p: any) => {
+          const symbol = String(p.symbol ?? "");
+          const unit = Number(p.supplierPrice);
+          const moq = Math.max(1, Number(p.moq) || 1);
+          const multiples = Math.max(1, Number(p.multiples) || 1);
+          const weightGrams = p.weightGrams != null ? Number(p.weightGrams) : null;
+          const stock = Number(p.stock) || 0;
+
+          if (!Number.isFinite(unit) || unit <= 0) {
+            return { symbol, ok: false, reason: "no supplier price" };
+          }
+          const pricing = calculatePriceWithFloor(unit, { moq, multiples, weightGrams, marketplace: "ebay", config });
+          const breakdown = calculateNetProfit({
+            salePrice: pricing.finalPrice,
+            packageSupplierCost: unit * moq,
+            weightGrams,
+            marketplace: "ebay",
+            config,
+          });
+
+          const reasons: string[] = [];
+          if (breakdown.netProfit < minNetProfit) {
+            reasons.push(`nets €${breakdown.netProfit.toFixed(2)} (need €${minNetProfit.toFixed(2)})`);
+          }
+          if (stock < minStock) reasons.push(`only ${stock} in stock (need ${minStock})`);
+          // Heavy items are where postage quietly eats the margin.
+          if (weightGrams != null && weightGrams > 2000) reasons.push("over 2kg — outside the postage bands");
+
+          return {
+            symbol,
+            ok: reasons.length === 0,
+            salePrice: Number(pricing.finalPrice.toFixed(2)),
+            netProfit: Number(breakdown.netProfit.toFixed(2)),
+            marginPct: Number(breakdown.netMarginPct.toFixed(1)),
+            shippingBand: breakdown.shippingBand,
+            packageCost: Number((unit * moq).toFixed(2)),
+            stock,
+            reason: reasons.length ? reasons.join("; ") : null,
+          };
+        });
+
+        const worthListing = results.filter((r: any) => r.ok);
+        res.json({
+          success: true,
+          results,
+          summary: {
+            scored: results.length,
+            worthListing: worthListing.length,
+            bestNetProfit: worthListing.reduce((m: number, r: any) => Math.max(m, r.netProfit ?? 0), 0),
+            thresholds: { minStock, minNetProfit },
+          },
+        });
+      } catch (error) {
+        res.status(500).json({ success: false, error: (error as Error).message });
+      }
+    });
+
     // Get TME products by category with enhanced filtering
     app.get("/api/tme/products", async (req, res) => {
       try {

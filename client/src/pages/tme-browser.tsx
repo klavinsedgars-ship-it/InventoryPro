@@ -683,6 +683,61 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     }
   };
 
+  /**
+   * Select only the products on this page that would actually make money.
+   *
+   * Scores each visible product with the SERVER's real fee model — eBay fees,
+   * VAT, the weight-based postage band, MOQ package cost — and selects the
+   * ones clearing the net-profit target with enough stock. With a finite eBay
+   * listing allowance, which products get a slot matters more than how many,
+   * and the rejection reasons show which categories are worth mining.
+   * Costs no TME quota: it scores data already on screen.
+   */
+  const [scoring, setScoring] = useState(false);
+  const selectProfitable = async () => {
+    if (visibleProducts.length === 0) return;
+    setScoring(true);
+    try {
+      const payload = visibleProducts.map((p: any) => ({
+        symbol: p.Symbol,
+        supplierPrice: getEnhancedProductInfo(p.Symbol)?.price?.PriceList?.[0]?.PriceValue
+          ?? p.PriceList?.[0]?.PriceValue,
+        weightGrams: p.Weight ?? null,
+        moq: p.MinAmount ?? 1,
+        multiples: p.Multiples ?? 1,
+        stock: getEnhancedProductInfo(p.Symbol)?.stock?.Amount ?? p.Amount ?? 0,
+      }));
+      const res = await fetch("/api/tme/score", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ products: payload }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const okSymbols = new Set<string>((data.results || []).filter((r: any) => r.ok).map((r: any) => r.symbol));
+      const picked = visibleProducts.filter((p: TMEProduct) => okSymbols.has(p.Symbol));
+
+      const newSelected = new Set(selectedProducts);
+      picked.forEach((p: TMEProduct) => newSelected.add(p.Symbol));
+      setSelectedProducts(newSelected);
+      rememberDetails(picked);
+
+      const rejected = (data.results || []).filter((r: any) => !r.ok);
+      const topReason = rejected[0]?.reason;
+      toast({
+        title: picked.length > 0 ? `Selected ${picked.length} worth listing` : "Nothing on this page is worth listing",
+        description:
+          `${data.summary?.worthListing ?? 0} of ${data.summary?.scored ?? 0} clear €${(data.summary?.thresholds?.minNetProfit ?? 4).toFixed(2)} net profit` +
+          (topReason ? `. Most common problem: ${topReason}` : ""),
+        variant: picked.length > 0 ? "default" : "destructive",
+      });
+    } catch (e: any) {
+      toast({ title: "Could not score products", description: e.message, variant: "destructive" });
+    } finally {
+      setScoring(false);
+    }
+  };
+
   const isSuitableProduct = (product: TMEProduct): boolean => {
     const weight = product.Weight || 0;
     return weight <= 500 && // Under 500g
@@ -1179,12 +1234,13 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
 
                         <div className="flex gap-2">
                           <Button
-                            onClick={selectAllSuitable}
+                            onClick={selectProfitable}
                             variant="outline"
                             size="sm"
-                            disabled={!selectedCategory}
+                            disabled={!selectedCategory || scoring || visibleProducts.length === 0}
+                            title="Select only products on this page that clear your net-profit target after eBay fees, VAT and postage"
                           >
-                            Select Suitable
+                            {scoring ? "Checking margins…" : "Select profitable"}
                           </Button>
                           <Button
                             onClick={clearSelection}
