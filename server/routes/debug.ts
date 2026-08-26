@@ -652,6 +652,102 @@ export function registerDebugRoutes(app: Express) {
     }
   });
 
+  /**
+   * Why is the listing ramp's shippability guard blocking its candidates?
+   *
+   * The guard reported "TME cannot ship N today (only 0 in stock)" for nearly
+   * every candidate while the products table said those SKUs were in stock.
+   * One of the two is wrong, and the answer needs the RAW TME response next to
+   * the DB row — the guard's own summary can't distinguish "TME says zero",
+   * "our stock is stale", and "we asked TME the wrong question".
+   *
+   * Read-only: no writes, no eBay calls.
+   */
+  app.get("/api/__ramp-block-check", async (req, res) => {
+    try {
+      const { tmeApiV2, shippableOfRequested, incomingSupplyDate } = await import("../tme-api-v2");
+      const { calculateEbayStock } = await import("../stock-manager");
+
+      const { getRampPriceRange } = await import("../ramp-config");
+      const limit = Math.min(25, Math.max(1, Number(req.query.limit) || 10));
+      // Same band the ramp uses, so this inspects the ramp's real queue.
+      const range = await getRampPriceRange();
+
+      const candidates = await storage.getListingCandidates(limit, range);
+      if (candidates.length === 0) return res.json({ ok: true, candidates: 0, note: "no ramp candidates in the current price band" });
+
+      const symbols = candidates.map((p: any) => p.supplierProductId || p.sku);
+      const wanted = candidates.map((p: any) => Math.max(1, calculateEbayStock(p).ebayStock));
+
+      // The exact call the guard makes, plus a no-deliveries call for the same
+      // symbols so warehouse stock can be compared against the delivery split.
+      const [withDel, plain] = await Promise.all([
+        tmeApiV2.getProductsData(symbols, { withDeliveries: true, amounts: wanted })
+          .catch((e) => ({ __error: (e as Error).message })),
+        tmeApiV2.getProductsData(symbols).catch((e) => ({ __error: (e as Error).message })),
+      ]);
+      if ((withDel as any).__error) return res.json({ ok: false, stage: "deliveries", error: (withDel as any).__error });
+
+      const delBy = new Map((withDel as any[]).map((e: any) => [e.symbol, e]));
+      const plainBy = new Map((Array.isArray(plain) ? plain : []).map((e: any) => [e.symbol, e]));
+
+      const rows = candidates.map((p: any, i: number) => {
+        const sym = symbols[i];
+        const d = delBy.get(sym);
+        const pl = plainBy.get(sym);
+        return {
+          sku: p.sku,
+          symbol: sym,
+          requested: wanted[i],
+          db: { stock: p.stock, moq: p.moq, multiples: p.multiples, salePrice: p.salePrice, lastSyncedAt: p.lastSyncedAt },
+          tme: {
+            returned: !!d,
+            warehouseStock: d?.stock_quantity ?? pl?.stock_quantity ?? null,
+            shippableOfRequested: d ? shippableOfRequested(d) : null,
+            // The raw split is the ground truth: an unexpected status here
+            // means the guard is discarding availability it should count.
+            deliveries: d?.deliveries?.elements ?? null,
+            incomingSupplyDate: d ? incomingSupplyDate(d) : null,
+          },
+          verdict: !d
+            ? "not returned by TME (guard lets it through)"
+            : shippableOfRequested(d) >= wanted[i]
+              ? "would list"
+              : "BLOCKED by shippability guard",
+        };
+      });
+
+      // Every distinct delivery status seen, so a status we don't treat as
+      // in-stock shows up by name instead of silently summing to zero.
+      const statusCounts: Record<string, number> = {};
+      for (const r of rows) {
+        for (const d of (r.tme.deliveries ?? []) as any[]) {
+          statusCounts[d.status] = (statusCounts[d.status] ?? 0) + 1;
+        }
+      }
+
+      res.json({
+        ok: true,
+        candidates: rows.length,
+        priceBand: range,
+        summary: {
+          blocked: rows.filter((r) => r.verdict.startsWith("BLOCKED")).length,
+          wouldList: rows.filter((r) => r.verdict === "would list").length,
+          dbSaysInStockButTmeSaysZero: rows.filter(
+            (r) => (r.db.stock ?? 0) > 0 && (r.tme.warehouseStock ?? 0) === 0,
+          ).length,
+          warehouseStockButNothingShippable: rows.filter(
+            (r) => (r.tme.warehouseStock ?? 0) > 0 && r.tme.shippableOfRequested === 0,
+          ).length,
+        },
+        deliveryStatusesSeen: statusCounts,
+        rows,
+      });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  });
+
   // Diagnostic endpoint - no auth required, no DB access.
   // Use to verify which commit is actually running and whether
   // BYPASS_AUTH is being read by the function.
