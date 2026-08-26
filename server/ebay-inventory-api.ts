@@ -239,6 +239,55 @@ export class EbayInventoryApiService {
   }
 
   /**
+   * Diagnostic: what merchant locations does the account ACTUALLY have, and
+   * what does the configured key resolve to? ensureMerchantLocation treats a
+   * successful GET as "fine", which hides a location that exists but is
+   * DISABLED or missing its address — both of which make eBay reject every
+   * inventory item with 25733 ("valid inventory units and location
+   * information must be provided").
+   */
+  async inspectMerchantLocations(): Promise<{
+    configuredKey: string;
+    keyFromEnv: boolean;
+    configured: { found: boolean; status?: string; address?: any; raw?: any };
+    allLocations: Array<{ key: string; status?: string; country?: string; postalCode?: string; types?: any }>;
+    error?: string;
+  }> {
+    const out: any = {
+      configuredKey: this.merchantLocationKey,
+      keyFromEnv: !!process.env.EBAY_MERCHANT_LOCATION_KEY,
+      configured: { found: false },
+      allLocations: [],
+    };
+    try {
+      const one = await this.req("GET", `/location/${encodeURIComponent(this.merchantLocationKey)}`);
+      if (one.ok) {
+        out.configured = {
+          found: true,
+          status: one.data?.merchantLocationStatus,
+          address: one.data?.location?.address,
+          raw: one.data,
+        };
+      } else {
+        out.configured = { found: false, raw: this.firstEbayError(one.data, one.text) };
+      }
+      const all = await this.req("GET", `/location?limit=100`);
+      if (all.ok && Array.isArray(all.data?.locations)) {
+        out.allLocations = all.data.locations.map((l: any) => ({
+          key: l.merchantLocationKey,
+          status: l.merchantLocationStatus,
+          country: l.location?.address?.country,
+          postalCode: l.location?.address?.postalCode,
+          types: l.locationTypes,
+        }));
+      }
+    } catch (e) {
+      out.error = (e as Error).message;
+    }
+    return out;
+  }
+
+  /**
    * Ensure a merchant inventory location exists (required to publish
    * offers). Idempotent: a 409/already-exists is treated as success.
    */

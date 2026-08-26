@@ -369,6 +369,44 @@ export function registerDebugRoutes(app: Express) {
     res.json(report);
   });
 
+  /**
+   * eBay merchant-location diagnostic + repair.
+   *
+   * Error 25733 ("valid inventory units and location information must be
+   * provided") on every inventory item points at the merchant location, but
+   * ensureMerchantLocation only checks that a GET succeeds — a location that
+   * exists yet is DISABLED, or lacks an address, passes that check and still
+   * fails every listing. This shows what eBay actually holds.
+   *
+   * ?fix=1 additionally force-writes the location (POST is an upsert for an
+   * existing key), which repairs a disabled/incomplete record.
+   */
+  app.get("/api/__ebay-location", async (req, res) => {
+    try {
+      const info = await ebayInventoryApi.inspectMerchantLocations();
+      let repair: any = null;
+      if (String(req.query.fix) === "1") {
+        repair = await ebayInventoryApi.ensureMerchantLocation();
+        // Re-read so the response shows the post-repair state.
+        (info as any).afterFix = await ebayInventoryApi.inspectMerchantLocations();
+      }
+      res.json({
+        ok: true,
+        ...info,
+        repair,
+        envUsed: {
+          EBAY_MERCHANT_LOCATION_KEY: process.env.EBAY_MERCHANT_LOCATION_KEY || "(unset -> 'default-location')",
+          EBAY_LISTING_COUNTRY: process.env.EBAY_LISTING_COUNTRY || "(unset -> LV)",
+          EBAY_LOCATION_POSTAL: process.env.EBAY_LOCATION_POSTAL || "(unset -> LV-1001)",
+          EBAY_LOCATION_CITY: process.env.EBAY_LOCATION_CITY || "(unset -> Riga)",
+        },
+        hint: "A usable location must exist under configuredKey with merchantLocationStatus ENABLED and a full address. Add ?fix=1 to rewrite it.",
+      });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  });
+
   // Diagnostic endpoint - no auth required, no DB access.
   // Use to verify which commit is actually running and whether
   // BYPASS_AUTH is being read by the function.
