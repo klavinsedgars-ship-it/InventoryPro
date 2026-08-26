@@ -724,6 +724,14 @@ export class DatabaseStorage implements IStorage {
       // and starving fresh candidates. Operator can reset via the
       // /api/ebay/reset-list-attempts endpoint to retry.
       lt(products.ebayListAttempts, maxAttempts),
+      // eBay rejects an inventory item with no image ("imageUrls darf nicht
+      // Null oder leer sein"), so a product without one can never list. Excluded
+      // here rather than attempted: the check is free and local, whereas letting
+      // it through spends three eBay round-trips per product to be told the same
+      // thing, three times, before it parks. The condition is re-evaluated every
+      // run, so a product returns to the queue the moment sync gives it an image.
+      isNotNull(products.imageUrl),
+      ne(products.imageUrl, ""),
       // Never list what TME will not sell us. These statuses mean the item is
       // unavailable in our country, withdrawn from the offer, blocked, or
       // orderable only by contacting their sales desk — any of them would
@@ -763,6 +771,25 @@ export class DatabaseStorage implements IStorage {
 
   async getListingCandidateCount(opts?: { minPrice?: number; maxPrice?: number }): Promise<number> {
     const [r] = await db.select({ c: count() }).from(products).where(this.listingCandidateConds(opts));
+    return r?.c ?? 0;
+  }
+
+  /**
+   * Products that would be listing candidates except that they have no image.
+   * Reported so the exclusion is visible: a silently shrinking candidate pool
+   * looks identical to "the catalogue is fully listed".
+   */
+  async getListingBlockedByMissingImageCount(opts?: { minPrice?: number; maxPrice?: number }): Promise<number> {
+    const conds = [
+      eq(products.supplier, "TME"),
+      eq(products.listedOnEbay, false),
+      gte(products.stock, 1),
+      or(eq(products.excludeFromListing, false), isNull(products.excludeFromListing)),
+      or(isNull(products.imageUrl), eq(products.imageUrl, "")),
+    ];
+    if (opts?.minPrice != null) conds.push(gte(products.salePrice, String(opts.minPrice)));
+    if (opts?.maxPrice != null) conds.push(lte(products.salePrice, String(opts.maxPrice)));
+    const [r] = await db.select({ c: count() }).from(products).where(and(...conds));
     return r?.c ?? 0;
   }
 

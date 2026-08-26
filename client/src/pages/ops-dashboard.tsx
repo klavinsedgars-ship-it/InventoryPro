@@ -189,7 +189,8 @@ export function OpsDashboard({ user, embedded = false }: OpsProps) {
         title: "Preview ready",
         description:
           d?.dryRun
-            ? `Would publish ${d.wouldPublishNow} now; ${d.totalCandidatesRemaining} candidates remaining.`
+            ? `Would publish ${d.wouldPublishNow} now; ${d.totalCandidatesRemaining} candidates remaining.` +
+              (d.blockedNoImage ? ` ${d.blockedNoImage} excluded — no image.` : "")
             : d?.error || "No data",
       });
     },

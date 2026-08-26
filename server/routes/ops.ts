@@ -169,9 +169,10 @@ export function registerOpsRoutes(app: Express) {
       // returns 401. This is read-only and already behind requireAuth.
       const batchSize = 25;
       const range = await getRampPriceRange();
-      const [candidates, totalCandidatesRemaining] = await Promise.all([
+      const [candidates, totalCandidatesRemaining, blockedNoImage] = await Promise.all([
         storage.getListingCandidates(batchSize, range),
         storage.getListingCandidateCount(range),
+        storage.getListingBlockedByMissingImageCount(range),
       ]);
       res.json({
         success: true,
@@ -179,6 +180,8 @@ export function registerOpsRoutes(app: Express) {
         priceRange: range,
         wouldPublishNow: candidates.length,
         totalCandidatesRemaining,
+        // Excluded, not failing: eBay refuses an item with no image.
+        blockedNoImage,
         sample: candidates.map((p: any) => ({
           id: p.id,
           sku: p.sku,
