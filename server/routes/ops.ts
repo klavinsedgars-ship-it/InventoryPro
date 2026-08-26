@@ -27,6 +27,30 @@ export function registerOpsRoutes(app: Express) {
         ]);
       const envCheck = validateListingEnv();
 
+      // A TME Browser import runs in chunks driven by the browser and its
+      // state lives server-side, so it RESUMES whenever the page is opened —
+      // including after a redeploy. That made products appear to arrive "on
+      // deploy" with nothing on screen explaining it. Surface any unfinished
+      // import so it is visible from the dashboard, not just from the tab
+      // that started it.
+      let activeImport: any = null;
+      try {
+        const job = await storage.getActiveSyncJob("tme_browser");
+        if (job) {
+          activeImport = {
+            jobId: job.jobId,
+            status: job.status,
+            total: job.total,
+            processed: job.processed,
+            syncedCount: job.syncedCount,
+            updatedCount: job.updatedCount,
+            failedCount: job.failedCount,
+            remaining: Math.max(0, (job.total ?? 0) - (job.processed ?? 0)),
+            createdAt: job.createdAt,
+          };
+        }
+      } catch { /* diagnostic only */ }
+
       const parseDetails = (l: any) => {
         try { return l?.details ? JSON.parse(l.details) : {}; } catch { return {}; }
       };
@@ -51,6 +75,7 @@ export function registerOpsRoutes(app: Express) {
             updatedAt: tmeUsage?.updatedAt ?? null,
           },
         },
+        activeImport,
         jobs: {
           runsToday: logStats.bySource,
           totalRunsToday: logStats.total,

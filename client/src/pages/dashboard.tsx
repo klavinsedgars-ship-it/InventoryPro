@@ -37,6 +37,16 @@ interface SyncLogEntry {
 
 interface OpsDaily {
   recentLogs?: SyncLogEntry[];
+  activeImport?: {
+    jobId: string;
+    status: string;
+    total: number;
+    processed: number;
+    syncedCount: number;
+    updatedCount: number;
+    failedCount: number;
+    remaining: number;
+  } | null;
 }
 
 function timeAgo(iso: string | null | undefined): string {
@@ -127,6 +137,29 @@ export function Dashboard({ user }: DashboardProps) {
               <span className="font-mono text-xs">
                 {(metricsErrorObj as Error)?.message || "Request failed"}
               </span>
+            </div>
+          )}
+
+          {/* An unfinished TME import keeps running whenever TME Browser is
+              opened — including after a redeploy — which is why products can
+              appear to arrive "on deploy" with nothing on screen saying so.
+              Show it here, where the product count actually changes. */}
+          {ops?.activeImport && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+              <div className="font-medium">
+                TME import in progress — {ops.activeImport.processed.toLocaleString()} of{" "}
+                {ops.activeImport.total.toLocaleString()} products
+                {ops.activeImport.remaining > 0
+                  ? `, ${ops.activeImport.remaining.toLocaleString()} still to go`
+                  : ""}
+              </div>
+              <div className="mt-1 text-xs opacity-90">
+                {ops.activeImport.syncedCount.toLocaleString()} added ·{" "}
+                {ops.activeImport.updatedCount.toLocaleString()} updated ·{" "}
+                {ops.activeImport.failedCount.toLocaleString()} failed. It continues in the
+                background whenever TME Browser is open, so the product count keeps rising until
+                it finishes. Open TME Browser to watch or cancel it.
+              </div>
             </div>
           )}
 
