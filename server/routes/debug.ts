@@ -1010,10 +1010,20 @@ export function registerDebugRoutes(app: Express) {
       if (probe?.__error) {
         return res.json({ ok: false, stage: "tme-api", have, error: probe.__error });
       }
+      // Surface the price BASIS: TME returns the customer-configuration
+      // currency unless we name one, so this confirms we are reading EUR/NET
+      // rather than (e.g.) PLN figures being consumed as EUR.
+      let basis: any = null;
+      try {
+        const raw: any = await (tmeApi as any).makeRequest?.("/Products/GetPricesAndStocks.json", { SymbolList: ["1N4148-DIO"] });
+        basis = { Currency: raw?.Data?.Currency ?? null, PriceType: raw?.Data?.PriceType ?? null, Language: raw?.Data?.Language ?? null };
+      } catch (e) { basis = { error: (e as Error).message.slice(0, 200) }; }
       return res.json({
         ok: true,
         stage: "success",
         have,
+        priceBasis: basis,
+        expected: { currency: process.env.TME_CURRENCY || "EUR", priceType: "NET" },
         sampleCount: Array.isArray(probe) ? probe.length : null,
         sample: Array.isArray(probe) ? probe.slice(0, 1) : probe,
       });

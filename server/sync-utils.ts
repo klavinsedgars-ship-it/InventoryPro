@@ -3,21 +3,33 @@
  * unit-tested without a database connection.
  */
 
-// Sum stock across TME warehouses (StockList), falling back to the flat Amount
-// field, then to the value we already hold in the DB.
-//
-// NOTE (oversell): TME's Amount can include not-yet-arrived "expected"
-// deliveries — see the 2026-06-16 incident. Correcting that requires the TME
-// stock-field breakdown and is handled elsewhere; this helper only sums what
-// it's given.
+/**
+ * Sellable stock for a TME product.
+ *
+ * TME support (2026-08) confirmed that `Amount` "shows the real warehouse
+ * stock" and is real-time. So Amount is now the PRIMARY source. Previously we
+ * summed `StockList` across warehouses first, which can exceed what is
+ * actually sellable (external/regional warehouses are not equivalent to
+ * on-hand stock) — the most plausible mechanism behind the 2026-06-16
+ * oversell, where a SKU reported far more than could ship.
+ *
+ * StockList is kept only as a fallback for responses that omit Amount, and
+ * even then we take the MAXIMUM single warehouse rather than the sum: one
+ * warehouse's quantity is a figure we can actually ship from, whereas the sum
+ * assumes fulfilment can pool every location.
+ *
+ * Note also (TME support): stock is reserved only when payment is finalised,
+ * so a small race remains on the last unit — which is what the per-product
+ * eBay quantity cap exists to absorb.
+ */
 export function extractStock(
   ps: { StockList?: Array<{ Amount: number }>; Amount?: number },
   fallback: number,
 ): number {
-  if (ps.StockList && ps.StockList.length > 0) {
-    return ps.StockList.reduce((sum, w) => sum + (w.Amount || 0), 0);
-  }
   if (typeof ps.Amount === "number") return ps.Amount;
+  if (ps.StockList && ps.StockList.length > 0) {
+    return ps.StockList.reduce((max, w) => Math.max(max, w.Amount || 0), 0);
+  }
   return fallback;
 }
 

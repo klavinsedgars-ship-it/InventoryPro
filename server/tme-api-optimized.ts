@@ -9,6 +9,7 @@
 import crypto from 'crypto';
 import type { IStorage } from './storage';
 import { storage } from './storage';
+import { assertPriceBasis } from './tme-api';
 
 interface TMECredentials {
   token: string;
@@ -71,6 +72,8 @@ interface TMEApiResponse<T> {
   ErrorCode?: number;
   Error?: any[];
   Data: {
+    Currency?: string;
+    PriceType?: string;
     ProductList?: T[];
     PriceList?: T[];
     StockList?: T[];
@@ -184,44 +187,41 @@ export class TMEApiServiceOptimized {
     return signature;
   }
 
-  private async rateLimitCheck(): Promise<void> {
-    const now = Date.now();
-    
-    if (now - this.lastCallTimestamp > 60000) {
-      this.callsThisMinute = 0;
-    }
-    
-    const safeRateLimit = 55; // Conservative: 55 calls per minute
-    
-    if (this.callsThisMinute >= safeRateLimit) {
-      const waitTime = 60000 - (now - this.lastCallTimestamp);
-      console.log(`🚦 Rate limit reached. Waiting ${waitTime}ms...`);
-      await new Promise(resolve => setTimeout(resolve, waitTime));
-      this.callsThisMinute = 0;
-    }
-    
+  // TME's real v1 limits (support, 2026-08): 2 req/sec for the price/stock
+  // endpoints, 10 req/sec for everything else, and no published daily quota.
+  // See the fuller note in tme-api.ts.
+  private static readonly SLOW_ENDPOINTS = [
+    "/Products/GetStocks",
+    "/Products/GetPrices",
+    "/Products/GetPricesAndStocks",
+    "/Products/GetDeliveryTime",
+  ];
+
+  private async rateLimitCheck(endpoint: string = ""): Promise<void> {
+    const perSecond = TMEApiServiceOptimized.SLOW_ENDPOINTS.some((e) => endpoint.startsWith(e))
+      ? Number(process.env.TME_RPS_PRICES) || 2
+      : Number(process.env.TME_RPS_DEFAULT) || 10;
+    const minInterval = Math.ceil(1000 / perSecond * 1.1); // 10% headroom
     if (this.lastCallTimestamp > 0) {
-      const timeSinceLastCall = now - this.lastCallTimestamp;
-      const minimumDelay = 500; // Reduced from 1000ms - use combined endpoint
-      if (timeSinceLastCall < minimumDelay) {
-        const waitTime = minimumDelay - timeSinceLastCall;
-        await new Promise(resolve => setTimeout(resolve, waitTime));
+      const elapsed = Date.now() - this.lastCallTimestamp;
+      if (elapsed < minInterval) {
+        await new Promise((resolve) => setTimeout(resolve, minInterval - elapsed));
       }
-    }
-    
-    if (this.callCount >= this.dailyLimit) {
-      throw new Error(`TME daily limit exceeded: ${this.callCount}/${this.dailyLimit}`);
     }
   }
 
   private async makeRequest<T>(endpoint: string, params: Record<string, any> = {}): Promise<TMEApiResponse<T>> {
-    await this.rateLimitCheck();
+    await this.rateLimitCheck(endpoint);
     
     const url = `${this.baseUrl}${endpoint}`;
     
+    // Currency MUST be explicit — see the matching note in tme-api.ts. TME
+    // returns the customer-configuration default otherwise (their own sample
+    // shows PLN), which we would silently treat as EUR.
     const requestParams: Record<string, any> = {
       Token: this.credentials.token,
-      Language: "EN"
+      Language: process.env.TME_LANGUAGE || "EN",
+      Currency: process.env.TME_CURRENCY || "EUR"
     };
 
     if (this.credentials.token.length === 45) {
@@ -458,7 +458,10 @@ export class TMEApiServiceOptimized {
     if (symbols.length === 0) return [];
 
     try {
-      const batchSize = 100; // Can request up to 100 at once
+      // TME caps this endpoint at 50 symbols per request (v2 docs state it
+      // explicitly; v1 behaves the same). Sending 100 risks silently losing
+      // the overflow, which our sync would record as 'synced, no change'.
+      const batchSize = 50;
       const results: TMEPriceStock[] = [];
 
       for (let i = 0; i < symbols.length; i += batchSize) {
@@ -470,6 +473,7 @@ export class TMEApiServiceOptimized {
           SymbolList: batch,
         });
 
+        assertPriceBasis(response.Data, "GetPricesAndStocks (optimized)");
         results.push(...(response.Data.ProductList || []));
 
         if (i + batchSize < symbols.length) {

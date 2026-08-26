@@ -92,12 +92,50 @@ interface TMEApiResponse<T> {
   ErrorCode?: number;
   Error?: any[];
   Data: {
+    // TME echoes the basis the prices are quoted in. Confirmed by TME support
+    // 2026-08: currency defaults to the CUSTOMER CONFIGURATION unless the
+    // request specifies one, and PriceType is NET for company accounts.
+    // We must never assume — a PLN figure treated as EUR silently destroys
+    // every margin calculation downstream.
+    Currency?: string;
+    PriceType?: string;
+    Language?: string;
     ProductList?: T[];
     PriceList?: T[];
     StockList?: T[];
     CategoryList?: T[];
     CategoryTree?: any[];  // TME returns categories in tree structure
   };
+}
+
+/**
+ * Guard the price BASIS before any price is used for margin maths.
+ *
+ * TME support (2026-08): the response currency follows the customer
+ * configuration unless the request names one, and PriceType is NET only for
+ * company-registered accounts. Their own sample response is PLN/NET. A PLN
+ * figure consumed as EUR silently corrupts every sale price we compute, and
+ * a GROSS figure treated as net cost overstates margin by the VAT rate — so
+ * this throws rather than letting bad money through.
+ */
+export function assertPriceBasis(data: { Currency?: string; PriceType?: string }, context: string): void {
+  const expectedCurrency = (process.env.TME_CURRENCY || "EUR").toUpperCase();
+  const currency = (data?.Currency || "").toUpperCase();
+  const priceType = (data?.PriceType || "").toUpperCase();
+
+  if (currency && currency !== expectedCurrency) {
+    throw new Error(
+      `TME returned prices in ${currency} but we price in ${expectedCurrency} (${context}). ` +
+      `Set TME_CURRENCY to match your account, or fix the account's default currency — ` +
+      `using these figures as ${expectedCurrency} would corrupt every margin.`,
+    );
+  }
+  if (priceType && priceType !== "NET") {
+    throw new Error(
+      `TME returned ${priceType} prices (${context}); margin maths assumes NET supplier cost. ` +
+      `A company-registered tme.eu account returns NET — check the account registration.`,
+    );
+  }
 }
 
 export class TMEApiService {
@@ -173,50 +211,59 @@ export class TMEApiService {
     return signature;
   }
 
-  private async rateLimitCheck(): Promise<void> {
-    const now = Date.now();
-    
-    // Reset minute counter
-    if (now - this.lastCallTimestamp > 60000) {
-      this.callsThisMinute = 0;
-    }
-    
-    // More conservative rate limiting - 55 calls per minute instead of 60
-    const safeRateLimit = 55;
-    
-    // Check rate limits
-    if (this.callsThisMinute >= safeRateLimit) {
-      const waitTime = 60000 - (now - this.lastCallTimestamp);
-      console.log(`🚦 Rate limit reached. Waiting ${waitTime}ms...`);
-      await new Promise(resolve => setTimeout(resolve, waitTime));
-      this.callsThisMinute = 0;
-    }
-    
-    // Add minimum delay between calls to avoid overwhelming the API
+  /**
+   * TME's REAL rate limits, confirmed by TME support 2026-08 for API v1:
+   *   2 req/sec — GetStocks, GetPrices, GetPricesAndStocks, GetDeliveryTime
+   *   10 req/sec — every other endpoint (Search, GetProducts, GetCategories)
+   * (v2 raises the price/stock group to 4 req/sec.)
+   *
+   * There is NO published daily quota: "the limit is per token, but if we see
+   * high traffic from one customer, we can cut the traffic". So the previous
+   * 10,000/day ceiling and the 55-calls-per-MINUTE pacing were both invented —
+   * the minute-based pacing was simultaneously far too slow for catalogue
+   * browsing (10/sec allowed) and not the right shape for the price endpoints.
+   * Limits are per second, so we pace per second, per endpoint class.
+   */
+  private static readonly SLOW_ENDPOINTS = [
+    "/Products/GetStocks",
+    "/Products/GetPrices",
+    "/Products/GetPricesAndStocks",
+    "/Products/GetDeliveryTime",
+  ];
+
+  private endpointMinIntervalMs(endpoint: string): number {
+    const perSecond = TMEApiService.SLOW_ENDPOINTS.some((e) => endpoint.startsWith(e))
+      ? Number(process.env.TME_RPS_PRICES) || 2
+      : Number(process.env.TME_RPS_DEFAULT) || 10;
+    // 10% headroom so clock jitter never tips us over the documented ceiling.
+    return Math.ceil(1000 / perSecond * 1.1);
+  }
+
+  private async rateLimitCheck(endpoint: string = ""): Promise<void> {
+    const minInterval = this.endpointMinIntervalMs(endpoint);
     if (this.lastCallTimestamp > 0) {
-      const timeSinceLastCall = now - this.lastCallTimestamp;
-      const minimumDelay = 1000; // 1 second minimum between calls
-      if (timeSinceLastCall < minimumDelay) {
-        const waitTime = minimumDelay - timeSinceLastCall;
-        console.log(`⏱️ Waiting ${waitTime}ms between API calls...`);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
+      const elapsed = Date.now() - this.lastCallTimestamp;
+      if (elapsed < minInterval) {
+        await new Promise((resolve) => setTimeout(resolve, minInterval - elapsed));
       }
-    }
-    
-    if (this.callCount >= this.dailyLimit) {
-      throw new Error(`TME daily limit exceeded: ${this.callCount}/${this.dailyLimit}`);
     }
   }
 
   private async makeRequest<T>(endpoint: string, params: Record<string, any> = {}): Promise<TMEApiResponse<T>> {
-    await this.rateLimitCheck();
+    await this.rateLimitCheck(endpoint);
     
     const url = `${this.baseUrl}${endpoint}`;
     
     // Prepare parameters - TME requires specific parameter order and format
+    // Currency MUST be explicit. TME support (2026-08): "If you didn't send a
+    // request with a specified currency, the default from your customer
+    // configuration will be returned" — and their own sample shows PLN. We
+    // price in EUR, so relying on an account default risks quoting PLN figures
+    // as EUR. Language likewise drives localised descriptions.
     const requestParams: Record<string, any> = {
       Token: this.credentials.token,
-      Language: "EN"
+      Language: process.env.TME_LANGUAGE || "EN",
+      Currency: process.env.TME_CURRENCY || "EUR"
     };
 
     // Add Country for public tokens (45 chars) or if specified
@@ -696,6 +743,7 @@ export class TMEApiService {
         SymbolList: symbols,
       });
 
+      assertPriceBasis(response.Data, "GetPricesAndStocks");
       return response.Data.ProductList || [];
     } catch (error) {
       // Propagate — see getProductDetails. Swallowing this made price/stock

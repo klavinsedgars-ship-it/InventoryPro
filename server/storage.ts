@@ -1376,8 +1376,12 @@ export class DatabaseStorage implements IStorage {
   // TME_DAILY_LIMIT accordingly (0 disables the cap).
   private providerDailyLimit(provider: string): number {
     if (provider === "tme") {
+      // TME support (2026-08): there is NO published daily quota — "the limit
+      // is per token, but if we see high traffic we can cut the traffic".
+      // Limits are PER SECOND and enforced in the TME clients. Default 0 =
+      // no daily cap; set TME_DAILY_LIMIT only to impose a self-limit.
       const v = Number(process.env.TME_DAILY_LIMIT);
-      return Number.isFinite(v) && v >= 0 ? v : 10000;
+      return Number.isFinite(v) && v >= 0 ? v : 0;
     }
     if (provider === "ebay") {
       const v = Number(process.env.EBAY_DAILY_LIMIT);
