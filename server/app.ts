@@ -77,16 +77,34 @@ export async function createApp(): Promise<Express> {
 
   await registerRoutes(app);
 
-  // Apply additive schema/index migrations lazily, on first boot per process.
-  // All statements are CREATE/ALTER IF NOT EXISTS so they're safe to repeat,
-  // and this stops new deploys from needing someone to hit the manual
-  // /api/__apply-migration endpoint to get the indexes the query plans rely
-  // on. Errors are logged but never block startup (a bad statement should
-  // never take down the whole app).
-  storage.applyScaleMigration().then(
-    (r) => console.log(`📐 ensureCoreSchema: ${r.statements} statement(s) applied`),
-    (e) => console.error("ensureCoreSchema failed:", e),
-  );
+  // Apply additive schema/index migrations on first boot per process. All
+  // statements are CREATE/ALTER IF NOT EXISTS so they're safe to repeat, and
+  // this stops new deploys from needing someone to hit the manual
+  // /api/__apply-migration endpoint to get the indexes the query plans rely on.
+  //
+  // AWAITED, unlike before: routes are registered above, and the app is
+  // returned to the serverless handler the moment this function resolves. Left
+  // unawaited, a cold start on a new deployment could serve requests from code
+  // that expects a column its own migration had not yet added — the classic
+  // deploy-time 500 that looks like a random outage.
+  //
+  // Two guards keep this from becoming a liability of its own: a timeout, so a
+  // slow or stuck migration degrades to the previous behaviour rather than
+  // hanging every cold start; and a caught rejection, so a bad statement is
+  // logged but never takes down the app.
+  const MIGRATION_GATE_MS = Math.max(1000, Number(process.env.MIGRATION_GATE_MS) || 8000);
+  await Promise.race([
+    storage.applyScaleMigration().then(
+      (r) => console.log(`📐 ensureCoreSchema: ${r.statements} statement(s) applied`),
+      (e) => console.error("ensureCoreSchema failed:", e),
+    ),
+    new Promise<void>((resolve) =>
+      setTimeout(() => {
+        console.warn(`ensureCoreSchema still running after ${MIGRATION_GATE_MS}ms — serving anyway`);
+        resolve();
+      }, MIGRATION_GATE_MS).unref?.(),
+    ),
+  ]);
 
   // One-time: align DB pricing tiers to the canonical config before the
   // calculations begin reading DB tiers, so wiring them up doesn't reprice.

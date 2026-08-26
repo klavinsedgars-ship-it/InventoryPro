@@ -86,6 +86,7 @@ import { db } from "./db";
 import { eq, ne, and, gte, lte, lt, desc, asc, count, or, ilike, isNull, isNotNull, sql, inArray, notInArray } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { PRICING_CONFIG } from "./dynamic-pricing";
+import type { LeaseStore } from "./job-lease";
 
 export interface IStorage {
   // Users
@@ -455,6 +456,15 @@ export class DatabaseStorage implements IStorage {
       `CREATE INDEX IF NOT EXISTS messages_thread_idx ON messages (thread_id)`,
       `CREATE INDEX IF NOT EXISTS message_threads_buyer_idx ON message_threads (marketplace, buyer_username)`,
       `CREATE INDEX IF NOT EXISTS sync_logs_synced_at_idx ON sync_logs (synced_at)`,
+      // Run-once-at-a-time leases for background jobs (see job-lease.ts). The
+      // primary key is what makes the acquire atomic: ON CONFLICT is evaluated
+      // against it, so two callers racing cannot both win.
+      `CREATE TABLE IF NOT EXISTS job_leases (
+         name text PRIMARY KEY,
+         owner text NOT NULL,
+         acquired_at timestamptz NOT NULL DEFAULT now(),
+         expires_at timestamptz NOT NULL
+       )`,
     ];
     for (const s of stmts) {
       await db.execute(sql.raw(s));
@@ -2662,3 +2672,78 @@ export class DatabaseStorage implements IStorage {
 }
 
 export const storage = new DatabaseStorage();
+
+/**
+ * Postgres-backed lease store (see job-lease.ts for why leases, not flags).
+ *
+ * Every statement is written so correctness does not depend on the caller:
+ * acquisition is one conditional INSERT ... ON CONFLICT, and renew/release are
+ * scoped to the owner so a straggler cannot disturb its successor.
+ */
+export const leaseStore: LeaseStore = {
+  async tryAcquire(name: string, owner: string, ttlSeconds: number) {
+    await ensureLeaseTable();
+    // Atomic: the ON CONFLICT ... WHERE clause only lets the row through when
+    // the existing lease has already expired. Two racing callers cannot both
+    // receive a row, because Postgres serialises the conflicting inserts.
+    const q: any = await db.execute(sql`
+      INSERT INTO job_leases (name, owner, expires_at)
+      VALUES (${name}, ${owner}, now() + make_interval(secs => ${ttlSeconds}))
+      ON CONFLICT (name) DO UPDATE
+        SET owner = EXCLUDED.owner,
+            acquired_at = now(),
+            expires_at = EXCLUDED.expires_at
+        WHERE job_leases.expires_at < now()
+      RETURNING owner, expires_at
+    `);
+    const row = (q.rows ?? q)?.[0];
+    return row ? { name, owner: row.owner, expiresAt: new Date(row.expires_at) } : null;
+  },
+
+  async renew(name: string, owner: string, ttlSeconds: number) {
+    const q: any = await db.execute(sql`
+      UPDATE job_leases
+      SET expires_at = now() + make_interval(secs => ${ttlSeconds})
+      WHERE name = ${name} AND owner = ${owner}
+      RETURNING name
+    `);
+    return ((q.rows ?? q)?.length ?? 0) > 0;
+  },
+
+  async release(name: string, owner: string) {
+    // Owner-scoped: a run that overran its lease must not delete the lease of
+    // whoever legitimately took over.
+    await db.execute(sql`DELETE FROM job_leases WHERE name = ${name} AND owner = ${owner}`);
+  },
+
+  async peek(name: string) {
+    const q: any = await db.execute(sql`
+      SELECT owner, acquired_at, expires_at FROM job_leases WHERE name = ${name}
+    `);
+    const row = (q.rows ?? q)?.[0];
+    if (!row) return null;
+    return {
+      owner: row.owner,
+      acquiredAt: row.acquired_at ? new Date(row.acquired_at) : null,
+      expiresAt: new Date(row.expires_at),
+    };
+  },
+};
+
+/**
+ * The lease table normally arrives via applyScaleMigration at boot, but a job
+ * must not fail merely because it ran first. Cheap and idempotent.
+ */
+let leaseTableReady = false;
+async function ensureLeaseTable(): Promise<void> {
+  if (leaseTableReady) return;
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS job_leases (
+      name text PRIMARY KEY,
+      owner text NOT NULL,
+      acquired_at timestamptz NOT NULL DEFAULT now(),
+      expires_at timestamptz NOT NULL
+    )
+  `);
+  leaseTableReady = true;
+}

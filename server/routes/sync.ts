@@ -302,6 +302,13 @@ export function registerSyncRoutes(app: Express) {
       }
     }
 
+    // One daily-sync run at a time, for the same reason as the ramp: cron and
+    // a manual trigger can overlap, and two runs sweeping the same stale-product
+    // cursor duplicate every TME call they make.
+    const { withLease, describeRefusal } = await import("../job-lease");
+    const { leaseStore } = await import("../storage");
+    const leased = await withLease(leaseStore, "daily_sync", { ttlSeconds: 90 }, async () => {
+
     const budgetMs = 270_000; // Vercel Pro maxDuration is 300s
     const start = Date.now();
 
@@ -366,7 +373,7 @@ export function registerSyncRoutes(app: Express) {
       // produced. With an hourly schedule, catch-up from a ~2k backlog
       // takes a handful of cron ticks instead of one chained burst.
 
-      res.json({
+      return {
         success: true,
         done: last?.done ?? false,
         chunks,
@@ -376,11 +383,19 @@ export function registerSyncRoutes(app: Express) {
         ebayRelisted: totalRelisted,
         remaining: last?.remaining ?? null,
         elapsedMs: Date.now() - start,
-      });
+      };
     } catch (error) {
       console.error("Cron sync failed:", error);
-      res.status(500).json({ success: false, error: (error as Error).message });
+      return { success: false, error: (error as Error).message, httpStatus: 500 };
     }
+
+    });
+
+    if (!leased.ran) {
+      return res.json({ success: true, skipped: true, reason: describeRefusal("daily_sync", leased) });
+    }
+    const { httpStatus, ...payload } = leased.result as any;
+    return res.status(httpStatus ?? 200).json(payload);
   };
   app.get("/api/cron/daily-sync", cronHandler);
   app.post("/api/cron/daily-sync", cronHandler);
@@ -484,6 +499,16 @@ export function registerSyncRoutes(app: Express) {
         })),
       });
     }
+
+    // One ramp run at a time. The hourly cron, the Operations "Start" button
+    // and a manual URL hit can all land together; without this they list the
+    // same candidates twice over, because the already-attempted set is per-run
+    // memory. The lease expires on its own, so a killed run never wedges the
+    // next tick. TTL comfortably exceeds the 270s budget, and the heartbeat
+    // keeps it alive for as long as the run genuinely lives.
+    const { withLease, describeRefusal } = await import("../job-lease");
+    const { leaseStore } = await import("../storage");
+    const leased = await withLease(leaseStore, "list_ramp", { ttlSeconds: 90 }, async () => {
 
     const { listProductsViaInventoryBulk } = await import("../ebay-lister");
     const budgetMs = 270_000;
@@ -624,11 +649,21 @@ export function registerSyncRoutes(app: Express) {
       // handler above. Remaining candidates are listed in subsequent
       // scheduled ramp ticks (or by the manual "Resume ramp" control).
 
-      res.json({ success: true, batches, published, failed, skipped, limitHit, budgetStop, done, blockedReason, topErrors, elapsedMs: Date.now() - start });
+      return { success: true, batches, published, failed, skipped, limitHit, budgetStop, done, blockedReason, topErrors, elapsedMs: Date.now() - start };
     } catch (error) {
       console.error("List ramp failed:", error);
-      res.status(500).json({ success: false, error: (error as Error).message });
+      return { success: false, error: (error as Error).message, httpStatus: 500 };
     }
+
+    });
+
+    // Refused, not failed: HTTP 200 so Vercel's scheduler doesn't treat a
+    // healthy overlap as a broken cron and start retrying.
+    if (!leased.ran) {
+      return res.json({ success: true, skipped: true, reason: describeRefusal("list_ramp", leased) });
+    }
+    const { httpStatus, ...payload } = leased.result as any;
+    return res.status(httpStatus ?? 200).json(payload);
   };
   app.get("/api/cron/list-ramp", listRampHandler);
   app.post("/api/cron/list-ramp", listRampHandler);

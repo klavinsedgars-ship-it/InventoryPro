@@ -207,6 +207,20 @@ export function registerOpsRoutes(app: Express) {
       if (process.env.LISTING_RAMP_ENABLED !== "true") {
         return res.status(412).json({ success: false, error: "LISTING_RAMP_ENABLED is not 'true'" });
       }
+      // Check the lease BEFORE firing. The run is dispatched fire-and-forget
+      // (it can last the full 270s), so without this the operator gets a
+      // "started" toast for a request the ramp will immediately refuse.
+      const { leaseStore } = await import("../storage");
+      const held = await leaseStore.peek("list_ramp").catch(() => null);
+      if (held && held.expiresAt.getTime() > Date.now()) {
+        const secs = held.acquiredAt ? Math.round((Date.now() - held.acquiredAt.getTime()) / 1000) : null;
+        return res.json({
+          success: false,
+          alreadyRunning: true,
+          error: `A ramp run is already in progress${secs != null ? ` (started ${secs}s ago)` : ""}. It will keep going on its own — no need to start another.`,
+        });
+      }
+
       // Clear any prior pause so this run actually proceeds.
       await storage.setMarketplaceSetting({ marketplace: "ebay", setting: "listing_ramp_paused", value: "false" });
       const base = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;

@@ -206,6 +206,9 @@ export function OpsDashboard({ user, embedded = false }: OpsProps) {
       if (d?.success) {
         toast({ title: "Listing ramp started", description: d.message });
         setTimeout(() => qc.invalidateQueries({ queryKey: ["/api/ops/daily"] }), 2000);
+      } else if (d?.alreadyRunning) {
+        // Not an error: the ramp is working. Say so plainly rather than in red.
+        toast({ title: "Ramp already running", description: d.error });
       } else {
         toast({ title: "Could not start ramp", description: d?.error || "Unknown error", variant: "destructive" });
       }

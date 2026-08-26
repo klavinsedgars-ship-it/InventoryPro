@@ -193,6 +193,29 @@ export const TME_SYNC_CHUNK_SIZE = 100;
  * who is pushing it forward.
  */
 export async function advanceSyncJob(jobId: string): Promise<{ done: boolean; job: any } | null> {
+  // Chunk advancement is a read-modify-write: it reads job.processed, spends
+  // ~12s importing that slice, then writes processed + chunk.length. The
+  // browser pump and the cron drain can both be inside that window, in which
+  // case both import the SAME symbols and the counter advances from a stale
+  // read. The lease makes one of them wait; because it expires, a caller that
+  // dies mid-chunk leaves the chunk to be retried rather than skipped.
+  const { withLease } = await import("./job-lease");
+  const { leaseStore } = await import("./storage");
+  const leased = await withLease(leaseStore, `sync_job:${jobId}`, { ttlSeconds: 120 }, () =>
+    advanceSyncJobChunk(jobId),
+  );
+  // Refused means another caller is mid-chunk. Report current state rather
+  // than an error: the caller polls again and sees the other's progress.
+  if (!leased.ran) {
+    const job = await storage.getSyncJob(jobId);
+    if (!job) return null;
+    const done = ["completed", "completed_with_errors", "failed", "cancelled"].includes(job.status);
+    return { done, job };
+  }
+  return leased.result;
+}
+
+async function advanceSyncJobChunk(jobId: string): Promise<{ done: boolean; job: any } | null> {
   const job = await storage.getSyncJob(jobId);
   if (!job) return null;
   if (["completed", "completed_with_errors", "failed", "cancelled"].includes(job.status)) {
@@ -264,10 +287,15 @@ export async function drainPendingImportJobs(budgetMs: number): Promise<{
     const idleMs = Date.now() - new Date((job as any).updatedAt ?? (job as any).createdAt ?? 0).getTime();
     if (Number.isFinite(idleMs) && idleMs < 2 * 60 * 1000) break;
 
+    const before = job.processed;
     const res = await advanceSyncJob(job.jobId);
     if (!res) break;
+    if (res.done) { finishedJobs++; continue; }
+    // No forward progress means someone else holds this job's chunk lease (a
+    // browser pump that just woke up). Yield instead of spinning: without this
+    // the drain would re-query in a tight loop for the rest of its budget.
+    if ((res.job?.processed ?? before) <= before) break;
     advancedChunks++;
-    if (res.done) finishedJobs++;
   }
   return { advancedChunks, finishedJobs };
 }
