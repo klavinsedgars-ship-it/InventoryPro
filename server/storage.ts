@@ -83,7 +83,7 @@ import {
   type InsertDemandSnapshot,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, ne, and, gte, lte, lt, desc, asc, count, or, ilike, isNull, isNotNull, sql, inArray } from "drizzle-orm";
+import { eq, ne, and, gte, lte, lt, desc, asc, count, or, ilike, isNull, isNotNull, sql, inArray, notInArray } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { PRICING_CONFIG } from "./dynamic-pricing";
 
@@ -740,12 +740,23 @@ export class DatabaseStorage implements IStorage {
 
   async getListingCandidates(
     limit: number,
-    opts?: { minPrice?: number; maxPrice?: number },
+    opts?: { minPrice?: number; maxPrice?: number; excludeIds?: number[] },
   ): Promise<Product[]> {
+    // excludeIds is what keeps a ramp run moving forward. The candidate set is
+    // ordered by id, so any batch that fails WITHOUT changing product state
+    // (merchant-location error, TME shippability block — neither increments
+    // ebay_list_attempts) is handed back identically on the next query. That
+    // turned one stuck batch into a 270-second loop over the same 25 SKUs:
+    // "75 batches, 0 published, 1875 failed" is 25 products retried 75 times,
+    // not 1875 products attempted.
+    const conds = [this.listingCandidateConds(opts)];
+    if (opts?.excludeIds?.length) {
+      conds.push(notInArray(products.id, opts.excludeIds));
+    }
     return await db
       .select()
       .from(products)
-      .where(this.listingCandidateConds(opts))
+      .where(and(...conds))
       .orderBy(asc(products.id))
       .limit(limit);
   }

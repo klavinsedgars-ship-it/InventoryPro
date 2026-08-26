@@ -505,9 +505,27 @@ export function registerSyncRoutes(app: Express) {
     // eBay before letting the ramp go wide. Unset = run the full time budget.
     const maxBatches = Number(req.query?.maxBatches ?? req.body?.maxBatches) || 0;
     let budgetStop = false;
+    // Every product this run has already handed to eBay. The candidate query
+    // is ordered by id, and two failure paths (merchant location, TME
+    // shippability) deliberately don't increment ebay_list_attempts — so
+    // without this the same 25 SKUs came back every iteration and the run
+    // spent its whole 270s budget retrying one stuck batch.
+    const attemptedIds: number[] = [];
+    let blockedReason: string | null = null;
+    const runResults: Array<{ sku: string; ok: boolean; error?: string }> = [];
+    const { summarizeRunErrors, shouldContinueRamp } = await import("../list-ramp-core");
     try {
-      while (Date.now() - start < budgetMs && !limitHit && !budgetStop) {
-        if (maxBatches > 0 && batches >= maxBatches) break;
+      while (
+        shouldContinueRamp({
+          elapsedMs: Date.now() - start,
+          budgetMs,
+          batches,
+          maxBatches,
+          limitHit,
+          budgetStop,
+          blocked: blockedReason !== null,
+        })
+      ) {
         // Re-check pause flag each batch so an in-flight chain stops on
         // the first batch after Pause is hit.
         const stillPaused = (await storage.getMarketplaceSettings("ebay")).find(
@@ -523,56 +541,57 @@ export function registerSyncRoutes(app: Express) {
           break;
         }
 
-        const candidates = await storage.getListingCandidates(batchSize, range);
+        const candidates = await storage.getListingCandidates(batchSize, { ...range, excludeIds: attemptedIds });
         lastBatchSize = candidates.length;
         if (candidates.length === 0) break;
+        for (const c of candidates as any[]) attemptedIds.push(c.id);
         const r = await listProductsViaInventoryBulk(candidates as any);
         batches++;
         published += r.published;
         failed += r.failed;
         skipped += r.skipped ?? 0;
         if (r.limitHit) limitHit = true;
+        // Keep this run's own per-SKU outcomes for the activity-feed summary.
+        runResults.push(...(r.results ?? []));
+        // Account-level blockers fail every batch identically. Stop the run and
+        // say so, rather than marching through the catalogue failing products
+        // for a problem none of them caused.
+        if (r.locationBlocked) {
+          blockedReason = r.locationError ?? "merchant location unavailable";
+        } else if (r.envBlocked) {
+          blockedReason = `listing env blocked: ${(r.envIssues ?? []).map((i: any) => i.key).join(", ")}`;
+        }
       }
 
       // A maxBatches stop is NOT "done" — candidates remain by definition.
       const cappedEarly = maxBatches > 0 && batches >= maxBatches;
-      const done = !limitHit && !budgetStop && !cappedEarly && lastBatchSize < batchSize;
+      const done = !limitHit && !budgetStop && !cappedEarly && !blockedReason && lastBatchSize < batchSize;
 
-      // Surface WHY listings failed directly in the activity feed. The old
-      // summary reported only "N failed", so a systemic blocker (wrong
-      // marketplace policy, missing location, category rejection) looked
-      // identical to random per-item problems and required digging.
-      let topErrors: Array<{ reason: string; count: number }> = [];
-      if (failed > 0) {
-        try {
-          const { db } = await import("../db");
-          const { sql } = await import("drizzle-orm");
-          const q: any = await db.execute(sql`
-            SELECT regexp_replace(left(ebay_listing_error, 140), '[0-9]{3,}', 'N', 'g') AS reason,
-                   COUNT(*)::int AS count
-            FROM products
-            WHERE ebay_listing_error IS NOT NULL AND ebay_listing_error <> ''
-            GROUP BY 1 ORDER BY 2 DESC LIMIT 3`);
-          topErrors = (q.rows ?? q) as Array<{ reason: string; count: number }>;
-        } catch { /* diagnostic only */ }
-      }
+      // Surface WHY listings failed directly in the activity feed. This counts
+      // THIS run's own per-SKU errors. It used to GROUP BY over every row in
+      // products with a non-null ebay_listing_error — no time bound, no link to
+      // the run — so the feed reported the loudest historical error (a stale
+      // one from a manual listing session) as this run's "top error" and sent
+      // diagnosis in entirely the wrong direction.
+      const topErrors = summarizeRunErrors(runResults);
       const topReason = topErrors[0]
         ? ` — top error: "${topErrors[0].reason.slice(0, 110)}" (${topErrors[0].count})`
         : "";
+      const blockedNote = blockedReason ? ` — STOPPED: ${blockedReason}` : "";
 
       await storage.createSyncLog({
         source: "ebay",
         operation: "list_ramp",
-        status: failed > 0 ? "partial" : "success",
-        message: `List ramp: ${batches} batches, ${published} published, ${failed} failed, ${skipped} skipped${limitHit ? " (limit hit)" : ""}${budgetStop ? ` (budget stop @${softCapPct}%)` : ""}${topReason}`,
-        details: JSON.stringify({ batches, published, failed, skipped, limitHit, budgetStop, softCapPct, done, topErrors }),
+        status: blockedReason ? "error" : failed > 0 ? "partial" : "success",
+        message: `List ramp: ${batches} batches, ${published} published, ${failed} failed, ${skipped} skipped${limitHit ? " (limit hit)" : ""}${budgetStop ? ` (budget stop @${softCapPct}%)` : ""}${blockedNote}${topReason}`,
+        details: JSON.stringify({ batches, published, failed, skipped, limitHit, budgetStop, softCapPct, done, blockedReason, topErrors }),
       });
 
       // No HTTP self-chain: see the matching note in the daily-sync
       // handler above. Remaining candidates are listed in subsequent
       // scheduled ramp ticks (or by the manual "Resume ramp" control).
 
-      res.json({ success: true, batches, published, failed, skipped, limitHit, budgetStop, done, elapsedMs: Date.now() - start });
+      res.json({ success: true, batches, published, failed, skipped, limitHit, budgetStop, done, blockedReason, topErrors, elapsedMs: Date.now() - start });
     } catch (error) {
       console.error("List ramp failed:", error);
       res.status(500).json({ success: false, error: (error as Error).message });

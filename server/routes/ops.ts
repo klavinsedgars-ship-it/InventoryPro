@@ -136,14 +136,18 @@ export function registerOpsRoutes(app: Express) {
           MAX(ebay_list_attempts)::int AS max_attempts,
           -- One VERBATIM example: the normalised reason above hides the eBay
           -- errorId and the parameters array, which name the offending field.
-          (array_agg(ebay_listing_error ORDER BY id))[1] AS sample_full_error
+          (array_agg(ebay_listing_error ORDER BY id))[1] AS sample_full_error,
+          -- Without this every group looked equally current, so a stale error
+          -- from a manual listing session outranked the error the ramp is
+          -- actually hitting right now.
+          MAX(updated_at) AS last_seen
         FROM products
         WHERE ebay_listing_error IS NOT NULL AND ebay_listing_error <> ''
         GROUP BY 1
-        ORDER BY 2 DESC
+        ORDER BY MAX(updated_at) DESC NULLS LAST, 2 DESC
         LIMIT 25
       `);
-      const groups = (r.rows ?? r) as Array<{ reason: string; count: number; sample_skus: string[]; max_attempts: number; sample_full_error: string }>;
+      const groups = (r.rows ?? r) as Array<{ reason: string; count: number; sample_skus: string[]; max_attempts: number; sample_full_error: string; last_seen: string }>;
       const totalRow: any = await db.execute(sql`
         SELECT COUNT(*)::int AS n FROM products
         WHERE ebay_listing_error IS NOT NULL AND ebay_listing_error <> ''`);

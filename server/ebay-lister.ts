@@ -155,7 +155,13 @@ export async function updateListedProductsViaInventory(
  */
 export async function listProductsViaInventoryBulk(
   allProducts: Product[],
-): Promise<ListBatchResult & { skipped: number; envBlocked?: boolean; envIssues?: { level: string; key: string; message: string }[] }> {
+): Promise<ListBatchResult & {
+  skipped: number;
+  envBlocked?: boolean;
+  envIssues?: { level: string; key: string; message: string }[];
+  locationBlocked?: boolean;
+  locationError?: string;
+}> {
   const results: ListBatchResult["results"] = [];
   let published = 0;
   let failed = 0;
@@ -191,12 +197,17 @@ export async function listProductsViaInventoryBulk(
   if (products.length > 0) {
     const loc = await ebayInventoryApi.ensureMerchantLocation();
     if (!loc.ok) {
+      // Account-level config problem, not a per-product one: every batch would
+      // fail identically. Flag it so the caller stops the whole run instead of
+      // grinding through the catalogue marking products as failed.
       return {
         attempted: allProducts.length,
         published: 0,
         failed: products.length,
         skipped,
         limitHit: false,
+        locationBlocked: true,
+        locationError: `merchant location: ${loc.error}`,
         results: products.map((p) => ({ sku: p.sku, ok: false, error: `merchant location: ${loc.error}` })),
       };
     }
