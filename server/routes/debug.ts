@@ -1003,12 +1003,16 @@ export function registerDebugRoutes(app: Express) {
     }
     try {
       const { tmeApi } = await import("../tme-api");
-      // Cheapest live call: ask for one well-known TME SKU
-      const probe = await (tmeApi as any)
-        .getProductsPricesAndStocks?.(["AVT-LITE"])
-        .catch((e: Error) => ({ __error: e.message }));
-      if (probe?.__error) {
-        return res.json({ ok: false, stage: "tme-api", have, error: probe.__error });
+      // Cheapest live call: ask for one well-known TME SKU.
+      // The method is getPricesAndStocks — the previous name belonged to the
+      // OPTIMIZED client, so optional chaining short-circuited the whole call
+      // and this endpoint reported stage:"success" without ever contacting
+      // TME. Call it directly so a failure is a failure.
+      let probe: any;
+      try {
+        probe = await tmeApi.getPricesAndStocks(["1N4148-DIO"]);
+      } catch (e) {
+        return res.json({ ok: false, stage: "tme-api", have, error: (e as Error).message });
       }
       // Surface the price BASIS: TME returns the customer-configuration
       // currency unless we name one, so this confirms we are reading EUR/NET
