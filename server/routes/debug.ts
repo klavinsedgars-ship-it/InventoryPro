@@ -556,6 +556,81 @@ export function registerDebugRoutes(app: Express) {
     res.json({ ok: !!good, ...out });
   });
 
+  /**
+   * Compare v1 and v2 side by side on REAL products before any cutover.
+   *
+   * The v2 migration changes the numbers that drive pricing and stock, so it
+   * must be verified against live data rather than trusted. For each SKU this
+   * reports v1's price/stock next to v2's, plus what v2 knows and v1 cannot:
+   * the sellable-now quantity, incoming supply dates, and product statuses
+   * that should block listing entirely.
+   *   GET /api/__tme-compare?skus=1N4148-DIO,POLOLU-4037
+   * With no ?skus it samples the local catalogue.
+   */
+  app.get("/api/__tme-compare", async (req, res) => {
+    try {
+      const { tmeApi } = await import("../tme-api");
+      const { tmeApiV2, availableNow, incomingSupplyDate, isListable } = await import("../tme-api-v2");
+
+      let symbols: string[] = String(req.query.skus || "")
+        .split(",").map((s) => s.trim()).filter(Boolean);
+      if (symbols.length === 0) {
+        const { rows } = await storage.getProductsPaged({ limit: 8, offset: 0 });
+        symbols = rows.map((r: any) => r.supplierProductId || r.sku).filter(Boolean);
+      }
+      symbols = symbols.slice(0, 25);
+      if (symbols.length === 0) return res.json({ ok: false, error: "no symbols to compare" });
+
+      const [v1, v2, v2products] = await Promise.all([
+        tmeApi.getPricesAndStocks(symbols).catch((e) => ({ __error: (e as Error).message })),
+        tmeApiV2.getProductsData(symbols, { withDeliveries: true, amounts: symbols.map(() => 1) })
+          .catch((e) => ({ __error: (e as Error).message })),
+        tmeApiV2.getProducts(symbols).catch(() => [] as any[]),
+      ]);
+      if ((v1 as any).__error) return res.json({ ok: false, stage: "v1", error: (v1 as any).__error });
+      if ((v2 as any).__error) return res.json({ ok: false, stage: "v2", error: (v2 as any).__error });
+
+      const v1By = new Map((v1 as any[]).map((p: any) => [p.Symbol, p]));
+      const statusBy = new Map((v2products as any[]).map((p: any) => [p.symbol, p.product_status ?? []]));
+
+      const rows = (v2 as any[]).map((e: any) => {
+        const a = v1By.get(e.symbol);
+        const v1Stock = a ? (typeof a.Amount === "number" ? a.Amount : null) : null;
+        const v1Price = a?.PriceList?.[0]?.PriceValue ?? null;
+        const v2Price = e.prices?.elements?.[0]?.price ?? null;
+        const sellable = availableNow(e);
+        const statuses = statusBy.get(e.symbol) ?? [];
+        const listable = isListable(statuses);
+        return {
+          symbol: e.symbol,
+          v1: { stock: v1Stock, unitPrice: v1Price },
+          v2: { warehouseStock: e.stock_quantity, sellableNow: sellable, unitPrice: v2Price, currency: e.prices?.currency, priceType: e.prices?.type },
+          // The decision-relevant deltas.
+          priceMatches: v1Price != null && v2Price != null ? Math.abs(v1Price - v2Price) < 0.0001 : null,
+          stockDelta: v1Stock != null ? sellable - v1Stock : null,
+          productStatus: statuses,
+          wouldBlockListing: !listable.ok ? listable.blockedBy : null,
+          shippingCautions: listable.cautions.length ? listable.cautions : null,
+          incomingSupplyDate: incomingSupplyDate(e),
+        };
+      });
+
+      res.json({
+        ok: true,
+        compared: rows.length,
+        summary: {
+          priceMismatches: rows.filter((r) => r.priceMatches === false).length,
+          stockDiffers: rows.filter((r) => r.stockDelta != null && r.stockDelta !== 0).length,
+          wouldBlock: rows.filter((r) => r.wouldBlockListing).length,
+          withCautions: rows.filter((r) => r.shippingCautions).length,
+        },
+        rows,
+      });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  });
+
   // Diagnostic endpoint - no auth required, no DB access.
   // Use to verify which commit is actually running and whether
   // BYPASS_AUTH is being read by the function.
