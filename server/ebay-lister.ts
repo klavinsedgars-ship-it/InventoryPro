@@ -227,14 +227,22 @@ export async function listProductsViaInventoryBulk(
         const wanted = batch.map((p) => Math.max(1, calculateEbayStock(p).ebayStock));
         const ship = await tmeApiV2.checkShippable(symbols, wanted);
         const blocked: typeof batch = [];
-        batch = batch.filter((p, idx) => {
+        batch = batch.flatMap((p, idx) => {
           const r = ship.get(symbols[idx]);
-          if (r && !r.canShip) { blocked.push(p); return false; }
-          return true;
+          if (!r) return [p]; // TME said nothing about it — don't invent a block
+          if (r.shippableNow <= 0) { blocked.push(p); return []; }
+          // Partial availability is a smaller listing, not a skipped one. A
+          // product with 1 unit shippable of the 2 we wanted was being dropped
+          // entirely; now it lists at 1. Capping stock here is enough — every
+          // downstream quantity flows from calculateEbayStock(product).
+          if (r.shippableNow < wanted[idx]) {
+            return [{ ...p, stock: Math.min(p.stock ?? 0, r.shippableNow) }];
+          }
+          return [p];
         });
         for (const p of blocked) {
           const r = ship.get(p.supplierProductId || p.sku);
-          const msg = `TME cannot ship ${r?.requested ?? "?"} today (only ${r?.shippableNow ?? 0} in stock${r?.supplyDate ? `, next supply ${r.supplyDate}` : ""})`;
+          const msg = `TME cannot ship today (0 available${r?.supplyDate ? `, next supply ${r.supplyDate}` : ""})`;
           failed++;
           results.push({ sku: p.sku, ok: false, error: msg });
           await storage.updateProduct(p.id, { ebayListingStatus: "error", ebayListingError: msg.slice(0, 500) });

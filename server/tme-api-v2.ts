@@ -91,7 +91,8 @@ export function isListable(statuses: string[] | undefined | null): { ok: boolean
 }
 
 /**
- * Of a REQUESTED quantity, how many units ship from stock right now.
+ * What the delivery breakdown says ships from stock right now, of the quantity
+ * that was REQUESTED — or null when TME returned no breakdown at all.
  *
  * IMPORTANT semantics: `deliveries` is not a general availability breakdown —
  * it answers "how would the quantity in amounts[] be fulfilled?". Ask for 1
@@ -100,16 +101,34 @@ export function isListable(statuses: string[] | undefined | null): { ok: boolean
  * must never be treated as the product's total sellable stock (doing so caps
  * every listing at the amount we happened to ask about).
  *
- * For "how much stock exists", use stock_quantity — TME support confirmed it
- * is the real, real-time warehouse figure.
+ * The null return is the other half of that care: TME frequently answers with
+ * an EMPTY deliveries array for a product that plainly has stock (observed:
+ * 48 units in the warehouse, `deliveries: []`). An empty array is "no delivery
+ * breakdown supplied", not "nothing can ship" — collapsing the two blocked
+ * every listing whose breakdown TME chose not to detail.
  */
-export function shippableOfRequested(p: V2ProductData): number {
+export function deliveryShippable(p: V2ProductData): number | null {
   const els = p.deliveries?.elements;
-  if (!els || els.length === 0) return 0;
-  // An all-incoming response legitimately sums to 0: nothing ships today.
+  if (!els || els.length === 0) return null;
+  // A NON-EMPTY all-incoming response legitimately sums to 0: nothing ships
+  // today. That is real evidence, and it is what the oversell guard is for.
   return els
     .filter((d) => IN_STOCK_STATUSES.has(d.status))
     .reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+}
+
+/**
+ * Units that can ship today, and what that figure is based on.
+ *
+ * Prefers the delivery breakdown, because it accounts for stock that exists
+ * but is already committed. Falls back to stock_quantity — which TME support
+ * confirmed is the real, real-time warehouse figure — when TME supplied no
+ * breakdown, so a missing answer never masquerades as a zero.
+ */
+export function shippableNow(p: V2ProductData): { units: number; basis: "deliveries" | "stock_quantity" } {
+  const fromDeliveries = deliveryShippable(p);
+  if (fromDeliveries !== null) return { units: fromDeliveries, basis: "deliveries" };
+  return { units: Math.max(0, Number(p.stock_quantity) || 0), basis: "stock_quantity" };
 }
 
 /**
@@ -117,7 +136,16 @@ export function shippableOfRequested(p: V2ProductData): number {
  * quantity we actually intend to sell, not for 1.
  */
 export function canShipNow(p: V2ProductData, requested: number): boolean {
-  return shippableOfRequested(p) >= requested;
+  return shippableNow(p).units >= requested;
+}
+
+export interface ShippableCheck {
+  requested: number;
+  shippableNow: number;
+  /** Where shippableNow came from — a delivery breakdown, or warehouse stock. */
+  basis: "deliveries" | "stock_quantity";
+  canShip: boolean;
+  supplyDate: string | null;
 }
 
 /** Earliest supply date across incoming deliveries, if any. */
@@ -447,19 +475,20 @@ export class TmeApiV2 {
   async checkShippable(
     symbols: string[],
     quantities: number[],
-  ): Promise<Map<string, { requested: number; shippableNow: number; canShip: boolean; supplyDate: string | null }>> {
-    const out = new Map<string, { requested: number; shippableNow: number; canShip: boolean; supplyDate: string | null }>();
+  ): Promise<Map<string, ShippableCheck>> {
+    const out = new Map<string, ShippableCheck>();
     if (symbols.length === 0) return out;
     const amounts = symbols.map((_, i) => Math.max(1, quantities[i] ?? 1));
     const els = await this.getProductsData(symbols, { withDeliveries: true, amounts });
     const wantBySymbol = new Map(symbols.map((s, i) => [s, amounts[i]]));
     for (const e of els) {
       const requested = wantBySymbol.get(e.symbol) ?? 1;
-      const shippableNow = shippableOfRequested(e);
+      const { units, basis } = shippableNow(e);
       out.set(e.symbol, {
         requested,
-        shippableNow,
-        canShip: shippableNow >= requested,
+        shippableNow: units,
+        basis,
+        canShip: units >= requested,
         supplyDate: incomingSupplyDate(e),
       });
     }

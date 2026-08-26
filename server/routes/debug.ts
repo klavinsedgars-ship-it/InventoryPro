@@ -665,7 +665,7 @@ export function registerDebugRoutes(app: Express) {
    */
   app.get("/api/__ramp-block-check", async (req, res) => {
     try {
-      const { tmeApiV2, shippableOfRequested, incomingSupplyDate } = await import("../tme-api-v2");
+      const { tmeApiV2, shippableNow, deliveryShippable, incomingSupplyDate } = await import("../tme-api-v2");
       const { calculateEbayStock } = await import("../stock-manager");
 
       const { getRampPriceRange } = await import("../ramp-config");
@@ -703,17 +703,21 @@ export function registerDebugRoutes(app: Express) {
           tme: {
             returned: !!d,
             warehouseStock: d?.stock_quantity ?? pl?.stock_quantity ?? null,
-            shippableOfRequested: d ? shippableOfRequested(d) : null,
-            // The raw split is the ground truth: an unexpected status here
-            // means the guard is discarding availability it should count.
+            shippableNow: d ? shippableNow(d).units : null,
+            basis: d ? shippableNow(d).basis : null,
+            // null here means TME supplied no breakdown at all — which is NOT
+            // the same as a breakdown that says nothing ships.
+            fromDeliveries: d ? deliveryShippable(d) : null,
             deliveries: d?.deliveries?.elements ?? null,
             incomingSupplyDate: d ? incomingSupplyDate(d) : null,
           },
           verdict: !d
             ? "not returned by TME (guard lets it through)"
-            : shippableOfRequested(d) >= wanted[i]
-              ? "would list"
-              : "BLOCKED by shippability guard",
+            : shippableNow(d).units <= 0
+              ? "BLOCKED — nothing shippable"
+              : shippableNow(d).units < wanted[i]
+                ? `would list at reduced quantity ${shippableNow(d).units}`
+                : "would list",
         };
       });
 
@@ -732,12 +736,15 @@ export function registerDebugRoutes(app: Express) {
         priceBand: range,
         summary: {
           blocked: rows.filter((r) => r.verdict.startsWith("BLOCKED")).length,
-          wouldList: rows.filter((r) => r.verdict === "would list").length,
+          wouldList: rows.filter((r) => r.verdict.startsWith("would list")).length,
+          reducedQuantity: rows.filter((r) => r.verdict.includes("reduced")).length,
           dbSaysInStockButTmeSaysZero: rows.filter(
             (r) => (r.db.stock ?? 0) > 0 && (r.tme.warehouseStock ?? 0) === 0,
           ).length,
-          warehouseStockButNothingShippable: rows.filter(
-            (r) => (r.tme.warehouseStock ?? 0) > 0 && r.tme.shippableOfRequested === 0,
+          // The bug this endpoint was built to find: TME sends no delivery
+          // breakdown, which the guard used to read as "nothing can ship".
+          warehouseStockButNoDeliveryData: rows.filter(
+            (r) => (r.tme.warehouseStock ?? 0) > 0 && r.tme.fromDeliveries === null,
           ).length,
         },
         deliveryStatusesSeen: statusCounts,
