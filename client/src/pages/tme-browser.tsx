@@ -619,6 +619,23 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   const bulkSelectPages = async () => {
     if (!selectedCategory) return;
 
+    // Refuse to silently start a scan that cannot finish. SMD resistors alone
+    // is 157,656 products — 1,577 pages, ~26 minutes — and the run would stop
+    // at the safety cap long before the end anyway. Say so up front rather
+    // than showing a 44-minute countdown for work that will be abandoned.
+    if (totalProducts > SELECT_ALL_CAP) {
+      const minutes = Math.round((Math.ceil(SELECT_ALL_CAP / 100) * 1.5) / 60);
+      const ok = window.confirm(
+        `This category has ${totalProducts.toLocaleString()} products.\n\n` +
+        `Selecting stops at the ${SELECT_ALL_CAP.toLocaleString()}-product safety limit ` +
+        `(about ${minutes || 1} minute${minutes === 1 ? "" : "s"}), so you would get the first ` +
+        `${SELECT_ALL_CAP.toLocaleString()} — not the whole category.\n\n` +
+        `Narrowing first (a sub-category, a producer, or a price range) gives you products you ` +
+        `actually want instead of the first few thousand.\n\nContinue anyway?`,
+      );
+      if (!ok) return;
+    }
+
     const controller = new AbortController();
     setBulkAbortController(controller);
     setBulkLoading(true);
@@ -672,9 +689,8 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
           found: newSelected.size - before,
           startedAt: prev?.startedAt ?? Date.now(),
         }));
-        setBulkProgress(
-          data.totalPages ? Math.min(99, Math.round((pagesDone / data.totalPages) * 100)) : 0,
-        );
+        const effPages = effectiveTotalPages(data.totalPages ?? null);
+        setBulkProgress(effPages ? Math.min(99, Math.round((pagesDone / effPages) * 100)) : 0);
 
         if (newSelected.size - before >= SELECT_ALL_CAP) { capped = true; break; }
         startPage = data.hasMore ? data.nextPage : null;
@@ -725,6 +741,14 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
    * Costs no TME quota: it scores data already on screen.
    */
   const [scoring, setScoring] = useState(false);
+  // Pages this scan will really walk: whichever comes first, the category's
+  // page count or the page on which the safety cap is reached.
+  const effectiveTotalPages = (totalPagesOfCategory: number | null) => {
+    if (!totalPagesOfCategory) return null;
+    const capPages = Math.ceil(SELECT_ALL_CAP / 100); // scan fetches 100/page
+    return Math.min(totalPagesOfCategory, capPages);
+  };
+
   const selectProfitable = async () => {
     if (visibleProducts.length === 0) return;
     setScoring(true);
@@ -1293,9 +1317,11 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                           <div className="flex items-center justify-between gap-3">
                             <div className="text-sm font-medium text-blue-900">
                               Scanning category
-                              {bulkStats?.totalPages
-                                ? ` — page ${Math.min(bulkStats.pagesDone, bulkStats.totalPages)} of ${bulkStats.totalPages}`
-                                : "…"}
+                              {(() => {
+                                const eff = effectiveTotalPages(bulkStats?.totalPages ?? null);
+                                if (!eff || !bulkStats) return "…";
+                                return ` — page ${Math.min(bulkStats.pagesDone, eff)} of ${eff}`;
+                              })()}
                             </div>
                             <Button
                               onClick={cancelBulkSelection}
@@ -1311,10 +1337,11 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                             {(bulkStats?.scanned ?? 0).toLocaleString()} checked ·{" "}
                             <strong>{(bulkStats?.found ?? 0).toLocaleString()} selected</strong>
                             {(() => {
-                              if (!bulkStats?.totalPages || bulkStats.pagesDone < 1) return null;
+                              const eff = effectiveTotalPages(bulkStats?.totalPages ?? null);
+                              if (!eff || !bulkStats || bulkStats.pagesDone < 1) return null;
                               const elapsed = (Date.now() - bulkStats.startedAt) / 1000;
                               const perPage = elapsed / bulkStats.pagesDone;
-                              const left = Math.max(0, bulkStats.totalPages - bulkStats.pagesDone) * perPage;
+                              const left = Math.max(0, eff - bulkStats.pagesDone) * perPage;
                               if (left < 2) return null;
                               const mins = Math.floor(left / 60);
                               const secs = Math.round(left % 60);
@@ -1322,6 +1349,9 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                             })()}
                           </div>
                           <div className="mt-1 text-[11px] text-blue-900/60">
+                            {totalProducts > SELECT_ALL_CAP
+                              ? `Stops at ${SELECT_ALL_CAP.toLocaleString()} products — this category has ${totalProducts.toLocaleString()}. `
+                              : ""}
                             TME allows 4 stock lookups per second, so large categories take a
                             while. Cancelling keeps whatever has been selected so far.
                           </div>
@@ -1481,7 +1511,26 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                                 <span className="text-gray-400">Stock: Unknown</span>
                                               )}
                                               {price != null ? (
-                                                <span className="text-blue-600">Price: €{Number(price).toFixed(2)}</span>
+                                                (() => {
+                                                  // TME quotes PER PIECE, and a 10kΩ resistor is
+                                                  // ~€0.002 — which .toFixed(2) renders as "€0.00",
+                                                  // making a perfectly viable €10 reel look free.
+                                                  // Show the package (unit × MOQ), because that is
+                                                  // what gets bought and listed, and keep enough
+                                                  // precision on the unit price to be meaningful.
+                                                  const unit = Number(price);
+                                                  const moq = Number((product as any).MinAmount) || 1;
+                                                  const pack = unit * moq;
+                                                  const fmt = (v: number) =>
+                                                    v >= 0.01 ? v.toFixed(2) : v.toPrecision(2);
+                                                  return (
+                                                    <span className="text-blue-600">
+                                                      {moq > 1
+                                                        ? `€${fmt(pack)} / ${moq.toLocaleString()} pcs`
+                                                        : `Price: €${fmt(unit)}`}
+                                                    </span>
+                                                  );
+                                                })()
                                               ) : loadingEnhanced ? (
                                                 <span className="text-gray-400">Loading price...</span>
                                               ) : (
