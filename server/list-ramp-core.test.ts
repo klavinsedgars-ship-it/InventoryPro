@@ -74,3 +74,36 @@ describe("shouldContinueRamp", () => {
     expect(shouldContinueRamp({ ...base, maxBatches: 1 })).toBe(false);
   });
 });
+
+describe("error classification — what may burn a listing attempt", () => {
+  // Mirrors the regexes in ebay-lister.ts. Attempts exist to park products
+  // with something wrong with them; these three categories are not that.
+  const LIMIT_RX = /\blimit\b|too many|rate.?limit|2001\b|21917|exceed/i;
+  const POLICY_RX = /\b25019\b|eBay-Grunds|nicht erlaubt|prohibited|restricted item|violat/i;
+  const TRANSIENT_RX = /system error|internal server error|temporarily unavailable|try again later|service unavailable|\b50[0234]\b/i;
+
+  it("treats an eBay outage as transient, not as a product defect", () => {
+    const err = "publish: 25001 A system error has occurred. Internal Server Error";
+    expect(TRANSIENT_RX.test(err)).toBe(true);
+    expect(POLICY_RX.test(err)).toBe(false);
+  });
+
+  it("treats a prohibited-item refusal as permanent", () => {
+    const err =
+      "publish: 25019 Cannot revise listing. Die Artikelbezeichnung und/oder -beschreibung enthalten unter Umständen unzulässige Begriffe oder das Angebot verstößt gegen die eBay-Grundsätze.";
+    expect(POLICY_RX.test(err)).toBe(true);
+    expect(TRANSIENT_RX.test(err)).toBe(false);
+  });
+
+  it("still burns an attempt for a real payload problem", () => {
+    const err = "inventory_item: 25717 imageUrls darf nicht Null oder leer sein.";
+    expect(LIMIT_RX.test(err)).toBe(false);
+    expect(POLICY_RX.test(err)).toBe(false);
+    expect(TRANSIENT_RX.test(err)).toBe(false);
+  });
+
+  it("does not mistake a plain user error for a system error", () => {
+    // "A user error has occurred" must not match the transient rule.
+    expect(TRANSIENT_RX.test("25002 A user error has occurred. Das Feld EAN fehlt.")).toBe(false);
+  });
+});

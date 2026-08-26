@@ -35,6 +35,16 @@ const LIMIT_RX = /\blimit\b|too many|rate.?limit|2001\b|21917|exceed/i;
  */
 const POLICY_RX = /\b25019\b|eBay-Grunds|nicht erlaubt|prohibited|restricted item|violat/i;
 
+/**
+ * eBay broke, not the listing: "A system error has occurred. Internal Server
+ * Error" and friends. Observed at ~2% of publishes under load.
+ *
+ * These must not burn an attempt. Nothing is wrong with the product, and three
+ * unlucky ticks would otherwise park a perfectly listable SKU permanently
+ * until someone noticed and requeued it.
+ */
+const TRANSIENT_RX = /system error|internal server error|temporarily unavailable|try again later|service unavailable|\b50[0234]\b/i;
+
 export async function listProductsViaInventory(allProducts: Product[]): Promise<ListBatchResult & { skipped: number }> {
   const results: ListBatchResult["results"] = [];
   let published = 0;
@@ -260,9 +270,19 @@ export async function listProductsViaInventoryBulk(
           const msg = `TME cannot ship today (0 available${r?.supplyDate ? `, next supply ${r.supplyDate}` : ""})`;
           failed++;
           results.push({ sku: p.sku, ok: false, error: msg });
-          await storage.updateProduct(p.id, { ebayListingStatus: "error", ebayListingError: msg.slice(0, 500) });
-          // Not the product's fault — don't burn an attempt on a stock state
-          // that will change; the ramp retries once supply arrives.
+          // Record what TME actually says is sellable. Not burning an attempt
+          // is right — the stock state will change and the ramp should retry —
+          // but leaving stock as-is made these products candidates AGAIN on
+          // every tick, so each hour re-fetched, re-asked TME and re-failed the
+          // same SKUs forever. Writing the true figure takes them out of the
+          // queue until a sync sees stock return, which is also the honest
+          // catalogue state and one less way to oversell.
+          await storage.updateProduct(p.id, {
+            stock: 0,
+            status: "inactive",
+            ebayListingStatus: "error",
+            ebayListingError: msg.slice(0, 500),
+          });
         }
       } catch (e) {
         console.warn(`shippability pre-check skipped: ${(e as Error).message}`);
@@ -308,7 +328,7 @@ export async function listProductsViaInventoryBulk(
           ebayListingStatus: "error",
           ebayListingError: `inventory_item: ${String(r.error)}`.slice(0, 500),
         });
-        if (!LIMIT_RX.test(String(r.error))) {
+        if (!LIMIT_RX.test(String(r.error)) && !TRANSIENT_RX.test(String(r.error))) {
           await storage.incrementEbayListAttempts(product.id);
         }
         if (LIMIT_RX.test(String(r.error))) limitHit = true;
@@ -331,7 +351,7 @@ export async function listProductsViaInventoryBulk(
           ebayListingStatus: r?.offerId ? "offer_created" : "error",
           ebayListingError: `offer: ${String(r?.error)}`.slice(0, 500),
         });
-        if (!LIMIT_RX.test(String(r?.error))) {
+        if (!LIMIT_RX.test(String(r?.error)) && !TRANSIENT_RX.test(String(r?.error))) {
           await storage.incrementEbayListAttempts(product.id);
         }
         if (LIMIT_RX.test(String(r?.error))) limitHit = true;
@@ -339,8 +359,22 @@ export async function listProductsViaInventoryBulk(
     }
     if (toPublish.length === 0) continue;
 
-    // 4) Publish.
-    const pubRes = await ebayInventoryApi.bulkPublishOffer(toPublish);
+    // 4) Publish. eBay returns transient 500s under load (~2% observed), and
+    //    the offer is already created — so one immediate retry of just those
+    //    recovers them in this run instead of leaving them for the next tick.
+    let pubRes = await ebayInventoryApi.bulkPublishOffer(toPublish);
+    const transientRetries = toPublish.filter((o) => {
+      const r = pubRes.get(o.sku);
+      return !(r?.ok && r.listingId) && TRANSIENT_RX.test(String(r?.error));
+    });
+    if (transientRetries.length > 0) {
+      await new Promise((res) => setTimeout(res, 1000));
+      const retryRes = await ebayInventoryApi.bulkPublishOffer(transientRetries);
+      // Merge: a successful retry replaces the transient failure, and a second
+      // failure keeps the newer message.
+      pubRes = new Map(pubRes);
+      retryRes.forEach((r, sku) => pubRes.set(sku, r));
+    }
     for (const { sku, offerId } of toPublish) {
       const product = productBySku.get(sku)!;
       const r = pubRes.get(sku);
@@ -363,13 +397,16 @@ export async function listProductsViaInventoryBulk(
         // A policy refusal is permanent: take the product out of the queue for
         // a human to review, rather than re-offering it until it parks.
         const policyBlocked = POLICY_RX.test(err);
+        const transient = TRANSIENT_RX.test(err);
         await storage.updateProduct(product.id, {
           ebayOfferId: offerId,
           ebayListingStatus: policyBlocked ? "error" : "offer_created",
           ebayListingError: (policyBlocked ? `policy: ${err}` : `publish: ${err}`).slice(0, 500),
           ...(policyBlocked ? { excludeFromListing: true } : {}),
         });
-        if (!LIMIT_RX.test(err) && !policyBlocked) {
+        // Attempts are for problems with the product. A rate limit, a policy
+        // refusal and an eBay outage are none of them.
+        if (!LIMIT_RX.test(err) && !policyBlocked && !transient) {
           await storage.incrementEbayListAttempts(product.id);
         }
         if (LIMIT_RX.test(err)) limitHit = true;
