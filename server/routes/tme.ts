@@ -298,10 +298,16 @@ export function registerTmeRoutes(app: Express): void {
         // clicks Load Prices.
         const useV2 = process.env.TME_API_VERSION === "v2";
         const v2 = useV2 ? (await import("../tme-api-v2")).tmeApiV2 : null;
+        // Default true (the grid's default), but honour an explicit false so
+        // the whole-category selection always matches what the grid shows.
+        const wantInStockAll = String(req.query.inStockOnly ?? "true") !== "false";
 
         for (; page < startPage + pages; page++) {
           if (v2) {
-            const r = await v2.getCategoryPageEnriched(categoryId, page, { limit: 100, inStockOnly: true });
+            const r = await v2.getCategoryPageEnriched(categoryId, page, {
+              limit: 100,
+              inStockOnly: wantInStockAll,
+            });
             pagesFetched++;
             total = r.total || total;
             for (const p of r.products) {

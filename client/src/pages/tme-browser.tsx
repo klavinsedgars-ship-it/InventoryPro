@@ -620,6 +620,9 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
           categoryId: selectedCategory,
           startPage: String(startPage),
           pages: "10",
+          // The same stock filter the grid uses: "Select whole category" must
+          // select exactly what the current view would show, page after page.
+          inStockOnly: String(filters.inStockOnly),
         });
         if (filters.search) params.append('search', filters.search);
         if (filters.producer) params.append('producer', filters.producer);
@@ -1141,6 +1144,10 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                           {/* Bulk Selection in same row */}
                           {selectedCategory && (
                             <div className="flex items-center gap-2 border-l pl-3">
+                              {/* Exactly two choices, each naming what it
+                                  selects: this page, or the whole category.
+                                  The stock filter above governs both, so the
+                                  buttons never need to restate it. */}
                               <Button
                                 onClick={selectAllOnPage}
                                 variant="outline"
@@ -1148,7 +1155,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                 disabled={visibleProducts.length === 0}
                                 data-testid="btn-select-page"
                               >
-                                Select Page ({visibleProducts.length})
+                                Select this page ({visibleProducts.length})
                               </Button>
                               <Button
                                 onClick={() => bulkSelectPages()}
@@ -1158,10 +1165,8 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                 data-testid="btn-select-all-category"
                               >
                                 {bulkLoading
-                                  ? `Selecting… ${selectedProducts.size.toLocaleString()} so far`
-                                  : filters.inStockOnly
-                                    ? "Select All in stock"
-                                    : `Select All (${totalProducts.toLocaleString()})`}
+                                  ? `Selecting… ${selectedProducts.size.toLocaleString()}`
+                                  : "Select whole category"}
                               </Button>
                             </div>
                           )}
@@ -1210,17 +1215,16 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                   <Card className="flex-1">
                     <CardHeader className="py-2.5 px-4">
                       <div className="flex items-center justify-between">
-                        {/* Every number here states exactly what it counts.
-                            `total` is TME's CATEGORY size and is not filtered
-                            by stock, so it is never labelled "in stock" — the
-                            old header did, which is why "120 in stock",
-                            "Select Page (26)" and a 42-product Select All all
-                            disagreed. */}
+                        {/* One short line. `total` is TME's CATEGORY size and
+                            is NOT stock-filtered, so it is only ever shown as
+                            "in category" — never as an in-stock figure, which
+                            is what previously made the counts contradict each
+                            other. */}
                         <CardTitle className="text-base font-semibold">
-                          Showing {visibleProducts.length.toLocaleString()}
-                          {filters.inStockOnly ? " in stock" : ""}
+                          {visibleProducts.length.toLocaleString()} products
                           <span className="ml-2 text-sm font-normal text-gray-500">
-                            of {totalProducts.toLocaleString()} in this category
+                            {filters.inStockOnly ? "in stock · " : ""}
+                            {totalProducts.toLocaleString()} in category
                           </span>
                         </CardTitle>
                         <div className="flex items-center gap-2">
