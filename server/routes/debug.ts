@@ -456,6 +456,106 @@ export function registerDebugRoutes(app: Express) {
     }
   });
 
+  /**
+   * Do our EXISTING TME credentials work against API v2?
+   *
+   * v1 authenticates with an HMAC-SHA1 signature over (token, secret); v2 uses
+   * OAuth 2.0 client_credentials with the same pair as HTTP Basic. Whether one
+   * credential set serves both is not stated in the documentation, and it
+   * decides whether the v2 migration starts with a portal visit or with code.
+   * This answers it in one request, using only what is already in the
+   * environment. Set TME_V2_TOKEN / TME_V2_SECRET to test a NEW pair instead.
+   *
+   * Read-only: fetches a token, then reads one product's price/stock.
+   */
+  app.get("/api/__tme-v2-check", async (_req, res) => {
+    const token = process.env.TME_V2_TOKEN || process.env.TME_TOKEN || "";
+    const secret = process.env.TME_V2_SECRET || process.env.TME_APPLICATION_SECRET || "";
+    const usingDedicated = !!(process.env.TME_V2_TOKEN && process.env.TME_V2_SECRET);
+    if (!token || !secret) {
+      return res.json({ ok: false, stage: "config", error: "TME_TOKEN / TME_APPLICATION_SECRET not set" });
+    }
+
+    const out: any = {
+      credentials: usingDedicated ? "TME_V2_TOKEN/SECRET (dedicated v2 pair)" : "existing v1 TME_TOKEN/SECRET",
+      tokenLength: token.length,
+    };
+
+    // Step 1 — OAuth token
+    let accessToken = "";
+    try {
+      const basic = Buffer.from(`${token}:${secret}`).toString("base64");
+      const r = await fetch("https://api.tme.eu/auth/token", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Authorization: `Basic ${basic}`,
+        },
+        body: "grant_type=client_credentials",
+      });
+      const text = await r.text();
+      let data: any = null;
+      try { data = text ? JSON.parse(text) : null; } catch { /* non-JSON */ }
+      out.authToken = {
+        ok: r.ok,
+        httpStatus: r.status,
+        expiresIn: data?.expires_in ?? null,
+        hasRefreshToken: !!data?.refresh_token,
+        error: r.ok ? null : (text || "").slice(0, 300),
+      };
+      if (!r.ok) {
+        out.verdict = "Existing credentials were REJECTED by v2 — generate an API key in the developer portal (developers.tme.eu) and set TME_V2_TOKEN / TME_V2_SECRET.";
+        return res.json({ ok: false, ...out });
+      }
+      accessToken = data?.access_token || "";
+    } catch (e) {
+      out.authToken = { ok: false, error: (e as Error).message };
+      return res.json({ ok: false, ...out, verdict: "Could not reach https://api.tme.eu/auth/token" });
+    }
+
+    // Step 2 — a real v2 read, exercising the fields the migration depends on
+    try {
+      const params = new URLSearchParams();
+      params.append("symbols[]", "1N4148-DIO");
+      params.append("scope[]", "prices");
+      params.append("scope[]", "stock");
+      params.append("scope[]", "delivery");
+      params.append("amounts[]", "1");
+      params.append("currency", process.env.TME_CURRENCY || "EUR");
+      if (process.env.TME_COUNTRY) params.append("country", process.env.TME_COUNTRY);
+
+      const r = await fetch(`https://api.tme.eu/products/data?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+      });
+      const text = await r.text();
+      let data: any = null;
+      try { data = text ? JSON.parse(text) : null; } catch { /* non-JSON */ }
+      const el = data?.data?.elements?.[0] ?? null;
+      out.productsData = {
+        ok: r.ok,
+        httpStatus: r.status,
+        symbol: el?.symbol ?? null,
+        stockQuantity: el?.stock_quantity ?? null,
+        priceCurrency: el?.prices?.currency ?? null,
+        priceType: el?.prices?.type ?? null,
+        taxRate: el?.prices?.tax?.rate ?? null,
+        // The availability split that the whole oversell question hinges on.
+        deliveries: (el?.deliveries?.elements ?? []).map((d: any) => ({ status: d.status, amount: d.amount, data: d.data })),
+        error: r.ok ? null : (text || "").slice(0, 300),
+      };
+    } catch (e) {
+      out.productsData = { ok: false, error: (e as Error).message };
+    }
+
+    const good = out.authToken?.ok && out.productsData?.ok;
+    out.verdict = good
+      ? (usingDedicated
+          ? "v2 works with the dedicated credentials."
+          : "Your EXISTING v1 credentials work on v2 — no new credentials needed. Migration is code-only.")
+      : "Token issued but the v2 product read failed — see productsData.error.";
+    res.json({ ok: !!good, ...out });
+  });
+
   // Diagnostic endpoint - no auth required, no DB access.
   // Use to verify which commit is actually running and whether
   // BYPASS_AUTH is being read by the function.
