@@ -493,7 +493,11 @@ export function registerSyncRoutes(app: Express) {
     let failed = 0;
     let skipped = 0;
     let limitHit = false;
-    let lastBatchSize = 0;
+    let lastFetchSize = 0;
+    // How many 25-SKU batches to run concurrently. eBay's per-batch work is 3
+    // bulk calls, so even 4 concurrent batches is 12 in-flight calls against a
+    // 2M/day budget. Raise via EBAY_RAMP_BATCH_CONCURRENCY.
+    const batchConcurrency = Math.min(6, Math.max(1, Number(process.env.EBAY_RAMP_BATCH_CONCURRENCY) || 3));
     // Proactive eBay daily-call budget. The ramp uses ~3 bulk calls per
     // 25-SKU batch + cold-path category/aspects, so 100k listings is
     // ~12-25k eBay calls — well under the 2M default cap but worth not
@@ -541,31 +545,60 @@ export function registerSyncRoutes(app: Express) {
           break;
         }
 
-        const candidates = await storage.getListingCandidates(batchSize, { ...range, excludeIds: attemptedIds });
-        lastBatchSize = candidates.length;
+        // Fetch enough for several batches and run them at once. Batches are
+        // independent — distinct SKUs, separate eBay calls — so the only thing
+        // sequencing them bought was a longer wall-clock. The candidate set is
+        // split before dispatch, so no product can land in two batches.
+        const candidates = await storage.getListingCandidates(batchSize * batchConcurrency, {
+          ...range,
+          excludeIds: attemptedIds,
+        });
+        lastFetchSize = candidates.length;
         if (candidates.length === 0) break;
         for (const c of candidates as any[]) attemptedIds.push(c.id);
-        const r = await listProductsViaInventoryBulk(candidates as any);
-        batches++;
-        published += r.published;
-        failed += r.failed;
-        skipped += r.skipped ?? 0;
-        if (r.limitHit) limitHit = true;
-        // Keep this run's own per-SKU outcomes for the activity-feed summary.
-        runResults.push(...(r.results ?? []));
-        // Account-level blockers fail every batch identically. Stop the run and
-        // say so, rather than marching through the catalogue failing products
-        // for a problem none of them caused.
-        if (r.locationBlocked) {
-          blockedReason = r.locationError ?? "merchant location unavailable";
-        } else if (r.envBlocked) {
-          blockedReason = `listing env blocked: ${(r.envIssues ?? []).map((i: any) => i.key).join(", ")}`;
+
+        const groups: any[][] = [];
+        for (let i = 0; i < candidates.length; i += batchSize) {
+          groups.push(candidates.slice(i, i + batchSize) as any[]);
+        }
+        const settled = await Promise.all(
+          groups.map((g) =>
+            listProductsViaInventoryBulk(g).catch((e) => ({
+              published: 0,
+              failed: g.length,
+              skipped: 0,
+              limitHit: false,
+              results: g.map((p: any) => ({ sku: p.sku, ok: false, error: (e as Error).message })),
+            })),
+          ),
+        );
+
+        for (const r of settled as any[]) {
+          batches++;
+          published += r.published;
+          failed += r.failed;
+          skipped += r.skipped ?? 0;
+          if (r.limitHit) limitHit = true;
+          // Keep this run's own per-SKU outcomes for the activity-feed summary.
+          runResults.push(...(r.results ?? []));
+          // Account-level blockers fail every batch identically. Stop the run and
+          // say so, rather than marching through the catalogue failing products
+          // for a problem none of them caused.
+          if (r.locationBlocked) {
+            blockedReason = r.locationError ?? "merchant location unavailable";
+          } else if (r.envBlocked) {
+            blockedReason = `listing env blocked: ${(r.envIssues ?? []).map((i: any) => i.key).join(", ")}`;
+          }
         }
       }
 
       // A maxBatches stop is NOT "done" — candidates remain by definition.
       const cappedEarly = maxBatches > 0 && batches >= maxBatches;
-      const done = !limitHit && !budgetStop && !cappedEarly && !blockedReason && lastBatchSize < batchSize;
+      // "Done" means the last fetch could not fill a full round of batches —
+      // i.e. the queue is drained, not merely that one batch came back short.
+      const done =
+        !limitHit && !budgetStop && !cappedEarly && !blockedReason &&
+        lastFetchSize < batchSize * batchConcurrency;
 
       // Surface WHY listings failed directly in the activity feed. This counts
       // THIS run's own per-SKU errors. It used to GROUP BY over every row in

@@ -9,6 +9,10 @@ import { storage } from "./storage";
 import { ebayInventoryApi } from "./ebay-inventory-api";
 import { validateListingEnv } from "./ebay-env";
 import { calculateEbayStock } from "./stock-manager";
+import { mapPool } from "./concurrency";
+
+/** Category lookups per batch to run at once — cache hits or Taxonomy calls. */
+const CATEGORY_CONCURRENCY = Math.min(12, Math.max(1, Number(process.env.EBAY_CATEGORY_CONCURRENCY) || 8));
 
 export interface ListBatchResult {
   attempted: number;
@@ -268,9 +272,15 @@ export async function listProductsViaInventoryBulk(
 
     // 1) Resolve a category per product (Taxonomy, cached upstream). Items
     //    with no category can't be listed.
+    // Resolved concurrently: each lookup is an independent cache hit or
+    // Taxonomy call, and 25 in sequence added a full serial round-trip chain
+    // to every batch before any listing work began.
+    const resolved = await mapPool(batch, CATEGORY_CONCURRENCY, async (product) => ({
+      product,
+      categoryId: await ebayInventoryApi.resolveCategory(product).catch(() => ""),
+    }));
     const withCat: Array<{ product: Product; categoryId: string }> = [];
-    for (const product of batch) {
-      const categoryId = await ebayInventoryApi.resolveCategory(product);
+    for (const { product, categoryId } of resolved) {
       if (!categoryId) {
         failed++;
         results.push({ sku: product.sku, ok: false, error: "no category resolved" });

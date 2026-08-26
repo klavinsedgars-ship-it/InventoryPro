@@ -24,6 +24,14 @@ import { imageProcessingService } from "./image-processing";
 import { storage } from "./storage";
 import { extractProductSpecs } from "./ebay-unified-template";
 import { identifiersForListing, noIdentifierValue } from "./ebay-identifiers";
+import { mapPool } from "./concurrency";
+
+/**
+ * How many products to prepare at once when building a 25-SKU bulk request.
+ * Bounded: the per-product work includes image download and processing, and
+ * this runs on a serverless function with modest CPU.
+ */
+const BUILD_CONCURRENCY = Math.min(12, Math.max(1, Number(process.env.EBAY_BUILD_CONCURRENCY) || 8));
 
 const INV_BASE = "https://api.ebay.com/sell/inventory/v1";
 
@@ -542,10 +550,13 @@ export class EbayInventoryApiService {
     items: Array<{ product: Product; categoryId: string }>,
   ): Promise<Map<string, { ok: boolean; error?: string }>> {
     const out = new Map<string, { ok: boolean; error?: string }>();
-    const requests = [];
-    for (const { product, categoryId } of items.slice(0, 25)) {
-      requests.push({ sku: product.sku, ...(await this.buildInventoryItem(product, categoryId)) });
-    }
+    // Built concurrently: buildInventoryItem resolves (and often downloads and
+    // re-processes) the product image, so 25 in sequence was the single
+    // largest cost in a ramp batch — image work, not eBay latency.
+    const requests = await mapPool(items.slice(0, 25), BUILD_CONCURRENCY, async ({ product, categoryId }) => ({
+      sku: product.sku,
+      ...(await this.buildInventoryItem(product, categoryId)),
+    }));
     const r = await this.req("POST", `/bulk_create_or_replace_inventory_item`, { requests });
     const responses = r.data?.responses || [];
     for (const resp of responses) {
@@ -585,16 +596,20 @@ export class EbayInventoryApiService {
     items: Array<{ product: Product; categoryId: string }>,
   ): Promise<Map<string, { ok: boolean; offerId?: string; error?: string }>> {
     const out = new Map<string, { ok: boolean; offerId?: string; error?: string }>();
-    const requests = [];
-    for (const { product, categoryId } of items.slice(0, 25)) {
+    const priced = items.slice(0, 25).filter(({ product }) => {
       // Same zero-price guard as createOffer: never offer a SKU at 0.00.
       const p = parseFloat(product.salePrice as any);
       if (!Number.isFinite(p) || p <= 0) {
         out.set(product.sku, { ok: false, error: `invalid price "${product.salePrice}" — offer not created` });
-        continue;
+        return false;
       }
-      requests.push(await this.buildOffer(product, categoryId));
-    }
+      return true;
+    });
+    // Concurrent for the same reason as the inventory items: buildOffer does
+    // per-product work (description, shipping policy) that need not queue.
+    const requests = await mapPool(priced, BUILD_CONCURRENCY, ({ product, categoryId }) =>
+      this.buildOffer(product, categoryId),
+    );
     if (requests.length === 0) return out;
     const r = await this.req("POST", `/bulk_create_offer`, { requests });
     const responses = r.data?.responses || [];
