@@ -373,6 +373,7 @@ export function registerTmeRoutes(app: Express): void {
         let total = 0;
         let pagesFetched = 0;
         let hasMore = false;
+        let totalPages = 1;
         let page = startPage;
 
         // v2 fetches 100 products per page against v1's fixed 20 — the direct
@@ -390,9 +391,13 @@ export function registerTmeRoutes(app: Express): void {
             const r = await v2.getCategoryPageEnriched(categoryId, page, {
               limit: 100,
               inStockOnly: wantInStockAll,
+              // Only pay for stock lookups when they actually change the
+              // outcome. Selecting everything needs symbols only.
+              withStock: wantInStockAll,
             });
             pagesFetched++;
             total = r.total || total;
+            totalPages = r.pages || totalPages;
             for (const p of r.products) {
               if (!seen.has(p.Symbol)) { seen.add(p.Symbol); all.push(p); }
             }
@@ -435,6 +440,9 @@ export function registerTmeRoutes(app: Express): void {
           pagesFetched,
           hasMore,
           nextPage: hasMore ? page : null,
+          // Denominator for a truthful progress bar: how many pages this
+          // category has at the size we are walking it.
+          totalPages,
         });
       } catch (error) {
         console.error("TME category-all fetch error:", error);

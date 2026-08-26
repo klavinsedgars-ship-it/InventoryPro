@@ -348,20 +348,27 @@ export class TmeApiV2 {
   async getCategoryPageEnriched(
     categoryId: string | number,
     page: number,
-    opts: { limit?: number; inStockOnly?: boolean } = {},
+    opts: { limit?: number; inStockOnly?: boolean; withStock?: boolean } = {},
   ): Promise<{ products: any[]; page: number; pages: number; total: number }> {
     const limit = Math.min(100, Math.max(1, opts.limit ?? 100));
     const res = await this.search({ categoryId, page, limit });
     const mapped = res.products.map((p: any) => TmeApiV2.toV1Shape(p));
     if (mapped.length === 0) return { products: [], page: res.page, pages: res.pages, total: res.count };
 
-    // Enrich with stock/price (2 calls per 100 symbols).
+    // Enrichment is the expensive half: /products/data is capped at 50 symbols
+    // AND rate-limited to 4 req/sec, so a 100-product page costs 1 cheap
+    // search call plus 2 slow data calls. Skip it when the caller needs
+    // neither stock filtering nor prices — that makes selecting a whole
+    // category roughly three times faster.
+    const needStock = opts.withStock ?? true;
     let dataBySymbol = new Map<string, V2ProductData>();
-    try {
-      const data = await this.getProductsData(mapped.map((m) => m.Symbol));
-      dataBySymbol = new Map(data.map((d) => [d.symbol, d]));
-    } catch {
-      /* enrichment is best-effort: the page still renders without it */
+    if (needStock) {
+      try {
+        const data = await this.getProductsData(mapped.map((m) => m.Symbol));
+        dataBySymbol = new Map(data.map((d) => [d.symbol, d]));
+      } catch {
+        /* enrichment is best-effort: the page still renders without it */
+      }
     }
 
     let products = mapped.map((m) => {

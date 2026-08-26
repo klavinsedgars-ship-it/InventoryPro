@@ -598,6 +598,24 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   // TME calls server-side), showed 0% progress the whole time, ignored Cancel
   // until the end, and died on the serverless timeout past ~4k products.
   const SELECT_ALL_CAP = 5000; // safety cap on selected products per run
+
+  /**
+   * Progress for a whole-category selection.
+   *
+   * Selecting a category is genuinely slow and it is worth being honest about
+   * why: TME caps /products/data at 50 symbols AND 4 requests/second, so each
+   * 100-product page costs one quick search call plus two slow stock calls —
+   * roughly 1.5s per 100 products. A 3,600-product category is therefore about
+   * a minute of real work. Without a denominator and an ETA that is
+   * indistinguishable from being stuck, which is exactly how it looked.
+   */
+  const [bulkStats, setBulkStats] = useState<{
+    pagesDone: number;
+    totalPages: number | null;
+    scanned: number;
+    found: number;
+    startedAt: number;
+  } | null>(null);
   const bulkSelectPages = async () => {
     if (!selectedCategory) return;
 
@@ -615,6 +633,8 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
 
     try {
       let startPage: number | null = 1;
+      let pagesDone = 0;
+      setBulkStats({ pagesDone: 0, totalPages: null, scanned: 0, found: 0, startedAt: Date.now() });
       while (startPage != null) {
         const params = new URLSearchParams({
           categoryId: selectedCategory,
@@ -640,11 +660,21 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
         });
         fetched += data.fetched || 0;
         total = data.total || total;
+        pagesDone += data.pagesFetched || 0;
 
         // Live feedback: selection count + progress bar advance per window.
         setSelectedProducts(new Set(newSelected));
         setSelectedDetails(new Map(newDetails));
-        setBulkProgress(total > 0 ? Math.min(99, Math.round((fetched / total) * 100)) : 0);
+        setBulkStats((prev) => ({
+          pagesDone,
+          totalPages: data.totalPages ?? prev?.totalPages ?? null,
+          scanned: fetched,
+          found: newSelected.size - before,
+          startedAt: prev?.startedAt ?? Date.now(),
+        }));
+        setBulkProgress(
+          data.totalPages ? Math.min(99, Math.round((pagesDone / data.totalPages) * 100)) : 0,
+        );
 
         if (newSelected.size - before >= SELECT_ALL_CAP) { capped = true; break; }
         startPage = data.hasMore ? data.nextPage : null;
@@ -679,6 +709,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     } finally {
       setBulkLoading(false);
       setBulkProgress(0);
+      setBulkStats(null);
       setBulkAbortController(null);
     }
   };
@@ -1253,18 +1284,47 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                         </div>
                       </div>
 
-                      {/* Bulk Loading Progress */}
+                      {/* Whole-category selection: say what it is doing, how
+                          far along it is, and roughly how long is left. A bare
+                          percentage with no denominator was indistinguishable
+                          from being stuck. */}
                       {bulkLoading && (
-                        <div className="flex items-center gap-2 pt-2">
-                          <Progress value={bulkProgress} className="flex-1 h-2" />
-                          <Button
-                            onClick={cancelBulkSelection}
-                            variant="destructive"
-                            size="sm"
-                            data-testid="btn-cancel-bulk"
-                          >
-                            Cancel
-                          </Button>
+                        <div className="mt-2 rounded-lg border border-blue-200 bg-blue-50 p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-sm font-medium text-blue-900">
+                              Scanning category
+                              {bulkStats?.totalPages
+                                ? ` — page ${Math.min(bulkStats.pagesDone, bulkStats.totalPages)} of ${bulkStats.totalPages}`
+                                : "…"}
+                            </div>
+                            <Button
+                              onClick={cancelBulkSelection}
+                              variant="destructive"
+                              size="sm"
+                              data-testid="btn-cancel-bulk"
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                          <Progress value={bulkProgress} className="mt-2 h-2" />
+                          <div className="mt-1.5 text-xs text-blue-900/80">
+                            {(bulkStats?.scanned ?? 0).toLocaleString()} checked ·{" "}
+                            <strong>{(bulkStats?.found ?? 0).toLocaleString()} selected</strong>
+                            {(() => {
+                              if (!bulkStats?.totalPages || bulkStats.pagesDone < 1) return null;
+                              const elapsed = (Date.now() - bulkStats.startedAt) / 1000;
+                              const perPage = elapsed / bulkStats.pagesDone;
+                              const left = Math.max(0, bulkStats.totalPages - bulkStats.pagesDone) * perPage;
+                              if (left < 2) return null;
+                              const mins = Math.floor(left / 60);
+                              const secs = Math.round(left % 60);
+                              return ` · about ${mins > 0 ? `${mins}m ` : ""}${secs}s left`;
+                            })()}
+                          </div>
+                          <div className="mt-1 text-[11px] text-blue-900/60">
+                            TME allows 4 stock lookups per second, so large categories take a
+                            while. Cancelling keeps whatever has been selected so far.
+                          </div>
                         </div>
                       )}
                     </div>
