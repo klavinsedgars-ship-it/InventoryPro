@@ -36,8 +36,18 @@ export async function listProductsViaInventory(allProducts: Product[]): Promise<
 
   // Per-product flow: independent and resilient (one failure never blocks
   // the rest, unlike a bulk batch which rejects everything on one bad item).
-  for (const prod of products) {
-    if (limitHit) break;
+  //
+  // CONCURRENT, not sequential: each listing spends ~6s in 4 serial eBay
+  // calls plus image processing, so one-at-a-time meant 250 listings ≈ 25
+  // minutes of mostly waiting. A pool of workers (default 6, tune via
+  // EBAY_LIST_CONCURRENCY) cuts that to ~4 minutes. eBay's call budget is
+  // ~2M/day — request volume is unchanged, only the waiting overlaps. On a
+  // rate-limit error the pool stops LAUNCHING new products but lets
+  // in-flight ones finish.
+  const CONCURRENCY = Math.min(12, Math.max(1, Number(process.env.EBAY_LIST_CONCURRENCY) || 6));
+  let cursor = 0;
+
+  const listOne = async (prod: Product): Promise<void> => {
     const r = await ebayInventoryApi.listOneProduct(prod);
 
     if (r.ok && r.listingId) {
@@ -73,7 +83,23 @@ export async function listProductsViaInventory(allProducts: Product[]): Promise<
       results.push({ sku: prod.sku, ok: false, error: `${r.failedStep || ""}: ${err}`.trim() });
       if (LIMIT_RX.test(String(err))) limitHit = true;
     }
-  }
+  };
+
+  const worker = async (): Promise<void> => {
+    while (!limitHit) {
+      const i = cursor++;
+      if (i >= products.length) return;
+      try {
+        await listOne(products[i]);
+      } catch (e) {
+        // A worker must never die silently mid-pool: record the product as
+        // failed and keep the lane running.
+        failed++;
+        results.push({ sku: products[i].sku, ok: false, error: (e as Error).message });
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, products.length) }, () => worker()));
 
   return { attempted: allProducts.length, published, failed, limitHit, skipped, results };
 }

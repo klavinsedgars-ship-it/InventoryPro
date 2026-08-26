@@ -311,10 +311,20 @@ export class EbayInventoryApiService {
    * Ensure a merchant inventory location exists (required to publish
    * offers). Idempotent: a 409/already-exists is treated as success.
    */
+  private locationEnsured = false;
   async ensureMerchantLocation(): Promise<StepResult> {
+    // A location, once verified, does not un-exist mid-run — but this was
+    // re-checked for EVERY product in the single-item flow, adding one eBay
+    // round-trip per listing. Cache the success per instance.
+    if (this.locationEnsured) {
+      return { step: "location", ok: true, data: { cached: true } };
+    }
     // GET first
     const got = await this.req("GET", `/location/${this.merchantLocationKey}`);
-    if (got.ok) return { step: "location", ok: true, httpStatus: got.status, data: { existing: true } };
+    if (got.ok) {
+      this.locationEnsured = true;
+      return { step: "location", ok: true, httpStatus: got.status, data: { existing: true } };
+    }
 
     const body = {
       location: {
@@ -332,10 +342,12 @@ export class EbayInventoryApiService {
     };
     const created = await this.req("POST", `/location/${this.merchantLocationKey}`, body);
     if (created.ok || created.status === 204) {
+      this.locationEnsured = true;
       return { step: "location", ok: true, httpStatus: created.status, data: { created: true } };
     }
     // 409 = already exists
     if (created.status === 409) {
+      this.locationEnsured = true;
       return { step: "location", ok: true, httpStatus: 409, data: { existing: true } };
     }
     return { step: "location", ok: false, httpStatus: created.status, error: this.firstEbayError(created.data, created.text) };
@@ -543,7 +555,9 @@ export class EbayInventoryApiService {
     if (!r.ok && responses.length === 0) {
       const envelopeError = this.firstEbayError(r.data, r.text);
       console.warn(`bulk inventory item envelope rejected (${envelopeError}) — falling back to single-item PUTs for ${items.length} SKU(s)`);
-      for (const { product, categoryId } of items.slice(0, 25)) {
+      // Concurrent, not serial: these PUTs are independent, and 25 in
+      // sequence made every ramp batch pay ~25x one round-trip.
+      await Promise.all(items.slice(0, 25).map(async ({ product, categoryId }) => {
         try {
           const single = await this.createOrReplaceInventoryItem(product.sku, product, categoryId);
           out.set(product.sku, single.ok
@@ -552,7 +566,7 @@ export class EbayInventoryApiService {
         } catch (e) {
           out.set(product.sku, { ok: false, error: `${(e as Error).message} (bulk envelope: ${envelopeError})` });
         }
-      }
+      }));
     }
     return out;
   }
@@ -664,8 +678,6 @@ export class EbayInventoryApiService {
     }
     return { step: "withdraw", ok: false, httpStatus: r.status, error: this.firstEbayError(r.data, r.text) };
   }
-
-  private locationEnsured = false;
 
   /**
    * Full single-product flow: location -> category -> inventory item ->
