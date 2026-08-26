@@ -1157,7 +1157,11 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                 disabled={bulkLoading || totalProducts < 1}
                                 data-testid="btn-select-all-category"
                               >
-                                {bulkLoading ? "Selecting all…" : `Select All (${totalProducts})`}
+                                {bulkLoading
+                                  ? `Selecting… ${selectedProducts.size.toLocaleString()} so far`
+                                  : filters.inStockOnly
+                                    ? "Select All in stock"
+                                    : `Select All (${totalProducts.toLocaleString()})`}
                               </Button>
                             </div>
                           )}
@@ -1206,12 +1210,18 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                   <Card className="flex-1">
                     <CardHeader className="py-2.5 px-4">
                       <div className="flex items-center justify-between">
+                        {/* Every number here states exactly what it counts.
+                            `total` is TME's CATEGORY size and is not filtered
+                            by stock, so it is never labelled "in stock" — the
+                            old header did, which is why "120 in stock",
+                            "Select Page (26)" and a 42-product Select All all
+                            disagreed. */}
                         <CardTitle className="text-base font-semibold">
-                          Products ({totalProducts.toLocaleString()} {filters.inStockOnly ? "in stock" : "total"}
-                          {hasPriceFilter && enhancedProducts.length > 0
-                            ? ` · ${visibleProducts.filter((p: TMEProduct) => inPriceRange(p.Symbol)).length} shown after price filter`
-                            : ""}
-                          )
+                          Showing {visibleProducts.length.toLocaleString()}
+                          {filters.inStockOnly ? " in stock" : ""}
+                          <span className="ml-2 text-sm font-normal text-gray-500">
+                            of {totalProducts.toLocaleString()} in this category
+                          </span>
                         </CardTitle>
                         <div className="flex items-center gap-2">
                           <Button

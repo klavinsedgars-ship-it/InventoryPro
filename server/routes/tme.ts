@@ -174,6 +174,8 @@ export function registerTmeRoutes(app: Express): void {
 
         let products: any[] = [];
         let total = 0;
+        let inStockShown: number | null = null;
+        let fetchedWindow: number | null = null;
 
         if (process.env.TME_API_VERSION === "v2") {
           // v2 honours the UI page size directly (1..100), so no aggregating
@@ -182,12 +184,20 @@ export function registerTmeRoutes(app: Express): void {
           // which is why the grid no longer shows "Unknown" until the
           // operator clicks Load Prices.
           const { tmeApiV2 } = await import("../tme-api-v2");
+          const wantInStock = String(inStockOnly) !== "false";
+          // One UI page maps to exactly one TME page. Over-fetching to "fill"
+          // a page would desynchronise pagination (fetching 100 per 50-row
+          // page makes UI page 2 start at TME item 101, not 51), so pages can
+          // legitimately show fewer rows than the page size when stock
+          // filtering removes some — and the header says so explicitly.
           const r = await tmeApiV2.getCategoryPageEnriched(categoryId as string, pageNum, {
             limit: effectiveLimit,
-            inStockOnly: String(inStockOnly) !== "false",
+            inStockOnly: wantInStock,
           });
           products = r.products;
           total = r.total;
+          inStockShown = products.length;
+          fetchedWindow = effectiveLimit;
         } else {
           // v1: Search.json returns a fixed 20 per page, so a larger UI page
           // size means aggregating consecutive TME pages and slicing the
@@ -230,11 +240,18 @@ export function registerTmeRoutes(app: Express): void {
         res.json({
           success: true,
           products: products,
+          // `total` is TME's count for the CATEGORY — it is not filtered by
+          // stock, so it must never be labelled "in stock" in the UI. The
+          // shown/window figures below describe what this page actually is.
           total: total,
           filtered: products.length,
+          shown: products.length,
+          inStockShown,
+          fetchedWindow,
+          stockFiltered: String(inStockOnly) !== "false",
           page: pageNum,
           limit: effectiveLimit,
-          totalPages: Math.ceil(total / effectiveLimit),
+          totalPages: Math.max(1, Math.ceil(total / effectiveLimit)),
           categoryId: categoryId
         });
 
