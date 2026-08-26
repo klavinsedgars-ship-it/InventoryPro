@@ -407,6 +407,55 @@ export function registerDebugRoutes(app: Express) {
     }
   });
 
+  /**
+   * Dump the EXACT payloads we send to eBay for one product — the single
+   * inventory-item PUT body, the bulk wrapper, and the offer — without
+   * calling eBay at all.
+   *
+   * Needed because error 25733 names "inventory units and location
+   * information" while both are demonstrably valid on our side, so the fault
+   * has to be in the payload's shape. Comparing the built JSON against eBay's
+   * schema is faster than another round of guess-and-deploy.
+   *   GET /api/__inventory-payload?productId=123
+   */
+  app.get("/api/__inventory-payload", async (req, res) => {
+    try {
+      let product: any = null;
+      if (req.query.productId) {
+        product = await storage.getProduct(Number(req.query.productId));
+      } else if (req.query.sku) {
+        product = await storage.getProductBySku(String(req.query.sku));
+      } else {
+        const c = await storage.getListingCandidates(1);
+        product = c[0] ?? null;
+      }
+      if (!product) return res.status(404).json({ ok: false, error: "product not found (pass ?productId= or ?sku=)" });
+
+      const api: any = ebayInventoryApi;
+      const categoryId = (await api.resolveCategory(product)) || process.env.EBAY_DEFAULT_CATEGORY_ID || null;
+      const inventoryItem = categoryId ? await api.buildInventoryItem(product, categoryId) : null;
+      const offer = categoryId ? await api.buildOffer(product, categoryId) : null;
+
+      res.json({
+        ok: true,
+        product: {
+          id: product.id, sku: product.sku, stock: product.stock,
+          salePrice: product.salePrice, weight: product.weight,
+          useStockLimit: product.useStockLimit, ebayStockLimit: product.ebayStockLimit,
+        },
+        categoryId,
+        // What PUT /inventory_item/{sku} receives:
+        singleInventoryItemBody: inventoryItem,
+        // What POST /bulk_create_or_replace_inventory_item receives:
+        bulkInventoryItemBody: inventoryItem ? { requests: [{ sku: product.sku, ...inventoryItem }] } : null,
+        offerBody: offer,
+        merchantLocationKey: api.merchantLocationKey,
+      });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message, stack: (error as Error).stack?.split("\n").slice(0, 4) });
+    }
+  });
+
   // Diagnostic endpoint - no auth required, no DB access.
   // Use to verify which commit is actually running and whether
   // BYPASS_AUTH is being read by the function.
