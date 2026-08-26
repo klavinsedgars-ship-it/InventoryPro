@@ -8,6 +8,7 @@ import type { Product } from "@shared/schema";
 import { storage } from "./storage";
 import { ebayInventoryApi } from "./ebay-inventory-api";
 import { validateListingEnv } from "./ebay-env";
+import { calculateEbayStock } from "./stock-manager";
 
 export interface ListBatchResult {
   attempted: number;
@@ -176,7 +177,38 @@ export async function listProductsViaInventoryBulk(
   }
 
   for (let i = 0; i < products.length && !limitHit; i += 25) {
-    const batch = products.slice(i, i + 25);
+    let batch = products.slice(i, i + 25);
+
+    // 0) OVERSELL GUARD (TME v2 only). Ask TME whether the quantity we are
+    //    about to publish can actually ship today. v1 could only report a
+    //    stock number; v2's delivery scope answers per requested quantity,
+    //    which is the check that would have prevented the 2026-06 incident.
+    if (process.env.TME_API_VERSION === "v2") {
+      try {
+        const { tmeApiV2 } = await import("./tme-api-v2");
+        const symbols = batch.map((p) => p.supplierProductId || p.sku);
+        const wanted = batch.map((p) => Math.max(1, calculateEbayStock(p).ebayStock));
+        const ship = await tmeApiV2.checkShippable(symbols, wanted);
+        const blocked: typeof batch = [];
+        batch = batch.filter((p, idx) => {
+          const r = ship.get(symbols[idx]);
+          if (r && !r.canShip) { blocked.push(p); return false; }
+          return true;
+        });
+        for (const p of blocked) {
+          const r = ship.get(p.supplierProductId || p.sku);
+          const msg = `TME cannot ship ${r?.requested ?? "?"} today (only ${r?.shippableNow ?? 0} in stock${r?.supplyDate ? `, next supply ${r.supplyDate}` : ""})`;
+          failed++;
+          results.push({ sku: p.sku, ok: false, error: msg });
+          await storage.updateProduct(p.id, { ebayListingStatus: "error", ebayListingError: msg.slice(0, 500) });
+          // Not the product's fault — don't burn an attempt on a stock state
+          // that will change; the ramp retries once supply arrives.
+        }
+      } catch (e) {
+        console.warn(`shippability pre-check skipped: ${(e as Error).message}`);
+      }
+      if (batch.length === 0) continue;
+    }
 
     // 1) Resolve a category per product (Taxonomy, cached upstream). Items
     //    with no category can't be listed.

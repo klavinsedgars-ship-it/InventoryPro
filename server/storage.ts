@@ -429,6 +429,9 @@ export class DatabaseStorage implements IStorage {
       // Failed-attempt counter for the ramp candidate filter (see the
       // listing-ramp infinite-retry fix). Default 0 for any pre-existing row.
       `ALTER TABLE products ADD COLUMN IF NOT EXISTS ebay_list_attempts integer NOT NULL DEFAULT 0`,
+      // TME v2 product_status (see shared/schema.ts) — drives the "TME won't
+      // sell us this" listing filter.
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS tme_product_status text`,
       `CREATE INDEX IF NOT EXISTS products_supplier_stale_idx ON products (supplier, last_synced_at)`,
       `CREATE INDEX IF NOT EXISTS products_status_idx ON products (status)`,
       `CREATE INDEX IF NOT EXISTS products_ebay_idx ON products (listed_on_ebay, ebay_item_id)`,
@@ -720,6 +723,14 @@ export class DatabaseStorage implements IStorage {
       // and starving fresh candidates. Operator can reset via the
       // /api/ebay/reset-list-attempts endpoint to retry.
       lt(products.ebayListAttempts, maxAttempts),
+      // Never list what TME will not sell us. These statuses mean the item is
+      // unavailable in our country, withdrawn from the offer, blocked, or
+      // orderable only by contacting their sales desk — any of them would
+      // produce an order we cannot fulfil. NULL = never checked (pre-v2 rows).
+      sql`(
+        ${products.tmeProductStatus} IS NULL
+        OR ${products.tmeProductStatus} !~ 'CANNOT_BE_ORDERED|NOT_IN_OFFER|PRODUCT_BLOCKED|ONLY_FOR_SPECIAL_ORDER|INVALID'
+      )`,
     ];
     if (opts?.minPrice != null) conds.push(gte(products.salePrice, String(opts.minPrice)));
     if (opts?.maxPrice != null) conds.push(lte(products.salePrice, String(opts.maxPrice)));

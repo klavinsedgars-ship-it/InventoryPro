@@ -77,9 +77,30 @@ export async function runSyncChunk(
   // storage.trackApiCall('tme'). MOQ/multiples/weight come from the DB row
   // (captured at import/list time and effectively static), so the cron needs
   // no per-product GetProducts call — ~4x fewer TME calls at 100k scale.
-  let priceStocks: Awaited<ReturnType<typeof tmeApiOptimized.getProductsPricesAndStocks>> = [];
+  // TME_API_VERSION=v2 switches the price/stock fetch to the v2 client, which
+  // TME allows at 4 req/sec vs v1's 2 (double the sync throughput) and which
+  // returns product_status so we can stop listing items TME will not sell us.
+  // The compat method returns the v1 shape, so nothing below changes.
+  const useV2 = process.env.TME_API_VERSION === "v2";
+  let priceStocks: Array<any> = [];
+  let statusBySymbol = new Map<string, string[]>();
   try {
-    priceStocks = await tmeApiOptimized.getProductsPricesAndStocks(symbols);
+    if (useV2) {
+      const { tmeApiV2 } = await import("./tme-api-v2");
+      priceStocks = await tmeApiV2.getPricesAndStocksCompat(symbols);
+      // Statuses come from /products — one extra call per chunk, worth it to
+      // keep unsellable items out of the listing queue.
+      try {
+        const details = await tmeApiV2.getProducts(symbols);
+        statusBySymbol = new Map(
+          details.map((d: any) => [d.symbol, Array.isArray(d.product_status) ? d.product_status : []]),
+        );
+      } catch (e) {
+        errors.push(`TME v2 product_status fetch failed: ${(e as Error).message}`);
+      }
+    } else {
+      priceStocks = await tmeApiOptimized.getProductsPricesAndStocks(symbols);
+    }
   } catch (e) {
     // TME fetch failed for the whole chunk (outage / rate-limit exhausted).
     // Abort WITHOUT touching lastSyncedAt so these products stay stale and get
@@ -146,6 +167,14 @@ export async function runSyncChunk(
     const stockChanged = (product.stock || 0) !== stock;
 
     const update: any = { lastSyncedAt: now, stock };
+    // Record TME's product_status so the listing-candidate filter can exclude
+    // items TME will not sell us (CANNOT_BE_ORDERED, NOT_IN_OFFER, ...).
+    // Only written when v2 actually returned statuses, so a v1 run never
+    // clears what v2 previously learned.
+    if (useV2) {
+      const st = statusBySymbol.get(sym);
+      if (st) update.tmeProductStatus = st.length ? st.join(",") : "";
+    }
     if (supplierPrice > 0) update.supplierPrice = String(supplierPrice);
     if (pricing && product.useCalculatedPrice !== false) {
       update.salePrice = String(pricing.finalPrice);

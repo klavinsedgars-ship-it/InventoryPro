@@ -36,6 +36,12 @@ export const products = pgTable("products", {
   listedOnEbay: boolean("listed_on_ebay").default(false),
   listedOnAmazon: boolean("listed_on_amazon").default(false),
   excludeFromListing: boolean("exclude_from_listing").default(false),
+  // Comma-separated TME product_status values (v2). Statuses like
+  // CANNOT_BE_ORDERED / NOT_IN_OFFER / PRODUCT_BLOCKED mean TME will not sell
+  // us the item, so it must never reach a marketplace listing. Kept separate
+  // from excludeFromListing so a supplier restriction and an operator's own
+  // exclusion stay independent.
+  tmeProductStatus: text("tme_product_status"),
   ebayItemId: text("ebay_item_id"), // legacy Trading-API listing id (migrated listings)
   // Inventory API listing state (SKU-keyed model: inventory item -> offer -> publish)
   ebayOfferId: text("ebay_offer_id"),
