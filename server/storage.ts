@@ -432,6 +432,7 @@ export class DatabaseStorage implements IStorage {
       // TME v2 product_status (see shared/schema.ts) — drives the "TME won't
       // sell us this" listing filter.
       `ALTER TABLE products ADD COLUMN IF NOT EXISTS tme_product_status text`,
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS tme_parameters text`,
       `CREATE INDEX IF NOT EXISTS products_supplier_stale_idx ON products (supplier, last_synced_at)`,
       `CREATE INDEX IF NOT EXISTS products_status_idx ON products (status)`,
       `CREATE INDEX IF NOT EXISTS products_ebay_idx ON products (listed_on_ebay, ebay_item_id)`,

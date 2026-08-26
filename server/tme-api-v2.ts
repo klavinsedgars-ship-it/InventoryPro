@@ -44,6 +44,21 @@ export interface V2ProductData {
 const IN_STOCK_STATUSES = new Set(["DS_AVAILABLE_IN_STOCK"]);
 
 /**
+ * TME product language for the eBay marketplace we sell on. Must be one of
+ * the codes /utils/languages returns; TME falls back to English per-field
+ * where no translation exists, so an unsupported choice degrades rather than
+ * fails. Keyed off EBAY_MARKETPLACE_SITE_ID so language and marketplace can
+ * never drift apart.
+ */
+export function tmeLanguageForMarketplace(): string {
+  const map: Record<string, string> = {
+    "0": "en", "3": "en", "77": "de", "71": "fr", "101": "it", "186": "es",
+    "205": "en", "146": "nl", "23": "fr", "16": "en",
+  };
+  return map[process.env.EBAY_MARKETPLACE_SITE_ID || "77"] || "en";
+}
+
+/**
  * Product statuses that must PREVENT listing. Straight from the spec:
  *   CANNOT_BE_ORDERED  — not available for sale in your country
  *   NOT_IN_OFFER       — no longer in TME's offer
@@ -182,7 +197,12 @@ export class TmeApiV2 {
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: "application/json",
-          "Accept-Language": process.env.TME_LANGUAGE_V2 || "en",
+          // Match TME's product language to the marketplace we actually sell
+          // on: eBay.de listings built from English descriptions rank worse
+          // and read badly to German buyers. Derived from the configured eBay
+          // site so the two can't drift apart; TME falls back to English for
+          // any field it has no translation for. TME_LANGUAGE_V2 overrides.
+          "Accept-Language": process.env.TME_LANGUAGE_V2 || tmeLanguageForMarketplace(),
         },
       });
       // Imported lazily: a module-level storage import pulls in db.ts, which
@@ -286,6 +306,80 @@ export class TmeApiV2 {
       pages: counters.pages ?? 1,
       count: counters.count ?? 0,
     };
+  }
+
+  /**
+   * Map a v2 product onto the v1 shape the TME Browser UI already renders,
+   * so the browser gains v2's benefits without a frontend rewrite.
+   * Also carries ProductStatusList, which v1 never populated.
+   */
+  static toV1Shape(p: any): any {
+    const photo = p?.assets?.primary_photo?.prime || null;
+    const thumb = p?.assets?.primary_photo?.thumbnail || null;
+    const abs = (u: string | null) => (u && u.startsWith("//") ? `https:${u}` : u);
+    return {
+      Symbol: p.symbol,
+      Description: p.description ?? "",
+      Producer: p?.manufacturer?.name ?? "",
+      EAN: p.ean ?? "",
+      CategoryId: p?.category?.id ?? null,
+      Category: p?.category?.name ?? "",
+      Photo: abs(photo),
+      Thumbnail: abs(thumb),
+      Weight: p?.weight?.value ?? null,
+      WeightUnit: p?.weight?.unit ?? null,
+      MinAmount: p.minimal_amount ?? 1,
+      Multiples: p.multiples ?? 1,
+      ProductStatusList: Array.isArray(p.product_status) ? p.product_status : [],
+    };
+  }
+
+  /**
+   * One page of a category, WITH live stock and price.
+   *
+   * v1 could only fetch 20 per page and returned neither stock nor price, so
+   * the browser showed "Unknown" until the operator clicked Load Prices. v2
+   * fetches 100 per page and we enrich with /products/data, which costs 2
+   * extra calls per 100 products but replaces a separate manual step — and
+   * lets us apply the in-stock filter server-side (v2 search has a `filter`
+   * object whose syntax the documentation does not expand, so we filter on
+   * the stock figures we already fetched).
+   */
+  async getCategoryPageEnriched(
+    categoryId: string | number,
+    page: number,
+    opts: { limit?: number; inStockOnly?: boolean } = {},
+  ): Promise<{ products: any[]; page: number; pages: number; total: number }> {
+    const limit = Math.min(100, Math.max(1, opts.limit ?? 100));
+    const res = await this.search({ categoryId, page, limit });
+    const mapped = res.products.map((p: any) => TmeApiV2.toV1Shape(p));
+    if (mapped.length === 0) return { products: [], page: res.page, pages: res.pages, total: res.count };
+
+    // Enrich with stock/price (2 calls per 100 symbols).
+    let dataBySymbol = new Map<string, V2ProductData>();
+    try {
+      const data = await this.getProductsData(mapped.map((m) => m.Symbol));
+      dataBySymbol = new Map(data.map((d) => [d.symbol, d]));
+    } catch {
+      /* enrichment is best-effort: the page still renders without it */
+    }
+
+    let products = mapped.map((m) => {
+      const d = dataBySymbol.get(m.Symbol);
+      return {
+        ...m,
+        Amount: d ? Number(d.stock_quantity) || 0 : null,
+        PriceList: (d?.prices?.elements ?? []).map((t) => ({
+          Amount: t.amount, PriceValue: t.price, PriceBase: t.price, Special: !!t.special,
+        })),
+      };
+    });
+    if (opts.inStockOnly) {
+      // null = stock unknown (enrichment failed); keep it rather than hide a
+      // product because of our own fetch problem.
+      products = products.filter((p) => p.Amount == null || p.Amount > 0);
+    }
+    return { products, page: res.page, pages: res.pages, total: res.count };
   }
 
   /** Symbols only — the cheap way to enumerate a category or the catalogue. */

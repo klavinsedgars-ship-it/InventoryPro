@@ -42,6 +42,11 @@ export const products = pgTable("products", {
   // from excludeFromListing so a supplier restriction and an operator's own
   // exclusion stay independent.
   tmeProductStatus: text("tme_product_status"),
+  // TME v2 /products/parameters as JSON: [{name, value}]. Structured technical
+  // specifications (operating voltage, package, tolerance, ...) used to fill
+  // eBay item specifics, which measurably improve marketplace search ranking.
+  // Parameters are effectively static, so they are fetched once per product.
+  tmeParameters: text("tme_parameters"),
   ebayItemId: text("ebay_item_id"), // legacy Trading-API listing id (migrated listings)
   // Inventory API listing state (SKU-keyed model: inventory item -> offer -> publish)
   ebayOfferId: text("ebay_offer_id"),

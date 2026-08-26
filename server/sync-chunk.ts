@@ -84,6 +84,7 @@ export async function runSyncChunk(
   const useV2 = process.env.TME_API_VERSION === "v2";
   let priceStocks: Array<any> = [];
   let statusBySymbol = new Map<string, string[]>();
+  const paramsBySymbol = new Map<string, Array<{ name: string; value: string }>>();
   try {
     if (useV2) {
       const { tmeApiV2 } = await import("./tme-api-v2");
@@ -97,6 +98,24 @@ export async function runSyncChunk(
         );
       } catch (e) {
         errors.push(`TME v2 product_status fetch failed: ${(e as Error).message}`);
+      }
+      // Technical parameters -> eBay item specifics. Static per product, so
+      // fetch ONLY for rows that don't have them yet: at steady state this
+      // costs nothing, and it back-fills the catalogue as the sync sweeps.
+      const needParams = slice
+        .filter((p) => !(p as any).tmeParameters)
+        .map((p) => p.supplierProductId || p.sku);
+      if (needParams.length > 0) {
+        try {
+          const { flattenTmeParameters } = await import("./tme-aspects");
+          const paramRows = await tmeApiV2.getParameters(needParams);
+          for (const row of paramRows) {
+            const flat = flattenTmeParameters(row);
+            if (flat.length > 0) paramsBySymbol.set(row.symbol, flat);
+          }
+        } catch (e) {
+          errors.push(`TME v2 parameters fetch failed: ${(e as Error).message}`);
+        }
       }
     } else {
       priceStocks = await tmeApiOptimized.getProductsPricesAndStocks(symbols);
@@ -174,6 +193,8 @@ export async function runSyncChunk(
     if (useV2) {
       const st = statusBySymbol.get(sym);
       if (st) update.tmeProductStatus = st.length ? st.join(",") : "";
+      const pars = paramsBySymbol.get(sym);
+      if (pars && pars.length > 0) update.tmeParameters = JSON.stringify(pars);
     }
     if (supplierPrice > 0) update.supplierPrice = String(supplierPrice);
     if (pricing && product.useCalculatedPrice !== false) {

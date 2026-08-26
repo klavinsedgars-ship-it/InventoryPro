@@ -255,20 +255,35 @@ export function registerTmeRoutes(app: Express): void {
         let hasMore = false;
         let page = startPage;
 
+        // v2 fetches 100 products per page against v1's fixed 20 — the direct
+        // cure for slow Select All on large categories — and returns live
+        // stock/price so the grid no longer shows "Unknown" until the operator
+        // clicks Load Prices.
+        const useV2 = process.env.TME_API_VERSION === "v2";
+        const v2 = useV2 ? (await import("../tme-api-v2")).tmeApiV2 : null;
+
         for (; page < startPage + pages; page++) {
-          const r = await tmeApi.getCategoryPageRaw(categoryId, page);
-          pagesFetched++;
-          total = r.total || total;
-          for (const p of r.products) {
-            if (!seen.has(p.Symbol)) {
-              seen.add(p.Symbol);
-              all.push(p);
+          if (v2) {
+            const r = await v2.getCategoryPageEnriched(categoryId, page, { limit: 100, inStockOnly: true });
+            pagesFetched++;
+            total = r.total || total;
+            for (const p of r.products) {
+              if (!seen.has(p.Symbol)) { seen.add(p.Symbol); all.push(p); }
             }
+            if (page >= (r.pages || 1)) { hasMore = false; break; }
+            hasMore = true;
+          } else {
+            const r = await tmeApi.getCategoryPageRaw(categoryId, page);
+            pagesFetched++;
+            total = r.total || total;
+            for (const p of r.products) {
+              if (!seen.has(p.Symbol)) { seen.add(p.Symbol); all.push(p); }
+            }
+            if (!r.hasMore) { hasMore = false; break; }
+            hasMore = true;
           }
-          if (!r.hasMore) { hasMore = false; break; }
-          hasMore = true;
           // Gentle pacing so a big category doesn't hammer TME's rate limit.
-          await new Promise((resolve) => setTimeout(resolve, 250));
+          await new Promise((resolve) => setTimeout(resolve, v2 ? 120 : 250));
         }
 
         // Apply the same client-side filters the grid uses (price filtering

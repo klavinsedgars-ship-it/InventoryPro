@@ -155,7 +155,27 @@ export class EbayInventoryApiService {
     const required = await this.getRequiredAspects(categoryId);
     const specs = extractProductSpecs(product);
 
+    // Prefer TME's STRUCTURED parameters (v2) over parsing the description.
+    // eBay ranks listings with complete, valid item specifics noticeably
+    // better, and "Operating voltage: 230V AC" as data beats guessing at it
+    // from free text. Purely additive: anything unmatched still falls through
+    // to the existing logic below.
+    let fromParams: Record<string, string[]> = {};
+    if ((product as any).tmeParameters) {
+      try {
+        const { aspectsFromParameters } = await import("./tme-aspects");
+        const parsed = JSON.parse((product as any).tmeParameters);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          fromParams = aspectsFromParameters(required, parsed);
+        }
+      } catch { /* malformed cache must never block a listing */ }
+    }
+
     for (const a of required) {
+      if (fromParams[a.name]) {
+        aspects[a.name] = fromParams[a.name];
+        continue;
+      }
       const mapped = this.mapSpecToAspect(a.name, specs, product);
       if (mapped) {
         // If the aspect has a constrained value list, only use the mapped value
