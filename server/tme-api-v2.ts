@@ -76,22 +76,33 @@ export function isListable(statuses: string[] | undefined | null): { ok: boolean
 }
 
 /**
- * How many units can actually ship NOW.
+ * Of a REQUESTED quantity, how many units ship from stock right now.
  *
- * `deliveries` is returned per requested quantity (amounts[]), split by
- * status: in-stock versus awaiting a supply date. Summing only the in-stock
- * entries is the honest sellable figure — the distinction v1 never gave us.
- * Falls back to stock_quantity when the delivery scope wasn't requested.
+ * IMPORTANT semantics: `deliveries` is not a general availability breakdown —
+ * it answers "how would the quantity in amounts[] be fulfilled?". Ask for 1
+ * unit and a product with 1,628 in stock replies DS_AVAILABLE_IN_STOCK: 1.
+ * So this is only meaningful relative to the quantity that was requested, and
+ * must never be treated as the product's total sellable stock (doing so caps
+ * every listing at the amount we happened to ask about).
+ *
+ * For "how much stock exists", use stock_quantity — TME support confirmed it
+ * is the real, real-time warehouse figure.
  */
-export function availableNow(p: V2ProductData): number {
+export function shippableOfRequested(p: V2ProductData): number {
   const els = p.deliveries?.elements;
-  if (els && els.length > 0) {
-    // An all-incoming response legitimately sums to 0: nothing ships today.
-    return els
-      .filter((d) => IN_STOCK_STATUSES.has(d.status))
-      .reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
-  }
-  return Number(p.stock_quantity) || 0;
+  if (!els || els.length === 0) return 0;
+  // An all-incoming response legitimately sums to 0: nothing ships today.
+  return els
+    .filter((d) => IN_STOCK_STATUSES.has(d.status))
+    .reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+}
+
+/**
+ * Can `requested` units ship today? The real oversell guard: run it for the
+ * quantity we actually intend to sell, not for 1.
+ */
+export function canShipNow(p: V2ProductData, requested: number): boolean {
+  return shippableOfRequested(p) >= requested;
 }
 
 /** Earliest supply date across incoming deliveries, if any. */
@@ -300,26 +311,23 @@ export class TmeApiV2 {
   }
 
   /**
-   * v1-shaped price/stock, so the existing sync can switch to v2 without any
-   * downstream change. `Amount` carries the TRULY sellable quantity (the
-   * in-stock portion of deliveries) rather than raw warehouse stock.
+   * v1-shaped price/stock so the sync can switch to v2 with no downstream
+   * change. `Amount` is stock_quantity — TME's real, real-time warehouse
+   * figure. It deliberately does NOT use the deliveries split: that answers
+   * "how would N units be fulfilled?" for the N you asked about, so folding
+   * it in here would cap every product at the requested quantity.
+   *
+   * Use checkShippable() for the oversell guard at the quantity that matters.
    */
   async getPricesAndStocksCompat(symbols: string[]): Promise<Array<{
     Symbol: string;
     Amount: number;
     PriceList: Array<{ Amount: number; PriceValue: number; PriceBase: number; Special: boolean }>;
-    StockQuantity: number;
-    SupplyDate: string | null;
   }>> {
-    const els = await this.getProductsData(symbols, {
-      withDeliveries: true,
-      amounts: symbols.map(() => 1),
-    });
+    const els = await this.getProductsData(symbols);
     return els.map((e) => ({
       Symbol: e.symbol,
-      Amount: availableNow(e),
-      StockQuantity: Number(e.stock_quantity) || 0,
-      SupplyDate: incomingSupplyDate(e),
+      Amount: Number(e.stock_quantity) || 0,
       PriceList: (e.prices?.elements ?? []).map((t) => ({
         Amount: t.amount,
         PriceValue: t.price,
@@ -327,6 +335,34 @@ export class TmeApiV2 {
         Special: !!t.special,
       })),
     }));
+  }
+
+  /**
+   * THE oversell guard: for each symbol, ask TME whether the specific
+   * quantity we intend to sell can ship today, and when the rest arrives.
+   * Run this for the eBay listing quantity — not for 1 — before publishing
+   * or raising stock on a listing.
+   */
+  async checkShippable(
+    symbols: string[],
+    quantities: number[],
+  ): Promise<Map<string, { requested: number; shippableNow: number; canShip: boolean; supplyDate: string | null }>> {
+    const out = new Map<string, { requested: number; shippableNow: number; canShip: boolean; supplyDate: string | null }>();
+    if (symbols.length === 0) return out;
+    const amounts = symbols.map((_, i) => Math.max(1, quantities[i] ?? 1));
+    const els = await this.getProductsData(symbols, { withDeliveries: true, amounts });
+    const wantBySymbol = new Map(symbols.map((s, i) => [s, amounts[i]]));
+    for (const e of els) {
+      const requested = wantBySymbol.get(e.symbol) ?? 1;
+      const shippableNow = shippableOfRequested(e);
+      out.set(e.symbol, {
+        requested,
+        shippableNow,
+        canShip: shippableNow >= requested,
+        supplyDate: incomingSupplyDate(e),
+      });
+    }
+    return out;
   }
 }
 

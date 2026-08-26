@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { availableNow, incomingSupplyDate, isListable, type V2ProductData } from "./tme-api-v2";
+import { shippableOfRequested, canShipNow, incomingSupplyDate, isListable, type V2ProductData } from "./tme-api-v2";
 
 const p = (over: Partial<V2ProductData>): V2ProductData => ({
   symbol: "X",
@@ -7,19 +7,20 @@ const p = (over: Partial<V2ProductData>): V2ProductData => ({
   ...over,
 });
 
-describe("availableNow — the oversell fix", () => {
-  it("counts only stock that can ship today, never incoming deliveries", () => {
-    // The exact shape of the 2026-06 incident: plenty on paper, none shippable.
+describe("shippableOfRequested — answers about a REQUESTED quantity", () => {
+  it("reports 0 when the whole requested amount is still incoming", () => {
+    // The exact shape of the 2026-06 incident: stock on paper, none shippable.
     const item = p({
       stock_quantity: 70,
       deliveries: { elements: [
         { status: "DS_DELIVERY_NEEDS_CONFIRMATION", amount: 70, data: { waiting_period: "P5W", supply_date: "2026-09-30" } },
       ]},
     });
-    expect(availableNow(item)).toBe(0);
+    expect(shippableOfRequested(item)).toBe(0);
+    expect(canShipNow(item, 70)).toBe(false);
   });
 
-  it("sums the in-stock portion of a split response", () => {
+  it("sums only the in-stock portion of a split response", () => {
     const item = p({
       stock_quantity: 1000,
       deliveries: { elements: [
@@ -27,12 +28,26 @@ describe("availableNow — the oversell fix", () => {
         { status: "DS_DELIVERY_NEEDS_CONFIRMATION", amount: 353, data: { supply_date: "2026-06-17" } },
       ]},
     });
-    expect(availableNow(item)).toBe(647);
+    expect(shippableOfRequested(item)).toBe(647);
+    expect(canShipNow(item, 647)).toBe(true);
+    expect(canShipNow(item, 1000)).toBe(false);
   });
 
-  it("falls back to stock_quantity when deliveries were not requested", () => {
-    expect(availableNow(p({ stock_quantity: 168752 }))).toBe(168752);
-    expect(availableNow(p({ stock_quantity: 0 }))).toBe(0);
+  it("is NOT a measure of total stock — it mirrors the quantity asked about", () => {
+    // Live regression: asking for 1 unit of a product with 1,628 in stock
+    // returns DS_AVAILABLE_IN_STOCK: 1. Treating that as total sellable stock
+    // would cap every listing at the amount we happened to request.
+    const askedForOne = p({
+      stock_quantity: 1628,
+      deliveries: { elements: [{ status: "DS_AVAILABLE_IN_STOCK", amount: 1, data: null }] },
+    });
+    expect(shippableOfRequested(askedForOne)).toBe(1);
+    expect(askedForOne.stock_quantity).toBe(1628); // the real stock figure
+    expect(canShipNow(askedForOne, 1)).toBe(true);
+  });
+
+  it("returns 0 when the delivery scope was not requested", () => {
+    expect(shippableOfRequested(p({ stock_quantity: 168752 }))).toBe(0);
   });
 });
 

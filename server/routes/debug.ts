@@ -570,7 +570,7 @@ export function registerDebugRoutes(app: Express) {
   app.get("/api/__tme-compare", async (req, res) => {
     try {
       const { tmeApi } = await import("../tme-api");
-      const { tmeApiV2, availableNow, incomingSupplyDate, isListable } = await import("../tme-api-v2");
+      const { tmeApiV2, incomingSupplyDate, isListable } = await import("../tme-api-v2");
 
       let symbols: string[] = String(req.query.skus || "")
         .split(",").map((s) => s.trim()).filter(Boolean);
@@ -581,10 +581,13 @@ export function registerDebugRoutes(app: Express) {
       symbols = symbols.slice(0, 25);
       if (symbols.length === 0) return res.json({ ok: false, error: "no symbols to compare" });
 
+      // No deliveries scope here: it answers "how would N units be fulfilled?"
+      // for the N requested, so asking for 1 would report 1 for every product
+      // regardless of real stock. Compare warehouse stock against v1 instead,
+      // and use checkShippable() when the question is a specific quantity.
       const [v1, v2, v2products] = await Promise.all([
         tmeApi.getPricesAndStocks(symbols).catch((e) => ({ __error: (e as Error).message })),
-        tmeApiV2.getProductsData(symbols, { withDeliveries: true, amounts: symbols.map(() => 1) })
-          .catch((e) => ({ __error: (e as Error).message })),
+        tmeApiV2.getProductsData(symbols).catch((e) => ({ __error: (e as Error).message })),
         tmeApiV2.getProducts(symbols).catch(() => [] as any[]),
       ]);
       if ((v1 as any).__error) return res.json({ ok: false, stage: "v1", error: (v1 as any).__error });
@@ -598,13 +601,13 @@ export function registerDebugRoutes(app: Express) {
         const v1Stock = a ? (typeof a.Amount === "number" ? a.Amount : null) : null;
         const v1Price = a?.PriceList?.[0]?.PriceValue ?? null;
         const v2Price = e.prices?.elements?.[0]?.price ?? null;
-        const sellable = availableNow(e);
+        const sellable = Number(e.stock_quantity) || 0;
         const statuses = statusBy.get(e.symbol) ?? [];
         const listable = isListable(statuses);
         return {
           symbol: e.symbol,
           v1: { stock: v1Stock, unitPrice: v1Price },
-          v2: { warehouseStock: e.stock_quantity, sellableNow: sellable, unitPrice: v2Price, currency: e.prices?.currency, priceType: e.prices?.type },
+          v2: { warehouseStock: e.stock_quantity, stock: sellable, unitPrice: v2Price, currency: e.prices?.currency, priceType: e.prices?.type },
           // The decision-relevant deltas.
           priceMatches: v1Price != null && v2Price != null ? Math.abs(v1Price - v2Price) < 0.0001 : null,
           stockDelta: v1Stock != null ? sellable - v1Stock : null,
