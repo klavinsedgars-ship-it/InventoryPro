@@ -1328,24 +1328,33 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                       </p>
                                       <div className="mt-0.5 flex items-center flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-gray-500">
                                         <span>Producer: {product.Producer}</span>
-                                        {enhanced?.stock && enhanced.stock.Amount !== undefined ? (
-                                          <span className={enhanced.stock.Amount > 0 ? "text-green-600" : "text-red-600"}>
-                                            Stock: {enhanced.stock.Amount.toLocaleString()} {enhanced.stock.Unit || 'pcs'}
-                                          </span>
-                                        ) : loadingEnhanced ? (
-                                          <span className="text-gray-400">Loading stock...</span>
-                                        ) : (
-                                          <span className="text-gray-400">Stock: Unknown</span>
-                                        )}
-                                        {enhanced?.price && enhanced.price.PriceList && enhanced.price.PriceList.length > 0 && enhanced.price.PriceList[0]?.PriceValue ? (
-                                          <span className="text-blue-600">
-                                            Price: €{enhanced.price.PriceList[0].PriceValue.toFixed(2)}
-                                          </span>
-                                        ) : loadingEnhanced ? (
-                                          <span className="text-gray-400">Loading price...</span>
-                                        ) : (
-                                          <span className="text-gray-400">Price: Unknown</span>
-                                        )}
+                                        {/* Stock/price come inline with the row on TME API v2; the
+                                            "Load Prices" fetch is the v1 fallback. Prefer whichever
+                                            is present so the grid stops showing "Unknown". */}
+                                        {(() => {
+                                          const stock = enhanced?.stock?.Amount ?? (typeof (product as any).Amount === "number" ? (product as any).Amount : undefined);
+                                          const price = enhanced?.price?.PriceList?.[0]?.PriceValue ?? (product as any).PriceList?.[0]?.PriceValue;
+                                          return (
+                                            <>
+                                              {stock !== undefined ? (
+                                                <span className={stock > 0 ? "text-green-600" : "text-red-600"}>
+                                                  Stock: {stock.toLocaleString()} {enhanced?.stock?.Unit || 'pcs'}
+                                                </span>
+                                              ) : loadingEnhanced ? (
+                                                <span className="text-gray-400">Loading stock...</span>
+                                              ) : (
+                                                <span className="text-gray-400">Stock: Unknown</span>
+                                              )}
+                                              {price != null ? (
+                                                <span className="text-blue-600">Price: €{Number(price).toFixed(2)}</span>
+                                              ) : loadingEnhanced ? (
+                                                <span className="text-gray-400">Loading price...</span>
+                                              ) : (
+                                                <span className="text-gray-400">Price: Unknown</span>
+                                              )}
+                                            </>
+                                          );
+                                        })()}
                                         {/* MOQ Badge - displays minimum order quantity */}
                                         {product.MinAmount && product.MinAmount > 1 && (
                                           <Badge variant="outline" className="px-1.5 py-0 text-[9px] bg-purple-50 text-purple-700 border-purple-200">

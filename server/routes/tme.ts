@@ -171,24 +171,44 @@ export function registerTmeRoutes(app: Express): void {
         const TME_PAGE = 20;
         const MAX_LIMIT = 100;
         const effectiveLimit = Math.min(Math.max(limitNum, 1), MAX_LIMIT);
-        const startIndex = (pageNum - 1) * effectiveLimit;
-        const firstTmePage = Math.floor(startIndex / TME_PAGE) + 1;
-        const lastTmePage = Math.floor((startIndex + effectiveLimit - 1) / TME_PAGE) + 1;
 
-        let aggregated: any[] = [];
+        let products: any[] = [];
         let total = 0;
-        for (let p = firstTmePage; p <= lastTmePage; p++) {
-          const r = await tmeApi.getProductsByCategory(categoryId as string, p, TME_PAGE);
-          aggregated = aggregated.concat(r.products || []);
-          total = r.total || total;
-          // TME returned fewer than the page size => past the end.
-          if (!r.products || r.products.length < TME_PAGE) break;
-        }
 
-        // Trim the aggregated batch to the requested window so page math
-        // ("Page X of Y") on the client matches what's actually displayed.
-        const windowStart = startIndex - (firstTmePage - 1) * TME_PAGE;
-        let products = aggregated.slice(windowStart, windowStart + effectiveLimit);
+        if (process.env.TME_API_VERSION === "v2") {
+          // v2 honours the UI page size directly (1..100), so no aggregating
+          // of 20-item pages and no window slicing — one call instead of
+          // three for a 50-row page. It also returns live stock and price,
+          // which is why the grid no longer shows "Unknown" until the
+          // operator clicks Load Prices.
+          const { tmeApiV2 } = await import("../tme-api-v2");
+          const r = await tmeApiV2.getCategoryPageEnriched(categoryId as string, pageNum, {
+            limit: effectiveLimit,
+            inStockOnly: String(inStockOnly) !== "false",
+          });
+          products = r.products;
+          total = r.total;
+        } else {
+          // v1: Search.json returns a fixed 20 per page, so a larger UI page
+          // size means aggregating consecutive TME pages and slicing the
+          // requested window.
+          const startIndex = (pageNum - 1) * effectiveLimit;
+          const firstTmePage = Math.floor(startIndex / TME_PAGE) + 1;
+          const lastTmePage = Math.floor((startIndex + effectiveLimit - 1) / TME_PAGE) + 1;
+
+          let aggregated: any[] = [];
+          for (let p = firstTmePage; p <= lastTmePage; p++) {
+            const r = await tmeApi.getProductsByCategory(categoryId as string, p, TME_PAGE);
+            aggregated = aggregated.concat(r.products || []);
+            total = r.total || total;
+            // TME returned fewer than the page size => past the end.
+            if (!r.products || r.products.length < TME_PAGE) break;
+          }
+          // Trim to the requested window so the client's "Page X of Y" math
+          // matches what is actually displayed.
+          const windowStart = startIndex - (firstTmePage - 1) * TME_PAGE;
+          products = aggregated.slice(windowStart, windowStart + effectiveLimit);
+        }
 
         // Apply client-side filters
         if (search) {
