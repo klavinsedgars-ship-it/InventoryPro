@@ -652,11 +652,16 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
 
       setBulkProgress(100);
       const added = newSelected.size - before;
+      const scanned = total ? ` — scanned all ${total.toLocaleString()} in the category` : "";
       toast({
-        title: capped ? "Selection capped" : "Bulk selection complete",
+        title: capped ? "Selection capped" : "Category selected",
         description: capped
-          ? `Stopped at the ${SELECT_ALL_CAP.toLocaleString()}-product safety cap — added ${added} (total ${newSelected.size}). Narrow the category or sync this batch first.`
-          : `Selected ${added} product(s) — total ${newSelected.size}.`,
+          ? `Stopped at the ${SELECT_ALL_CAP.toLocaleString()}-product safety cap — added ${added.toLocaleString()} (total ${newSelected.size.toLocaleString()}). Narrow the category or sync this batch first.`
+          : filters.inStockOnly
+            // Says why the number is smaller than the category size: the rest
+            // are out of stock, not missed.
+            ? `Added ${added.toLocaleString()} in stock${scanned}. Total selected: ${newSelected.size.toLocaleString()}.`
+            : `Added ${added.toLocaleString()}${scanned}. Total selected: ${newSelected.size.toLocaleString()}.`,
       });
     } catch (error: any) {
       if (error.name !== 'AbortError') {
