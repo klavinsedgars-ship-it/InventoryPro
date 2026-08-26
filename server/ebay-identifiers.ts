@@ -51,3 +51,29 @@ export function normalizeEan(raw: string | null | undefined): string | null {
 export function eanForListing(raw: string | null | undefined, siteId?: string): string[] {
   return [normalizeEan(raw) ?? noIdentifierValue(siteId)];
 }
+
+/**
+ * All three product identifiers eBay may demand, as the inventory item wants
+ * them.
+ *
+ * Which one a listing needs depends on the resolved category, and eBay only
+ * tells us after rejecting the publish: supplying EAN alone still produced
+ * "Das Feld ISBN fehlt" for products whose category resolution landed in a
+ * media category. Declaring "no identifier" on all three costs nothing —
+ * eBay ignores the ones its category does not use — and removes a whole class
+ * of publish failure that is otherwise only discoverable one category at a
+ * time.
+ */
+export function identifiersForListing(
+  ean: string | null | undefined,
+  siteId?: string,
+): { ean: string[]; upc: string[]; isbn: string[] } {
+  const gtin = normalizeEan(ean);
+  const none = noIdentifierValue(siteId);
+  return {
+    // A 12-digit GTIN is a UPC; anything else valid goes in the EAN field.
+    ean: [gtin && gtin.length !== 12 ? gtin : none],
+    upc: [gtin && gtin.length === 12 ? gtin : none],
+    isbn: [none],
+  };
+}

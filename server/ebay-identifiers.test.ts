@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { normalizeEan, noIdentifierValue, eanForListing } from "./ebay-identifiers";
+import { normalizeEan, noIdentifierValue, eanForListing, identifiersForListing } from "./ebay-identifiers";
 
 const originalSite = process.env.EBAY_MARKETPLACE_SITE_ID;
 afterEach(() => {
@@ -62,5 +62,30 @@ describe("eanForListing", () => {
     for (const raw of ["", null, undefined, "bad", "4006381333932"]) {
       expect(eanForListing(raw, "77")).toHaveLength(1);
     }
+  });
+});
+
+describe("identifiersForListing — every field a category might demand", () => {
+  it("declares all three, so an ISBN-requiring category cannot reject the publish", () => {
+    // Regression: EAN alone still failed with "Das Feld ISBN fehlt" for
+    // products whose category resolution landed in a media category.
+    expect(identifiersForListing(null, "77")).toEqual({
+      ean: ["Nicht zutreffend"],
+      upc: ["Nicht zutreffend"],
+      isbn: ["Nicht zutreffend"],
+    });
+  });
+
+  it("routes a 13-digit GTIN to EAN and a 12-digit one to UPC", () => {
+    expect(identifiersForListing("4006381333931", "77").ean).toEqual(["4006381333931"]);
+    expect(identifiersForListing("4006381333931", "77").upc).toEqual(["Nicht zutreffend"]);
+    // 12-digit UPC-A with a valid check digit.
+    const upc = identifiersForListing("012345678905", "77");
+    expect(upc.upc).toEqual(["012345678905"]);
+    expect(upc.ean).toEqual(["Nicht zutreffend"]);
+  });
+
+  it("follows the marketplace language", () => {
+    expect(identifiersForListing(null, "3").isbn).toEqual(["Does not apply"]);
   });
 });

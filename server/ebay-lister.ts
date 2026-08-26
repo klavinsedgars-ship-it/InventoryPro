@@ -20,6 +20,17 @@ export interface ListBatchResult {
 
 const LIMIT_RX = /\blimit\b|too many|rate.?limit|2001\b|21917|exceed/i;
 
+/**
+ * eBay refused the item on policy grounds — a prohibited or restricted
+ * product, not a fixable payload problem. Observed: a GPS receiver module
+ * rejected as a suspected signal jammer (25019).
+ *
+ * These must not be retried. Nothing about the next attempt differs, and
+ * repeatedly pushing an item eBay has called prohibited is exactly the
+ * behaviour that attracts selling restrictions.
+ */
+const POLICY_RX = /\b25019\b|eBay-Grunds|nicht erlaubt|prohibited|restricted item|violat/i;
+
 export async function listProductsViaInventory(allProducts: Product[]): Promise<ListBatchResult & { skipped: number }> {
   const results: ListBatchResult["results"] = [];
   let published = 0;
@@ -337,16 +348,21 @@ export async function listProductsViaInventoryBulk(
         });
       } else {
         failed++;
-        results.push({ sku, ok: false, error: `publish: ${r?.error}` });
+        const err = String(r?.error);
+        results.push({ sku, ok: false, error: `publish: ${err}` });
+        // A policy refusal is permanent: take the product out of the queue for
+        // a human to review, rather than re-offering it until it parks.
+        const policyBlocked = POLICY_RX.test(err);
         await storage.updateProduct(product.id, {
           ebayOfferId: offerId,
-          ebayListingStatus: "offer_created",
-          ebayListingError: `publish: ${String(r?.error)}`.slice(0, 500),
+          ebayListingStatus: policyBlocked ? "error" : "offer_created",
+          ebayListingError: (policyBlocked ? `policy: ${err}` : `publish: ${err}`).slice(0, 500),
+          ...(policyBlocked ? { excludeFromListing: true } : {}),
         });
-        if (!LIMIT_RX.test(String(r?.error))) {
+        if (!LIMIT_RX.test(err) && !policyBlocked) {
           await storage.incrementEbayListAttempts(product.id);
         }
-        if (LIMIT_RX.test(String(r?.error))) limitHit = true;
+        if (LIMIT_RX.test(err)) limitHit = true;
       }
     }
   }
