@@ -511,9 +511,28 @@ export class EbayInventoryApiService {
       const ok = resp.statusCode >= 200 && resp.statusCode < 300;
       out.set(resp.sku, { ok, error: ok ? undefined : this.firstEbayError(resp, JSON.stringify(resp)) });
     }
-    // If the envelope itself failed, mark all as failed
+
+    // Envelope rejected outright (no per-item responses): eBay validated the
+    // whole batch away — e.g. 25733 "valid inventory units and location
+    // information must be provided", which it returns even when quantity and
+    // the merchant location are demonstrably valid. The single-item PUT is a
+    // separate, more permissive endpoint that accepts the very same item
+    // body, so fall back to it per product rather than failing 25 listings on
+    // a bulk-validation quirk. Costs N calls instead of 1 — still far inside
+    // the daily budget, and only on the failure path.
     if (!r.ok && responses.length === 0) {
-      for (const { product } of items.slice(0, 25)) out.set(product.sku, { ok: false, error: this.firstEbayError(r.data, r.text) });
+      const envelopeError = this.firstEbayError(r.data, r.text);
+      console.warn(`bulk inventory item envelope rejected (${envelopeError}) — falling back to single-item PUTs for ${items.length} SKU(s)`);
+      for (const { product, categoryId } of items.slice(0, 25)) {
+        try {
+          const single = await this.createOrReplaceInventoryItem(product.sku, product, categoryId);
+          out.set(product.sku, single.ok
+            ? { ok: true }
+            : { ok: false, error: `${single.error} (bulk envelope: ${envelopeError})` });
+        } catch (e) {
+          out.set(product.sku, { ok: false, error: `${(e as Error).message} (bulk envelope: ${envelopeError})` });
+        }
+      }
     }
     return out;
   }
