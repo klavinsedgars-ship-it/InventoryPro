@@ -75,6 +75,8 @@ export async function processTmeSyncChunk(
   const existingBySku = new Map(existing.map((p) => [p.sku, p]));
 
   const feeConfig = await getFeeConfig("ebay");
+  // DB writes for this chunk, flushed together at the end (pool-bounded).
+  const writes: Array<Promise<unknown>> = [];
 
   // Load the operator's DB pricing tiers (Configuration UI) — module state
   // resets per serverless invocation, so this must happen on EVERY import
@@ -143,8 +145,17 @@ export async function processTmeSyncChunk(
 
       const match = existingBySku.get(product.Symbol);
       if (match) {
-        await storage.updateProduct(match.id, productData);
-        result.updatedCount++;
+        // Queue the write instead of awaiting per product: 100 serial Neon
+        // round-trips were the bulk of each chunk's latency (~5-8s of the
+        // ~12s a chunk took), which is why the progress bar sat still.
+        writes.push(
+          storage.updateProduct(match.id, productData)
+            .then(() => { result.updatedCount++; })
+            .catch((e) => {
+              result.failedCount++;
+              result.errors.push(`${product.Symbol}: ${(e as Error).message}`);
+            }),
+        );
       } else {
         // New product with no price: create it, but never as sellable.
         if (supplierPrice <= 0) {
@@ -152,8 +163,14 @@ export async function processTmeSyncChunk(
           productData.salePrice = "0";
           productData.status = "inactive";
         }
-        await storage.createProduct(productData);
-        result.syncedCount++;
+        writes.push(
+          storage.createProduct(productData)
+            .then(() => { result.syncedCount++; })
+            .catch((e) => {
+              result.failedCount++;
+              result.errors.push(`${product.Symbol}: ${(e as Error).message}`);
+            }),
+        );
       }
     } catch (itemError) {
       console.error("Failed to sync product:", itemError);
@@ -162,5 +179,95 @@ export async function processTmeSyncChunk(
     }
   }
 
+  await Promise.allSettled(writes);
   return result;
+}
+
+
+export const TME_SYNC_CHUNK_SIZE = 100;
+
+/**
+ * Advance a TME Browser import job by ONE chunk. The single source of truth
+ * for job progression: the HTTP route (browser-driven) and the cron drain
+ * (server-driven) both call this, so an import behaves identically no matter
+ * who is pushing it forward.
+ */
+export async function advanceSyncJob(jobId: string): Promise<{ done: boolean; job: any } | null> {
+  const job = await storage.getSyncJob(jobId);
+  if (!job) return null;
+  if (["completed", "completed_with_errors", "failed", "cancelled"].includes(job.status)) {
+    return { done: true, job };
+  }
+
+  const allSymbols: string[] = JSON.parse(job.symbols);
+  const settings = job.settings ? JSON.parse(job.settings) : {};
+  const chunk = allSymbols.slice(job.processed, job.processed + TME_SYNC_CHUNK_SIZE);
+
+  if (job.status === "pending") {
+    await storage.updateSyncJob(jobId, { status: "processing" });
+  }
+
+  const r = await processTmeSyncChunk(chunk, settings);
+
+  const processed = job.processed + chunk.length;
+  const syncedCount = job.syncedCount + r.syncedCount;
+  const updatedCount = job.updatedCount + r.updatedCount;
+  const failedCount = job.failedCount + r.failedCount;
+  const prevErrors: string[] = job.errors ? JSON.parse(job.errors) : [];
+  const errors = [...prevErrors, ...r.errors].slice(0, 50);
+
+  const done = processed >= allSymbols.length;
+  const status = done ? (failedCount > 0 ? "completed_with_errors" : "completed") : "processing";
+  const message = `Synced ${syncedCount} new, updated ${updatedCount}, failed ${failedCount}`;
+
+  const updated = await storage.updateSyncJob(jobId, {
+    processed, syncedCount, updatedCount, failedCount,
+    errors: errors.length ? JSON.stringify(errors) : null,
+    status, message,
+  });
+
+  if (done) {
+    await storage.createSyncLog({
+      source: "tme_browser",
+      operation: "sync_selected",
+      status: failedCount === 0 ? "success" : failedCount < allSymbols.length ? "partial" : "error",
+      message,
+      details: JSON.stringify({ jobId, syncedCount, updatedCount, failedCount }),
+    });
+    console.log(`✅ TME sync job ${jobId} ${status}: ${message}`);
+  }
+
+  return { done, job: updated };
+}
+
+/**
+ * Finish imports the browser abandoned. An import's state lives server-side,
+ * but progression used to depend entirely on the browser POSTing chunk after
+ * chunk — so a closed tab, a network blip, or a redeploy left the job frozen
+ * mid-run until someone reopened the page. The hourly cron now calls this
+ * with a slice of its time budget, which turns "the sync died at 43%" into
+ * "the sync finished on its own within the hour".
+ */
+export async function drainPendingImportJobs(budgetMs: number): Promise<{
+  advancedChunks: number;
+  finishedJobs: number;
+}> {
+  const start = Date.now();
+  let advancedChunks = 0;
+  let finishedJobs = 0;
+
+  while (Date.now() - start < budgetMs) {
+    const job = await storage.getActiveSyncJob("tme_browser");
+    if (!job) break;
+    // Leave a fresh job to its browser: only adopt runs nothing has touched
+    // for 2+ minutes, so the cron never competes with a live pump.
+    const idleMs = Date.now() - new Date((job as any).updatedAt ?? (job as any).createdAt ?? 0).getTime();
+    if (Number.isFinite(idleMs) && idleMs < 2 * 60 * 1000) break;
+
+    const res = await advanceSyncJob(job.jobId);
+    if (!res) break;
+    advancedChunks++;
+    if (res.done) finishedJobs++;
+  }
+  return { advancedChunks, finishedJobs };
 }

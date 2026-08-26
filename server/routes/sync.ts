@@ -304,6 +304,27 @@ export function registerSyncRoutes(app: Express) {
 
     const budgetMs = 270_000; // Vercel Pro maxDuration is 300s
     const start = Date.now();
+
+    // Finish any TME Browser import the browser abandoned (closed tab,
+    // network drop, redeploy mid-run). Bounded to a slice of the budget so
+    // the regular price/stock sweep still runs. This is what makes an import
+    // "always completes" instead of "completes if the tab survives".
+    try {
+      const { drainPendingImportJobs } = await import("../tme-sync");
+      const drained = await drainPendingImportJobs(90_000);
+      if (drained.advancedChunks > 0) {
+        await storage.createSyncLog({
+          source: "tme_browser",
+          operation: "import_drain",
+          status: "success",
+          message: `Resumed abandoned import: ${drained.advancedChunks} chunk(s) processed${drained.finishedJobs ? `, ${drained.finishedJobs} job(s) finished` : ""}`,
+          details: JSON.stringify(drained),
+        });
+      }
+    } catch (e) {
+      console.error("import drain failed:", e);
+    }
+
     let chunks = 0;
     let totalChanged = 0;
     let totalEbay = 0;

@@ -338,19 +338,52 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   // Drive a sync job to completion: repeatedly ask the server to process the
   // next chunk, updating real progress each round. Returns the final payload,
   // or null if the user cancelled. Throws on a server error.
+  /**
+   * Drive the import chunk by chunk — surviving the failures that used to
+   * kill it. A single dropped request (a redeploy swapping deployments
+   * mid-run, a network blip, a laptop sleeping) previously aborted the whole
+   * run with "Failed to fetch" at whatever percentage it had reached.
+   *
+   * Now each chunk retries up to 5 times with backoff, showing "connection
+   * hiccup — retrying" instead of dying. And if the connection really is
+   * gone, nothing is lost: the job's state lives server-side, reopening this
+   * page resumes it, and the hourly cron finishes abandoned imports on its
+   * own. The failure message says exactly that.
+   */
   const pumpSyncJob = async (jobId: string) => {
     syncCancelRef.current = false;
+    const MAX_RETRIES = 5;
     while (!syncCancelRef.current) {
-      const res = await fetch("/api/tme/sync-job-chunk", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Sync chunk failed");
+      let data: any = null;
+      for (let attempt = 1; ; attempt++) {
+        if (syncCancelRef.current) return null;
+        try {
+          const res = await fetch("/api/tme/sync-job-chunk", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jobId }),
+          });
+          if (res.status === 404) throw Object.assign(new Error("Sync job not found"), { fatal: true });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `HTTP ${res.status}`);
+          }
+          data = await res.json();
+          break;
+        } catch (e: any) {
+          if (e.fatal || attempt >= MAX_RETRIES) {
+            throw new Error(
+              `${e.message || "Connection lost"}. Your progress is saved — the import resumes when you reopen this page, and finishes automatically in the background within the hour either way.`,
+            );
+          }
+          const wait = Math.min(8000, 1000 * 2 ** (attempt - 1));
+          toast({
+            title: `Connection hiccup — retrying (${attempt}/${MAX_RETRIES})`,
+            description: "Progress is saved server-side; nothing is lost.",
+          });
+          await new Promise((r) => setTimeout(r, wait));
+        }
       }
-      const data = await res.json();
       applySyncProgress(data);
       if (data.done) return data;
     }

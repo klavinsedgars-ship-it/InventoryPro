@@ -4,7 +4,7 @@ import { requireAuth } from "../middleware/auth";
 import { tmeApi } from "../tme-api";
 import { tmeApiOptimized } from "../tme-api-optimized";
 import { ebayAccountApi } from "../ebay-account-api";
-import { processTmeSyncChunk } from "../tme-sync";
+import { processTmeSyncChunk, advanceSyncJob } from "../tme-sync";
 import { getFeeConfig } from "../fee-config";
 import { calculatePriceWithFloor } from "../dynamic-pricing";
 import { randomUUID } from "crypto";
@@ -774,58 +774,11 @@ export function registerTmeRoutes(app: Express): void {
       try {
         const { jobId } = req.body;
         if (!jobId) return res.status(400).json({ success: false, error: "jobId is required" });
-
-        const job = await storage.getSyncJob(jobId);
-        if (!job) return res.status(404).json({ success: false, error: "Sync job not found" });
-
-        // Already finished (or cancelled) — nothing to do.
-        if (["completed", "completed_with_errors", "failed", "cancelled"].includes(job.status)) {
-          return res.json({ success: true, done: true, ...syncJobProgress(job) });
-        }
-
-        const allSymbols: string[] = JSON.parse(job.symbols);
-        const settings = job.settings ? JSON.parse(job.settings) : {};
-        const chunk = allSymbols.slice(job.processed, job.processed + TME_SYNC_CHUNK_SIZE);
-
-        if (job.status === "pending") {
-          await storage.updateSyncJob(jobId, { status: "processing" });
-        }
-
-        const r = await processTmeSyncChunk(chunk, settings);
-
-        const processed = job.processed + chunk.length;
-        const syncedCount = job.syncedCount + r.syncedCount;
-        const updatedCount = job.updatedCount + r.updatedCount;
-        const failedCount = job.failedCount + r.failedCount;
-        const prevErrors: string[] = job.errors ? JSON.parse(job.errors) : [];
-        const errors = [...prevErrors, ...r.errors].slice(0, 50); // cap stored errors
-
-        const done = processed >= allSymbols.length;
-        const status = done ? (failedCount > 0 ? "completed_with_errors" : "completed") : "processing";
-        const message = `Synced ${syncedCount} new, updated ${updatedCount}, failed ${failedCount}`;
-
-        const updated = await storage.updateSyncJob(jobId, {
-          processed,
-          syncedCount,
-          updatedCount,
-          failedCount,
-          errors: errors.length ? JSON.stringify(errors) : null,
-          status,
-          message,
-        });
-
-        if (done) {
-          await storage.createSyncLog({
-            source: "tme_browser",
-            operation: "sync_selected",
-            status: failedCount === 0 ? "success" : failedCount < allSymbols.length ? "partial" : "error",
-            message,
-            details: JSON.stringify({ jobId, syncedCount, updatedCount, failedCount }),
-          });
-          console.log(`✅ TME sync job ${jobId} ${status}: ${message}`);
-        }
-
-        res.json({ success: true, done, ...syncJobProgress(updated) });
+        // Shared engine (tme-sync.ts): the cron drain uses the same function,
+        // so browser-driven and server-driven progression cannot diverge.
+        const r = await advanceSyncJob(jobId);
+        if (!r) return res.status(404).json({ success: false, error: "Sync job not found" });
+        res.json({ success: true, done: r.done, ...syncJobProgress(r.job) });
       } catch (error) {
         console.error("Sync job chunk failed:", error);
         res.status(500).json({ success: false, error: (error as Error).message });
