@@ -321,7 +321,12 @@ export function registerDebugRoutes(app: Express) {
     // ---- TME API, endpoint by endpoint ----
     const { tmeApi } = await import("../tme-api");
     const PROBE_SYMBOL = "1N4148";
-    const tme: any = {};
+    const tme: any = {
+      // Which client the sync actually uses right now. Reported because an
+      // env var only takes effect on a NEW deployment — "I set it" and "it is
+      // running" are different states, and this is where that gets confirmed.
+      activeVersion: process.env.TME_API_VERSION === "v2" ? "v2" : "v1 (default)",
+    };
     try {
       const s = await tmeApi.searchProducts("1N4148", 1);
       tme.search = { ok: true, results: s.length };
@@ -334,6 +339,16 @@ export function registerDebugRoutes(app: Express) {
       const p = await (tmeApi as any).getPricesAndStocks([PROBE_SYMBOL]);
       tme.getPricesAndStocks = { ok: true, results: p.length };
     } catch (e) { tme.getPricesAndStocks = { ok: false, error: (e as Error).message.slice(0, 160) }; }
+    if (process.env.TME_API_VERSION === "v2") {
+      try {
+        const { tmeApiV2 } = await import("../tme-api-v2");
+        const rows = await tmeApiV2.getPricesAndStocksCompat([PROBE_SYMBOL + "-DIO"]);
+        tme.v2 = { ok: true, results: rows.length, sampleStock: rows[0]?.Amount ?? null, samplePrice: rows[0]?.PriceList?.[0]?.PriceValue ?? null };
+      } catch (e) {
+        tme.v2 = { ok: false, error: (e as Error).message.slice(0, 200) };
+        verdicts.push("TME_API_VERSION=v2 is set but the v2 client is failing — the sync cannot fetch prices/stock. Unset it to fall back to v1.");
+      }
+    }
     report.tme = tme;
     if (!tme.search.ok && !tme.getProducts.ok) {
       verdicts.push("TME API fully down/denied — imports and sync cannot work. Check TME_TOKEN/TME_APPLICATION_SECRET (v2 tokens: developers.tme.eu).");
@@ -355,6 +370,9 @@ export function registerDebugRoutes(app: Express) {
       database: !!(process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.POSTGRES_URL),
       staleNeonVar: !!process.env.NEON_DATABASE_URL,
       tmeCreds: !!(process.env.TME_TOKEN && process.env.TME_APPLICATION_SECRET),
+      tmeApiVersion: process.env.TME_API_VERSION || "(unset -> v1)",
+      tmeCountry: process.env.TME_COUNTRY || "(unset)",
+      tmeCurrency: process.env.TME_CURRENCY || "(unset -> EUR)",
       ebayCreds: !!((process.env.EBAY_OAUTH_CLIENT_ID || process.env.EBAY_APP_ID) && (process.env.EBAY_OAUTH_REFRESH_TOKEN || process.env.EBAY_REFRESH_TOKEN)),
       cronSecret: !!process.env.CRON_SECRET,
       bypassAuth: process.env.BYPASS_AUTH === "true",
