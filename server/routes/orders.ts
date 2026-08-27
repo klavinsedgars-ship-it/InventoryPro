@@ -149,18 +149,12 @@ export function registerOrderRoutes(app: Express): void {
         });
       }
 
-      // Validate status transition
-      const validTransitions: Record<string, string[]> = {
-        'new': ['packed', 'cancelled'],
-        'packed': ['shipped', 'new'],
-        'shipped': ['delivered', 'returned'],
-        'delivered': ['completed', 'returned'],
-        'completed': [],
-        'returned': [],
-        'cancelled': []
-      };
-
-      if (!validTransitions[order.status]?.includes(status)) {
+      // Validate the transition against the SHARED rule, so the server and the
+      // UI cannot disagree. The previous table only allowed 'packed' back to
+      // 'new' — every other step forward was one-way, and correcting a
+      // mis-click after shipping meant editing the database by hand.
+      const { isAllowedTransition } = await import("@shared/order-status");
+      if (!isAllowedTransition(order.status, status)) {
         return res.status(400).json({
           success: false,
           error: `Invalid status transition from ${order.status} to ${status}`

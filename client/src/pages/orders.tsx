@@ -21,12 +21,14 @@ import {
 } from "@/components/ui/collapsible";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { countryName, labelAddressLines } from "@shared/country-names";
+import { previousStatus, revertLabel } from "@shared/order-status";
 import { Separator } from "@/components/ui/separator";
 import { 
   Package, Search, RefreshCw, Loader2, ExternalLink, 
   Truck, CheckCircle, Clock, XCircle, RotateCcw, 
   Printer, MapPin, Copy, ChevronDown, ChevronRight,
-  ShoppingBag, Box, ClipboardCheck, History, DollarSign,
+  ShoppingBag, Box, ClipboardCheck, History, DollarSign, Undo2,
   User, StickyNote, Check, AlertTriangle
 } from "lucide-react";
 import { SiEbay, SiAmazon } from "react-icons/si";
@@ -222,18 +224,36 @@ export function Orders({ user }: OrdersProps) {
     });
   };
 
+  // Undo a mis-click. Packing is manual, and marking an order packed or
+  // shipped used to be a one-way door whose only recovery was a DB edit.
+  const handleRevertStatus = (orderId: number, currentStatus: string) => {
+    const prev = previousStatus(currentStatus);
+    if (!prev) return;
+    updateStatusMutation.mutate({ id: orderId, status: prev });
+  };
+
   const copyAddress = () => {
     if (!selectedOrder) return;
-    const address = [
-      selectedOrder.shippingName,
-      selectedOrder.shippingAddressLine1,
-      selectedOrder.shippingAddressLine2,
-      `${selectedOrder.shippingCity}, ${selectedOrder.shippingPostalCode}`,
-      selectedOrder.shippingCountry
-    ].filter(Boolean).join('\n');
-    
-    navigator.clipboard.writeText(address);
+    navigator.clipboard.writeText(labelAddressLines(selectedOrder).join("\n"));
     toast({ title: "Copied", description: "Address copied to clipboard" });
+  };
+
+  /**
+   * A paste-ready supplier order. TME's API has no cart or ordering endpoint
+   * (only /products/* and /utils/*), so the order cannot be placed from here —
+   * but their site accepts a pasted symbol/quantity list, which removes the
+   * error-prone part: typing part numbers by hand.
+   */
+  const copyTmeList = () => {
+    if (!selectedOrder?.items?.length) return;
+    const lines = selectedOrder.items
+      .map((i: any) => `${i.tmeProductId || i.sku}\t${i.quantity}`)
+      .join("\n");
+    navigator.clipboard.writeText(lines);
+    toast({
+      title: "TME list copied",
+      description: `${selectedOrder.items.length} line(s). Paste into TME's quick-order form.`,
+    });
   };
 
   return (
@@ -416,6 +436,25 @@ export function Orders({ user }: OrdersProps) {
                           <div className="space-y-1">
                             {selectedOrder.items.map((item: any) => (
                               <div key={item.id} className="flex items-center gap-2 text-sm bg-gray-50 rounded p-1.5">
+                                {/* Picture first: a packer recognises a part by
+                                    sight far faster than by reading a symbol
+                                    like RC0402FR-0710KL. */}
+                                {item.imageUrl ? (
+                                  <img
+                                    src={item.imageUrl}
+                                    alt={item.title || item.sku}
+                                    className="w-12 h-12 object-contain bg-white rounded border flex-shrink-0"
+                                    loading="lazy"
+                                    // A dead supplier image must not leave a
+                                    // broken-image icon on the packing screen.
+                                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                                    data-testid={`img-item-${item.id}`}
+                                  />
+                                ) : (
+                                  <div className="w-12 h-12 rounded border bg-white flex items-center justify-center flex-shrink-0">
+                                    <Box className="w-5 h-5 text-gray-300" />
+                                  </div>
+                                )}
                                 <span className="w-6 h-6 bg-gray-200 rounded flex items-center justify-center text-xs font-bold flex-shrink-0">
                                   {item.quantity}x
                                 </span>
@@ -466,8 +505,9 @@ export function Orders({ user }: OrdersProps) {
                           <p className="font-bold">{selectedOrder.shippingName}</p>
                           <p>{selectedOrder.shippingAddressLine1}</p>
                           {selectedOrder.shippingAddressLine2 && <p>{selectedOrder.shippingAddressLine2}</p>}
-                          <p>{selectedOrder.shippingCity}, {selectedOrder.shippingPostalCode}</p>
-                          <p className="font-bold">{selectedOrder.shippingCountry}</p>
+                          <p>{[selectedOrder.shippingPostalCode, selectedOrder.shippingCity].filter(Boolean).join(" ")}</p>
+                          <p className="font-bold">{countryName(selectedOrder.shippingCountry)}</p>
+                          {selectedOrder.shippingPhone && <p>Tel: {selectedOrder.shippingPhone}</p>}
                           {selectedOrder.shippingPhone && (
                             <p className="text-gray-500 mt-1">Tel: {selectedOrder.shippingPhone}</p>
                           )}
@@ -551,7 +591,21 @@ export function Orders({ user }: OrdersProps) {
                   </div>
 
                   {/* Action Footer - Compact */}
-                  <div className="p-3 border-t bg-gray-50">
+                  <div className="p-3 border-t bg-gray-50 space-y-2">
+                    {/* Supplier order: TME has no cart API, so this hands the
+                        packer a paste-ready list instead of retyping symbols. */}
+                    {!!selectedOrder.items?.length && (
+                      <Button
+                        variant="outline"
+                        className="w-full h-8 text-xs"
+                        onClick={copyTmeList}
+                        data-testid="btn-copy-tme-list"
+                      >
+                        <Copy className="w-3 h-3 mr-2" />
+                        Copy TME order list ({selectedOrder.items.length})
+                      </Button>
+                    )}
+
                     {selectedOrder.status === 'new' && (
                       <Button
                         className="w-full h-10 bg-yellow-500 hover:bg-yellow-600"
@@ -618,6 +672,22 @@ export function Orders({ user }: OrdersProps) {
                         <p className="font-medium">Completed</p>
                       </div>
                     )}
+
+                    {/* Step back one status. Always available where a previous
+                        state exists, including after shipping — a wrong click
+                        otherwise needed a database edit to undo. */}
+                    {revertLabel(selectedOrder.status) && (
+                      <Button
+                        variant="ghost"
+                        className="w-full h-8 text-xs text-gray-600"
+                        onClick={() => handleRevertStatus(selectedOrder.id, selectedOrder.status)}
+                        disabled={updateStatusMutation.isPending}
+                        data-testid="btn-revert-status"
+                      >
+                        <Undo2 className="w-3 h-3 mr-2" />
+                        {revertLabel(selectedOrder.status)}
+                      </Button>
+                    )}
                   </div>
                 </>
               )}
@@ -638,18 +708,30 @@ export function Orders({ user }: OrdersProps) {
 
           {selectedOrder && (
             <div className="space-y-4">
+              {/* Postal order, country spelled out, phone included — carriers
+                  require a contact number for international services. */}
               <div className="p-4 bg-white border-2 border-black font-mono text-sm" style={{ fontFamily: 'monospace' }}>
                 <p className="font-bold text-lg mb-2">{selectedOrder.shippingName}</p>
                 <p>{selectedOrder.shippingAddressLine1}</p>
                 {selectedOrder.shippingAddressLine2 && <p>{selectedOrder.shippingAddressLine2}</p>}
-                <p>{selectedOrder.shippingCity}</p>
-                <p className="font-bold text-lg">{selectedOrder.shippingPostalCode}</p>
-                <p className="font-bold">{selectedOrder.shippingCountry}</p>
+                <p className="font-bold text-lg">
+                  {[selectedOrder.shippingPostalCode, selectedOrder.shippingCity].filter(Boolean).join(" ")}
+                </p>
+                {selectedOrder.shippingStateOrProvince && <p>{selectedOrder.shippingStateOrProvince}</p>}
+                <p className="font-bold text-lg uppercase">{countryName(selectedOrder.shippingCountry)}</p>
+                {selectedOrder.shippingPhone && (
+                  <p className="mt-2">Tel: {selectedOrder.shippingPhone}</p>
+                )}
               </div>
 
               <div className="text-xs text-gray-500 space-y-1">
                 <p>Order: #{selectedOrder.marketplaceOrderId}</p>
                 <p>Items: {selectedOrder.items?.length || 0}</p>
+                {!selectedOrder.shippingPhone && (
+                  <p className="text-amber-600">
+                    No phone number on this order — some carriers require one for international parcels.
+                  </p>
+                )}
               </div>
 
               <div className="flex gap-2">
