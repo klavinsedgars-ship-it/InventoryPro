@@ -186,6 +186,8 @@ export async function listProductsViaInventoryBulk(
   envIssues?: { level: string; key: string; message: string }[];
   locationBlocked?: boolean;
   locationError?: string;
+  taxonomyBlocked?: boolean;
+  taxonomyError?: string;
 }> {
   const results: ListBatchResult["results"] = [];
   let published = 0;
@@ -295,23 +297,49 @@ export async function listProductsViaInventoryBulk(
     // Resolved concurrently: each lookup is an independent cache hit or
     // Taxonomy call, and 25 in sequence added a full serial round-trip chain
     // to every batch before any listing work began.
-    const resolved = await mapPool(batch, CATEGORY_CONCURRENCY, async (product) => ({
-      product,
-      categoryId: await ebayInventoryApi.resolveCategory(product).catch(() => ""),
-    }));
+    const resolved = await mapPool(batch, CATEGORY_CONCURRENCY, async (product) =>
+      ({ product, ...(await ebayInventoryApi.resolveCategoryDetailed(product)
+        .catch(() => ({ id: "", transient: true }))) }),
+    );
     const withCat: Array<{ product: Product; categoryId: string }> = [];
-    for (const { product, categoryId } of resolved) {
+    let transientCategoryFailures = 0;
+    for (const { product, id: categoryId, transient } of resolved) {
       if (!categoryId) {
         failed++;
-        results.push({ sku: product.sku, ok: false, error: "no category resolved" });
+        if (transient) transientCategoryFailures++;
+        // A throttled Taxonomy service is not a property of the product. This
+        // distinction matters at ramp scale: treating it as one burned an
+        // attempt per product per tick and parked thousands of listable SKUs
+        // in a single night.
+        const msg = transient
+          ? "category lookup unavailable (eBay Taxonomy throttled) — will retry"
+          : "no category resolved";
+        results.push({ sku: product.sku, ok: false, error: msg });
         await storage.updateProduct(product.id, {
           ebayListingStatus: "error",
-          ebayListingError: "no category resolved",
+          ebayListingError: msg,
         });
-        await storage.incrementEbayListAttempts(product.id);
+        if (!transient) await storage.incrementEbayListAttempts(product.id);
         continue;
       }
       withCat.push({ product, categoryId });
+    }
+    // A whole batch lost to Taxonomy being unavailable is an account-level
+    // condition, not 25 unlucky products. Report it so the ramp stops rather
+    // than marching through the catalogue at ~25 failures per second — which
+    // is exactly how one throttled night produced 3,000 failures and 69
+    // listings.
+    if (withCat.length === 0 && transientCategoryFailures > 0) {
+      return {
+        attempted: allProducts.length,
+        published,
+        failed,
+        skipped,
+        limitHit,
+        taxonomyBlocked: true,
+        taxonomyError: "eBay Taxonomy unavailable (throttled). Set EBAY_DEFAULT_CATEGORY_ID to keep listing through it.",
+        results,
+      };
     }
     if (withCat.length === 0) continue;
     const productBySku = new Map(withCat.map(({ product }) => [product.sku, product]));

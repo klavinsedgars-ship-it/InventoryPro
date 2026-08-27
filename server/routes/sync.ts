@@ -611,6 +611,8 @@ export function registerSyncRoutes(app: Express) {
           // for a problem none of them caused.
           if (r.locationBlocked) {
             blockedReason = r.locationError ?? "merchant location unavailable";
+          } else if (r.taxonomyBlocked) {
+            blockedReason = r.taxonomyError ?? "eBay Taxonomy unavailable";
           } else if (r.envBlocked) {
             blockedReason = `listing env blocked: ${(r.envIssues ?? []).map((i: any) => i.key).join(", ")}`;
           }

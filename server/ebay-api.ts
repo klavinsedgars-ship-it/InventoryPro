@@ -4,6 +4,18 @@ import { generateEbayListing } from "./ebay-listing-template";
 import { calculateEbayStock } from "./stock-manager";
 import { findEbayCategoryForTMEProduct } from "./tme-ebay-category-mapping";
 import { imageProcessingService } from "./image-processing";
+import { isTransientTaxonomyStatus } from "./ebay-category-query";
+
+/**
+ * eBay's Taxonomy service was unavailable (throttled or erroring). Distinct
+ * from "eBay has no category for this" — the caller must retry, not conclude.
+ */
+export class TaxonomyUnavailableError extends Error {
+  constructor(message: string, readonly httpStatus: number) {
+    super(message);
+    this.name = "TaxonomyUnavailableError";
+  }
+}
 
 /**
  * Filter function to remove bundle-related words from eBay listings.
@@ -947,7 +959,15 @@ export class EbayApiService {
         },
       });
       if (!resp.ok) {
-        console.warn(`Taxonomy suggestions HTTP ${resp.status} for "${query}": ${(await resp.text()).slice(0, 200)}`);
+        const body = (await resp.text()).slice(0, 200);
+        console.warn(`Taxonomy suggestions HTTP ${resp.status} for "${query}": ${body}`);
+        // A throttled or broken Taxonomy service says nothing about the
+        // product. Returning null here made the caller record "no category
+        // resolved" and burn a listing attempt, so an eBay-side rate limit
+        // quietly parked thousands of perfectly listable products.
+        if (isTransientTaxonomyStatus(resp.status)) {
+          throw new TaxonomyUnavailableError(`Taxonomy HTTP ${resp.status}`, resp.status);
+        }
         return null;
       }
       const data = await resp.json();
@@ -963,6 +983,9 @@ export class EbayApiService {
       }
       return null;
     } catch (err) {
+      // Propagate transient failures so callers can retry rather than record a
+      // verdict; genuine "no suggestion" answers still resolve to null.
+      if (err instanceof TaxonomyUnavailableError) throw err;
       console.warn(`Taxonomy get_category_suggestions failed for "${query}":`, (err as Error).message);
       return null;
     }

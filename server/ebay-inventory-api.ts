@@ -17,7 +17,8 @@
  */
 import type { Product } from "@shared/schema";
 import { ebayOAuth } from "./ebay-oauth";
-import { ebayApi, filterBundleWords } from "./ebay-api";
+import { ebayApi, filterBundleWords, TaxonomyUnavailableError } from "./ebay-api";
+import { categoryQueryFor } from "./ebay-category-query";
 import { getShippingPolicyId } from "./shipping-policies";
 import { calculateEbayStock } from "./stock-manager";
 import { imageProcessingService } from "./image-processing";
@@ -682,14 +683,34 @@ export class EbayInventoryApiService {
     return out;
   }
 
-  /** Resolve a product's eBay category via the Taxonomy resolver (cached upstream). */
-  async resolveCategory(product: Product): Promise<string> {
+  /**
+   * Resolve a product's eBay category (Taxonomy, cached upstream by query).
+   *
+   * `transient: true` means the lookup could not be performed — eBay throttled
+   * or errored — as opposed to eBay having no category for this product. The
+   * caller must not treat the first as a defect of the product.
+   */
+  async resolveCategoryDetailed(product: Product): Promise<{ id: string; transient: boolean }> {
+    const fallback = process.env.EBAY_DEFAULT_CATEGORY_ID || "";
     try {
-      const s = await ebayApi.getSuggestedCategory(`${product.category} ${product.name}`.slice(0, 80));
-      return s?.id || process.env.EBAY_DEFAULT_CATEGORY_ID || "";
-    } catch {
-      return process.env.EBAY_DEFAULT_CATEGORY_ID || "";
+      // Query by supplier CATEGORY, not by product name: the query string is
+      // the cache key, so a per-product query meant a Taxonomy call per
+      // product and no reuse at all. See ebay-category-query.ts.
+      const s = await ebayApi.getSuggestedCategory(categoryQueryFor(product));
+      return { id: s?.id || fallback, transient: false };
+    } catch (e) {
+      if (e instanceof TaxonomyUnavailableError) {
+        // A configured default still lets the listing proceed; without one the
+        // caller retries this product on a later tick.
+        return { id: fallback, transient: !fallback };
+      }
+      return { id: fallback, transient: false };
     }
+  }
+
+  /** Back-compat wrapper: the id only. */
+  async resolveCategory(product: Product): Promise<string> {
+    return (await this.resolveCategoryDetailed(product)).id;
   }
 
   /** End a live listing by withdrawing its offer (keeps the inventory item). */
