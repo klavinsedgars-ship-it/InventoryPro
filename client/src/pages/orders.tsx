@@ -828,6 +828,17 @@ function OrderFinancials({ orderId }: { orderId: number }) {
         ))}
       </div>
 
+      {data.postage && (
+        <p className="text-[10px] text-gray-400 mt-1.5">
+          Postage: {data.postage.service === "paka" ? "Paka" : "Sīkpaka"}
+          {data.postage.tracked ? " (tracked)" : ""} · {data.postage.bandLabel} ·{" "}
+          {data.postage.contentGrams}g goods + {data.postage.packagingGrams}g packaging → {data.postage.country}
+          {!data.postage.weightComplete && (
+            <span className="text-amber-600"> · some products have no weight, so this band may be too low</span>
+          )}
+        </p>
+      )}
+
       {!e.fullyActual && (
         <p className="text-[10px] text-amber-600 mt-1.5">
           Some figures are modelled rather than charged — profit is approximate.

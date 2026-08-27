@@ -94,14 +94,15 @@ export function Reports({ user }: { user?: any }) {
                 />
               </div>
 
-              {dq && (dq.ordersMissingSupplierCost > 0 || !dq.postageCostTracked) && (
+              {dq && (dq.ordersMissingSupplierCost > 0 || dq.ordersWithIncompleteWeight > 0 || dq.ordersMissingActualFee > 0) && (
                 <Card className="border-amber-200 bg-amber-50">
                   <CardContent className="py-3 text-sm text-amber-900 flex gap-2">
                     <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
                     <div>
-                      <p className="font-medium">Profit shown is optimistic</p>
+                      <p className="font-medium">Some inputs are estimated</p>
                       <p className="text-xs mt-1">
-                        {!dq.postageCostTracked && "Postage paid to the carrier isn't recorded per order yet, so it isn't deducted. "}
+                        {dq.ordersWithIncompleteWeight > 0 &&
+                        `${dq.ordersWithIncompleteWeight} order(s) contain products with no weight recorded, so their postage band — and therefore cost — may be understated. `}
                         {dq.ordersMissingSupplierCost > 0 &&
                           `${dq.ordersMissingSupplierCost} order(s) have no supplier cost recorded. `}
                         {dq.ordersMissingActualFee > 0 &&
@@ -128,7 +129,7 @@ export function Reports({ user }: { user?: any }) {
                       { label: "Supplier cost (TME, 0% VAT)", amount: -t.supplierCost, kind: "out", note: "Bought under reverse charge, so no input VAT to reclaim" },
                       { label: "eBay fees", amount: -t.marketplaceFee, kind: "out", note: "Charged on the gross, VAT included" },
                       ...(t.paymentFee > 0 ? [{ label: "Payment processing", amount: -t.paymentFee, kind: "out" as const }] : []),
-                      ...(t.postageCost > 0 ? [{ label: "Postage", amount: -t.postageCost, kind: "out" as const }] : []),
+                      { label: "Postage (Latvijas Pasts)", amount: -t.postageCost, kind: "out", note: "Priced from the tariff book by weight band and destination" },
                       { label: "Packaging", amount: -t.packagingCost, kind: "out" },
                       { label: "Net profit", amount: t.netProfit, kind: "total" },
                     ]}

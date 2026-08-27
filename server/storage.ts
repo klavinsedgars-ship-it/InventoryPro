@@ -705,6 +705,37 @@ export class DatabaseStorage implements IStorage {
     return (q.rows ?? q ?? []) as any[];
   }
 
+  /**
+   * Shipped weight per order, in grams, from the products behind each line.
+   *
+   * Postage is billed by weight band, so the profit model cannot price a
+   * parcel without this. Lines whose product we never matched contribute
+   * nothing and are counted separately, so an under-weighed order can be
+   * reported as an estimate rather than passed off as measured.
+   */
+  async getOrderWeights(orderIds: number[]): Promise<Map<number, { grams: number; linesWithWeight: number; linesTotal: number }>> {
+    const out = new Map<number, { grams: number; linesWithWeight: number; linesTotal: number }>();
+    if (orderIds.length === 0) return out;
+    const q: any = await db.execute(sql`
+      SELECT oi.order_id                                              AS order_id,
+             COALESCE(SUM(oi.quantity * COALESCE(p.weight::numeric, 0)), 0)::float AS grams,
+             COUNT(*) FILTER (WHERE p.weight IS NOT NULL AND p.weight::numeric > 0)::int AS lines_with_weight,
+             COUNT(*)::int                                            AS lines_total
+      FROM order_items oi
+      LEFT JOIN products p ON p.id = oi.product_id
+      WHERE oi.order_id = ANY(${orderIds})
+      GROUP BY oi.order_id
+    `);
+    for (const r of (q.rows ?? q ?? [])) {
+      out.set(Number(r.order_id), {
+        grams: Number(r.grams) || 0,
+        linesWithWeight: Number(r.lines_with_weight) || 0,
+        linesTotal: Number(r.lines_total) || 0,
+      });
+    }
+    return out;
+  }
+
   /** Window totals, so the page can say how much data it is reasoning from. */
   async getSalesTotals(days: number): Promise<{ orders: number; units: number; revenue: number; cost: number }> {
     const q: any = await db.execute(sql`

@@ -4,6 +4,15 @@ import { storage } from "../storage";
 import { getFeeConfig } from "../fee-config";
 import { computeOrderEconomics, type EconomicsConfig } from "@shared/order-economics";
 import { vatForSale } from "@shared/vat-rates";
+import { quotePostage } from "@shared/latvian-post";
+
+/**
+ * Packaging adds weight, and postage is billed by band — a 495g order in a
+ * padded envelope is a 501g parcel and costs a band more. Configurable via
+ * PACKAGING_WEIGHT_G.
+ */
+const packagingGrams = () => Number(process.env.PACKAGING_WEIGHT_G) || 40;
+const mansPasts = () => process.env.LATVIAN_POST_MANS_PASTS === "true";
 
 /**
  * Financial reporting from realised orders.
@@ -83,7 +92,11 @@ export function registerReportsRoutes(app: Express) {
       const live = orders.filter(
         (o: any) => !["cancelled", "refunded", "returned"].includes(String(o.status).toLowerCase()),
       );
-      const itemsByOrder = await storage.getOrderItemsByOrderIds(live.map((o: any) => o.id));
+      const orderIds = live.map((o: any) => o.id);
+      const [itemsByOrder, weightsByOrder] = await Promise.all([
+        storage.getOrderItemsByOrderIds(orderIds),
+        storage.getOrderWeights(orderIds),
+      ]);
 
       const totals = emptyBucket();
       const byPeriod = new Map<string, any>();
@@ -93,6 +106,7 @@ export function registerReportsRoutes(app: Express) {
       const perOrder: any[] = [];
       let ordersMissingCost = 0;
       let ordersMissingFee = 0;
+      let ordersMissingWeight = 0;
 
       for (const o of live as any[]) {
         const items = itemsByOrder.get(o.id) ?? [];
@@ -102,6 +116,11 @@ export function registerReportsRoutes(app: Express) {
           0,
         );
 
+        const w = weightsByOrder.get(o.id) ?? { grams: 0, linesWithWeight: 0, linesTotal: 0 };
+        const postage = quotePostage(w.grams + packagingGrams(), o.shippingCountry, {
+          mansPastsDiscount: mansPasts(),
+        });
+
         const e = computeOrderEconomics(
           {
             itemsGross: Number(o.subtotal ?? 0),
@@ -110,14 +129,13 @@ export function registerReportsRoutes(app: Express) {
             supplierCost,
             actualMarketplaceFee: o.marketplaceFee != null ? Number(o.marketplaceFee) : null,
             actualPaymentFee: o.paymentProcessingFee != null ? Number(o.paymentProcessingFee) : null,
-            // Not captured per order yet; the ledger marks it as absent rather
-            // than pretending postage was free.
-            postageCost: 0,
+            postageCost: postage.cost,
           },
           config,
         );
 
         if (supplierCost <= 0) ordersMissingCost++;
+        if (w.linesWithWeight < w.linesTotal) ordersMissingWeight++;
         if (o.marketplaceFee == null) ordersMissingFee++;
 
         addTo(totals, e, units);
@@ -155,6 +173,7 @@ export function registerReportsRoutes(app: Express) {
           status: o.status,
           country: o.shippingCountry,
           units,
+          postage,
           ...e,
         });
       }
@@ -177,9 +196,10 @@ export function registerReportsRoutes(app: Express) {
         dataQuality: {
           ordersMissingSupplierCost: ordersMissingCost,
           ordersMissingActualFee: ordersMissingFee,
-          postageCostTracked: false,
+          postageCostTracked: true,
+          ordersWithIncompleteWeight: ordersMissingWeight,
           note:
-            "Postage paid to the carrier is not captured per order yet, so profit is overstated by roughly the shipping cost. Supplier cost is recorded at sale time on orders imported since that column existed.",
+            "Postage is priced from the Latvijas Pasts tariff book by weight band and destination, not from a carrier invoice — an order whose products carry no weight is under-weighed and therefore under-charged. Supplier cost is recorded at sale time on orders imported since that column existed.",
         },
         orders: perOrder.slice(0, 200),
       });
@@ -202,6 +222,10 @@ export function registerReportsRoutes(app: Express) {
         0,
       );
       const feeConfig = await getFeeConfig("ebay");
+      const w = (await storage.getOrderWeights([id])).get(id) ?? { grams: 0, linesWithWeight: 0, linesTotal: 0 };
+      const postage = quotePostage(w.grams + packagingGrams(), order.shippingCountry, {
+        mansPastsDiscount: mansPasts(),
+      });
 
       const economics = computeOrderEconomics(
         {
@@ -211,7 +235,7 @@ export function registerReportsRoutes(app: Express) {
           supplierCost,
           actualMarketplaceFee: order.marketplaceFee != null ? Number(order.marketplaceFee) : null,
           actualPaymentFee: order.paymentProcessingFee != null ? Number(order.paymentProcessingFee) : null,
-          postageCost: 0,
+          postageCost: postage.cost,
         },
         {
           feePct: feeConfig.ebayFvfPct,
@@ -225,6 +249,12 @@ export function registerReportsRoutes(app: Express) {
         success: true,
         orderId: id,
         vatRate: vatForSale(order.shippingCountry),
+        postage: {
+          ...postage,
+          contentGrams: w.grams,
+          packagingGrams: packagingGrams(),
+          weightComplete: w.linesTotal > 0 && w.linesWithWeight === w.linesTotal,
+        },
         items: items.map((i: any) => ({
           sku: i.sku,
           title: i.title,
