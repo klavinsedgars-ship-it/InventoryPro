@@ -61,16 +61,11 @@ export function validateListingEnv(): {
     });
   }
 
-  // Default category — fallback only, but if Taxonomy fails this is the
-  // last line; if it's unset some products will fail outright.
-  if (!process.env.EBAY_DEFAULT_CATEGORY_ID) {
-    issues.push({
-      level: "warning",
-      key: "EBAY_DEFAULT_CATEGORY_ID",
-      message:
-        "EBAY_DEFAULT_CATEGORY_ID is not set — if Taxonomy fails for a product it will be skipped.",
-    });
-  }
+  // Default category — optional since the fallback is learned from the
+  // categories eBay itself has returned for this marketplace (see
+  // ebayInventoryApi.defaultCategoryId). Set it only to pin a specific
+  // category; there is nothing to warn about when it is absent, and the old
+  // warning asked the operator to find an id that cannot be looked up by hand.
 
   return { ok: issues.every((i) => i.level !== "error"), issues };
 }

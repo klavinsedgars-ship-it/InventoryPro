@@ -1615,6 +1615,34 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
+  /**
+   * Every category suggestion eBay has given us for one marketplace tree.
+   * Used to derive a last-resort default category from answers eBay itself
+   * produced for this site, rather than a hardcoded id copied from another
+   * marketplace's tree.
+   */
+  async getCachedCategorySuggestions(treeId: string, limit = 2000): Promise<Array<{ id?: string; name?: string }>> {
+    try {
+      await this.ensureTaxonomyTable();
+      const rows: any = await db.execute(sql`
+        SELECT value FROM ebay_taxonomy_cache
+        WHERE cache_key LIKE ${`suggest:${treeId}:%`} AND expires_at > now()
+        LIMIT ${limit}
+      `);
+      const out: Array<{ id?: string; name?: string }> = [];
+      for (const r of (rows.rows ?? rows ?? [])) {
+        try {
+          const v = JSON.parse(r.value);
+          if (v?.id) out.push({ id: String(v.id), name: v.name ?? "" });
+        } catch { /* a malformed row must not sink the survey */ }
+      }
+      return out;
+    } catch (e) {
+      console.warn("taxonomy suggestion survey failed (ignored):", (e as Error).message);
+      return [];
+    }
+  }
+
   async setTaxonomyCache(key: string, value: any, ttlHours = 24 * 30): Promise<void> {
     try {
       await this.ensureTaxonomyTable();

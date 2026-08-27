@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { categoryQueryFor, isTransientTaxonomyStatus } from "./ebay-category-query";
+import { categoryQueryFor, isTransientTaxonomyStatus, pickDefaultCategory } from "./ebay-category-query";
 
 const p = (category: string, name: string) => ({ category, name }) as any;
 
@@ -44,5 +44,48 @@ describe("isTransientTaxonomyStatus", () => {
     for (const s of [400, 401, 403, 404]) {
       expect(isTransientTaxonomyStatus(s)).toBe(false);
     }
+  });
+});
+
+describe("pickDefaultCategory — learned, not hardcoded", () => {
+  const many = (id: string, n: number, name = "") => Array.from({ length: n }, () => ({ id, name }));
+
+  it("picks the category eBay has most often returned for this marketplace", () => {
+    // Correct by construction: every candidate is an answer eBay gave for THIS
+    // tree, so it cannot be an id borrowed from another site's category tree.
+    const picked = pickDefaultCategory([
+      ...many("4662", 7, "Elektronische Bauteile"),
+      ...many("58277", 2),
+      ...many("181939", 1),
+    ]);
+    expect(picked?.id).toBe("4662");
+    expect(picked?.name).toBe("Elektronische Bauteile");
+    expect(picked?.count).toBe(7);
+    expect(picked?.sample).toBe(10);
+    expect(picked?.share).toBeCloseTo(0.7);
+  });
+
+  it("returns null until there is enough evidence", () => {
+    // No fallback beats one fixed on a fluke: the ramp simply retries later.
+    expect(pickDefaultCategory(many("4662", 3))).toBeNull();
+    expect(pickDefaultCategory([])).toBeNull();
+  });
+
+  it("ignores malformed and empty entries", () => {
+    const picked = pickDefaultCategory([
+      ...many("4662", 6),
+      null,
+      undefined,
+      {},
+      { id: "" },
+    ]);
+    expect(picked?.id).toBe("4662");
+    expect(picked?.sample).toBe(6); // only real ids counted
+  });
+
+  it("breaks ties deterministically, so the default doesn't flap", () => {
+    const a = pickDefaultCategory([...many("999", 3), ...many("111", 3)]);
+    const b = pickDefaultCategory([...many("111", 3), ...many("999", 3)]);
+    expect(a?.id).toBe(b?.id);
   });
 });

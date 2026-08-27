@@ -18,7 +18,7 @@
 import type { Product } from "@shared/schema";
 import { ebayOAuth } from "./ebay-oauth";
 import { ebayApi, filterBundleWords, TaxonomyUnavailableError } from "./ebay-api";
-import { categoryQueryFor } from "./ebay-category-query";
+import { categoryQueryFor, pickDefaultCategory } from "./ebay-category-query";
 import { getShippingPolicyId } from "./shipping-policies";
 import { calculateEbayStock } from "./stock-manager";
 import { imageProcessingService } from "./image-processing";
@@ -691,7 +691,7 @@ export class EbayInventoryApiService {
    * caller must not treat the first as a defect of the product.
    */
   async resolveCategoryDetailed(product: Product): Promise<{ id: string; transient: boolean }> {
-    const fallback = process.env.EBAY_DEFAULT_CATEGORY_ID || "";
+    const fallback = await this.defaultCategoryId();
     try {
       // Query by supplier CATEGORY, not by product name: the query string is
       // the cache key, so a per-product query meant a Taxonomy call per
@@ -711,6 +711,67 @@ export class EbayInventoryApiService {
   /** Back-compat wrapper: the id only. */
   async resolveCategory(product: Product): Promise<string> {
     return (await this.resolveCategoryDetailed(product)).id;
+  }
+
+  /**
+   * The category to list under when Taxonomy can't answer.
+   *
+   * Learned, not hardcoded. eBay category ids are per-marketplace, so an id
+   * copied from another site's tree is at best useless and at worst wrong-but-
+   * valid — thousands of listings in the wrong place. Instead this takes the
+   * category eBay itself has most often returned for THIS marketplace tree:
+   * every candidate has already been accepted for live listings on this
+   * account, so it is correct by construction and needs nobody to look one up.
+   *
+   * Order: operator override -> learned value (refreshed weekly) -> none.
+   * Returning "" is a valid answer meaning "don't guess"; the ramp then retries
+   * the product on a later tick instead of filing it somewhere arbitrary.
+   */
+  private defaultCategoryMemo: { id: string; at: number } | null = null;
+  async defaultCategoryId(): Promise<string> {
+    const override = process.env.EBAY_DEFAULT_CATEGORY_ID;
+    if (override) return override;
+
+    // Per-process memo: this is consulted once per uncategorised product.
+    if (this.defaultCategoryMemo && Date.now() - this.defaultCategoryMemo.at < 10 * 60_000) {
+      return this.defaultCategoryMemo.id;
+    }
+
+    const treeId = process.env.EBAY_MARKETPLACE_SITE_ID || "77";
+    const WEEK_MS = 7 * 24 * 3600 * 1000;
+    try {
+      const settings = await storage.getMarketplaceSettings("ebay");
+      const stored = settings.find((s: any) => s.setting === "default_category_id")?.value ?? "";
+      const learnedAt = Number(settings.find((s: any) => s.setting === "default_category_learned_at")?.value ?? 0);
+      if (stored && Date.now() - learnedAt < WEEK_MS) {
+        this.defaultCategoryMemo = { id: stored, at: Date.now() };
+        return stored;
+      }
+
+      // Re-learn: the catalogue's shape changes as new categories are imported.
+      const suggestions = await storage.getCachedCategorySuggestions(treeId);
+      const picked = pickDefaultCategory(suggestions);
+      if (picked) {
+        await storage.setMarketplaceSetting({ marketplace: "ebay", setting: "default_category_id", value: picked.id });
+        await storage.setMarketplaceSetting({
+          marketplace: "ebay",
+          setting: "default_category_learned_at",
+          value: String(Date.now()),
+        });
+        console.log(
+          `🗂️ default eBay category learned for tree ${treeId}: ${picked.id} (${picked.name}) — ` +
+          `${picked.count}/${picked.sample} of cached suggestions`,
+        );
+        this.defaultCategoryMemo = { id: picked.id, at: Date.now() };
+        return picked.id;
+      }
+      // Not enough evidence yet: keep any previous value rather than nothing.
+      this.defaultCategoryMemo = { id: stored, at: Date.now() };
+      return stored;
+    } catch (e) {
+      console.warn("default category lookup failed (ignored):", (e as Error).message);
+      return "";
+    }
   }
 
   /** End a live listing by withdrawing its offer (keeps the inventory item). */

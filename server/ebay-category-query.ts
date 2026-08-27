@@ -39,3 +39,42 @@ export function categoryQueryFor(product: Pick<Product, "category" | "name">): s
 export function isTransientTaxonomyStatus(status: number): boolean {
   return status === 429 || status === 408 || status >= 500;
 }
+
+/**
+ * Choose a last-resort category from categories eBay has already given us.
+ *
+ * Hardcoding an id is not safe: eBay category ids are per-marketplace, so a
+ * value copied from the US tree can be meaningless (or worse, wrong but valid)
+ * on eBay.de. Every cached suggestion, by contrast, is eBay's own answer for
+ * THIS marketplace tree, and the popular ones have already produced live
+ * listings on this account — so the fallback is correct by construction and
+ * needs no operator to look one up.
+ *
+ * Returns null until there is enough evidence; no fallback is better than one
+ * fixed on a fluke.
+ */
+export function pickDefaultCategory(
+  suggestions: Array<{ id?: string; name?: string } | null | undefined>,
+  opts: { minSample?: number } = {},
+): { id: string; name: string; count: number; sample: number; share: number } | null {
+  const minSample = opts.minSample ?? 5;
+  const counts = new Map<string, { name: string; count: number }>();
+  let sample = 0;
+  for (const s of suggestions) {
+    const id = s?.id ? String(s.id) : "";
+    if (!id) continue;
+    sample++;
+    const e = counts.get(id);
+    if (e) e.count++;
+    else counts.set(id, { name: s?.name ?? "", count: 1 });
+  }
+  if (sample < minSample) return null;
+  let best: { id: string; name: string; count: number } | null = null;
+  for (const [id, e] of Array.from(counts.entries())) {
+    if (!best || e.count > best.count || (e.count === best.count && id < best.id)) {
+      best = { id, name: e.name, count: e.count };
+    }
+  }
+  if (!best) return null;
+  return { ...best, sample, share: best.count / sample };
+}

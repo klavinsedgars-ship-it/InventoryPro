@@ -663,6 +663,42 @@ export function registerDebugRoutes(app: Express) {
    *
    * Read-only: no writes, no eBay calls.
    */
+  /**
+   * What the ramp will use as a category when Taxonomy can't answer, and the
+   * evidence behind it. The fallback is learned from suggestions eBay returned
+   * for this marketplace tree, so it is worth being able to see which one won.
+   */
+  app.get("/api/__default-category", async (_req, res) => {
+    try {
+      const { ebayInventoryApi } = await import("../ebay-inventory-api");
+      const { pickDefaultCategory } = await import("../ebay-category-query");
+      const treeId = process.env.EBAY_MARKETPLACE_SITE_ID || "77";
+      const suggestions = await storage.getCachedCategorySuggestions(treeId);
+      const picked = pickDefaultCategory(suggestions);
+      const top = new Map<string, { name: string; count: number }>();
+      for (const s of suggestions) {
+        if (!s.id) continue;
+        const e = top.get(s.id);
+        if (e) e.count++;
+        else top.set(s.id, { name: s.name ?? "", count: 1 });
+      }
+      res.json({
+        ok: true,
+        treeId,
+        inUse: await ebayInventoryApi.defaultCategoryId(),
+        source: process.env.EBAY_DEFAULT_CATEGORY_ID ? "env override" : "learned from eBay's own suggestions",
+        learned: picked,
+        cachedSuggestions: suggestions.length,
+        distribution: Array.from(top.entries())
+          .map(([id, e]) => ({ id, name: e.name, count: e.count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 10),
+      });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  });
+
   app.get("/api/__ramp-block-check", async (req, res) => {
     try {
       const { tmeApiV2, shippableNow, deliveryShippable, incomingSupplyDate } = await import("../tme-api-v2");
