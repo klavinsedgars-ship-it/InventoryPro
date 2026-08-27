@@ -25,12 +25,18 @@ export function Reports({ user }: { user?: any }) {
   const [days, setDays] = useState(30);
   const [groupBy, setGroupBy] = useState<(typeof GROUPINGS)[number]>("day");
 
-  const { data, isLoading, isFetching, refetch } = useQuery<any>({
+  const { data, isLoading, isFetching, refetch, error } = useQuery<any>({
     queryKey: ["/api/reports/financials", days, groupBy],
     queryFn: async () => {
       const r = await fetch(`/api/reports/financials?days=${days}&groupBy=${groupBy}`, { credentials: "include" });
-      if (!r.ok) throw new Error(`Request failed: ${r.status}`);
-      return r.json();
+      const body = await r.text();
+      if (!r.ok) {
+        // Surface the server's own message: a blank page tells nobody anything.
+        let detail = body.slice(0, 300);
+        try { detail = JSON.parse(body).error ?? detail; } catch { /* not JSON */ }
+        throw new Error(`${r.status}: ${detail}`);
+      }
+      return JSON.parse(body);
     },
   });
 
@@ -67,6 +73,25 @@ export function Reports({ user }: { user?: any }) {
           </div>
 
           {isLoading && <div className="text-gray-400">Loading financials…</div>}
+
+          {error && (
+            <Card className="border-red-200 bg-red-50">
+              <CardContent className="py-4 text-sm text-red-900">
+                <p className="font-medium flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4" /> Could not load the report
+                </p>
+                <p className="text-xs mt-1 font-mono break-all">{(error as Error).message}</p>
+              </CardContent>
+            </Card>
+          )}
+
+          {!isLoading && !error && !t && (
+            <Card>
+              <CardContent className="py-8 text-center text-gray-500">
+                No data returned for this window.
+              </CardContent>
+            </Card>
+          )}
 
           {noData && (
             <Card>
@@ -105,6 +130,7 @@ export function Reports({ user }: { user?: any }) {
                         `${dq.ordersWithIncompleteWeight} order(s) contain products with no weight recorded, so their postage band — and therefore cost — may be understated. `}
                         {dq.ordersMissingSupplierCost > 0 &&
                           `${dq.ordersMissingSupplierCost} order(s) have no supplier cost recorded. `}
+                        {dq.weightError && `Parcel weights unavailable (${dq.weightError}) — postage is not deducted. `}
                         {dq.ordersMissingActualFee > 0 &&
                           `${dq.ordersMissingActualFee} order(s) use an estimated eBay fee rather than the charged amount.`}
                       </p>

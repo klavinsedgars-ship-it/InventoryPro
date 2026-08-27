@@ -716,22 +716,28 @@ export class DatabaseStorage implements IStorage {
   async getOrderWeights(orderIds: number[]): Promise<Map<number, { grams: number; linesWithWeight: number; linesTotal: number }>> {
     const out = new Map<number, { grams: number; linesWithWeight: number; linesTotal: number }>();
     if (orderIds.length === 0) return out;
-    const q: any = await db.execute(sql`
-      SELECT oi.order_id                                              AS order_id,
-             COALESCE(SUM(oi.quantity * COALESCE(p.weight::numeric, 0)), 0)::float AS grams,
-             COUNT(*) FILTER (WHERE p.weight IS NOT NULL AND p.weight::numeric > 0)::int AS lines_with_weight,
-             COUNT(*)::int                                            AS lines_total
-      FROM order_items oi
-      LEFT JOIN products p ON p.id = oi.product_id
-      WHERE oi.order_id = ANY(${orderIds})
-      GROUP BY oi.order_id
-    `);
-    for (const r of (q.rows ?? q ?? [])) {
-      out.set(Number(r.order_id), {
-        grams: Number(r.grams) || 0,
-        linesWithWeight: Number(r.lines_with_weight) || 0,
-        linesTotal: Number(r.lines_total) || 0,
-      });
+    // Query builder rather than raw SQL: `= ANY($1)` with a JS array depends
+    // on how the driver encodes array parameters, and the aggregation is
+    // trivial to do here over a handful of rows.
+    const rows = await db
+      .select({
+        orderId: orderItems.orderId,
+        quantity: orderItems.quantity,
+        weight: products.weight,
+      })
+      .from(orderItems)
+      .leftJoin(products, eq(products.id, orderItems.productId))
+      .where(inArray(orderItems.orderId, orderIds));
+
+    for (const r of rows) {
+      const bucket = out.get(r.orderId) ?? { grams: 0, linesWithWeight: 0, linesTotal: 0 };
+      const grams = Number(r.weight ?? 0);
+      bucket.linesTotal += 1;
+      if (Number.isFinite(grams) && grams > 0) {
+        bucket.linesWithWeight += 1;
+        bucket.grams += grams * (r.quantity || 0);
+      }
+      out.set(r.orderId, bucket);
     }
     return out;
   }

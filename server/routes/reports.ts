@@ -95,10 +95,17 @@ export function registerReportsRoutes(app: Express) {
         (o: any) => !["cancelled", "refunded", "returned"].includes(String(o.status).toLowerCase()),
       );
       const orderIds = live.map((o: any) => o.id);
-      const [itemsByOrder, weightsByOrder] = await Promise.all([
-        storage.getOrderItemsByOrderIds(orderIds),
-        storage.getOrderWeights(orderIds),
-      ]);
+      const itemsByOrder = await storage.getOrderItemsByOrderIds(orderIds);
+      // Weights only affect the postage line. If they can't be read, report
+      // the rest rather than failing the whole page over one column.
+      let weightsByOrder = new Map<number, { grams: number; linesWithWeight: number; linesTotal: number }>();
+      let weightError: string | null = null;
+      try {
+        weightsByOrder = await storage.getOrderWeights(orderIds);
+      } catch (e) {
+        weightError = (e as Error).message;
+        console.error("order weights unavailable:", e);
+      }
 
       const totals = emptyBucket();
       const byPeriod = new Map<string, any>();
@@ -198,6 +205,7 @@ export function registerReportsRoutes(app: Express) {
           ordersMissingActualFee: ordersMissingFee,
           postageCostTracked: true,
           ordersWithIncompleteWeight: ordersMissingWeight,
+          weightError,
           note:
             "Postage is priced from the Latvijas Pasts tariff book by weight band and destination, not from a carrier invoice — an order whose products carry no weight is under-weighed and therefore under-charged. Supplier cost is recorded at sale time on orders imported since that column existed.",
         },
@@ -222,7 +230,10 @@ export function registerReportsRoutes(app: Express) {
         0,
       );
       const feeConfig = await getFeeConfig("ebay");
-      const w = (await storage.getOrderWeights([id])).get(id) ?? { grams: 0, linesWithWeight: 0, linesTotal: 0 };
+      const w = (await storage.getOrderWeights([id]).catch((e) => {
+        console.error("order weight unavailable:", e);
+        return new Map();
+      })).get(id) ?? { grams: 0, linesWithWeight: 0, linesTotal: 0 };
       const postage = quotePostage(w.grams + packagingGrams(), order.shippingCountry, shipOpts());
 
       const economics = computeOrderEconomics(

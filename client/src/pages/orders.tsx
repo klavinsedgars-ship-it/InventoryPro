@@ -750,16 +750,31 @@ export function Orders({ user }: OrdersProps) {
  * numbers and the period totals can never tell different stories.
  */
 function OrderFinancials({ orderId }: { orderId: number }) {
-  const { data, isLoading } = useQuery<any>({
+  const { data, isLoading, error } = useQuery<any>({
     queryKey: ["/api/reports/order", orderId],
     queryFn: async () => {
       const r = await fetch(`/api/reports/order/${orderId}`, { credentials: "include" });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.json();
+      const body = await r.text();
+      if (!r.ok) {
+        let detail = body.slice(0, 200);
+        try { detail = JSON.parse(body).error ?? detail; } catch { /* not JSON */ }
+        throw new Error(`${r.status}: ${detail}`);
+      }
+      return JSON.parse(body);
     },
   });
 
   if (isLoading) return <div className="text-xs text-gray-400 border rounded-lg p-2">Calculating…</div>;
+  // Say why rather than rendering nothing — a silent blank is what sent us
+  // looking for a bug in the wrong place.
+  if (error) {
+    return (
+      <div className="border border-red-200 bg-red-50 rounded-lg p-2 text-xs text-red-900">
+        <p className="font-medium">Could not calculate financials</p>
+        <p className="font-mono text-[10px] mt-1 break-all">{(error as Error).message}</p>
+      </div>
+    );
+  }
   const e = data?.economics;
   if (!e) return null;
 
