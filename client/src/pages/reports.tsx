@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, RefreshCw, Receipt, Globe, Truck, Calendar } from "lucide-react";
+import { FinancialStatBar } from "@/components/financial-stat-bar";
 
 const WINDOWS = [
   { days: 7, label: "7 days" },
@@ -103,21 +104,8 @@ export function Reports({ user }: { user?: any }) {
 
           {t && t.orders > 0 && (
             <>
-              {/* The money story in one row, in the order it actually happens */}
-              <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-                <Stat label="Orders" value={String(t.orders)} sub={`${t.units} units`} />
-                <Stat label="Buyer paid" value={eur(t.grossReceived)} sub="VAT inclusive" />
-                <Stat label="VAT owed" value={eur(t.vatOwed)} sub="not yours" warn />
-                <Stat label="Net revenue" value={eur(t.netRevenue)} sub="ex-VAT" />
-                <Stat label="Total costs" value={eur(t.totalCosts)} sub="goods + fees" />
-                <Stat
-                  label="Net profit"
-                  value={eur(t.netProfit)}
-                  sub={`${pct(t.netMarginPct)} of net`}
-                  good={t.netProfit > 0}
-                  warn={t.netProfit <= 0}
-                />
-              </div>
+              {/* Same component the Dashboard uses, so the two cannot drift */}
+              <FinancialStatBar totals={t} />
 
               {dq && (dq.ordersMissingSupplierCost > 0 || dq.ordersWithIncompleteWeight > 0 || dq.ordersMissingActualFee > 0) && (
                 <Card className="border-amber-200 bg-amber-50">
@@ -245,17 +233,6 @@ export function Reports({ user }: { user?: any }) {
   );
 }
 
-function Stat({ label, value, sub, warn, good }: { label: string; value: string; sub?: string; warn?: boolean; good?: boolean }) {
-  return (
-    <Card>
-      <CardContent className="pt-4 pb-3">
-        <div className="text-xs text-gray-500">{label}</div>
-        <div className={`text-xl font-semibold ${good ? "text-green-700" : warn ? "text-amber-700" : ""}`}>{value}</div>
-        {sub && <div className="text-[11px] text-gray-400 mt-0.5">{sub}</div>}
-      </CardContent>
-    </Card>
-  );
-}
 
 function Waterfall({ rows }: { rows: Array<{ label: string; amount: number; kind: "in" | "out" | "total"; note?: string }> }) {
   const max = Math.max(...rows.map((r) => Math.abs(r.amount)), 1);

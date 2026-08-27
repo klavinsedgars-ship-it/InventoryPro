@@ -5,6 +5,8 @@ import { Header } from "@/components/layout/header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatNumber } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { FinancialStatBar } from "@/components/financial-stat-bar";
 import {
   Package,
   ShoppingCart,
@@ -127,6 +129,10 @@ export function Dashboard({ user }: DashboardProps) {
         />
 
         <div className="p-6 space-y-6">
+          {/* Money first: the point of opening this page in the morning is to
+              see what sold and what it earned, not the catalogue size. */}
+          <TodayFinancials />
+
           {/* A failed metrics fetch must not render as an empty install:
               "0 products, no sync" and "the dashboard can't load" are very
               different situations (see the August outage). */}
@@ -244,6 +250,80 @@ export function Dashboard({ user }: DashboardProps) {
           </Card>
         </div>
       </div>
+    </div>
+  );
+}
+
+
+/**
+ * Today's trading, at the top of the dashboard.
+ *
+ * "Today" is the seller's calendar day, resolved server-side from the
+ * browser's timezone offset — a UTC boundary would drop last night's orders
+ * out of the figure in the early hours.
+ */
+function TodayFinancials() {
+  const [period, setPeriod] = useState<"today" | "7" | "30">("today");
+
+  const query =
+    period === "today"
+      ? `period=today&tzOffset=${new Date().getTimezoneOffset()}`
+      : `days=${period}`;
+
+  const { data, isLoading, error } = useQuery<any>({
+    queryKey: ["/api/reports/financials", "bar", period],
+    queryFn: async () => {
+      const r = await fetch(`/api/reports/financials?${query}&groupBy=day`, { credentials: "include" });
+      const body = await r.text();
+      if (!r.ok) {
+        let detail = body.slice(0, 200);
+        try { detail = JSON.parse(body).error ?? detail; } catch { /* not JSON */ }
+        throw new Error(`${r.status}: ${detail}`);
+      }
+      return JSON.parse(body);
+    },
+  });
+
+  const totals = data?.totals;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-medium text-gray-700">
+          {period === "today" ? "Today" : `Last ${period} days`}
+        </h2>
+        <div className="flex gap-1">
+          {([["today", "Today"], ["7", "7d"], ["30", "30d"]] as const).map(([v, label]) => (
+            <Button
+              key={v}
+              size="sm"
+              variant={period === v ? "secondary" : "ghost"}
+              className="h-7 px-2 text-xs"
+              onClick={() => setPeriod(v)}
+              data-testid={`btn-period-${v}`}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      {isLoading && <div className="text-sm text-gray-400">Loading today's figures…</div>}
+
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <strong>Financials failed to load</strong>{" "}
+          <span className="font-mono text-xs">{(error as Error).message}</span>
+        </div>
+      )}
+
+      {totals && totals.orders > 0 && <FinancialStatBar totals={totals} compact />}
+
+      {totals && totals.orders === 0 && (
+        <div className="rounded-lg border bg-white px-4 py-3 text-sm text-gray-500">
+          No orders {period === "today" ? "yet today" : `in the last ${period} days`}.
+        </div>
+      )}
     </div>
   );
 }

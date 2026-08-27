@@ -5,6 +5,7 @@ import { getFeeConfig } from "../fee-config";
 import { computeOrderEconomics, type EconomicsConfig } from "@shared/order-economics";
 import { vatForSale } from "@shared/vat-rates";
 import { quotePostage, trackedShippingDefault } from "@shared/latvian-post";
+import { resolveReportWindow } from "@shared/report-window";
 
 /**
  * Packaging adds weight, and postage is billed by band — a 495g order in a
@@ -74,13 +75,15 @@ export function registerReportsRoutes(app: Express) {
 
   app.get("/api/reports/financials", requireAuth, async (req, res) => {
     try {
-      const days = Math.min(1825, Math.max(1, Number(req.query.days) || 30));
       const groupBy = ["day", "week", "month", "year"].includes(String(req.query.groupBy))
         ? String(req.query.groupBy)
         : "day";
-
-      const from = new Date();
-      from.setDate(from.getDate() - days);
+      const window = resolveReportWindow({
+        period: req.query.period as string,
+        days: Number(req.query.days),
+        tzOffsetMin: Number(req.query.tzOffset),
+      });
+      const from = window.from;
 
       const feeConfig = await getFeeConfig("ebay");
       const config: EconomicsConfig = {
@@ -189,7 +192,7 @@ export function registerReportsRoutes(app: Express) {
 
       res.json({
         success: true,
-        window: { days, from: from.toISOString(), groupBy },
+        window: { label: window.label, period: window.period, from: from.toISOString(), groupBy },
         totals: round(totals),
         byPeriod: Array.from(byPeriod.values()).map(round).sort((a, b) => (a.period < b.period ? 1 : -1)),
         byCountry: Array.from(byCountry.values()).map(round).sort((a, b) => b.netProfit - a.netProfit),
