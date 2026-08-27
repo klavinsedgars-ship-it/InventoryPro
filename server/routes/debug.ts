@@ -702,6 +702,92 @@ export function registerDebugRoutes(app: Express) {
     }
   });
 
+  /**
+   * Did eBay really return no orders, or did we drop them?
+   *
+   * A sync reporting 0 new / 0 updated / 0 failed is ambiguous: an account
+   * with no sales and a parser that discards every order look identical from
+   * the outside. This shows eBay's own totals next to what we hold, so the
+   * three cases separate: no sales, an auth/scope problem, or an import bug.
+   */
+  app.get("/api/__ebay-orders-probe", async (req, res) => {
+    try {
+      const days = Math.min(365, Math.max(1, Number(req.query.days) || 90));
+      const { ebayOrdersApi } = await import("../ebay-orders-api");
+      const from = new Date();
+      from.setDate(from.getDate() - days);
+
+      const out: any = { days, windowFrom: from.toISOString() };
+
+      // 1) Filtered exactly as the sync asks for it.
+      try {
+        const r: any = await ebayOrdersApi.getOrders({
+          creationDateFrom: from.toISOString(),
+          creationDateTo: new Date().toISOString(),
+          limit: 10,
+        });
+        out.filtered = {
+          total: r?.total ?? null,
+          returned: (r?.orders ?? []).length,
+          firstOrder: (r?.orders ?? [])[0]
+            ? {
+                orderId: r.orders[0].orderId,
+                creationDate: r.orders[0].creationDate,
+                orderFulfillmentStatus: r.orders[0].orderFulfillmentStatus,
+                lineItemCount: (r.orders[0].lineItems ?? []).length,
+                firstSku: r.orders[0].lineItems?.[0]?.sku ?? null,
+              }
+            : null,
+        };
+      } catch (e) {
+        out.filtered = { error: (e as Error).message };
+      }
+
+      // 2) UNFILTERED. If this returns orders while the filtered call doesn't,
+      //    the date filter is the problem, not the account.
+      try {
+        const r: any = await ebayOrdersApi.getOrders({ limit: 10 });
+        out.unfiltered = {
+          total: r?.total ?? null,
+          returned: (r?.orders ?? []).length,
+          newestCreationDate: (r?.orders ?? [])[0]?.creationDate ?? null,
+        };
+      } catch (e) {
+        out.unfiltered = { error: (e as Error).message };
+      }
+
+      // 3) What we actually hold, so "eBay has them but we don't" is visible.
+      try {
+        const { db } = await import("../db");
+        const { sql } = await import("drizzle-orm");
+        const q: any = await db.execute(sql`
+          SELECT COUNT(*)::int AS orders,
+                 MIN(order_date) AS oldest,
+                 MAX(order_date) AS newest
+          FROM orders`);
+        const items: any = await db.execute(sql`SELECT COUNT(*)::int AS line_items FROM order_items`);
+        out.local = { ...((q.rows ?? q)[0] ?? {}), ...((items.rows ?? items)[0] ?? {}) };
+      } catch (e) {
+        out.local = { error: (e as Error).message };
+      }
+
+      out.verdict =
+        out.filtered?.error || out.unfiltered?.error
+          ? "eBay call failed — check the error (scope/auth most likely)"
+          : (out.unfiltered?.total ?? 0) === 0
+            ? "eBay reports no orders on this account at all"
+            : (out.filtered?.total ?? 0) === 0
+              ? "eBay has orders, but none in the requested window — check the date filter"
+              : (out.local?.orders ?? 0) === 0
+                ? "eBay returned orders but none were imported — import bug"
+                : "orders present on both sides";
+
+      res.json({ ok: true, ...out });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  });
+
   app.get("/api/__ramp-block-check", async (req, res) => {
     try {
       const { tmeApiV2, shippableNow, deliveryShippable, incomingSupplyDate } = await import("../tme-api-v2");
