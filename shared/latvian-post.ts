@@ -33,6 +33,26 @@ export const TRACKING_FEE = 2.54;
 /** Discount for booking through manspasts.lv, on tracked/registered items. */
 export const MANS_PASTS_DISCOUNT = 0.46;
 
+/**
+ * Do we buy tracking? Default: no.
+ *
+ * Tracking costs a flat EUR 2.54 on every parcel. Self-insuring instead — just
+ * posting a replacement when something goes missing — costs the loss rate
+ * times the price of a resend, roughly EUR 8 for a typical order of components
+ * plus postage. Those break even at a loss rate around 30%; real postal loss
+ * is a couple of percent. For a basket of cheap parts, paying for tracking on
+ * every parcel costs an order of magnitude more than replacing the few that go
+ * astray.
+ *
+ * What it buys instead of money: an eBay "item not received" case is lost by
+ * default without tracking, and tracked-dispatch rates feed seller standards.
+ * That is the real trade, and it is a business call — SHIP_TRACKED=true flips
+ * it without touching code.
+ */
+export function trackedShippingDefault(): boolean {
+  return typeof process !== "undefined" && process.env?.SHIP_TRACKED === "true";
+}
+
 export interface CountryTariff {
   name: string;
   /** Sīkpaka, untracked, by weight band. */

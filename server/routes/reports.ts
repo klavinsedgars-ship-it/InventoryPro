@@ -4,7 +4,7 @@ import { storage } from "../storage";
 import { getFeeConfig } from "../fee-config";
 import { computeOrderEconomics, type EconomicsConfig } from "@shared/order-economics";
 import { vatForSale } from "@shared/vat-rates";
-import { quotePostage } from "@shared/latvian-post";
+import { quotePostage, trackedShippingDefault } from "@shared/latvian-post";
 
 /**
  * Packaging adds weight, and postage is billed by band — a 495g order in a
@@ -13,6 +13,8 @@ import { quotePostage } from "@shared/latvian-post";
  */
 const packagingGrams = () => Number(process.env.PACKAGING_WEIGHT_G) || 40;
 const mansPasts = () => process.env.LATVIAN_POST_MANS_PASTS === "true";
+// Report what we actually pay: the same tracked/untracked choice pricing uses.
+const shipOpts = () => ({ mansPastsDiscount: mansPasts(), tracked: trackedShippingDefault() });
 
 /**
  * Financial reporting from realised orders.
@@ -117,9 +119,7 @@ export function registerReportsRoutes(app: Express) {
         );
 
         const w = weightsByOrder.get(o.id) ?? { grams: 0, linesWithWeight: 0, linesTotal: 0 };
-        const postage = quotePostage(w.grams + packagingGrams(), o.shippingCountry, {
-          mansPastsDiscount: mansPasts(),
-        });
+        const postage = quotePostage(w.grams + packagingGrams(), o.shippingCountry, shipOpts());
 
         const e = computeOrderEconomics(
           {
@@ -223,9 +223,7 @@ export function registerReportsRoutes(app: Express) {
       );
       const feeConfig = await getFeeConfig("ebay");
       const w = (await storage.getOrderWeights([id])).get(id) ?? { grams: 0, linesWithWeight: 0, linesTotal: 0 };
-      const postage = quotePostage(w.grams + packagingGrams(), order.shippingCountry, {
-        mansPastsDiscount: mansPasts(),
-      });
+      const postage = quotePostage(w.grams + packagingGrams(), order.shippingCountry, shipOpts());
 
       const economics = computeOrderEconomics(
         {

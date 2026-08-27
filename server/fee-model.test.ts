@@ -45,25 +45,26 @@ describe("fee-model floor is the inverse of net-profit", () => {
 describe("postage comes from the real tariff table", () => {
   const cfg = { ...DEFAULT_FEE_CONFIG.ebay };
 
-  it("charges Germany's TRACKED rate, not the derived untracked one", () => {
-    // 200g of goods + 40g packaging = 240g → the 101-500g band.
-    // Tracked to DE is 8.66; the old bandPrice/1.15 model produced ~6.17,
-    // which is the UNTRACKED rate — short by the 2.54 tracking fee.
+  it("uses the published untracked rate by default", () => {
+    // 200g of goods + 40g packaging = 240g → the 101-500g band. Untracked to
+    // DE is 6.12 — the real tariff, where the old model inferred ~6.17 from
+    // the buyer's shipping charge and happened to land nearby.
     const b = calculateNetProfit({
       salePrice: 20, packageSupplierCost: 5, weightGrams: 200,
       marketplace: "ebay", config: cfg, destinationCountry: "DE",
     });
+    expect(b.actualPostageCost).toBe(6.12);
+    expect(b.postageTracked).toBe(false);
+  });
+
+  it("charges the tracked rate when tracking is opted into", () => {
+    const b = calculateNetProfit({
+      salePrice: 20, packageSupplierCost: 5, weightGrams: 200,
+      marketplace: "ebay", config: cfg, destinationCountry: "DE", trackedShipping: true,
+    });
     expect(b.actualPostageCost).toBe(8.66);
     expect(b.postageBand).toBe("100-500g");
     expect(b.postageTracked).toBe(true);
-  });
-
-  it("prices untracked when tracking is turned off", () => {
-    const b = calculateNetProfit({
-      salePrice: 20, packageSupplierCost: 5, weightGrams: 200,
-      marketplace: "ebay", config: cfg, destinationCountry: "DE", trackedShipping: false,
-    });
-    expect(b.actualPostageCost).toBe(6.12);
   });
 
   it("counts packaging weight, which can push an order into the next band", () => {
@@ -77,8 +78,8 @@ describe("postage comes from the real tariff table", () => {
       salePrice: 20, packageSupplierCost: 5, weightGrams: 480,
       marketplace: "ebay", config: cfg, destinationCountry: "DE",
     });
-    expect(light.actualPostageCost).toBe(8.66);
-    expect(heavy.actualPostageCost).toBe(10.7);
+    expect(light.actualPostageCost).toBe(6.12);
+    expect(heavy.actualPostageCost).toBe(8.16);
   });
 
   it("raises the price floor by the postage that was previously missed", () => {

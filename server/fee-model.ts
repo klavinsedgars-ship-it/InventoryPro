@@ -19,7 +19,7 @@
  * marketplaceSettings by the caller). Only dependency is the shipping bands.
  */
 import { getShippingPolicyByWeight } from "./shipping-policies";
-import { quotePostage } from "@shared/latvian-post";
+import { quotePostage, trackedShippingDefault } from "@shared/latvian-post";
 
 export type Marketplace = "ebay" | "amazon";
 
@@ -130,7 +130,7 @@ export interface NetProfitInput {
   config: FeeConfig;
   /** Where we'd post it. Defaults to the marketplace's own country. */
   destinationCountry?: string;
-  /** eBay expects tracking, so this defaults to true. */
+  /** Defaults to trackedShippingDefault() — untracked unless opted in. */
   trackedShipping?: boolean;
 }
 
@@ -145,7 +145,7 @@ function pricingCountry(explicit?: string): string {
   return bySite[process.env.EBAY_MARKETPLACE_SITE_ID || "77"] || "DE";
 }
 
-const trackedByDefault = () => process.env.SHIP_TRACKED !== "false";
+const trackedByDefault = trackedShippingDefault;
 const packagingGramsForPricing = () => Number(process.env.PACKAGING_WEIGHT_G) || 40;
 
 /**

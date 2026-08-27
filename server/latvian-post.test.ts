@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import {
   quotePostage, LATVIAN_POST_TARIFFS, TRACKING_FEE, MANS_PASTS_DISCOUNT,
+  trackedShippingDefault,
 } from "@shared/latvian-post";
 
 describe("tariff table matches the published book", () => {
@@ -76,5 +77,38 @@ describe("quotePostage", () => {
   it("handles a missing country without throwing", () => {
     expect(() => quotePostage(250, null)).not.toThrow();
     expect(quotePostage(250, null).estimated).toBe(true);
+  });
+});
+
+describe("trackedShippingDefault — untracked unless opted in", () => {
+  const saved = process.env.SHIP_TRACKED;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.SHIP_TRACKED;
+    else process.env.SHIP_TRACKED = saved;
+  });
+
+  it("defaults to untracked", () => {
+    // Tracking is €2.54 a parcel; replacing the rare lost order is cheaper for
+    // a basket of low-value components.
+    delete process.env.SHIP_TRACKED;
+    expect(trackedShippingDefault()).toBe(false);
+  });
+
+  it("opts in only on an explicit true", () => {
+    process.env.SHIP_TRACKED = "true";
+    expect(trackedShippingDefault()).toBe(true);
+    process.env.SHIP_TRACKED = "false";
+    expect(trackedShippingDefault()).toBe(false);
+    process.env.SHIP_TRACKED = "yes";
+    expect(trackedShippingDefault()).toBe(false);
+  });
+
+  it("shows why: tracking costs far more than self-insuring at real loss rates", () => {
+    const perParcelTrackingCost = quotePostage(250, "DE", { tracked: true }).cost
+      - quotePostage(250, "DE", { tracked: false }).cost;
+    expect(perParcelTrackingCost).toBeCloseTo(TRACKING_FEE, 2);
+    const resendCost = 3 /* goods */ + quotePostage(250, "DE", { tracked: false }).cost;
+    const breakEvenLossRate = perParcelTrackingCost / resendCost;
+    expect(breakEvenLossRate).toBeGreaterThan(0.25); // ~28% — far above real postal loss
   });
 });
