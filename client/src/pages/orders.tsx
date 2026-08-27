@@ -507,7 +507,6 @@ export function Orders({ user }: OrdersProps) {
                           {selectedOrder.shippingAddressLine2 && <p>{selectedOrder.shippingAddressLine2}</p>}
                           <p>{[selectedOrder.shippingPostalCode, selectedOrder.shippingCity].filter(Boolean).join(" ")}</p>
                           <p className="font-bold">{countryName(selectedOrder.shippingCountry)}</p>
-                          {selectedOrder.shippingPhone && <p>Tel: {selectedOrder.shippingPhone}</p>}
                           {selectedOrder.shippingPhone && (
                             <p className="text-gray-500 mt-1">Tel: {selectedOrder.shippingPhone}</p>
                           )}
@@ -542,22 +541,10 @@ export function Orders({ user }: OrdersProps) {
                           Financials
                         </CollapsibleTrigger>
                         <CollapsibleContent className="mt-1">
-                          <div className="border rounded p-2 text-xs space-y-0.5">
-                            <div className="flex justify-between">
-                              <span>Subtotal</span>
-                              <span>{formatCurrency(parseFloat(selectedOrder.subtotal))}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span>Shipping</span>
-                              <span>{formatCurrency(parseFloat(selectedOrder.shippingCost))}</span>
-                            </div>
-                            {selectedOrder.marketplaceFee && (
-                              <div className="flex justify-between text-red-600">
-                                <span>Fee</span>
-                                <span>-{formatCurrency(parseFloat(selectedOrder.marketplaceFee))}</span>
-                              </div>
-                            )}
-                          </div>
+                          {/* The full ledger, not just the three lines eBay
+                              reports: those show money in and the fee, which
+                              looks like profit until VAT and cost come out. */}
+                          <OrderFinancials orderId={selectedOrder.id} />
                         </CollapsibleContent>
                       </Collapsible>
 
@@ -588,13 +575,6 @@ export function Orders({ user }: OrdersProps) {
                         </CollapsibleContent>
                       </Collapsible>
                     </div>
-                  </div>
-
-                  {/* Money: what this order actually earned, step by step.
-                      Loaded per order so the ledger and the Reports page run
-                      the same calculation over the same row. */}
-                  <div className="px-3 pb-3">
-                    <OrderFinancials orderId={selectedOrder.id} />
                   </div>
 
                   {/* Action Footer - Compact */}
@@ -826,6 +806,25 @@ function OrderFinancials({ orderId }: { orderId: number }) {
             </span>
           </div>
         ))}
+      </div>
+
+      {/* Both margins, because they answer different questions and quoting one
+          alone is how a VAT-inclusive sale gets mistaken for a healthy one. */}
+      <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t">
+        <div>
+          <div className="text-[10px] text-gray-400">Margin on net revenue</div>
+          <div className={`text-sm font-semibold ${e.netProfit < 0 ? "text-red-600" : "text-green-700"}`}>
+            {e.netMarginPct == null ? "—" : `${e.netMarginPct.toFixed(1)}%`}
+            <span className="text-[10px] font-normal text-gray-400 ml-1">of {money(e.netRevenue)}</span>
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] text-gray-400">Margin on what buyer paid</div>
+          <div className="text-sm font-medium text-gray-600">
+            {e.grossMarginPct == null ? "—" : `${e.grossMarginPct.toFixed(1)}%`}
+            <span className="text-[10px] font-normal text-gray-400 ml-1">of {money(e.grossReceived)}</span>
+          </div>
+        </div>
       </div>
 
       {data.postage && (
