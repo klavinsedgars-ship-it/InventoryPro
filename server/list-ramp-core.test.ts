@@ -80,7 +80,7 @@ describe("error classification — what may burn a listing attempt", () => {
   // with something wrong with them; these three categories are not that.
   const LIMIT_RX = /\blimit\b|too many|rate.?limit|2001\b|21917|exceed/i;
   const POLICY_RX = /\b25019\b|eBay-Grunds|nicht erlaubt|prohibited|restricted item|violat/i;
-  const TRANSIENT_RX = /system error|internal server error|temporarily unavailable|try again later|service unavailable|\b50[0234]\b/i;
+  const TRANSIENT_RX = /system error|internal server error|temporarily unavailable|try again|service unavailable|\b50[0234]\b|\b25604\b|availability not found|verfügbarkeit nicht gefunden/i;
 
   it("treats an eBay outage as transient, not as a product defect", () => {
     const err = "publish: 25001 A system error has occurred. Internal Server Error";
@@ -104,6 +104,27 @@ describe("error classification — what may burn a listing attempt", () => {
 
   it("does not mistake a plain user error for a system error", () => {
     // "A user error has occurred" must not match the transient rule.
+    expect(TRANSIENT_RX.test("25002 A user error has occurred. Das Feld EAN fehlt.")).toBe(false);
+  });
+});
+
+describe("25604 'Availability not found' is a propagation delay, not a defect", () => {
+  const TRANSIENT_RX = /system error|internal server error|temporarily unavailable|try again|service unavailable|\b50[0234]\b|\b25604\b|availability not found|verfügbarkeit nicht gefunden/i;
+  const POLICY_RX = /\b25019\b|eBay-Grunds|nicht erlaubt|prohibited|restricted item|violat/i;
+
+  it("classifies the live error text as transient in both languages", () => {
+    // Seen at 2-6% of publishes once the ramp reached ~800 listings a tick.
+    // The offer is created moments before the publish that rejects it, and the
+    // products all carry stock, so burning an attempt would park good SKUs.
+    const en = "publish: 25604 Input error. Seller Inventory Service can not publish the data. Availability not found. Please try again or contact customer service..";
+    const de = "25604 Eingabefehler. Seller Inventory Service kann die Daten nicht veröffentlichen. Verfügbarkeit nicht gefunden. Bitte versuchen Sie es noch einmal.";
+    expect(TRANSIENT_RX.test(en)).toBe(true);
+    expect(TRANSIENT_RX.test(de)).toBe(true);
+    expect(POLICY_RX.test(en)).toBe(false);
+  });
+
+  it("still treats a genuine payload fault as the product's problem", () => {
+    expect(TRANSIENT_RX.test("inventory_item: 25717 imageUrls darf nicht Null oder leer sein.")).toBe(false);
     expect(TRANSIENT_RX.test("25002 A user error has occurred. Das Feld EAN fehlt.")).toBe(false);
   });
 });

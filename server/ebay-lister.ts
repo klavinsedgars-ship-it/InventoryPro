@@ -42,8 +42,16 @@ const POLICY_RX = /\b25019\b|eBay-Grunds|nicht erlaubt|prohibited|restricted ite
  * These must not burn an attempt. Nothing is wrong with the product, and three
  * unlucky ticks would otherwise park a perfectly listable SKU permanently
  * until someone noticed and requeued it.
+ *
+ * 25604 "Availability not found" belongs here too, though it reads like a
+ * payload fault. The inventory item is written and the offer created moments
+ * before the publish that rejects it, the products carry stock (the candidate
+ * query and the shippability guard both require it), and eBay's own message
+ * ends "Please try again" — the signature of a service that has not yet
+ * propagated the availability it was just given. It tracks listing volume,
+ * ~2-6% per tick, rather than any property of the products.
  */
-const TRANSIENT_RX = /system error|internal server error|temporarily unavailable|try again later|service unavailable|\b50[0234]\b/i;
+const TRANSIENT_RX = /system error|internal server error|temporarily unavailable|try again|service unavailable|\b50[0234]\b|\b25604\b|availability not found|verfügbarkeit nicht gefunden/i;
 
 export async function listProductsViaInventory(allProducts: Product[]): Promise<ListBatchResult & { skipped: number }> {
   const results: ListBatchResult["results"] = [];
@@ -387,17 +395,25 @@ export async function listProductsViaInventoryBulk(
     }
     if (toPublish.length === 0) continue;
 
-    // 4) Publish. eBay returns transient 500s under load (~2% observed), and
-    //    the offer is already created — so one immediate retry of just those
-    //    recovers them in this run instead of leaving them for the next tick.
+    // 4) Publish. Some publishes fail for reasons that have nothing to do with
+    //    the listing: eBay 500s under load, and 25604 "Availability not found"
+    //    where the inventory item we just wrote hasn't propagated yet. The
+    //    offer already exists, so retrying just those recovers them in this run
+    //    instead of leaving them for the next tick.
+    //
+    //    Backoff, not a single retry: a propagation delay that outlasts one
+    //    second is exactly the case a fixed 1s retry cannot fix, and at ~800
+    //    listings a tick a few percent is dozens of products an hour.
     let pubRes = await ebayInventoryApi.bulkPublishOffer(toPublish);
-    const transientRetries = toPublish.filter((o) => {
-      const r = pubRes.get(o.sku);
-      return !(r?.ok && r.listingId) && TRANSIENT_RX.test(String(r?.error));
-    });
-    if (transientRetries.length > 0) {
-      await new Promise((res) => setTimeout(res, 1000));
-      const retryRes = await ebayInventoryApi.bulkPublishOffer(transientRetries);
+    const RETRY_DELAYS_MS = [1000, 4000];
+    for (const delay of RETRY_DELAYS_MS) {
+      const retryable = toPublish.filter((o) => {
+        const r = pubRes.get(o.sku);
+        return !(r?.ok && r.listingId) && TRANSIENT_RX.test(String(r?.error));
+      });
+      if (retryable.length === 0) break;
+      await new Promise((res) => setTimeout(res, delay));
+      const retryRes = await ebayInventoryApi.bulkPublishOffer(retryable);
       // Merge: a successful retry replaces the transient failure, and a second
       // failure keeps the newer message.
       pubRes = new Map(pubRes);
