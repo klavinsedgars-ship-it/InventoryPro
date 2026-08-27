@@ -402,6 +402,59 @@ export function registerSyncRoutes(app: Express) {
   app.get("/api/cron/daily-sync", cronHandler);
   app.post("/api/cron/daily-sync", cronHandler);
 
+  /**
+   * Orders: eBay -> DB.
+   *
+   * syncOrdersFromEbay's own comments reason about "the cron runs hourly
+   * anyway", but no cron ever called it — the only caller was a button. So
+   * order history, and with it every realised-profit figure, was only as
+   * complete as the last time somebody clicked sync.
+   *
+   * Short window by default: this runs frequently, and re-scanning 30 days
+   * every 20 minutes is pointless once the backlog is in. Pass ?daysBack= for
+   * a deeper catch-up.
+   */
+  const ordersCronHandler = async (req: any, res: any) => {
+    const auth = req.headers["authorization"] || "";
+    const cronSecret = process.env.CRON_SECRET;
+    const isVercelCron = cronSecret && auth === `Bearer ${cronSecret}`;
+    const isAuthed = !!req.session?.userId || process.env.BYPASS_AUTH === "true";
+    if (!isVercelCron && !isAuthed) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const daysBack = Math.min(
+      90,
+      Math.max(1, Number(req.query?.daysBack) || Number(process.env.ORDER_SYNC_DAYS_BACK) || 3),
+    );
+
+    const { withLease, describeRefusal } = await import("../job-lease");
+    const { leaseStore } = await import("../storage");
+    const leased = await withLease(leaseStore, "order_sync", { ttlSeconds: 90 }, async () => {
+      const { ebayOrdersApi } = await import("../ebay-orders-api");
+      const r = await ebayOrdersApi.syncOrdersFromEbay(daysBack);
+      // Only log when something happened or went wrong: at 20-minute cadence a
+      // line per run would bury everything else in the activity feed.
+      if (r.synced > 0 || r.updated > 0 || r.failed > 0) {
+        await storage.createSyncLog({
+          source: "ebay",
+          operation: "order_sync",
+          status: r.failed > 0 ? "partial" : "success",
+          message: `Orders: ${r.synced} new, ${r.updated} updated${r.failed ? `, ${r.failed} failed` : ""} (last ${daysBack}d)`,
+          details: JSON.stringify({ ...r, daysBack, errors: r.errors.slice(0, 10) }),
+        });
+      }
+      return { success: true, ...r, daysBack };
+    });
+
+    if (!leased.ran) {
+      return res.json({ success: true, skipped: true, reason: describeRefusal("order_sync", leased) });
+    }
+    return res.json(leased.result);
+  };
+  app.get("/api/cron/orders", ordersCronHandler);
+  app.post("/api/cron/orders", ordersCronHandler);
+
   // Auto-message cron: sends delayed (days-after-delivery) rule messages and
   // due one-off scheduled messages. Needed because the setInterval scheduler
   // only runs on a long-lived server, which Vercel isn't — so without this
