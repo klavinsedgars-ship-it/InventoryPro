@@ -19,6 +19,7 @@
  * marketplaceSettings by the caller). Only dependency is the shipping bands.
  */
 import { getShippingPolicyByWeight } from "./shipping-policies";
+import { quotePostage } from "@shared/latvian-post";
 
 export type Marketplace = "ebay" | "amazon";
 
@@ -29,7 +30,11 @@ export interface FeeConfig {
   amazonReferralPct: number; // Amazon referral fraction, e.g. 0.15
   vatPct: number; // VAT fraction, e.g. 0.21 (LV); price is VAT-inclusive
   packagingCost: number; // flat packaging cost per order, e.g. 0.30
-  postageMarkup: number; // carrier cost = bandPrice / (1 + postageMarkup), e.g. 0.15
+  /**
+   * @deprecated Postage cost now comes from the Latvijas Pasts tariff table
+   * (shared/latvian-post.ts). Kept so existing saved settings still load.
+   */
+  postageMarkup: number;
   targetMinNetProfit: number; // floor: every sale must net at least this, e.g. 4.00
 }
 
@@ -42,7 +47,10 @@ export interface ProfitBreakdown {
   marketplaceFee: number; // FVF (+ fixed) or Amazon referral
   vatAmount: number;
   supplierCost: number; // package cost (unit price * MOQ)
-  actualPostageCost: number; // what the seller pays the carrier
+  actualPostageCost: number; // what the seller pays the carrier (real tariff)
+  postageBand?: string;
+  postageCountry?: string;
+  postageTracked?: boolean;
   packagingCost: number;
   netProfit: number;
   netMarginPct: number; // netProfit / grossRevenue * 100
@@ -120,6 +128,45 @@ export interface NetProfitInput {
   weightGrams: number | null | undefined;
   marketplace: Marketplace;
   config: FeeConfig;
+  /** Where we'd post it. Defaults to the marketplace's own country. */
+  destinationCountry?: string;
+  /** eBay expects tracking, so this defaults to true. */
+  trackedShipping?: boolean;
+}
+
+/** The country most parcels go to, from the marketplace we sell on. */
+function pricingCountry(explicit?: string): string {
+  if (explicit) return explicit.toUpperCase();
+  if (process.env.PRICING_POSTAGE_COUNTRY) return process.env.PRICING_POSTAGE_COUNTRY.toUpperCase();
+  const bySite: Record<string, string> = {
+    "0": "US", "3": "GB", "77": "DE", "71": "FR", "101": "IT", "186": "ES",
+    "205": "IE", "23": "BE", "146": "NL", "16": "AU",
+  };
+  return bySite[process.env.EBAY_MARKETPLACE_SITE_ID || "77"] || "DE";
+}
+
+const trackedByDefault = () => process.env.SHIP_TRACKED !== "false";
+const packagingGramsForPricing = () => Number(process.env.PACKAGING_WEIGHT_G) || 40;
+
+/**
+ * What the carrier will actually charge us, from the published tariffs.
+ *
+ * This used to be derived from what the BUYER is charged
+ * (bandPrice / 1.15), which inverted cause and effect: the buyer's shipping
+ * charge is a pricing decision, not evidence of our cost. Calibrated against
+ * the real table, that assumption reproduced Germany's UNTRACKED rate almost
+ * exactly — so on tracked post, which eBay effectively requires, every price
+ * floor was short by the €2.54 tracking fee.
+ */
+function realPostageCost(input: { weightGrams: number | null | undefined; destinationCountry?: string; trackedShipping?: boolean }) {
+  return quotePostage(
+    (input.weightGrams ?? 0) + packagingGramsForPricing(),
+    pricingCountry(input.destinationCountry),
+    {
+      tracked: input.trackedShipping ?? trackedByDefault(),
+      mansPastsDiscount: process.env.LATVIAN_POST_MANS_PASTS === "true",
+    },
+  );
 }
 
 /**
@@ -136,7 +183,8 @@ export function calculateNetProfit(input: NetProfitInput): ProfitBreakdown {
   const grossRevenue = salePrice + buyerShipping;
   const { feePct, fixed } = feeFractionAndFixed(config);
   const marketplaceFee = feePct * grossRevenue + fixed;
-  const actualPostageCost = buyerShipping / (1 + config.postageMarkup);
+  const postage = realPostageCost(input);
+  const actualPostageCost = postage.cost;
   const vatAmount = (config.vatPct * salePrice) / (1 + config.vatPct);
 
   const netProfit =
@@ -151,7 +199,7 @@ export function calculateNetProfit(input: NetProfitInput): ProfitBreakdown {
 
   const assumptions = [
     `VAT ${(config.vatPct * 100).toFixed(0)}% on item price (VAT-inclusive); shipping VAT ~ washes against input VAT on postage.`,
-    `Carrier cost = band price / ${(1 + config.postageMarkup).toFixed(2)} (${(config.postageMarkup * 100).toFixed(0)}% packaging markup baked into buyer shipping).`,
+    `Postage €${postage.cost.toFixed(2)}: Latvijas Pasts ${postage.service === "paka" ? "Paka" : "Sīkpaka"}${postage.tracked ? " tracked" : ""}, ${postage.bandLabel} to ${postage.country}${postage.estimated ? " (estimated — no tariff for that country)" : ""}.`,
     marketplace === "amazon"
       ? `Amazon referral ${(config.amazonReferralPct * 100).toFixed(1)}% of item + shipping.`
       : `eBay FVF ${(config.ebayFvfPct * 100).toFixed(1)}% of item + shipping, plus €${config.ebayFixedFee.toFixed(2)} fixed.`,
@@ -162,6 +210,9 @@ export function calculateNetProfit(input: NetProfitInput): ProfitBreakdown {
     salePrice: round2(salePrice),
     buyerShipping: round2(buyerShipping),
     shippingBand: policy?.name ?? null,
+    postageBand: postage.bandLabel,
+    postageCountry: postage.country,
+    postageTracked: postage.tracked,
     grossRevenue: round2(grossRevenue),
     marketplaceFee: round2(marketplaceFee),
     vatAmount: round2(vatAmount),
@@ -180,6 +231,8 @@ export interface ProfitFloorInput {
   weightGrams: number | null | undefined;
   marketplace: Marketplace;
   config: FeeConfig;
+  destinationCountry?: string;
+  trackedShipping?: boolean;
 }
 
 /**
@@ -202,7 +255,7 @@ export function calculateProfitFloorPrice(input: ProfitFloorInput): number {
 
   const { feePct, fixed } = feeFractionAndFixed(config);
   const vatFrac = config.vatPct / (1 + config.vatPct);
-  const actualPostageCost = buyerShipping / (1 + config.postageMarkup);
+  const actualPostageCost = realPostageCost(input).cost;
 
   const denom = 1 - feePct - vatFrac;
   if (denom <= 0) {

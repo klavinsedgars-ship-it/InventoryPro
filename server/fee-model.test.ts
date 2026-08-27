@@ -41,3 +41,68 @@ describe("fee-model floor is the inverse of net-profit", () => {
     expect(cheap - dear).toBeCloseTo(7, 5); // €7 more cost -> €7 less profit
   });
 });
+
+describe("postage comes from the real tariff table", () => {
+  const cfg = { ...DEFAULT_FEE_CONFIG.ebay };
+
+  it("charges Germany's TRACKED rate, not the derived untracked one", () => {
+    // 200g of goods + 40g packaging = 240g → the 101-500g band.
+    // Tracked to DE is 8.66; the old bandPrice/1.15 model produced ~6.17,
+    // which is the UNTRACKED rate — short by the 2.54 tracking fee.
+    const b = calculateNetProfit({
+      salePrice: 20, packageSupplierCost: 5, weightGrams: 200,
+      marketplace: "ebay", config: cfg, destinationCountry: "DE",
+    });
+    expect(b.actualPostageCost).toBe(8.66);
+    expect(b.postageBand).toBe("100-500g");
+    expect(b.postageTracked).toBe(true);
+  });
+
+  it("prices untracked when tracking is turned off", () => {
+    const b = calculateNetProfit({
+      salePrice: 20, packageSupplierCost: 5, weightGrams: 200,
+      marketplace: "ebay", config: cfg, destinationCountry: "DE", trackedShipping: false,
+    });
+    expect(b.actualPostageCost).toBe(6.12);
+  });
+
+  it("counts packaging weight, which can push an order into the next band", () => {
+    // 480g of goods is in the 101-500g band, but with 40g of packaging the
+    // parcel is 520g and costs a band more. Ignoring that loses €2.04 a time.
+    const light = calculateNetProfit({
+      salePrice: 20, packageSupplierCost: 5, weightGrams: 400,
+      marketplace: "ebay", config: cfg, destinationCountry: "DE",
+    });
+    const heavy = calculateNetProfit({
+      salePrice: 20, packageSupplierCost: 5, weightGrams: 480,
+      marketplace: "ebay", config: cfg, destinationCountry: "DE",
+    });
+    expect(light.actualPostageCost).toBe(8.66);
+    expect(heavy.actualPostageCost).toBe(10.7);
+  });
+
+  it("raises the price floor by the postage that was previously missed", () => {
+    // The floor must now recover the true carrier cost, so it sits above what
+    // the old model demanded — this is the correction to every listing price.
+    const floor = calculateProfitFloorPrice({
+      packageSupplierCost: 5, weightGrams: 200,
+      marketplace: "ebay", config: cfg, destinationCountry: "DE",
+    });
+    const achieved = calculateNetProfit({
+      salePrice: floor, packageSupplierCost: 5, weightGrams: 200,
+      marketplace: "ebay", config: cfg, destinationCountry: "DE",
+    });
+    // The floor is defined as the price that exactly hits the target profit.
+    expect(achieved.netProfit).toBeCloseTo(cfg.targetMinNetProfit, 1);
+    expect(achieved.meetsTarget).toBe(true);
+  });
+
+  it("still returns a usable floor for a destination with no tariff row", () => {
+    const floor = calculateProfitFloorPrice({
+      packageSupplierCost: 5, weightGrams: 200,
+      marketplace: "ebay", config: cfg, destinationCountry: "ZZ",
+    });
+    expect(Number.isFinite(floor)).toBe(true);
+    expect(floor).toBeGreaterThan(0);
+  });
+});
