@@ -15,6 +15,7 @@ import { registerPricingRoutes } from "./routes/pricing";
 import { registerEbayListingRoutes } from "./routes/ebay-listing";
 import { registerDebugRoutes } from "./routes/debug";
 import { registerResearchRoutes } from "./routes/research";
+import { registerAnalyticsRoutes } from "./routes/analytics";
 import {
   insertCategorySchema,
   loginSchema,
@@ -548,6 +549,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   registerRepricingRoutes(app);
   registerResearchRoutes(app);
+  registerAnalyticsRoutes(app);
   registerSyncRoutes(app);
 
   // Image processing endpoints

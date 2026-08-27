@@ -567,6 +567,116 @@ export class DatabaseStorage implements IStorage {
     return r?.c ?? 0;
   }
 
+  /**
+   * Realised sales per SKU over a window, from order_items.
+   *
+   * Cancelled and refunded orders are excluded: they are not demand, and
+   * counting them would point the ramp at products that were sent back.
+   */
+  async getSkuSales(days: number, limit = 100): Promise<any[]> {
+    const q: any = await db.execute(sql`
+      SELECT
+        oi.sku                                              AS sku,
+        MAX(oi.title)                                       AS title,
+        MAX(p.category)                                     AS category,
+        SUM(oi.quantity)::int                               AS units,
+        SUM(oi.total_price)::float                          AS revenue,
+        SUM(COALESCE(oi.supplier_cost_at_sale, 0) * oi.quantity)::float AS cost,
+        COUNT(DISTINCT o.id)::int                           AS orders,
+        MIN(o.order_date)                                   AS first_sold,
+        MAX(o.order_date)                                   AS last_sold
+      FROM order_items oi
+      JOIN orders o ON o.id = oi.order_id
+      LEFT JOIN products p ON p.id = oi.product_id
+      WHERE o.order_date >= now() - make_interval(days => ${days})
+        AND lower(o.status) NOT IN ('cancelled', 'refunded', 'returned')
+      GROUP BY oi.sku
+      ORDER BY units DESC
+      LIMIT ${limit}
+    `);
+    return (q.rows ?? q ?? []) as any[];
+  }
+
+  /**
+   * Sales per category, joined to what the catalogue still holds there.
+   *
+   * The catalogue side is the point: sales alone say what earned, but the
+   * decision needs how much is left to list in the same place. Counted with
+   * the ramp's own definition of listable (in stock, not excluded, not
+   * TME-blocked) so the number means "the ramp could list these", not "these
+   * exist".
+   */
+  async getCategorySales(days: number, limit = 50): Promise<any[]> {
+    const q: any = await db.execute(sql`
+      WITH sales AS (
+        SELECT
+          COALESCE(NULLIF(p.category, ''), 'Uncategorised')  AS category,
+          SUM(oi.quantity)::int                              AS units,
+          SUM(oi.total_price)::float                         AS revenue,
+          SUM(COALESCE(oi.supplier_cost_at_sale, 0) * oi.quantity)::float AS cost,
+          COUNT(DISTINCT o.id)::int                          AS orders,
+          COUNT(DISTINCT oi.sku)::int                        AS distinct_skus
+        FROM order_items oi
+        JOIN orders o ON o.id = oi.order_id
+        LEFT JOIN products p ON p.id = oi.product_id
+        WHERE o.order_date >= now() - make_interval(days => ${days})
+          AND lower(o.status) NOT IN ('cancelled', 'refunded', 'returned')
+        GROUP BY 1
+      ),
+      catalogue AS (
+        SELECT
+          COALESCE(NULLIF(category, ''), 'Uncategorised')    AS category,
+          COUNT(*)::int                                      AS products_in_catalogue,
+          COUNT(*) FILTER (WHERE listed_on_ebay)::int        AS products_listed,
+          COUNT(*) FILTER (
+            WHERE NOT listed_on_ebay
+              AND stock >= 1
+              AND COALESCE(exclude_from_listing, false) = false
+              AND (image_url IS NOT NULL AND image_url <> '')
+              AND (
+                tme_product_status IS NULL
+                OR tme_product_status !~ 'CANNOT_BE_ORDERED|NOT_IN_OFFER|PRODUCT_BLOCKED|ONLY_FOR_SPECIAL_ORDER|INVALID'
+              )
+          )::int                                             AS products_listable
+        FROM products
+        WHERE supplier = 'TME'
+        GROUP BY 1
+      )
+      SELECT
+        s.category, s.units, s.revenue, s.cost, s.orders, s.distinct_skus,
+        COALESCE(c.products_in_catalogue, 0) AS products_in_catalogue,
+        COALESCE(c.products_listed, 0)       AS products_listed,
+        COALESCE(c.products_listable, 0)     AS products_listable
+      FROM sales s
+      LEFT JOIN catalogue c ON c.category = s.category
+      ORDER BY s.revenue DESC
+      LIMIT ${limit}
+    `);
+    return (q.rows ?? q ?? []) as any[];
+  }
+
+  /** Window totals, so the page can say how much data it is reasoning from. */
+  async getSalesTotals(days: number): Promise<{ orders: number; units: number; revenue: number; cost: number }> {
+    const q: any = await db.execute(sql`
+      SELECT
+        COUNT(DISTINCT o.id)::int                           AS orders,
+        COALESCE(SUM(oi.quantity), 0)::int                  AS units,
+        COALESCE(SUM(oi.total_price), 0)::float             AS revenue,
+        COALESCE(SUM(COALESCE(oi.supplier_cost_at_sale, 0) * oi.quantity), 0)::float AS cost
+      FROM order_items oi
+      JOIN orders o ON o.id = oi.order_id
+      WHERE o.order_date >= now() - make_interval(days => ${days})
+        AND lower(o.status) NOT IN ('cancelled', 'refunded', 'returned')
+    `);
+    const r = (q.rows ?? q ?? [])[0] ?? {};
+    return {
+      orders: Number(r.orders) || 0,
+      units: Number(r.units) || 0,
+      revenue: Number(r.revenue) || 0,
+      cost: Number(r.cost) || 0,
+    };
+  }
+
   async getTmeProductCount(): Promise<number> {
     const [r] = await db.select({ c: count() }).from(products).where(eq(products.supplier, "TME"));
     return r?.c ?? 0;
