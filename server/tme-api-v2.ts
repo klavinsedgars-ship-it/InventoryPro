@@ -17,12 +17,18 @@
  * This client is additive: getPricesAndStocksCompat() returns the exact v1
  * shape, so the sync can switch over without touching downstream code.
  */
+import { RateLimiter, intervalForRps } from "./rate-limiter";
+
 const V2_BASE = "https://api.tme.eu";
 
 // TME support (2026-08), v2 limits: /products/data 4 req/sec, everything
 // else 10 req/sec. No published daily quota.
 const RPS_PRODUCTS_DATA = Number(process.env.TME_V2_RPS_DATA) || 4;
 const RPS_DEFAULT = Number(process.env.TME_V2_RPS_DEFAULT) || 10;
+
+// Module-level, so every caller in this process shares one schedule. A
+// per-instance limiter would let concurrent slices each keep their own.
+const tmeRateLimiter = new RateLimiter();
 
 // Documented maximum symbols per request for the batch endpoints.
 export const V2_MAX_SYMBOLS = 50;
@@ -161,7 +167,6 @@ export function incomingSupplyDate(p: V2ProductData): string | null {
 export class TmeApiV2 {
   private accessToken: string | null = null;
   private tokenExpiresAt = 0;
-  private lastCallAt = 0;
 
   private get credentials() {
     return {
@@ -200,13 +205,19 @@ export class TmeApiV2 {
     return this.accessToken!;
   }
 
+  /**
+   * Hold TME's per-second limits (4/s for /products/data, 10/s elsewhere).
+   *
+   * Was a last-call timestamp, which only works while calls are serial: two
+   * concurrent callers read the same timestamp, waited the same delay and then
+   * fired together. The sync now runs several slices at once and the listing
+   * ramp several batches, so the limit has to hold under concurrency — TME
+   * throttling us would fail exactly as eBay's Taxonomy did.
+   */
   private async pace(path: string): Promise<void> {
-    const rps = path.startsWith("/products/data") ? RPS_PRODUCTS_DATA : RPS_DEFAULT;
-    const minInterval = Math.ceil((1000 / rps) * 1.1); // 10% headroom
-    const elapsed = Date.now() - this.lastCallAt;
-    if (this.lastCallAt > 0 && elapsed < minInterval) {
-      await new Promise((r) => setTimeout(r, minInterval - elapsed));
-    }
+    const isData = path.startsWith("/products/data");
+    const rps = isData ? RPS_PRODUCTS_DATA : RPS_DEFAULT;
+    await tmeRateLimiter.acquire(isData ? "products_data" : "default", intervalForRps(rps));
   }
 
   private async get<T = any>(path: string, params: URLSearchParams): Promise<T> {
@@ -220,7 +231,6 @@ export class TmeApiV2 {
 
     const maxAttempts = 3;
     for (let attempt = 1; ; attempt++) {
-      this.lastCallAt = Date.now();
       const r = await fetch(`${V2_BASE}${path}?${params.toString()}`, {
         headers: {
           Authorization: `Bearer ${token}`,

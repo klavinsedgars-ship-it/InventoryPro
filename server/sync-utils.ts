@@ -48,3 +48,19 @@ export function staleCutoffs(now = Date.now()): { listed: Date; unlisted: Date }
     unlisted: new Date(now - unlistedHours * 3600 * 1000),
   };
 }
+
+/**
+ * Split one fetched batch into the slices that will be synced concurrently.
+ *
+ * The batch is fetched ONCE per round and divided here, rather than each
+ * concurrent worker querying for its own slice. That ordering is the whole
+ * correctness argument: getStaleTmeProducts returns the stalest rows, and
+ * lastSyncedAt is not written until a slice finishes, so parallel queries
+ * would each receive the SAME products and sync them several times over.
+ */
+export function sliceEvenly<T>(batch: readonly T[], chunkSize: number): T[][] {
+  const size = Math.max(1, Math.floor(chunkSize));
+  const out: T[][] = [];
+  for (let i = 0; i < batch.length; i += size) out.push(batch.slice(i, i + size));
+  return out;
+}

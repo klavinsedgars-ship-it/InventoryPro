@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractStock, staleCutoffs } from "./sync-utils";
+import { extractStock, staleCutoffs, sliceEvenly } from "./sync-utils";
 
 describe("extractStock", () => {
   // TME support (2026-08): Amount "shows the real warehouse stock", real-time.
@@ -37,5 +37,29 @@ describe("staleCutoffs", () => {
   it("keeps listed at least as fresh as unlisted", () => {
     const { listed, unlisted } = staleCutoffs();
     expect(listed.getTime()).toBeGreaterThanOrEqual(unlisted.getTime());
+  });
+});
+
+describe("sliceEvenly — concurrent slices must be disjoint", () => {
+  it("covers every product exactly once", () => {
+    // The property that matters: syncing a product twice wastes a TME call and
+    // can push the same eBay update twice.
+    const batch = Array.from({ length: 200 }, (_, i) => ({ id: i }));
+    const slices = sliceEvenly(batch, 50);
+    expect(slices).toHaveLength(4);
+    const seen = slices.flat().map((p) => p.id);
+    expect(seen).toHaveLength(200);
+    expect(new Set(seen).size).toBe(200);
+  });
+
+  it("handles a final short slice", () => {
+    const slices = sliceEvenly(Array.from({ length: 130 }, (_, i) => i), 50);
+    expect(slices.map((s) => s.length)).toEqual([50, 50, 30]);
+  });
+
+  it("handles empty input and degenerate sizes", () => {
+    expect(sliceEvenly([], 50)).toEqual([]);
+    expect(sliceEvenly([1, 2, 3], 0).flat()).toEqual([1, 2, 3]);
+    expect(sliceEvenly([1, 2, 3], -5).flat()).toEqual([1, 2, 3]);
   });
 });

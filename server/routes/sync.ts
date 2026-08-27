@@ -342,17 +342,19 @@ export function registerSyncRoutes(app: Express) {
     let last: any = null;
     const allErrors: string[] = [];
     try {
-      do {
-        last = await runSyncChunk(50, "cron");
-        chunks++;
-        totalChanged += last.changed;
-        totalEbay += last.ebayUpdated;
-        totalUnlisted += last.ebayUnlisted ?? 0;
-        totalRelisted += last.ebayRelisted ?? 0;
-        totalProcessed += last.processedThisChunk ?? 0;
-        totalProcessedListed += last.processedListed ?? 0;
-        allErrors.push(...last.errors);
-      } while (!last.done && Date.now() - start < budgetMs);
+      // One sweep, several slices at a time, with the per-run inputs loaded
+      // once. The old loop ran chunks strictly in sequence and re-counted the
+      // whole products table on every one of them.
+      const { runSyncSweep } = await import("../sync-chunk");
+      last = await runSyncSweep({ budgetMs: budgetMs - (Date.now() - start), source: "cron" });
+      chunks = last.chunks;
+      totalChanged = last.changed;
+      totalEbay = last.ebayUpdated;
+      totalUnlisted = last.ebayUnlisted ?? 0;
+      totalRelisted = last.ebayRelisted ?? 0;
+      totalProcessed = last.processedThisChunk ?? 0;
+      totalProcessedListed = last.processedListed ?? 0;
+      allErrors.push(...last.errors);
 
       await storage.createSyncLog({
         source: "tme",

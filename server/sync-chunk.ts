@@ -23,7 +23,7 @@ import {
 } from "./dynamic-pricing";
 import { getFeeConfig } from "./fee-config";
 import { ebayInventoryApi } from "./ebay-inventory-api";
-import { extractStock, staleCutoffs } from "./sync-utils";
+import { extractStock, staleCutoffs, sliceEvenly } from "./sync-utils";
 
 // Marks a listing we ended automatically because TME stock hit 0, so we can
 // tell it apart from manual unlists and auto-republish it when stock returns.
@@ -47,29 +47,60 @@ export interface SyncChunkResult {
 // before the row is written.
 type AuditDraft = InsertSyncAudit & { _intent: string };
 
-export async function runSyncChunk(
-  limit = 50,
-  source: "cron" | "manual" = "cron",
-): Promise<SyncChunkResult> {
-  const errors: string[] = [];
+/** Inputs that are identical for every slice in a run. */
+export interface SyncContext {
+  cutoffs: { listed: Date; unlisted: Date };
+  feeConfig: Awaited<ReturnType<typeof getFeeConfig>>;
+  source: "cron" | "manual";
+}
 
-  // DB-side: load only the next `limit` stalest TME products (indexed),
-  // not the whole table. Tiered staleness — listed first.
+/**
+ * Load the per-run fixed inputs ONCE.
+ *
+ * These were resolved inside every chunk: a full COUNT over products (twice
+ * per chunk, for `total` and `remaining`), the fee config, and the pricing
+ * tiers. At 60+ chunks per cron run that is ~250 redundant queries, and the
+ * counts get slower as the catalogue grows — the sync was paying more for
+ * bookkeeping the bigger it got.
+ */
+export async function loadSyncContext(source: "cron" | "manual" = "cron"): Promise<SyncContext> {
   const cutoffs = staleCutoffs();
-  const total = await storage.getTmeProductCount();
-  const slice = (await storage.getStaleTmeProducts(limit, cutoffs.listed, cutoffs.unlisted))
-    .filter((p) => p.sku);
-  if (slice.length === 0) {
-    return { total, remaining: 0, processedThisChunk: 0, processedListed: 0, changed: 0, ebayUpdated: 0, ebayUnlisted: 0, ebayRelisted: 0, done: true, errors };
-  }
-
-  // Resolve fee config once per chunk (drives the net-profit price floor).
   const feeConfig = await getFeeConfig("ebay");
-
-  // Load the operator's DB pricing tiers so Configuration-UI edits take effect
-  // (calculations previously ignored them). Falls back to the built-in config
-  // if the table is empty.
+  // Operator's DB pricing tiers, so Configuration-UI edits take effect.
+  // Module-level state, so once per run is both sufficient and correct.
   setActivePricingTiers(dbTiersToPricingTiers(await storage.getPricingTiers()));
+  return { cutoffs, feeConfig, source };
+}
+
+/** What one slice of products contributed; no run-wide totals. */
+export interface SliceResult {
+  processedThisChunk: number;
+  processedListed: number;
+  changed: number;
+  ebayUpdated: number;
+  ebayUnlisted: number;
+  ebayRelisted: number;
+  /** TME failed for the whole slice — the caller should stop this run. */
+  tmeFailed: boolean;
+  errors: string[];
+}
+
+const EMPTY_SLICE_RESULT: SliceResult = {
+  processedThisChunk: 0, processedListed: 0, changed: 0,
+  ebayUpdated: 0, ebayUnlisted: 0, ebayRelisted: 0, tmeFailed: false, errors: [],
+};
+
+/**
+ * Sync one slice of products: refresh price/stock from TME, recompute pricing,
+ * write the DB, and push changes to eBay for listed items.
+ *
+ * Takes the products it should handle rather than querying for them, so
+ * several slices can run concurrently over provably disjoint sets.
+ */
+export async function processSyncSlice(slice: any[], ctx: SyncContext): Promise<SliceResult> {
+  const errors: string[] = [];
+  const { feeConfig, source } = ctx;
+  if (slice.length === 0) return { ...EMPTY_SLICE_RESULT };
 
   const symbols = slice.map((p) => p.supplierProductId || p.sku);
   // Optimized client: one combined GetPricesAndStocks call per 100 symbols
@@ -127,14 +158,7 @@ export async function runSyncChunk(
     // success. done:true stops this tick's loop from hammering a down TME;
     // the next scheduled cron retries.
     errors.push(`TME fetch failed: ${(e as Error).message}`);
-    const remaining = Math.max(
-      0,
-      await storage.getStaleTmeProductCount(cutoffs.listed, cutoffs.unlisted),
-    );
-    return {
-      total, remaining, processedThisChunk: 0, processedListed: 0, changed: 0,
-      ebayUpdated: 0, ebayUnlisted: 0, ebayRelisted: 0, done: true, errors,
-    };
+    return { ...EMPTY_SLICE_RESULT, tmeFailed: true, errors };
   }
   const bySymbol = new Map(priceStocks.map((ps) => [ps.Symbol, ps]));
 
@@ -391,22 +415,152 @@ export async function runSyncChunk(
     errors.push(`audit write failed: ${(e as Error).message}`);
   }
 
-  // Tiered staleness (batch 3): count listed + unlisted against their own
-  // cutoffs, not a single staleBefore.
-  const remaining = Math.max(
-    0,
-    await storage.getStaleTmeProductCount(cutoffs.listed, cutoffs.unlisted),
-  );
   return {
-    total,
-    remaining,
     processedThisChunk: slice.length,
     processedListed: slice.filter((p) => p.listedOnEbay).length,
     changed,
     ebayUpdated,
     ebayUnlisted,
     ebayRelisted,
-    done: remaining === 0,
+    tmeFailed: false,
     errors,
+  };
+}
+
+/**
+ * One chunk, counts included. Kept for the manual "Sync Now" path, whose
+ * browser loop wants per-chunk totals and a `done` flag.
+ */
+export async function runSyncChunk(
+  limit = 50,
+  source: "cron" | "manual" = "cron",
+): Promise<SyncChunkResult> {
+  const ctx = await loadSyncContext(source);
+  const total = await storage.getTmeProductCount();
+  const slice = (await storage.getStaleTmeProducts(limit, ctx.cutoffs.listed, ctx.cutoffs.unlisted))
+    .filter((p) => p.sku);
+  if (slice.length === 0) {
+    return {
+      total, remaining: 0, processedThisChunk: 0, processedListed: 0, changed: 0,
+      ebayUpdated: 0, ebayUnlisted: 0, ebayRelisted: 0, done: true, errors: [],
+    };
+  }
+  const r = await processSyncSlice(slice, ctx);
+  const remaining = Math.max(
+    0,
+    await storage.getStaleTmeProductCount(ctx.cutoffs.listed, ctx.cutoffs.unlisted),
+  );
+  return {
+    total,
+    remaining,
+    processedThisChunk: r.processedThisChunk,
+    processedListed: r.processedListed,
+    changed: r.changed,
+    ebayUpdated: r.ebayUpdated,
+    ebayUnlisted: r.ebayUnlisted,
+    ebayRelisted: r.ebayRelisted,
+    // A TME outage ends the run: nothing was written, so retrying immediately
+    // would only hammer a service that is already failing.
+    done: r.tmeFailed || remaining === 0,
+    errors: r.errors,
+  };
+}
+
+/**
+ * Sweep as many stale products as fit in the time budget.
+ *
+ * Chunks used to run strictly one after another, so a run's throughput was
+ * capped at roughly (budget / chunk latency) — about 3,000 products an hour,
+ * while every new eBay listing permanently adds to the 4-hourly refresh load.
+ * Slices are independent (disjoint products, separate TME and eBay calls), so
+ * they now run several at a time.
+ *
+ * The slice set is fetched as ONE query per round and split before dispatch:
+ * concurrent callers of getStaleTmeProducts would otherwise each receive the
+ * same stalest rows — lastSyncedAt is only written at the end of a slice — and
+ * sync the same products several times over.
+ */
+export async function runSyncSweep(opts: {
+  budgetMs: number;
+  chunkSize?: number;
+  concurrency?: number;
+  source?: "cron" | "manual";
+}): Promise<SyncChunkResult & { chunks: number; rounds: number }> {
+  const chunkSize = opts.chunkSize ?? 50;
+  const concurrency = Math.min(
+    8,
+    Math.max(1, opts.concurrency ?? (Number(process.env.SYNC_CHUNK_CONCURRENCY) || 4)),
+  );
+  const source = opts.source ?? "cron";
+  const start = Date.now();
+
+  const ctx = await loadSyncContext(source);
+  const total = await storage.getTmeProductCount();
+
+  let chunks = 0;
+  let rounds = 0;
+  let processed = 0;
+  let processedListed = 0;
+  let changed = 0;
+  let ebayUpdated = 0;
+  let ebayUnlisted = 0;
+  let ebayRelisted = 0;
+  let drained = false;
+  let tmeFailed = false;
+  const errors: string[] = [];
+
+  while (Date.now() - start < opts.budgetMs && !tmeFailed) {
+    const batch = (await storage.getStaleTmeProducts(
+      chunkSize * concurrency,
+      ctx.cutoffs.listed,
+      ctx.cutoffs.unlisted,
+    )).filter((p: any) => p.sku);
+    if (batch.length === 0) { drained = true; break; }
+
+    const slices = sliceEvenly(batch, chunkSize);
+    const results = await Promise.all(
+      slices.map((s) =>
+        processSyncSlice(s, ctx).catch((e) => ({
+          ...EMPTY_SLICE_RESULT,
+          errors: [`slice failed: ${(e as Error).message}`],
+        })),
+      ),
+    );
+
+    rounds++;
+    for (const r of results) {
+      chunks++;
+      processed += r.processedThisChunk;
+      processedListed += r.processedListed;
+      changed += r.changed;
+      ebayUpdated += r.ebayUpdated;
+      ebayUnlisted += r.ebayUnlisted;
+      ebayRelisted += r.ebayRelisted;
+      if (r.tmeFailed) tmeFailed = true;
+      errors.push(...r.errors);
+    }
+    // A short round means the queue is drained; stop rather than re-querying
+    // for rows we know aren't there.
+    if (batch.length < chunkSize * concurrency) { drained = true; break; }
+  }
+
+  // Counted once for the whole run, not once per chunk.
+  const remaining = Math.max(
+    0,
+    await storage.getStaleTmeProductCount(ctx.cutoffs.listed, ctx.cutoffs.unlisted),
+  );
+  return {
+    total,
+    remaining,
+    processedThisChunk: processed,
+    processedListed,
+    changed,
+    ebayUpdated,
+    ebayUnlisted,
+    ebayRelisted,
+    done: tmeFailed || drained || remaining === 0,
+    errors: errors.slice(0, 50),
+    chunks,
+    rounds,
   };
 }
