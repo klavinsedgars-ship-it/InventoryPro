@@ -50,14 +50,52 @@ export function isTransientTaxonomyStatus(status: number): boolean {
  * listings on this account — so the fallback is correct by construction and
  * needs no operator to look one up.
  *
- * Returns null until there is enough evidence; no fallback is better than one
- * fixed on a fluke.
+ * Frequency alone is the WRONG rule, which the live data showed: the most
+ * common suggestion was "Druckschalter" (pushbutton switches) at 16% — a
+ * specific product category. Filing an unknown product there is a
+ * miscategorisation, and the whole point of a fallback is to be somewhere
+ * broad enough to be defensible for a product we could not classify.
+ *
+ * So candidates are ranked by GENERALITY first: a category eBay itself names
+ * as a catch-all ("Sonstige…", "Other…"), preferring one that also names the
+ * broad domain this catalogue lives in (electronics / measurement / components)
+ * over a narrower one (automation, sensors). Frequency only breaks ties.
+ *
+ * Returns null when no catch-all exists; no fallback is better than confidently
+ * filing products under pushbutton switches.
  */
+
+/** eBay's own wording for a catch-all node, across the marketplaces we list on. */
+const CATCH_ALL_RX = /\b(sonstige[sr]?|other|misc\.?|miscellaneous|autres?|altro|altri|otros?)\b/i;
+/** The broad domain this catalogue belongs to. */
+const BROAD_DOMAIN_RX = /elektronik|elektronisch|electronic|messtechnik|bauteil|bauelement|component/i;
+/** On-topic but narrower — acceptable, not preferred. */
+const NARROW_DOMAIN_RX = /automation|sensor|messteil|prozessor|platine|equipment|zubehör|zubehor/i;
+
+export function scoreCategoryGenerality(name: string): number {
+  const n = name ?? "";
+  if (!CATCH_ALL_RX.test(n)) return 0; // not a catch-all: never a fallback
+  let score = 3;
+  if (BROAD_DOMAIN_RX.test(n)) score += 3;
+  else if (NARROW_DOMAIN_RX.test(n)) score += 1;
+  return score;
+}
+
 export function pickDefaultCategory(
   suggestions: Array<{ id?: string; name?: string } | null | undefined>,
-  opts: { minSample?: number } = {},
-): { id: string; name: string; count: number; sample: number; share: number } | null {
+  opts: { minSample?: number; minCount?: number } = {},
+): {
+  id: string;
+  name: string;
+  count: number;
+  sample: number;
+  share: number;
+  generality: number;
+} | null {
   const minSample = opts.minSample ?? 5;
+  // A catch-all seen once could be a stray classification; require a little
+  // corroboration before it becomes the destination for unknown products.
+  const minCount = opts.minCount ?? 3;
   const counts = new Map<string, { name: string; count: number }>();
   let sample = 0;
   for (const s of suggestions) {
@@ -65,15 +103,27 @@ export function pickDefaultCategory(
     if (!id) continue;
     sample++;
     const e = counts.get(id);
-    if (e) e.count++;
-    else counts.set(id, { name: s?.name ?? "", count: 1 });
+    if (e) {
+      e.count++;
+      if (!e.name && s?.name) e.name = s.name;
+    } else {
+      counts.set(id, { name: s?.name ?? "", count: 1 });
+    }
   }
   if (sample < minSample) return null;
-  let best: { id: string; name: string; count: number } | null = null;
+
+  let best: { id: string; name: string; count: number; generality: number } | null = null;
   for (const [id, e] of Array.from(counts.entries())) {
-    if (!best || e.count > best.count || (e.count === best.count && id < best.id)) {
-      best = { id, name: e.name, count: e.count };
-    }
+    const generality = scoreCategoryGenerality(e.name);
+    if (generality === 0) continue;
+    if (e.count < minCount) continue;
+    const better =
+      !best ||
+      generality > best.generality ||
+      (generality === best.generality && e.count > best.count) ||
+      // Deterministic tie-break so the default doesn't flap between runs.
+      (generality === best.generality && e.count === best.count && id < best.id);
+    if (better) best = { id, name: e.name, count: e.count, generality };
   }
   if (!best) return null;
   return { ...best, sample, share: best.count / sample };

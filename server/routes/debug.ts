@@ -674,6 +674,7 @@ export function registerDebugRoutes(app: Express) {
       const { pickDefaultCategory } = await import("../ebay-category-query");
       const treeId = process.env.EBAY_MARKETPLACE_SITE_ID || "77";
       const suggestions = await storage.getCachedCategorySuggestions(treeId);
+      const { scoreCategoryGenerality } = await import("../ebay-category-query");
       const picked = pickDefaultCategory(suggestions);
       const top = new Map<string, { name: string; count: number }>();
       for (const s of suggestions) {
@@ -689,8 +690,10 @@ export function registerDebugRoutes(app: Express) {
         source: process.env.EBAY_DEFAULT_CATEGORY_ID ? "env override" : "learned from eBay's own suggestions",
         learned: picked,
         cachedSuggestions: suggestions.length,
+        // generality 0 = a specific product category, never eligible as a
+        // fallback however often eBay suggests it.
         distribution: Array.from(top.entries())
-          .map(([id, e]) => ({ id, name: e.name, count: e.count }))
+          .map(([id, e]) => ({ id, name: e.name, count: e.count, generality: scoreCategoryGenerality(e.name) }))
           .sort((a, b) => b.count - a.count)
           .slice(0, 10),
       });

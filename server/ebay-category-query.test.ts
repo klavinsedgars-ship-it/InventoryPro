@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { categoryQueryFor, isTransientTaxonomyStatus, pickDefaultCategory } from "./ebay-category-query";
+import { categoryQueryFor, isTransientTaxonomyStatus, pickDefaultCategory, scoreCategoryGenerality } from "./ebay-category-query";
 
 const p = (category: string, name: string) => ({ category, name }) as any;
 
@@ -47,45 +47,84 @@ describe("isTransientTaxonomyStatus", () => {
   });
 });
 
-describe("pickDefaultCategory — learned, not hardcoded", () => {
-  const many = (id: string, n: number, name = "") => Array.from({ length: n }, () => ({ id, name }));
-
-  it("picks the category eBay has most often returned for this marketplace", () => {
-    // Correct by construction: every candidate is an answer eBay gave for THIS
-    // tree, so it cannot be an id borrowed from another site's category tree.
-    const picked = pickDefaultCategory([
-      ...many("4662", 7, "Elektronische Bauteile"),
-      ...many("58277", 2),
-      ...many("181939", 1),
-    ]);
-    expect(picked?.id).toBe("4662");
-    expect(picked?.name).toBe("Elektronische Bauteile");
-    expect(picked?.count).toBe(7);
-    expect(picked?.sample).toBe(10);
-    expect(picked?.share).toBeCloseTo(0.7);
+describe("scoreCategoryGenerality", () => {
+  it("scores a specific product category as unusable for a fallback", () => {
+    expect(scoreCategoryGenerality("Druckschalter")).toBe(0);
+    expect(scoreCategoryGenerality("Widerstände")).toBe(0);
+    expect(scoreCategoryGenerality("Platinen & Entwicklungskits")).toBe(0);
   });
 
-  it("returns null until there is enough evidence", () => {
-    // No fallback beats one fixed on a fluke: the ramp simply retries later.
-    expect(pickDefaultCategory(many("4662", 3))).toBeNull();
-    expect(pickDefaultCategory([])).toBeNull();
+  it("ranks a broad catch-all above a narrow one", () => {
+    const broad = scoreCategoryGenerality("Sonstige Elektronik & Messtechnik");
+    const narrow = scoreCategoryGenerality("Sonstiges Automations Equipment");
+    const bare = scoreCategoryGenerality("Sonstige");
+    expect(broad).toBeGreaterThan(narrow);
+    expect(narrow).toBeGreaterThan(bare);
+    expect(bare).toBeGreaterThan(0);
   });
 
-  it("ignores malformed and empty entries", () => {
-    const picked = pickDefaultCategory([
-      ...many("4662", 6),
-      null,
-      undefined,
-      {},
-      { id: "" },
-    ]);
-    expect(picked?.id).toBe("4662");
-    expect(picked?.sample).toBe(6); // only real ids counted
+  it("recognises catch-all wording on the other marketplaces we list on", () => {
+    for (const n of ["Other Electronic Components", "Autres composants", "Altri componenti", "Otros"]) {
+      expect(scoreCategoryGenerality(n)).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("pickDefaultCategory — generality first, frequency only as tie-break", () => {
+  // The real distribution from the live account (tree 77, 2000 cached
+  // suggestions). Ranking by frequency picked "Druckschalter" — pushbutton
+  // switches — as the home for every unclassifiable product.
+  const LIVE = [
+    { id: "111607", name: "Druckschalter", count: 327 },
+    { id: "36802", name: "Sonstiges Automations Equipment", count: 255 },
+    { id: "159680", name: "Eingebettete Prozessoren & Steuerungen", count: 185 },
+    { id: "65507", name: "Platinen & Entwicklungskits", count: 156 },
+    { id: "25414", name: "Sonstige Messteile & Zubehör", count: 135 },
+    { id: "57520", name: "Sonstige Sensoren", count: 102 },
+    { id: "92078", name: "Sonstige Elektronik & Messtechnik", count: 98 },
+    { id: "9715", name: "Sonstige", count: 94 },
+    { id: "42886", name: "Anschlussdosen & Gehäuse", count: 53 },
+    { id: "181912", name: "Widerstände", count: 49 },
+  ];
+  const expand = (rows: typeof LIVE) =>
+    rows.flatMap((r) => Array.from({ length: r.count }, () => ({ id: r.id, name: r.name })));
+
+  it("picks the broad electronics catch-all, not the most frequent category", () => {
+    const picked = pickDefaultCategory(expand(LIVE));
+    expect(picked?.id).toBe("92078");
+    expect(picked?.name).toBe("Sonstige Elektronik & Messtechnik");
+    // Chosen despite being only the 7th most common.
+    expect(picked?.count).toBe(98);
   });
 
-  it("breaks ties deterministically, so the default doesn't flap", () => {
-    const a = pickDefaultCategory([...many("999", 3), ...many("111", 3)]);
-    const b = pickDefaultCategory([...many("111", 3), ...many("999", 3)]);
+  it("never picks a specific category even when it dominates", () => {
+    const picked = pickDefaultCategory(
+      expand([{ id: "111607", name: "Druckschalter", count: 999 }, { id: "9715", name: "Sonstige", count: 5 }]),
+    );
+    expect(picked?.id).toBe("9715");
+  });
+
+  it("returns null when nothing in the evidence is a catch-all", () => {
+    // Better to retry the product next tick than to file it under switches.
+    expect(pickDefaultCategory(expand([{ id: "111607", name: "Druckschalter", count: 500 }]))).toBeNull();
+  });
+
+  it("ignores a catch-all seen too few times to corroborate", () => {
+    const picked = pickDefaultCategory(
+      expand([{ id: "111607", name: "Druckschalter", count: 50 }, { id: "92078", name: "Sonstige Elektronik", count: 2 }]),
+    );
+    expect(picked).toBeNull();
+  });
+
+  it("still requires a minimum sample, and tolerates malformed rows", () => {
+    expect(pickDefaultCategory([{ id: "9715", name: "Sonstige" }])).toBeNull();
+    expect(() => pickDefaultCategory([null, undefined, {}, { id: "" }])).not.toThrow();
+  });
+
+  it("breaks ties deterministically so the default doesn't flap", () => {
+    const rows = [{ id: "999", name: "Sonstige Elektronik", count: 10 }, { id: "111", name: "Sonstige Elektronik", count: 10 }];
+    const a = pickDefaultCategory(expand(rows));
+    const b = pickDefaultCategory(expand([...rows].reverse()));
     expect(a?.id).toBe(b?.id);
   });
 });

@@ -34,6 +34,13 @@ import { mapPool } from "./concurrency";
  */
 const BUILD_CONCURRENCY = Math.min(12, Math.max(1, Number(process.env.EBAY_BUILD_CONCURRENCY) || 8));
 
+/**
+ * Bump when the fallback-category selection rule changes, so a value learned
+ * under the old rule is re-learned immediately instead of persisting for its
+ * remaining TTL.
+ */
+const CATEGORY_RULE_VERSION = "generality-first-v2";
+
 const INV_BASE = "https://api.ebay.com/sell/inventory/v1";
 
 function marketplaceId(): string {
@@ -743,7 +750,12 @@ export class EbayInventoryApiService {
       const settings = await storage.getMarketplaceSettings("ebay");
       const stored = settings.find((s: any) => s.setting === "default_category_id")?.value ?? "";
       const learnedAt = Number(settings.find((s: any) => s.setting === "default_category_learned_at")?.value ?? 0);
-      if (stored && Date.now() - learnedAt < WEEK_MS) {
+      const storedRule = settings.find((s: any) => s.setting === "default_category_rule")?.value ?? "";
+      // A value learned under an older rule must be discarded, not waited out:
+      // the first rule ranked purely by frequency and picked "Druckschalter",
+      // and a week of listing unknown products under pushbutton switches is
+      // not an acceptable way to expire a bad default.
+      if (stored && storedRule === CATEGORY_RULE_VERSION && Date.now() - learnedAt < WEEK_MS) {
         this.defaultCategoryMemo = { id: stored, at: Date.now() };
         return stored;
       }
@@ -758,16 +770,23 @@ export class EbayInventoryApiService {
           setting: "default_category_learned_at",
           value: String(Date.now()),
         });
+        await storage.setMarketplaceSetting({
+          marketplace: "ebay",
+          setting: "default_category_rule",
+          value: CATEGORY_RULE_VERSION,
+        });
         console.log(
           `🗂️ default eBay category learned for tree ${treeId}: ${picked.id} (${picked.name}) — ` +
-          `${picked.count}/${picked.sample} of cached suggestions`,
+          `generality ${picked.generality}, ${picked.count}/${picked.sample} of cached suggestions`,
         );
         this.defaultCategoryMemo = { id: picked.id, at: Date.now() };
         return picked.id;
       }
-      // Not enough evidence yet: keep any previous value rather than nothing.
-      this.defaultCategoryMemo = { id: stored, at: Date.now() };
-      return stored;
+      // No catch-all category in the evidence. Deliberately return nothing
+      // rather than the stale value: an unknown product retried next tick is
+      // better than one filed under a specific category it doesn't belong to.
+      this.defaultCategoryMemo = { id: "", at: Date.now() };
+      return "";
     } catch (e) {
       console.warn("default category lookup failed (ignored):", (e as Error).message);
       return "";
