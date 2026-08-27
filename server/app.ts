@@ -106,6 +106,14 @@ export async function createApp(): Promise<Express> {
     ),
   ]);
 
+  // Admin credentials come from the environment, so the seeded default
+  // password cannot survive in a live deployment. Runs after the migration
+  // gate above, since it writes to the users table.
+  storage.applyAdminCredentialsFromEnv().then(
+    (r) => console.log(`🔑 admin credentials: ${r.note}`),
+    (e) => console.error("admin credential sync failed:", e),
+  );
+
   // One-time: align DB pricing tiers to the canonical config before the
   // calculations begin reading DB tiers, so wiring them up doesn't reprice.
   storage.ensurePricingTiersAligned().catch((e) =>

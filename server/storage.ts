@@ -349,9 +349,59 @@ export class DatabaseStorage implements IStorage {
    * schema-reset bootstrap can re-seed a freshly provisioned database.
    * Assumes tables exist — schema creation is /api/__schema-reset's job.
    */
+  /**
+   * Apply the admin credentials declared in the environment.
+   *
+   * Idempotent and cheap: the password is only re-hashed when it does not
+   * already match, so a cold start costs one bcrypt comparison rather than a
+   * write. Reconciling on every boot makes the environment the source of
+   * truth — rotating means changing one value and redeploying.
+   */
+  async applyAdminCredentialsFromEnv(): Promise<{ changed: boolean; note: string }> {
+    const { adminCredentialsFromEnv } = await import("./admin-credentials");
+    const r = adminCredentialsFromEnv();
+    if (!r.configured) return { changed: false, note: "ADMIN_PASSWORD not set — leaving the existing account alone" };
+    if (!r.ok) return { changed: false, note: r.error };
+
+    const { username, email, password } = r.credentials;
+    // The account may be found under its new name (already applied), the
+    // seeded "admin", or by email if the username is being changed.
+    const existing =
+      (await this.getUserByUsername(username)) ??
+      (await this.getUserByEmail(email)) ??
+      (await this.getUserByUsername("admin"));
+
+    if (!existing) {
+      await this.createUser({ username, password: await bcrypt.hash(password, 10), email, role: "admin" });
+      return { changed: true, note: `admin account created as ${username}` };
+    }
+
+    const passwordMatches = await bcrypt.compare(password, existing.password);
+    if (passwordMatches && existing.username === username && existing.email === email) {
+      return { changed: false, note: "admin credentials already match the environment" };
+    }
+
+    await db
+      .update(users)
+      .set({
+        username,
+        email,
+        role: "admin",
+        ...(passwordMatches ? {} : { password: await bcrypt.hash(password, 10) }),
+      })
+      .where(eq(users.id, existing.id));
+    return {
+      changed: true,
+      note: `admin account updated (${existing.username} -> ${username}${passwordMatches ? "" : ", password changed"})`,
+    };
+  }
+
   async seedDefaults() {
     try {
-      // Create default admin user if it doesn't exist
+      // Create default admin user if it doesn't exist. The password here is a
+      // placeholder for a fresh database only — ADMIN_PASSWORD in the
+      // environment replaces it on the next boot (see
+      // applyAdminCredentialsFromEnv), which is also how it gets rotated.
       const existingAdmin = await this.getUserByUsername("admin");
       if (!existingAdmin) {
         const hashedPassword = await bcrypt.hash("admin123", 10);

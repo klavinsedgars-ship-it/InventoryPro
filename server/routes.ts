@@ -42,7 +42,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { username, password } = loginSchema.parse(req.body);
 
-      const user = await storage.getUserByUsername(username);
+      // Accept either the username or the email address. The admin account is
+      // now identified by an email, and requiring people to remember which
+      // field it lives in is a needless way to be locked out.
+      const user =
+        (await storage.getUserByUsername(username)) ??
+        (username.includes("@") ? await storage.getUserByEmail(username) : undefined);
       if (!user) {
         return res.status(401).json({ message: "Invalid credentials" });
       }
