@@ -590,6 +590,13 @@ export function Orders({ user }: OrdersProps) {
                     </div>
                   </div>
 
+                  {/* Money: what this order actually earned, step by step.
+                      Loaded per order so the ledger and the Reports page run
+                      the same calculation over the same row. */}
+                  <div className="px-3 pb-3">
+                    <OrderFinancials orderId={selectedOrder.id} />
+                  </div>
+
                   {/* Action Footer - Compact */}
                   <div className="p-3 border-t bg-gray-50 space-y-2">
                     {/* Supplier order: TME has no cart API, so this hands the
@@ -752,6 +759,80 @@ export function Orders({ user }: OrdersProps) {
           )}
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/**
+ * Per-order profit ledger.
+ *
+ * Reads the same endpoint the Reports page aggregates, so a single order's
+ * numbers and the period totals can never tell different stories.
+ */
+function OrderFinancials({ orderId }: { orderId: number }) {
+  const { data, isLoading } = useQuery<any>({
+    queryKey: ["/api/reports/order", orderId],
+    queryFn: async () => {
+      const r = await fetch(`/api/reports/order/${orderId}`, { credentials: "include" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    },
+  });
+
+  if (isLoading) return <div className="text-xs text-gray-400 border rounded-lg p-2">Calculating…</div>;
+  const e = data?.economics;
+  if (!e) return null;
+
+  const money = (n: number) => `€${Number(n).toFixed(2)}`;
+
+  return (
+    <div className="border rounded-lg p-2">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-medium text-gray-600 flex items-center gap-1">
+          <DollarSign className="w-3 h-3" /> Profit breakdown
+        </p>
+        <span className={`text-sm font-semibold ${e.netProfit < 0 ? "text-red-600" : "text-green-700"}`}>
+          {money(e.netProfit)}
+          <span className="text-xs font-normal text-gray-400 ml-1">
+            {e.netMarginPct == null ? "" : `(${e.netMarginPct.toFixed(1)}% of net)`}
+          </span>
+        </span>
+      </div>
+
+      <div className="space-y-0.5 text-xs">
+        {e.ledger.map((l: any) => (
+          <div
+            key={l.key}
+            className={`flex items-start justify-between gap-2 ${
+              l.kind === "total" ? "border-t pt-1 mt-1 font-medium" : ""
+            }`}
+          >
+            <div className="min-w-0">
+              <span className={l.kind === "out" ? "text-gray-600" : ""}>{l.label}</span>
+              {/* An estimated figure must look different from a charged one:
+                  a report that hides the difference reads as fact. */}
+              {l.actual === false && l.kind === "out" && (
+                <span className="ml-1 text-[10px] text-amber-600">est.</span>
+              )}
+              {l.note && <p className="text-[10px] text-gray-400 leading-tight">{l.note}</p>}
+            </div>
+            <span
+              className={`tabular-nums flex-shrink-0 ${
+                l.kind === "out" ? "text-red-600" : l.kind === "total" ? "" : "text-green-700"
+              }`}
+            >
+              {l.kind === "out" ? "−" : ""}
+              {money(l.amount)}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {!e.fullyActual && (
+        <p className="text-[10px] text-amber-600 mt-1.5">
+          Some figures are modelled rather than charged — profit is approximate.
+        </p>
+      )}
     </div>
   );
 }

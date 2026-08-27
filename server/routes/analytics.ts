@@ -123,7 +123,7 @@ export function registerAnalyticsRoutes(app: Express) {
     }
   });
 
-  app.get("/api/analytics/sales", requireAuth, async (req, res) => {
+  app.get("/api/analytics/sales-performance", requireAuth, async (req, res) => {
     try {
       const days = Math.min(365, Math.max(1, Number(req.query.days) || 30));
       const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));

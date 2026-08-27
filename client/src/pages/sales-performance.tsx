@@ -18,9 +18,9 @@ export default function SalesPerformance({ user }: { user?: any }) {
   const [days, setDays] = useState<number>(30);
 
   const { data, isLoading, isFetching, refetch } = useQuery<any>({
-    queryKey: ["/api/analytics/sales", days],
+    queryKey: ["/api/analytics/sales-performance", days],
     queryFn: async () => {
-      const r = await fetch(`/api/analytics/sales?days=${days}`, { credentials: "include" });
+      const r = await fetch(`/api/analytics/sales-performance?days=${days}`, { credentials: "include" });
       if (!r.ok) throw new Error(`Request failed: ${r.status}`);
       return r.json();
     },

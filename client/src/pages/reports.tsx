@@ -3,432 +3,213 @@ import { useQuery } from "@tanstack/react-query";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from "recharts";
-import { Download, TrendingUp, TrendingDown, AlertTriangle, Package, DollarSign } from "lucide-react";
-import { formatCurrency, formatNumber } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { AlertTriangle, RefreshCw, Receipt, Globe, Truck, Calendar } from "lucide-react";
 
-interface ReportsProps {
-  user: any;
-}
+const WINDOWS = [
+  { days: 7, label: "7 days" },
+  { days: 30, label: "30 days" },
+  { days: 90, label: "90 days" },
+  { days: 365, label: "1 year" },
+  { days: 1825, label: "All time" },
+];
+const GROUPINGS = ["day", "week", "month", "year"] as const;
 
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8'];
+const eur = (n: number | null | undefined) =>
+  n == null ? "—" : `€${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const pct = (n: number | null | undefined) => (n == null ? "—" : `${Number(n).toFixed(1)}%`);
 
-export function Reports({ user }: ReportsProps) {
-  const [selectedPeriod, setSelectedPeriod] = useState("12m");
+export function Reports({ user }: { user?: any }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [days, setDays] = useState(30);
+  const [groupBy, setGroupBy] = useState<(typeof GROUPINGS)[number]>("day");
 
-  // Analytics endpoints return dynamically-shaped rollups; typed as any here
-  // (the server responses aren't strongly typed). See /api/analytics/*.
-  const { data: inventoryAnalytics, isLoading: inventoryLoading } = useQuery<any>({
-    queryKey: ["/api/analytics/inventory"],
+  const { data, isLoading, isFetching, refetch } = useQuery<any>({
+    queryKey: ["/api/reports/financials", days, groupBy],
+    queryFn: async () => {
+      const r = await fetch(`/api/reports/financials?days=${days}&groupBy=${groupBy}`, { credentials: "include" });
+      if (!r.ok) throw new Error(`Request failed: ${r.status}`);
+      return r.json();
+    },
   });
 
-  const { data: salesAnalytics, isLoading: salesLoading } = useQuery<any>({
-    queryKey: ["/api/analytics/sales"],
-  });
-
-  // The server returns { totals, monthly, byMarketplace } — adapt to the
-  // shapes this page renders (marketplacePerformance.{ebay,amazon}, monthlyRevenue).
-  const _byMp: Array<{ marketplace: string; orders: number; revenue: number }> =
-    salesAnalytics?.byMarketplace ?? [];
-  const _mp = (name: string) => {
-    const m = _byMp.find((x) => x.marketplace === name);
-    const orders = m?.orders ?? 0;
-    const revenue = m?.revenue ?? 0;
-    return { orders, revenue, avgOrderValue: orders > 0 ? revenue / orders : 0 };
-  };
-  const marketplacePerformance = { ebay: _mp("ebay"), amazon: _mp("amazon") };
-  const monthlyRevenue = (salesAnalytics?.monthly ?? []) as any[];
-
-  const isLoading = inventoryLoading || salesLoading;
+  const t = data?.totals;
+  const dq = data?.dataQuality;
+  const noData = !isLoading && t && t.orders === 0;
 
   return (
     <div className="min-h-screen bg-gray-50">
       <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
-      <div className={`transition-all duration-200 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
-        <Header 
-          title="Reports & Analytics" 
-          subtitle="Comprehensive insights into your inventory and sales performance"
-        />
-        
-        <div className="p-6">
-          {/* Report Controls */}
-          <div className="mb-6 flex justify-between items-center">
-            <div className="flex items-center space-x-4">
-              <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
-                <SelectTrigger className="w-40">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1m">Last Month</SelectItem>
-                  <SelectItem value="3m">Last 3 Months</SelectItem>
-                  <SelectItem value="6m">Last 6 Months</SelectItem>
-                  <SelectItem value="12m">Last 12 Months</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <Button>
-              <Download className="w-4 h-4 mr-2" />
-              Export Report
-            </Button>
-          </div>
+      <div className={`transition-all duration-200 ${sidebarCollapsed ? "ml-16" : "ml-64"}`}>
+        <Header title="Financial Reports" subtitle="Revenue, VAT, fees, cost and profit from realised orders" />
 
-          {/* Sales & Real Profit (revenue − eBay fees − VAT − supplier cost) */}
-          {(() => {
-            const sales = salesAnalytics as
-              | undefined
-              | {
-                  totals: {
-                    orders: number; items: number; revenue: number; shipping: number;
-                    fees: number; vat: number; supplierCost: number; postage: number;
-                    packaging: number; netProfit: number; netMarginPct: number;
-                  };
-                  monthly: Array<{ month: string; revenue: number; netProfit: number; orders: number }>;
-                  byMarketplace: Array<{ marketplace: string; orders: number; revenue: number; netProfit: number }>;
-                  assumptions: string[];
-                };
-            const t = sales?.totals;
-            return (
-              <div className="mb-8">
-                <h2 className="text-lg font-semibold text-gray-900 mb-3">Sales &amp; Real Profit</h2>
-                {!t || t.orders === 0 ? (
-                  <Card>
-                    <CardContent className="p-6 text-sm text-gray-500">
-                      No sales recorded yet. Sync orders from eBay to see realized profit
-                      (revenue − fees − VAT − supplier cost).
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <>
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                      <Card>
-                        <CardContent className="p-4">
-                          <p className="text-xs text-gray-500">Revenue</p>
-                          <p className="text-lg font-semibold">{formatCurrency(t.revenue)}</p>
-                          <p className="text-[11px] text-gray-400">{t.orders} orders · {t.items} items</p>
-                        </CardContent>
-                      </Card>
-                      <Card>
-                        <CardContent className="p-4">
-                          <p className="text-xs text-gray-500">eBay fees</p>
-                          <p className="text-lg font-semibold text-red-600">−{formatCurrency(t.fees)}</p>
-                        </CardContent>
-                      </Card>
-                      <Card>
-                        <CardContent className="p-4">
-                          <p className="text-xs text-gray-500">VAT</p>
-                          <p className="text-lg font-semibold text-red-600">−{formatCurrency(t.vat)}</p>
-                        </CardContent>
-                      </Card>
-                      <Card>
-                        <CardContent className="p-4">
-                          <p className="text-xs text-gray-500">Supplier cost</p>
-                          <p className="text-lg font-semibold text-red-600">−{formatCurrency(t.supplierCost)}</p>
-                        </CardContent>
-                      </Card>
-                      <Card>
-                        <CardContent className="p-4">
-                          <p className="text-xs text-gray-500">Postage + packaging</p>
-                          <p className="text-lg font-semibold text-red-600">
-                            −{formatCurrency(t.postage + t.packaging)}
-                          </p>
-                        </CardContent>
-                      </Card>
-                      <Card className="border-green-200 bg-green-50">
-                        <CardContent className="p-4">
-                          <p className="text-xs text-gray-500">Net profit</p>
-                          <p className={`text-lg font-bold ${t.netProfit >= 0 ? "text-green-700" : "text-red-600"}`}>
-                            {formatCurrency(t.netProfit)}
-                          </p>
-                          <p className="text-[11px] text-gray-400">{t.netMarginPct}% margin</p>
-                        </CardContent>
-                      </Card>
-                    </div>
-                    {sales?.monthly && sales.monthly.length > 0 && (
-                      <Card className="mt-4">
-                        <CardHeader className="py-3">
-                          <CardTitle className="text-sm">Monthly</CardTitle>
-                        </CardHeader>
-                        <CardContent className="pt-0">
-                          <table className="w-full text-sm">
-                            <thead>
-                              <tr className="text-left text-xs text-gray-500">
-                                <th className="py-1">Month</th>
-                                <th className="py-1 text-right">Orders</th>
-                                <th className="py-1 text-right">Revenue</th>
-                                <th className="py-1 text-right">Net profit</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {sales.monthly.map((m) => (
-                                <tr key={m.month} className="border-t">
-                                  <td className="py-1">{m.month}</td>
-                                  <td className="py-1 text-right">{m.orders}</td>
-                                  <td className="py-1 text-right">{formatCurrency(m.revenue)}</td>
-                                  <td className={`py-1 text-right ${m.netProfit >= 0 ? "text-green-700" : "text-red-600"}`}>
-                                    {formatCurrency(m.netProfit)}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </CardContent>
-                      </Card>
-                    )}
-                    {sales?.assumptions && sales.assumptions.length > 0 && (
-                      <p className="text-[11px] text-gray-400 mt-2">{sales.assumptions.join(" ")}</p>
-                    )}
-                  </>
-                )}
-              </div>
-            );
-          })()}
-
-          {isLoading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-              {[...Array(4)].map((_, i) => (
-                <Card key={i} className="animate-pulse">
-                  <CardContent className="p-6">
-                    <div className="h-20 bg-gray-200 rounded"></div>
-                  </CardContent>
-                </Card>
+        <div className="p-6 space-y-6">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex gap-2 flex-wrap">
+              {WINDOWS.map((w) => (
+                <Button key={w.days} size="sm" variant={days === w.days ? "default" : "outline"} onClick={() => setDays(w.days)}>
+                  {w.label}
+                </Button>
               ))}
             </div>
-          ) : (
+            <div className="flex gap-2 items-center">
+              <Calendar className="w-4 h-4 text-gray-400" />
+              {GROUPINGS.map((g) => (
+                <Button key={g} size="sm" variant={groupBy === g ? "secondary" : "ghost"} onClick={() => setGroupBy(g)}>
+                  {g}
+                </Button>
+              ))}
+              <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+                <RefreshCw className={`w-4 h-4 ${isFetching ? "animate-spin" : ""}`} />
+              </Button>
+            </div>
+          </div>
+
+          {isLoading && <div className="text-gray-400">Loading financials…</div>}
+
+          {noData && (
+            <Card>
+              <CardContent className="py-8 text-center text-gray-500">
+                No orders in this window. Figures appear as sales come through.
+              </CardContent>
+            </Card>
+          )}
+
+          {t && t.orders > 0 && (
             <>
-              {/* Key Metrics Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                <Card>
-                  <CardContent className="p-6">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-gray-600">Total Inventory Value</p>
-                        <p className="text-2xl font-bold text-gray-900">
-                          {inventoryAnalytics?.categoryBreakdown 
-                            ? formatCurrency(inventoryAnalytics.categoryBreakdown.reduce((sum: number, cat: any) => sum + cat.totalValue, 0))
-                            : '$0'
-                          }
-                        </p>
-                      </div>
-                      <DollarSign className="h-8 w-8 text-green-600" />
+              {/* The money story in one row, in the order it actually happens */}
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+                <Stat label="Orders" value={String(t.orders)} sub={`${t.units} units`} />
+                <Stat label="Buyer paid" value={eur(t.grossReceived)} sub="VAT inclusive" />
+                <Stat label="VAT owed" value={eur(t.vatOwed)} sub="not yours" warn />
+                <Stat label="Net revenue" value={eur(t.netRevenue)} sub="ex-VAT" />
+                <Stat label="Total costs" value={eur(t.totalCosts)} sub="goods + fees" />
+                <Stat
+                  label="Net profit"
+                  value={eur(t.netProfit)}
+                  sub={`${pct(t.netMarginPct)} of net`}
+                  good={t.netProfit > 0}
+                  warn={t.netProfit <= 0}
+                />
+              </div>
+
+              {dq && (dq.ordersMissingSupplierCost > 0 || !dq.postageCostTracked) && (
+                <Card className="border-amber-200 bg-amber-50">
+                  <CardContent className="py-3 text-sm text-amber-900 flex gap-2">
+                    <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="font-medium">Profit shown is optimistic</p>
+                      <p className="text-xs mt-1">
+                        {!dq.postageCostTracked && "Postage paid to the carrier isn't recorded per order yet, so it isn't deducted. "}
+                        {dq.ordersMissingSupplierCost > 0 &&
+                          `${dq.ordersMissingSupplierCost} order(s) have no supplier cost recorded. `}
+                        {dq.ordersMissingActualFee > 0 &&
+                          `${dq.ordersMissingActualFee} order(s) use an estimated eBay fee rather than the charged amount.`}
+                      </p>
                     </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Where the buyer's money went — the step-by-step the user asked for */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Receipt className="w-4 h-4" /> Where the money went
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Waterfall
+                    rows={[
+                      { label: "Buyer paid (gross)", amount: t.grossReceived, kind: "in" },
+                      { label: "VAT to tax authority", amount: -t.vatOwed, kind: "out", note: "Collected on their behalf — never income" },
+                      { label: "Net revenue", amount: t.netRevenue, kind: "total" },
+                      { label: "Supplier cost (TME, 0% VAT)", amount: -t.supplierCost, kind: "out", note: "Bought under reverse charge, so no input VAT to reclaim" },
+                      { label: "eBay fees", amount: -t.marketplaceFee, kind: "out", note: "Charged on the gross, VAT included" },
+                      ...(t.paymentFee > 0 ? [{ label: "Payment processing", amount: -t.paymentFee, kind: "out" as const }] : []),
+                      ...(t.postageCost > 0 ? [{ label: "Postage", amount: -t.postageCost, kind: "out" as const }] : []),
+                      { label: "Packaging", amount: -t.packagingCost, kind: "out" },
+                      { label: "Net profit", amount: t.netProfit, kind: "total" },
+                    ]}
+                  />
+                </CardContent>
+              </Card>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <Globe className="w-4 h-4" /> By destination country
+                    </CardTitle>
+                    <p className="text-xs text-gray-500">Each country's own VAT rate applies to consumer sales (OSS)</p>
+                  </CardHeader>
+                  <CardContent className="overflow-x-auto">
+                    <Table
+                      head={["Country", "VAT", "Orders", "Gross", "VAT owed", "Profit", "Margin"]}
+                      rows={(data.byCountry ?? []).map((c: any) => [
+                        c.country, `${c.vatRatePct}%`, c.orders, eur(c.grossReceived), eur(c.vatOwed),
+                        <span className={c.netProfit < 0 ? "text-red-600" : ""}>{eur(c.netProfit)}</span>,
+                        pct(c.netMarginPct),
+                      ])}
+                    />
                   </CardContent>
                 </Card>
 
                 <Card>
-                  <CardContent className="p-6">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-gray-600">Low Stock Alerts</p>
-                        <p className="text-2xl font-bold text-gray-900">
-                          {inventoryAnalytics?.lowStockAlerts?.length || 0}
-                        </p>
-                      </div>
-                      <AlertTriangle className="h-8 w-8 text-orange-600" />
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardContent className="p-6">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-gray-600">Active Products</p>
-                        <p className="text-2xl font-bold text-gray-900">
-                          {inventoryAnalytics?.statusBreakdown?.active || 0}
-                        </p>
-                      </div>
-                      <Package className="h-8 w-8 text-blue-600" />
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardContent className="p-6">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-gray-600">Monthly Revenue</p>
-                        <p className="text-2xl font-bold text-gray-900">
-                          {marketplacePerformance 
-                            ? formatCurrency((marketplacePerformance.ebay.revenue + marketplacePerformance.amazon.revenue) / 12)
-                            : '$0'
-                          }
-                        </p>
-                      </div>
-                      <TrendingUp className="h-8 w-8 text-green-600" />
-                    </div>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <Truck className="w-4 h-4" /> By supplier
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="overflow-x-auto">
+                    <Table
+                      head={["Supplier", "Lines", "Units", "Cost"]}
+                      rows={(data.bySupplier ?? []).map((s: any) => [s.supplier, s.lines, s.units, eur(s.cost)])}
+                    />
                   </CardContent>
                 </Card>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                {/* Category Breakdown */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Inventory by Category</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={inventoryAnalytics?.categoryBreakdown || []}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="category" />
-                        <YAxis />
-                        <Tooltip formatter={(value) => [formatCurrency(Number(value)), "Total Value"]} />
-                        <Bar dataKey="totalValue" fill="#3B82F6" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">By {groupBy}</CardTitle>
+                </CardHeader>
+                <CardContent className="overflow-x-auto">
+                  <Table
+                    head={["Period", "Orders", "Units", "Gross", "VAT", "Net rev.", "Goods", "Fees", "Profit", "Margin"]}
+                    rows={(data.byPeriod ?? []).map((p: any) => [
+                      p.period, p.orders, p.units, eur(p.grossReceived), eur(p.vatOwed), eur(p.netRevenue),
+                      eur(p.supplierCost), eur(p.marketplaceFee),
+                      <span className={p.netProfit < 0 ? "text-red-600" : ""}>{eur(p.netProfit)}</span>,
+                      pct(p.netMarginPct),
+                    ])}
+                  />
+                </CardContent>
+              </Card>
 
-                {/* Status Distribution */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Product Status Distribution</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <PieChart>
-                        <Pie
-                          data={[
-                            { name: 'Active', value: inventoryAnalytics?.statusBreakdown?.active || 0 },
-                            { name: 'Low Stock', value: inventoryAnalytics?.statusBreakdown?.lowStock || 0 },
-                            { name: 'Out of Stock', value: inventoryAnalytics?.statusBreakdown?.outOfStock || 0 },
-                            { name: 'Inactive', value: inventoryAnalytics?.statusBreakdown?.inactive || 0 }
-                          ]}
-                          cx="50%"
-                          cy="50%"
-                          labelLine={false}
-                          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                          outerRadius={100}
-                          fill="#8884d8"
-                          dataKey="value"
-                        >
-                          {[1,2,3,4].map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                {/* Sales Performance */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Monthly Revenue Trend</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <LineChart data={monthlyRevenue || []}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="month" />
-                        <YAxis />
-                        <Tooltip formatter={(value) => [formatCurrency(Number(value)), "Revenue"]} />
-                        <Line type="monotone" dataKey="revenue" stroke="#10B981" strokeWidth={3} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-
-                {/* Marketplace Performance */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Marketplace Performance</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      <div className="flex justify-between items-center p-4 bg-orange-50 rounded-lg">
-                        <div>
-                          <h4 className="font-semibold text-orange-900">eBay</h4>
-                          <p className="text-sm text-orange-700">
-                            {marketplacePerformance?.ebay?.orders || 0} orders
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-lg font-bold text-orange-900">
-                            {formatCurrency(marketplacePerformance?.ebay?.revenue || 0)}
-                          </p>
-                          <p className="text-sm text-orange-700">
-                            Avg: {formatCurrency(marketplacePerformance?.ebay?.avgOrderValue || 0)}
-                          </p>
-                        </div>
-                      </div>
-                      
-                      <div className="flex justify-between items-center p-4 bg-blue-50 rounded-lg">
-                        <div>
-                          <h4 className="font-semibold text-blue-900">Amazon</h4>
-                          <p className="text-sm text-blue-700">
-                            {marketplacePerformance?.amazon?.orders || 0} orders
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-lg font-bold text-blue-900">
-                            {formatCurrency(marketplacePerformance?.amazon?.revenue || 0)}
-                          </p>
-                          <p className="text-sm text-blue-700">
-                            Avg: {formatCurrency(marketplacePerformance?.amazon?.avgOrderValue || 0)}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Additional Tables */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Top Products */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Top Products by Value</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      {inventoryAnalytics?.topProducts?.map((product: any, index: number) => (
-                        <div key={index} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-                          <div>
-                            <p className="font-medium">{product.name}</p>
-                            <p className="text-sm text-gray-600">{product.sku}</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="font-semibold">{formatCurrency(product.value)}</p>
-                            <Badge variant="secondary">{product.margin}% margin</Badge>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Low Stock Alerts */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Low Stock Alerts</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      {inventoryAnalytics?.lowStockAlerts?.slice(0, 5).map((product: any, index: number) => (
-                        <div key={index} className="flex justify-between items-center p-3 bg-red-50 rounded-lg">
-                          <div>
-                            <p className="font-medium">{product.name}</p>
-                            <p className="text-sm text-gray-600">{product.sku} • {product.category}</p>
-                          </div>
-                          <Badge variant="destructive">{product.stock} left</Badge>
-                        </div>
-                      ))}
-                      {(!inventoryAnalytics?.lowStockAlerts || inventoryAnalytics.lowStockAlerts.length === 0) && (
-                        <p className="text-gray-500 text-center py-4">No low stock alerts</p>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Every order</CardTitle>
+                </CardHeader>
+                <CardContent className="overflow-x-auto">
+                  <Table
+                    head={["Date", "Order", "To", "Units", "Gross", "VAT", "Goods", "Fee", "Profit", "Margin"]}
+                    rows={(data.orders ?? []).map((o: any) => [
+                      new Date(o.orderDate).toLocaleDateString(),
+                      o.marketplaceOrderId,
+                      o.country ?? "—",
+                      o.units,
+                      eur(o.grossReceived),
+                      eur(o.vatOwed),
+                      eur(o.supplierCost),
+                      eur(o.marketplaceFee),
+                      <span className={o.netProfit < 0 ? "text-red-600 font-medium" : ""}>{eur(o.netProfit)}</span>,
+                      pct(o.netMarginPct),
+                    ])}
+                  />
+                </CardContent>
+              </Card>
             </>
           )}
         </div>
@@ -436,3 +217,65 @@ export function Reports({ user }: ReportsProps) {
     </div>
   );
 }
+
+function Stat({ label, value, sub, warn, good }: { label: string; value: string; sub?: string; warn?: boolean; good?: boolean }) {
+  return (
+    <Card>
+      <CardContent className="pt-4 pb-3">
+        <div className="text-xs text-gray-500">{label}</div>
+        <div className={`text-xl font-semibold ${good ? "text-green-700" : warn ? "text-amber-700" : ""}`}>{value}</div>
+        {sub && <div className="text-[11px] text-gray-400 mt-0.5">{sub}</div>}
+      </CardContent>
+    </Card>
+  );
+}
+
+function Waterfall({ rows }: { rows: Array<{ label: string; amount: number; kind: "in" | "out" | "total"; note?: string }> }) {
+  const max = Math.max(...rows.map((r) => Math.abs(r.amount)), 1);
+  return (
+    <div className="space-y-1.5">
+      {rows.map((r, i) => (
+        <div key={i} className={`flex items-center gap-3 ${r.kind === "total" ? "border-t pt-2 mt-1" : ""}`}>
+          <div className="w-64 flex-shrink-0">
+            <div className={`text-sm ${r.kind === "total" ? "font-semibold" : ""}`}>{r.label}</div>
+            {r.note && <div className="text-[11px] text-gray-400">{r.note}</div>}
+          </div>
+          <div className="flex-1 h-4 bg-gray-100 rounded overflow-hidden">
+            <div
+              className={`h-full ${r.kind === "total" ? "bg-blue-500" : r.amount < 0 ? "bg-red-400" : "bg-green-400"}`}
+              style={{ width: `${Math.min(100, (Math.abs(r.amount) / max) * 100)}%` }}
+            />
+          </div>
+          <div className={`w-28 text-right text-sm tabular-nums ${r.kind === "total" ? "font-semibold" : r.amount < 0 ? "text-red-600" : ""}`}>
+            {eur(r.amount)}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Table({ head, rows }: { head: string[]; rows: any[][] }) {
+  return (
+    <table className="w-full text-sm">
+      <thead className="text-left text-gray-500">
+        <tr>
+          {head.map((h, i) => (
+            <th key={h} className={`py-2 pr-3 ${i > 1 ? "text-right" : ""}`}>{h}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r, i) => (
+          <tr key={i} className="border-t">
+            {r.map((c, j) => (
+              <td key={j} className={`py-1.5 pr-3 ${j > 1 ? "text-right tabular-nums" : ""}`}>{c}</td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+export default Reports;
