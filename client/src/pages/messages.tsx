@@ -457,18 +457,11 @@ export default function MessagesPage() {
                                 {msg.subject}
                               </p>
                             )}
-                            {/* bodyHtml is sanitised on the server at write
-                                time (allowlist, see shared/html-sanitize.ts),
-                                so paragraphs, lists and links render as eBay
-                                sent them instead of one flattened block. */}
-                            {msg.bodyHtml ? (
-                              <div
-                                className="text-sm message-html"
-                                dangerouslySetInnerHTML={{ __html: msg.bodyHtml }}
-                              />
-                            ) : (
-                              <p className="text-sm whitespace-pre-wrap">{msg.body}</p>
-                            )}
+                            {/* `body` is the buyer's actual words, with eBay's
+                                notification wrapper stripped. The full original
+                                stays one click away rather than being the
+                                default — it is a whole email around one line. */}
+                            <MessageBody message={msg} />
                             <div className={`flex items-center gap-2 mt-2 text-xs ${
                               msg.direction === 'outbound' ? 'text-primary-foreground/70' : 'text-gray-400'
                             }`}>
@@ -1139,6 +1132,46 @@ function BuyerContextPanel({ threadId }: { threadId: number }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+
+/**
+ * One message: the buyer's words by default, the full eBay notification on
+ * demand.
+ *
+ * eBay sends an email ABOUT the message — header, preview copy, buttons,
+ * greeting, signature, item block, footer — around what is often a single
+ * sentence. Showing all of it buries the question, so the extracted text leads
+ * and the original is a click away, never discarded.
+ */
+function MessageBody({ message }: { message: any }) {
+  const [showOriginal, setShowOriginal] = useState(false);
+  // Only worth offering when the original genuinely holds more than the text.
+  const hasMore =
+    !!message.bodyHtml &&
+    message.bodyHtml.replace(/<[^>]+>/g, "").trim().length > (message.body?.length ?? 0) + 40;
+
+  return (
+    <div>
+      {showOriginal && message.bodyHtml ? (
+        <div className="text-sm message-html" dangerouslySetInnerHTML={{ __html: message.bodyHtml }} />
+      ) : (
+        <p className="text-sm whitespace-pre-wrap">{message.body}</p>
+      )}
+      {hasMore && (
+        <button
+          type="button"
+          onClick={() => setShowOriginal((v) => !v)}
+          className={`mt-1.5 text-[11px] underline opacity-70 hover:opacity-100 ${
+            message.direction === "outbound" ? "text-primary-foreground" : "text-gray-500"
+          }`}
+          data-testid="btn-toggle-original"
+        >
+          {showOriginal ? "Show message only" : "Show full eBay notification"}
+        </button>
+      )}
     </div>
   );
 }

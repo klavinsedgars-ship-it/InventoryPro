@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { storage } from "../storage";
 import { sanitizeMessageHtml, htmlToPlainText } from "@shared/html-sanitize";
+import { extractBuyerMessage } from "@shared/message-extract";
 import { requireAuth } from "../middleware/auth";
 import { ebayOAuth } from "../ebay-oauth";
 import { ebayMessagesApi } from "../ebay-messages-api";
@@ -67,10 +68,16 @@ async function syncEbayMessages(daysBack: number): Promise<{
           threadId: thread.id,
           direction: 'inbound',
           subject: htmlToPlainText(msg.subject),
-          // Capped on the way in. A buyer's question is a few hundred bytes;
-          // eBay's marketing emails are whole HTML documents, and a thread of
-          // ten of them is megabytes to fetch every time it is opened.
-          body: htmlToPlainText(msg.body).slice(0, 8_000),
+          // `body` is what a person reads: eBay's notification wrapper
+          // stripped down to the words the buyer wrote. `bodyHtml` keeps the
+          // whole original, so nothing is lost and the UI can show it on
+          // demand. Both capped — a buyer's question is a few hundred bytes,
+          // eBay's wrapper is a whole HTML document.
+          body: extractBuyerMessage(htmlToPlainText(msg.body), {
+            buyerUsername: msg.sender,
+            itemTitle: msg.itemTitle,
+            sellerUsername: process.env.EBAY_SELLER_USERNAME,
+          }).text.slice(0, 8_000),
           // Sanitised at write time: nothing unsafe is ever stored, so the
           // client never has to trust what it renders.
           bodyHtml: sanitizeMessageHtml((msg as any).bodyHtml || msg.body, { maxLength: 20_000 }) || null,
@@ -81,13 +88,22 @@ async function syncEbayMessages(daysBack: number): Promise<{
           status: 'delivered',
         });
         newMessages++;
-      } else if (!existingMsg.bodyHtml || existingMsg.bodyHtml.includes("@media") || (existingMsg.body?.length ?? 0) > 8_000) {
+      } else if (
+        !existingMsg.bodyHtml ||
+        existingMsg.bodyHtml.includes("@media") ||
+        (existingMsg.body?.length ?? 0) > 8_000 ||
+        /New message from|Reply with offer|sent a message about/i.test(existingMsg.body ?? "")
+      ) {
         // Back-fill or REPAIR: rows written before the decode-order fix hold
         // the whole document (CSS and all), which is both unreadable and the
         // reason threads were slow to load.
         await storage.updateMessage(existingMsg.id, {
           bodyHtml: sanitizeMessageHtml((msg as any).bodyHtml || msg.body, { maxLength: 20_000 }) || null,
-          body: htmlToPlainText(msg.body).slice(0, 8_000),
+          body: extractBuyerMessage(htmlToPlainText(msg.body), {
+            buyerUsername: msg.sender,
+            itemTitle: msg.itemTitle,
+            sellerUsername: process.env.EBAY_SELLER_USERNAME,
+          }).text.slice(0, 8_000),
         } as any);
       }
     }
