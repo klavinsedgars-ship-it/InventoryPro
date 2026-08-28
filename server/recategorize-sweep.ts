@@ -105,14 +105,16 @@ export async function runRecategorizeSweep(budgetMs = 250_000): Promise<SweepSta
     } catch { /* evidence only — a bad row must not stop the sweep */ }
   }
 
+  // ALL categories with live listings — not just never-converged ones: an
+  // operator pin (category override) applied after a category converged must
+  // re-file it, so pending is judged per category against the CURRENT target.
   const catsQ: any = await db.execute(sql`
     SELECT category, count(*)::int AS listed
     FROM products
     WHERE supplier = 'TME' AND listed_on_ebay = true
-      AND (ebay_category_id IS NULL)
-      AND (ebay_listing_error IS NULL OR ebay_listing_error NOT LIKE ${FAIL_MARK + "%"})
     GROUP BY category
   `);
+  let anyPending = false;
   const cats = (catsQ.rows ?? catsQ)
     .map((r: any) => ({
       category: String(r.category),
@@ -127,18 +129,15 @@ export async function runRecategorizeSweep(budgetMs = 250_000): Promise<SweepSta
       break;
     }
 
-    const pendingCond = and(
+    const scopeCond = and(
       eq(products.supplier, "TME"),
       eq(products.listedOnEbay, true),
       eq(products.category, cat.category),
-      sql`${products.ebayCategoryId} IS NULL`,
-      sql`(${products.ebayListingError} IS NULL OR ${products.ebayListingError} NOT LIKE ${FAIL_MARK + "%"})`,
     );
-
-    const [first] = await db.select().from(products).where(pendingCond).orderBy(asc(products.id)).limit(1);
+    const [first] = await db.select().from(products).where(scopeCond).orderBy(asc(products.id)).limit(1);
     if (!first) continue;
 
-    // One guarded resolution per category (cached in suggest2 + memo).
+    // One guarded resolution per category (override > cached suggestion).
     let targetId = "";
     try {
       targetId = (await ebayInventoryApi.resolveCategoryDetailed(first)).id;
@@ -150,6 +149,16 @@ export async function runRecategorizeSweep(budgetMs = 250_000): Promise<SweepSta
       stats.notes.push(`${cat.category}: no plausible category and no fallback — skipped`);
       continue;
     }
+
+    const pendingCond = and(
+      scopeCond,
+      sql`${products.ebayCategoryId} IS DISTINCT FROM ${targetId}`,
+      sql`(${products.ebayListingError} IS NULL OR ${products.ebayListingError} NOT LIKE ${FAIL_MARK + "%"})`,
+    );
+
+    const [firstPending] = await db.select({ id: products.id }).from(products).where(pendingCond).limit(1);
+    if (!firstPending) continue;
+    anyPending = true;
 
     stats.categoriesTouched++;
 
@@ -197,6 +206,9 @@ export async function runRecategorizeSweep(budgetMs = 250_000): Promise<SweepSta
   const progress = await sweepProgress();
   stats.remaining = progress.remaining;
   stats.parkedFailures = progress.parkedFailures;
-  stats.done = progress.remaining === 0;
+  // Done = a full pass over every category found nothing pending against its
+  // CURRENT target. The NULL-based `remaining` is only a coarse progress
+  // proxy (it cannot see a re-pinned category), so it must not gate this.
+  stats.done = !stats.budgetHit && !anyPending;
   return stats;
 }

@@ -463,6 +463,54 @@ export function registerEbayListingRoutes(app: Express) {
       res.status(500).json({ ok: false, error: (error as Error).message });
     }
   };
+  /**
+   * Operator pins: TME category → eBay category id, consulted before the
+   * Taxonomy suggester (see categoryOverrides in ebay-inventory-api.ts).
+   * value = category id, "default" (force the learned catch-all), "" = unset.
+   * The sweep re-files a re-pinned category automatically on its next pass.
+   */
+  app.get("/api/ebay/category-overrides", requireAuth, async (_req, res) => {
+    try {
+      const settings = await storage.getMarketplaceSettings("ebay");
+      const overrides = (settings as any[])
+        .filter((s) => String(s.setting).startsWith("category_override:") && s.value)
+        .map((s) => ({ category: String(s.setting).slice("category_override:".length), value: s.value }));
+      res.json({ ok: true, overrides });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  });
+  app.post("/api/ebay/category-overrides", requireAuth, async (req, res) => {
+    try {
+      const list = req.body?.overrides;
+      if (!Array.isArray(list) || list.length === 0) {
+        return res.status(400).json({
+          ok: false,
+          error: 'body must be {"overrides":[{"category":"<TME category>","value":"<eBay category id>|default|"}]}',
+        });
+      }
+      let applied = 0;
+      for (const o of list) {
+        const category = String(o?.category ?? "").trim().toLowerCase();
+        const value = String(o?.value ?? "").trim();
+        if (!category) continue;
+        if (value && value !== "default" && !/^\d+$/.test(value)) {
+          return res.status(400).json({ ok: false, error: `"${value}" is not a category id, "default", or ""` });
+        }
+        await storage.setMarketplaceSetting({
+          marketplace: "ebay",
+          setting: `category_override:${category}`,
+          value,
+        });
+        applied++;
+      }
+      ebayInventoryApi.clearCategoryOverridesCache();
+      res.json({ ok: true, applied });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  });
+
   app.get("/api/ebay/recategorize", requireAuth, recategorizeHandler);
   app.post("/api/ebay/recategorize", requireAuth, recategorizeHandler);
 

@@ -587,7 +587,10 @@ export class EbayInventoryApiService {
       offerId = viaCreate.offerId;
     }
 
-    await storage.updateProduct(product.id, { ebayCategoryId: categoryId, ebayOfferId: offerId });
+    // ebayListingError: null also clears a sweep "recategorize:" park marker
+    // when a manual retry succeeds — otherwise the product stays counted as a
+    // parked failure forever.
+    await storage.updateProduct(product.id, { ebayCategoryId: categoryId, ebayOfferId: offerId, ebayListingError: null });
     return { ok: true, sku: product.sku, categoryId };
   }
 
@@ -741,8 +744,43 @@ export class EbayInventoryApiService {
    * or errored — as opposed to eBay having no category for this product. The
    * caller must not treat the first as a defect of the product.
    */
+  /**
+   * Operator-pinned eBay categories per TME category — consulted BEFORE the
+   * Taxonomy suggester. The 2026-08-28 resolve-all showed a residue of
+   * suggestions no heuristic can save (tact switches classified as computer
+   * mice, screwdriver "Sets" as placemats): those get pinned by hand, from
+   * data, once. Stored as marketplace_settings 'ebay'/'category_override:<tme
+   * category lowercased>'; value = eBay category id, or "default" to force
+   * the learned catch-all, or "" to unset.
+   */
+  private categoryOverridesMemo: { map: Map<string, string>; at: number } | null = null;
+  async categoryOverrides(): Promise<Map<string, string>> {
+    if (this.categoryOverridesMemo && Date.now() - this.categoryOverridesMemo.at < 5 * 60_000) {
+      return this.categoryOverridesMemo.map;
+    }
+    const map = new Map<string, string>();
+    try {
+      const settings = await storage.getMarketplaceSettings("ebay");
+      for (const s of settings as any[]) {
+        if (String(s.setting).startsWith("category_override:") && s.value) {
+          map.set(String(s.setting).slice("category_override:".length), String(s.value));
+        }
+      }
+    } catch { /* overrides are an overlay — never block category resolution */ }
+    this.categoryOverridesMemo = { map, at: Date.now() };
+    return map;
+  }
+  clearCategoryOverridesCache(): void {
+    this.categoryOverridesMemo = null;
+  }
+
   async resolveCategoryDetailed(product: Product): Promise<{ id: string; transient: boolean }> {
     const fallback = await this.defaultCategoryId();
+    const override = (await this.categoryOverrides()).get((product.category ?? "").trim().toLowerCase());
+    if (override) {
+      if (override === "default") return { id: fallback, transient: !fallback };
+      return { id: override, transient: false };
+    }
     try {
       // Query by supplier CATEGORY, not by product name: the query string is
       // the cache key, so a per-product query meant a Taxonomy call per
