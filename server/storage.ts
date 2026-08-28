@@ -608,14 +608,43 @@ export class DatabaseStorage implements IStorage {
   // between cron ticks while the listing still shows qty; refreshing listed
   // SKUs ~3× more often (e.g. 4h) catches that quickly, while unlisted SKUs
   // can drift for 48h with no customer impact — overall load drops too.
+  /**
+   * The stalest TME products, as a PROJECTION rather than whole rows.
+   *
+   * This is the single biggest consumer of database egress: the sweep reads
+   * ~8,200 rows an hour, and a full row carries `description` and
+   * `tme_parameters` — roughly 1.4 KB of text the sync never looks at. That was
+   * ~300 MB a day of transfer for 15 small fields, and on Neon's free tier
+   * (5 GB/month) it was most of the allowance.
+   *
+   * tme_parameters is only tested for PRESENCE, to decide whether to back-fill
+   * it, so a boolean crosses the wire instead of the JSON.
+   */
   async getStaleTmeProducts(
     limit: number,
     listedBefore: Date,
     unlistedBefore?: Date,
-  ): Promise<Product[]> {
+  ): Promise<any[]> {
     const unlisted = unlistedBefore ?? listedBefore;
     return await db
-      .select()
+      .select({
+        id: products.id,
+        sku: products.sku,
+        supplierProductId: products.supplierProductId,
+        stock: products.stock,
+        supplierPrice: products.supplierPrice,
+        salePrice: products.salePrice,
+        moq: products.moq,
+        multiples: products.multiples,
+        weight: products.weight,
+        useCalculatedPrice: products.useCalculatedPrice,
+        useStockLimit: products.useStockLimit,
+        ebayStockLimit: products.ebayStockLimit,
+        listedOnEbay: products.listedOnEbay,
+        ebayOfferId: products.ebayOfferId,
+        ebayListingStatus: products.ebayListingStatus,
+        hasTmeParameters: sql<boolean>`(${products.tmeParameters} IS NOT NULL AND ${products.tmeParameters} <> '')`,
+      })
       .from(products)
       .where(
         and(

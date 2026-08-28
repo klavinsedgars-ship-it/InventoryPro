@@ -134,7 +134,8 @@ export async function processSyncSlice(slice: any[], ctx: SyncContext): Promise<
       // fetch ONLY for rows that don't have them yet: at steady state this
       // costs nothing, and it back-fills the catalogue as the sync sweeps.
       const needParams = slice
-        .filter((p) => !(p as any).tmeParameters)
+        // Projection sends a boolean, not the JSON — see getStaleTmeProducts.
+        .filter((p) => !(p as any).hasTmeParameters)
         .map((p) => p.supplierProductId || p.sku);
       if (needParams.length > 0) {
         try {
