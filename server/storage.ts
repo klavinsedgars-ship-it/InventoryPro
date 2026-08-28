@@ -1747,6 +1747,9 @@ export class DatabaseStorage implements IStorage {
         COUNT(*) FILTER (WHERE stock = 0)::int                 AS out_of_stock,
         COALESCE(SUM(sale_price * stock), 0)::float            AS total_revenue
       FROM products
+      -- Blocked products are hidden from the Products page, so counting them
+      -- here made the dashboard disagree with the list it summarises.
+      WHERE NOT EXISTS (SELECT 1 FROM blocked_products b WHERE b.code = upper(products.sku))
     `);
     const row = (r.rows ?? r)?.[0] ?? {};
     return {

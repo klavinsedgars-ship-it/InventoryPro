@@ -710,6 +710,101 @@ export function registerDebugRoutes(app: Express) {
    * the outside. This shows eBay's own totals next to what we hold, so the
    * three cases separate: no sales, an auth/scope problem, or an import bug.
    */
+  /**
+   * Is the catalogue count real?
+   *
+   * `sku` is UNIQUE, so exact duplicates cannot exist — but Postgres compares
+   * it case-sensitively, so "DF-0077" and "df-0077" are two rows to the
+   * database and one product to a supplier. This checks that and the other
+   * ways a headline count misleads: rows counted that are blocked or not
+   * really ours, two products claiming the same eBay listing, and the same TME
+   * symbol behind different SKUs.
+   *
+   * Read-only.
+   */
+  app.get("/api/__data-integrity", async (_req, res) => {
+    try {
+      const { db } = await import("../db");
+      const { sql } = await import("drizzle-orm");
+      const one = async (q: any) => ((await db.execute(q)) as any).rows?.[0] ?? {};
+      const many = async (q: any) => (((await db.execute(q)) as any).rows ?? []) as any[];
+
+      const counts = await one(sql`
+        SELECT
+          COUNT(*)::int                                          AS total_rows,
+          COUNT(DISTINCT upper(sku))::int                        AS distinct_sku_ci,
+          COUNT(*) FILTER (WHERE supplier = 'TME')::int          AS tme_rows,
+          COUNT(*) FILTER (WHERE supplier <> 'TME' OR supplier IS NULL)::int AS non_tme_rows,
+          COUNT(*) FILTER (WHERE listed_on_ebay)::int            AS listed,
+          COUNT(*) FILTER (WHERE listed_on_ebay AND ebay_listing_id IS NULL)::int AS listed_without_listing_id,
+          COUNT(DISTINCT ebay_listing_id) FILTER (WHERE ebay_listing_id IS NOT NULL)::int AS distinct_listing_ids,
+          COUNT(*) FILTER (WHERE ebay_listing_id IS NOT NULL)::int AS rows_with_listing_id,
+          COUNT(*) FILTER (WHERE status = 'blocked')::int        AS blocked_rows,
+          COUNT(*) FILTER (WHERE stock = 0)::int                 AS zero_stock,
+          COUNT(*) FILTER (WHERE sale_price IS NULL OR sale_price::numeric <= 0)::int AS no_price
+        FROM products
+      `);
+
+      // Same supplier symbol behind more than one SKU: a genuine duplicate
+      // product, which the UNIQUE constraint on sku cannot catch.
+      const dupSymbols = await many(sql`
+        SELECT upper(supplier_product_id) AS symbol, COUNT(*)::int AS rows,
+               array_agg(sku ORDER BY id) AS skus
+        FROM products
+        WHERE supplier_product_id IS NOT NULL AND supplier_product_id <> ''
+        GROUP BY 1 HAVING COUNT(*) > 1
+        ORDER BY 2 DESC LIMIT 20
+      `);
+
+      // Two products pointing at one eBay listing — an oversell waiting to
+      // happen, since both would push stock to the same item.
+      const dupListings = await many(sql`
+        SELECT ebay_listing_id, COUNT(*)::int AS rows, array_agg(sku ORDER BY id) AS skus
+        FROM products
+        WHERE ebay_listing_id IS NOT NULL AND ebay_listing_id <> ''
+        GROUP BY 1 HAVING COUNT(*) > 1
+        ORDER BY 2 DESC LIMIT 20
+      `);
+
+      const caseDupes = await many(sql`
+        SELECT upper(sku) AS code, COUNT(*)::int AS rows, array_agg(sku ORDER BY id) AS variants
+        FROM products GROUP BY 1 HAVING COUNT(*) > 1
+        ORDER BY 2 DESC LIMIT 20
+      `);
+
+      const totalRows = Number(counts.total_rows) || 0;
+      const findings: string[] = [];
+      if (Number(counts.distinct_sku_ci) < totalRows) {
+        findings.push(`${totalRows - Number(counts.distinct_sku_ci)} SKU(s) differ only by letter case — the same product stored twice`);
+      }
+      if (dupSymbols.length > 0) findings.push(`${dupSymbols.length}+ TME symbol(s) appear under more than one SKU`);
+      if (dupListings.length > 0) findings.push(`${dupListings.length}+ eBay listing id(s) claimed by more than one product — oversell risk`);
+      if (Number(counts.listed_without_listing_id) > 0) {
+        findings.push(`${counts.listed_without_listing_id} product(s) marked listed but carry no eBay listing id`);
+      }
+      if (Number(counts.blocked_rows) > 0) {
+        findings.push(`${counts.blocked_rows} blocked product(s) are still counted in the dashboard's "Total Products"`);
+      }
+
+      res.json({
+        ok: true,
+        headline: {
+          totalProducts: totalRows,
+          distinctSkusCaseInsensitive: Number(counts.distinct_sku_ci),
+          listed: Number(counts.listed),
+          distinctEbayListingIds: Number(counts.distinct_listing_ids),
+        },
+        counts,
+        duplicateSymbols: dupSymbols,
+        duplicateListingIds: dupListings,
+        caseOnlyDuplicateSkus: caseDupes,
+        findings: findings.length ? findings : ["No duplicate or inconsistency found"],
+      });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  });
+
   app.get("/api/__ebay-orders-probe", async (req, res) => {
     try {
       const days = Math.min(365, Math.max(1, Number(req.query.days) || 90));
