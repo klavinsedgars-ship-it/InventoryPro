@@ -354,6 +354,18 @@ export function registerEbayListingRoutes(app: Express) {
         const { isSweepEnabled, setSweepEnabled, sweepProgress, runRecategorizeSweep } = await import("../recategorize-sweep");
         if (sweep === "start") await setSweepEnabled(true);
         if (sweep === "stop") await setSweepEnabled(false);
+        // Clear the "recategorize:" park markers so the sweep retries those
+        // listings — used after fixing whatever made them fail.
+        let unparked: number | undefined;
+        if (sweep === "retry-parked") {
+          const { db } = await import("../db");
+          const { sql } = await import("drizzle-orm");
+          const r: any = await db.execute(sql`
+            UPDATE products SET ebay_listing_error = NULL
+            WHERE ebay_listing_error LIKE 'recategorize: %'
+          `);
+          unparked = r.rowCount ?? 0;
+        }
         let slice = null;
         if (sweep === "start" && (q.run === "1" || q.run === true)) {
           const leased = await withLease(leaseStore, "recategorize", { ttlSeconds: 300 }, () => runRecategorizeSweep(240_000));
@@ -364,6 +376,7 @@ export function registerEbayListingRoutes(app: Express) {
           sweep,
           enabled: await isSweepEnabled(),
           progress: await sweepProgress(),
+          ...(unparked !== undefined ? { unparked } : {}),
           ...(slice ? { slice } : {}),
           note: "the /api/cron/recategorize tick (every 10 min) works the sweep while enabled; it disables itself when done",
         });

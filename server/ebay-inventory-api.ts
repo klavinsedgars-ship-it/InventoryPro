@@ -464,12 +464,28 @@ export class EbayInventoryApiService {
     };
   }
 
-  async createOrReplaceInventoryItem(sku: string, product: Product, categoryId: string): Promise<StepResult & { quantity?: number; aspects?: any }> {
+  async createOrReplaceInventoryItem(
+    sku: string,
+    product: Product,
+    categoryId: string,
+    /** Extra aspects merged UNDER the built ones (recategorize transition). */
+    extraAspects?: Record<string, string[]>,
+  ): Promise<StepResult & { quantity?: number; aspects?: any }> {
     const item = await this.buildInventoryItem(product, categoryId);
+    if (extraAspects && Object.keys(extraAspects).length > 0) {
+      item.product.aspects = { ...extraAspects, ...item.product.aspects };
+    }
     const quantity = item.availability.shipToLocationAvailability.quantity;
     const r = await this.req("PUT", `/inventory_item/${encodeURIComponent(sku)}`, item);
     if (r.ok || r.status === 204) return { step: "inventory_item", ok: true, httpStatus: r.status, quantity, aspects: item.product.aspects };
     return { step: "inventory_item", ok: false, httpStatus: r.status, quantity, aspects: item.product.aspects, error: this.firstEbayError(r.data, r.text) };
+  }
+
+  /** The live inventory item's aspects, or null when the item can't be read. */
+  async getInventoryItemAspects(sku: string): Promise<Record<string, string[]> | null> {
+    const r = await this.req("GET", `/inventory_item/${encodeURIComponent(sku)}`);
+    if (!r.ok) return null;
+    return r.data?.product?.aspects ?? {};
   }
 
   /** Build an offer payload (price/qty/policies/category) for a SKU. */
@@ -550,12 +566,20 @@ export class EbayInventoryApiService {
   /**
    * Move ONE live listing to the category the (guarded) resolver chooses now.
    *
-   * Order matters: the inventory item is rewritten FIRST because the new
-   * category's required aspects live on it; then the offer is PUT with the
-   * new categoryId — for a published offer eBay applies that to the live
-   * listing immediately, no publish call needed. Records the result in
-   * products.ebay_category_id, which is what makes /api/ebay/recategorize
-   * resumable.
+   * The transition is the tricky part (learned live, 2026-08-28, from 479
+   * uniform failures): replacing the inventory item is validated by eBay
+   * against the CURRENT published offer's category — a bolt moving out of
+   * "DVDs & Blu-rays" was rejected for missing the aspect "Film-/Fernseh-
+   * Titel" the moment we wrote proper bolt aspects. So:
+   *   1. read the live item's existing aspects,
+   *   2. write the item with the UNION (old aspects keep the old category's
+   *      validator happy, new aspects satisfy the target category),
+   *   3. move the offer to the new category,
+   *   4. write the item once more with only the new aspects, so the DVD-era
+   *      junk doesn't linger as item specifics (best-effort: the listing is
+   *      correctly categorised even if this step fails).
+   * Records the result in products.ebay_category_id, which is what makes
+   * /api/ebay/recategorize resumable.
    */
   async recategorizeOne(product: Product): Promise<{ ok: boolean; sku: string; categoryId?: string; error?: string }> {
     const { id: categoryId } = await this.resolveCategoryDetailed(product);
@@ -563,7 +587,9 @@ export class EbayInventoryApiService {
       return { ok: false, sku: product.sku, error: "no plausible category resolved (and no fallback learned)" };
     }
 
-    const inv = await this.createOrReplaceInventoryItem(product.sku, product, categoryId);
+    const existingAspects = await this.getInventoryItemAspects(product.sku);
+
+    const inv = await this.createOrReplaceInventoryItem(product.sku, product, categoryId, existingAspects ?? undefined);
     if (!inv.ok) return { ok: false, sku: product.sku, categoryId, error: `inventory_item: ${inv.error}` };
 
     let offerId = product.ebayOfferId || null;
@@ -585,6 +611,19 @@ export class EbayInventoryApiService {
         return { ok: false, sku: product.sku, categoryId, error: `offer: ${viaCreate.error}` };
       }
       offerId = viaCreate.offerId;
+    }
+
+    // Cleanup pass: drop the old category's aspects now that the offer has
+    // moved (validation is against the NEW category from here). Only needed
+    // when the old item carried aspects the new build doesn't — compared
+    // against the NEW-ONLY aspects (inv.aspects is the merged set and would
+    // never show a difference). Best-effort: a failure here leaves harmless
+    // extra item specifics on a correctly categorised listing.
+    if (existingAspects) {
+      const newOnly = await this.buildAspects(product, categoryId).catch(() => null);
+      if (newOnly && Object.keys(existingAspects).some((k) => !(k in newOnly))) {
+        await this.createOrReplaceInventoryItem(product.sku, product, categoryId).catch(() => undefined);
+      }
     }
 
     // ebayListingError: null also clears a sweep "recategorize:" park marker
