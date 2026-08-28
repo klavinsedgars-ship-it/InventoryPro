@@ -525,6 +525,14 @@ export class DatabaseStorage implements IStorage {
       // sync alone runs ~164 chunks an hour, so this is the difference between
       // a cheap lookup and a full scan repeated thousands of times a day.
       `CREATE INDEX IF NOT EXISTS products_sku_upper_idx ON products (upper(sku))`,
+      // The Products page searches name/sku/ean with ILIKE '%term%'. No btree
+      // index can serve a leading wildcard, so every search read the whole
+      // 143MB table. Trigram indexes do serve it. Extension first — Neon
+      // supports pg_trgm; if it is unavailable the CREATE INDEX statements
+      // below simply fail and are skipped, leaving today's behaviour.
+      `CREATE EXTENSION IF NOT EXISTS pg_trgm`,
+      `CREATE INDEX IF NOT EXISTS products_name_trgm_idx ON products USING gin (name gin_trgm_ops)`,
+      `CREATE INDEX IF NOT EXISTS products_sku_trgm_idx ON products USING gin (sku gin_trgm_ops)`,
       // Run-once-at-a-time leases for background jobs (see job-lease.ts). The
       // primary key is what makes the acquire atomic: ON CONFLICT is evaluated
       // against it, so two callers racing cannot both win.
@@ -535,10 +543,23 @@ export class DatabaseStorage implements IStorage {
          expires_at timestamptz NOT NULL
        )`,
     ];
+    // Each statement is isolated: an extension that a host does not allow, or
+    // an index that cannot be built, must not stop the rest of the schema from
+    // being applied. Previously one failure aborted everything after it.
+    let applied = 0;
+    const failures: string[] = [];
     for (const s of stmts) {
-      await db.execute(sql.raw(s));
+      try {
+        await db.execute(sql.raw(s));
+        applied++;
+      } catch (e) {
+        failures.push(`${s.slice(0, 60)}…: ${(e as Error).message}`);
+      }
     }
-    return { ok: true, statements: stmts.length };
+    if (failures.length > 0) {
+      console.warn(`ensureCoreSchema: ${failures.length} statement(s) skipped:`, failures.slice(0, 5));
+    }
+    return { ok: true, statements: applied };
   }
 
   // Idempotent schema upgrade for order integrity: the cost-at-sale column,
