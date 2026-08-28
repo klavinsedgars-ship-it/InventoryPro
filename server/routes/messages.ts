@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import { storage } from "../storage";
+import { sanitizeMessageHtml, htmlToPlainText } from "@shared/html-sanitize";
 import { requireAuth } from "../middleware/auth";
 import { ebayOAuth } from "../ebay-oauth";
 import { ebayMessagesApi } from "../ebay-messages-api";
@@ -8,6 +9,88 @@ import { ZodError } from "zod";
 
 // Buyer messaging: threads, replies, templates, auto-rules, scheduled sends.
 // Extracted from the routes.ts monolith (behaviour unchanged).
+
+/**
+ * Pull messages from eBay into threads. Shared by the manual button and the
+ * scheduled cron, so both behave identically.
+ */
+async function syncEbayMessages(daysBack: number): Promise<{
+  synced: number; updated: number; newMessages: number; threadsTouched: number; errors: string[];
+}> {
+  const startTime = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000);
+  let synced = 0, updated = 0, newMessages = 0;
+  const errors: string[] = [];
+  const touched = new Set<number>();
+
+  let pageNum = 1;
+  let hasMore = true;
+  while (hasMore) {
+    const result = await ebayMessagesApi.getMyMessages(startTime, undefined, 'Inbox', 100, pageNum);
+    if (!result.success) {
+      errors.push(result.error || 'eBay message fetch failed');
+      break;
+    }
+    hasMore = result.hasMoreMessages || false;
+
+    for (const msg of result.messages) {
+      let thread = await storage.getMessageThreadByBuyer(msg.sender, msg.itemId);
+      if (!thread) {
+        thread = await storage.createMessageThread({
+          marketplace: 'ebay',
+          marketplaceThreadId: msg.messageId,
+          buyerUsername: msg.sender,
+          buyerEmail: msg.senderEmail,
+          itemId: msg.itemId,
+          itemTitle: msg.itemTitle,
+          subject: htmlToPlainText(msg.subject),
+          status: 'open',
+          isRead: msg.isRead,
+          lastMessageAt: new Date(msg.creationDate),
+        });
+        synced++;
+      } else {
+        const cleanedSubject = htmlToPlainText(msg.subject);
+        if (thread.subject !== cleanedSubject) {
+          await storage.updateMessageThread(thread.id, {
+            subject: cleanedSubject,
+            lastMessageAt: new Date(msg.creationDate),
+          });
+        }
+        updated++;
+      }
+      touched.add(thread.id);
+
+      const existingMessages = await storage.getMessages(thread.id);
+      const existingMsg = existingMessages.find((m) => m.marketplaceMessageId === msg.messageId);
+      if (!existingMsg) {
+        await storage.createMessage({
+          threadId: thread.id,
+          direction: 'inbound',
+          subject: htmlToPlainText(msg.subject),
+          body: htmlToPlainText(msg.body),
+          // Sanitised at write time: nothing unsafe is ever stored, so the
+          // client never has to trust what it renders.
+          bodyHtml: sanitizeMessageHtml((msg as any).bodyHtml || msg.body) || null,
+          sentAt: msg.creationDate ? new Date(msg.creationDate) : new Date(),
+          marketplaceMessageId: msg.messageId,
+          senderUsername: msg.sender,
+          senderEmail: msg.senderEmail,
+          status: 'delivered',
+        });
+        newMessages++;
+      } else if (!existingMsg.bodyHtml) {
+        // Back-fill formatting for messages stored before HTML was kept.
+        await storage.updateMessage(existingMsg.id, {
+          bodyHtml: sanitizeMessageHtml((msg as any).bodyHtml || msg.body) || null,
+        } as any);
+      }
+    }
+    if (hasMore) pageNum++;
+  }
+
+  return { synced, updated, newMessages, threadsTouched: touched.size, errors };
+}
+
 export function registerMessageRoutes(app: Express): void {
   app.get('/api/messages/threads', requireAuth, async (req, res) => {
     try {
@@ -254,118 +337,156 @@ export function registerMessageRoutes(app: Express): void {
   };
 
   // Sync messages from eBay
-  app.post('/api/messages/sync/ebay', requireAuth, async (req, res) => {
+  /**
+   * Everything we know about the person in this thread.
+   *
+   * Answering a buyer means knowing what they bought, whether it shipped and
+   * what it was worth — which today means leaving the CRM for eBay mid-reply.
+   * Matched on the buyer username the thread carries.
+   */
+  app.get('/api/messages/threads/:id/context', requireAuth, async (req, res) => {
     try {
-      if (!ebayOAuth.isOAuthConfigured()) {
-        return res.status(400).json({
-          success: false,
-          error: 'eBay OAuth not configured'
-        });
+      const thread: any = await storage.getMessageThread(Number(req.params.id));
+      if (!thread) return res.status(404).json({ success: false, error: 'Thread not found' });
+
+      const { db } = await import("../db");
+      const { sql } = await import("drizzle-orm");
+      const q: any = await db.execute(sql`
+        SELECT o.id, o.marketplace_order_id, o.status, o.order_date, o.total_price, o.currency,
+               o.shipping_name, o.shipping_city, o.shipping_country, o.shipping_phone,
+               o.tracking_number, o.shipping_carrier, o.shipped_at, o.delivered_at,
+               o.buyer_username, o.buyer_email
+        FROM orders o
+        WHERE lower(o.buyer_username) = lower(${thread.buyerUsername})
+        ORDER BY o.order_date DESC
+        LIMIT 25
+      `);
+      const orders = (q.rows ?? q ?? []) as any[];
+
+      const items: any = orders.length
+        ? await db.execute(sql`
+            SELECT oi.order_id, oi.sku, oi.title, oi.quantity, oi.total_price, oi.image_url,
+                   oi.tme_product_id
+            FROM order_items oi
+            WHERE oi.order_id = ANY(ARRAY[${sql.join(orders.map((o: any) => sql`${o.id}`), sql`, `)}]::int[])
+          `)
+        : { rows: [] };
+      const itemsByOrder = new Map<number, any[]>();
+      for (const i of (items.rows ?? items ?? [])) {
+        const list = itemsByOrder.get(Number(i.order_id)) ?? [];
+        list.push(i);
+        itemsByOrder.set(Number(i.order_id), list);
       }
 
-      const { daysBack = 30 } = req.body;
-      const startTime = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000);
-
-      console.log(`📬 Syncing eBay messages from last ${daysBack} days...`);
-
-      let synced = 0;
-      let updated = 0;
-      let pageNum = 1;
-      let hasMore = true;
-
-      // Keep fetching pages until no more messages
-      while (hasMore) {
-        console.log(`📬 Fetching message page ${pageNum}...`);
-        const result = await ebayMessagesApi.getMyMessages(startTime, undefined, 'Inbox', 100, pageNum);
-
-        if (!result.success) {
-          return res.status(500).json({
-            success: false,
-            error: result.error
-          });
-        }
-
-        hasMore = result.hasMoreMessages || false;
-
-        for (const msg of result.messages) {
-          // Find or create thread
-          let thread = await storage.getMessageThreadByBuyer(msg.sender, msg.itemId);
-
-          if (!thread) {
-            thread = await storage.createMessageThread({
-              marketplace: 'ebay',
-              marketplaceThreadId: msg.messageId,
-              buyerUsername: msg.sender,
-              buyerEmail: msg.senderEmail,
-              itemId: msg.itemId,
-              itemTitle: msg.itemTitle,
-              subject: cleanMessageBodyForStorage(msg.subject),
-              status: 'open',
-              isRead: msg.isRead,
-              lastMessageAt: new Date(msg.creationDate)
-            });
-            synced++;
-          } else {
-            // Update thread subject with cleaned content if needed
-            const cleanedSubject = cleanMessageBodyForStorage(msg.subject);
-            if (thread.subject !== cleanedSubject) {
-              await storage.updateMessageThread(thread.id, {
-                subject: cleanedSubject,
-                lastMessageAt: new Date(msg.creationDate)
-              });
-            }
-            updated++;
-          }
-
-          // Check if message already exists
-          const existingMessages = await storage.getMessages(thread.id);
-          const existingMsg = existingMessages.find(m => m.marketplaceMessageId === msg.messageId);
-
-          if (!existingMsg) {
-            await storage.createMessage({
-              threadId: thread.id,
-              direction: 'inbound',
-              subject: cleanMessageBodyForStorage(msg.subject),
-              body: cleanMessageBodyForStorage(msg.body),
-              marketplaceMessageId: msg.messageId,
-              senderUsername: msg.sender,
-              senderEmail: msg.senderEmail,
-              status: 'delivered'
-            });
-          } else {
-            // Update existing message with cleaned HTML content
-            const cleanedBody = cleanMessageBodyForStorage(msg.body);
-            const cleanedSubject = cleanMessageBodyForStorage(msg.subject);
-            if (existingMsg.body !== cleanedBody || existingMsg.subject !== cleanedSubject) {
-              await storage.updateMessage(existingMsg.id, {
-                body: cleanedBody,
-                subject: cleanedSubject
-              });
-            }
-          }
-        }
-
-        if (hasMore) pageNum++;
-      }
-
-      console.log(`📬 Synced ${synced} new threads, updated ${updated} existing threads`);
+      const totalSpent = orders.reduce((s: number, o: any) => s + Number(o.total_price ?? 0), 0);
 
       res.json({
         success: true,
-        synced,
-        updated,
-        totalMessages: synced + updated
+        buyer: {
+          username: thread.buyerUsername,
+          email: thread.buyerEmail ?? orders[0]?.buyer_email ?? null,
+          name: orders[0]?.shipping_name ?? null,
+          city: orders[0]?.shipping_city ?? null,
+          country: orders[0]?.shipping_country ?? null,
+          phone: orders[0]?.shipping_phone ?? null,
+          orderCount: orders.length,
+          totalSpent: Math.round(totalSpent * 100) / 100,
+          currency: orders[0]?.currency ?? 'EUR',
+        },
+        // The listing the message is about, even when no order exists yet —
+        // most questions arrive before the sale, not after.
+        item: thread.itemId ? { itemId: thread.itemId, title: thread.itemTitle ?? null } : null,
+        orders: orders.map((o: any) => ({
+          id: o.id,
+          marketplaceOrderId: o.marketplace_order_id,
+          status: o.status,
+          orderDate: o.order_date,
+          total: Number(o.total_price ?? 0),
+          currency: o.currency,
+          trackingNumber: o.tracking_number,
+          carrier: o.shipping_carrier,
+          shippedAt: o.shipped_at,
+          deliveredAt: o.delivered_at,
+          shipTo: [o.shipping_name, o.shipping_city, o.shipping_country].filter(Boolean).join(', '),
+          items: (itemsByOrder.get(Number(o.id)) ?? []).map((i: any) => ({
+            sku: i.sku, title: i.title, quantity: i.quantity,
+            total: Number(i.total_price ?? 0), imageUrl: i.image_url,
+            tmeProductId: i.tme_product_id,
+          })),
+        })),
       });
     } catch (error) {
-      console.error('Failed to sync eBay messages:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to sync messages from eBay'
-      });
+      console.error('Thread context failed:', error);
+      res.status(500).json({ success: false, error: (error as Error).message });
     }
   });
 
-  // Get message templates
+  /**
+   * Scheduled message sync.
+   *
+   * Messages only ever arrived when someone pressed "Sync from eBay", so a
+   * buyer question sat unseen until the operator happened to look. eBay's
+   * response-time metrics run on the clock whether or not anyone is watching.
+   *
+   * Delegates to the same handler as the button by calling the sync directly,
+   * with the CRON_SECRET-or-session auth the other crons use.
+   */
+  const messagesSyncCron = async (req: any, res: any) => {
+    const auth = req.headers["authorization"] || "";
+    const cronSecret = process.env.CRON_SECRET;
+    const isVercelCron = cronSecret && auth === `Bearer ${cronSecret}`;
+    const isAuthed = !!req.session?.userId || process.env.BYPASS_AUTH === "true";
+    if (!isVercelCron && !isAuthed) return res.status(401).json({ message: "Unauthorized" });
+
+    if (!ebayOAuth.isOAuthConfigured()) {
+      return res.json({ success: true, skipped: true, reason: "eBay OAuth not configured" });
+    }
+
+    const { withLease, describeRefusal } = await import("../job-lease");
+    const { leaseStore } = await import("../storage");
+    const leased = await withLease(leaseStore, "messages_sync", { ttlSeconds: 120 }, async () => {
+      // Short window on a schedule: re-scanning a month every two hours is
+      // wasted Trading-API calls once the backlog is in.
+      const daysBack = Math.min(90, Math.max(1, Number(req.query?.daysBack) || 3));
+      const result = await syncEbayMessages(daysBack);
+      if (result.newMessages > 0 || result.errors.length > 0) {
+        await storage.createSyncLog({
+          source: "messages",
+          operation: "message_sync",
+          status: result.errors.length > 0 ? "partial" : "success",
+          message: `Messages: ${result.newMessages} new, ${result.threadsTouched} thread(s) (last ${daysBack}d)`,
+          details: JSON.stringify(result).slice(0, 4000),
+        });
+      }
+      return { success: true, ...result };
+    });
+
+    if (!leased.ran) {
+      return res.json({ success: true, skipped: true, reason: describeRefusal("messages_sync", leased) });
+    }
+    return res.json(leased.result);
+  };
+  app.get('/api/cron/messages', messagesSyncCron);
+  app.post('/api/cron/messages', messagesSyncCron);
+
+  app.post('/api/messages/sync/ebay', requireAuth, async (req, res) => {
+    try {
+      if (!ebayOAuth.isOAuthConfigured()) {
+        return res.status(400).json({ success: false, error: 'eBay OAuth not configured' });
+      }
+      const daysBack = Math.min(90, Math.max(1, Number(req.body?.daysBack) || 30));
+      const result = await syncEbayMessages(daysBack);
+      res.json({
+        success: true,
+        ...result,
+        totalMessages: result.synced + result.updated,
+      });
+    } catch (error) {
+      console.error('Failed to sync eBay messages:', error);
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
   app.get('/api/messages/templates', requireAuth, async (req, res) => {
     try {
       const category = req.query.category as string | undefined;

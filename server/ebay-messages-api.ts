@@ -39,6 +39,8 @@ class RateLimiter {
 const tradingApiRateLimiter = new RateLimiter(75, 60000);
 
 interface EbayMessage {
+  /** Original HTML from eBay, kept so the UI can render real formatting. */
+  bodyHtml?: string;
   messageId: string;
   subject: string;
   body: string;
@@ -279,6 +281,9 @@ export async function getMyMessages(
           messageId: parseXmlValue(block, 'MessageID') || '',
           subject: cleanMessageBody(parseXmlValue(block, 'Subject') || '(No Subject)'),
           body: cleanMessageBody(rawBody),
+          // The flattened text loses every paragraph break and leaves literal
+          // "&nbsp;" on screen; keep the source so the UI can render it.
+          bodyHtml: rawBody || undefined,
           sender: parseXmlValue(block, 'Sender') || '',
           senderEmail: parseXmlValue(block, 'SenderEmail') || undefined,
           recipientUserId: parseXmlValue(block, 'RecipientUserID') || '',

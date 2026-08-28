@@ -104,3 +104,24 @@ button, a, input, select, textarea {
   outline: 2px solid hsl(var(--ring));
   outline-offset: 2px;
 }
+
+
+/* Rendered message bodies (sanitised server-side; see shared/html-sanitize.ts).
+   eBay sends real HTML — without these rules paragraphs and lists collapse
+   into one wall of text, which is what the plain-text view looked like. */
+.message-html p { margin: 0 0 0.5rem; }
+.message-html p:last-child { margin-bottom: 0; }
+.message-html ul, .message-html ol { margin: 0 0 0.5rem 1.25rem; list-style: revert; }
+.message-html li { margin: 0.125rem 0; }
+.message-html a { text-decoration: underline; }
+.message-html b, .message-html strong { font-weight: 600; }
+.message-html blockquote {
+  margin: 0.5rem 0; padding-left: 0.75rem;
+  border-left: 3px solid rgb(203 213 225); color: rgb(100 116 139);
+}
+.message-html table { border-collapse: collapse; margin: 0.5rem 0; }
+.message-html td, .message-html th { border: 1px solid rgb(226 232 240); padding: 0.25rem 0.5rem; }
+.message-html h1, .message-html h2, .message-html h3 { font-weight: 600; margin: 0.5rem 0 0.25rem; }
+.message-html pre { white-space: pre-wrap; word-break: break-word; }
+/* A long unbroken URL must not stretch the bubble off screen. */
+.message-html { overflow-wrap: anywhere; }

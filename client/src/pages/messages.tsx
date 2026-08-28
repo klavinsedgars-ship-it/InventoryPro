@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Sidebar } from "@/components/layout/sidebar";
@@ -52,6 +52,9 @@ export default function MessagesPage() {
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  // The newest message is the one you need; a thread that opens at the top
+  // makes you scroll every time.
+  const threadScrollRef = useRef<HTMLDivElement | null>(null);
   const [replyText, setReplyText] = useState("");
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
@@ -91,6 +94,15 @@ export default function MessagesPage() {
     },
     enabled: !!selectedThreadId
   });
+
+  // Jump to the newest message whenever a thread opens or a reply lands.
+  useEffect(() => {
+    const el = threadScrollRef.current;
+    if (!el) return;
+    // rAF: the DOM has to paint the new messages before the height is real.
+    requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+  }, [selectedThreadId, messagesData?.messages?.length]);
+
 
   // Derive the selected thread from LIVE data (detail endpoint first, then the
   // list) instead of a stale snapshot — otherwise star/read toggles in the
@@ -347,7 +359,8 @@ export default function MessagesPage() {
               </CardContent>
             </Card>
 
-            <Card className="flex-1 flex flex-col">
+            <div className="flex-1 flex min-w-0">
+            <Card className="flex-1 flex flex-col min-w-0">
               {selectedThread ? (
                 <>
                   <CardHeader className="py-3 px-4 border-b flex-shrink-0">
@@ -413,7 +426,7 @@ export default function MessagesPage() {
                     </div>
                   </CardHeader>
 
-                  <CardContent className="flex-1 overflow-y-auto p-4 space-y-4">
+                  <CardContent className="flex-1 overflow-y-auto p-4 space-y-4" ref={threadScrollRef}>
                     {messagesLoading ? (
                       <div className="flex items-center justify-center py-8">
                         <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
@@ -444,12 +457,23 @@ export default function MessagesPage() {
                                 {msg.subject}
                               </p>
                             )}
-                            <p className="text-sm whitespace-pre-wrap">{msg.body}</p>
+                            {/* bodyHtml is sanitised on the server at write
+                                time (allowlist, see shared/html-sanitize.ts),
+                                so paragraphs, lists and links render as eBay
+                                sent them instead of one flattened block. */}
+                            {msg.bodyHtml ? (
+                              <div
+                                className="text-sm message-html"
+                                dangerouslySetInnerHTML={{ __html: msg.bodyHtml }}
+                              />
+                            ) : (
+                              <p className="text-sm whitespace-pre-wrap">{msg.body}</p>
+                            )}
                             <div className={`flex items-center gap-2 mt-2 text-xs ${
                               msg.direction === 'outbound' ? 'text-primary-foreground/70' : 'text-gray-400'
                             }`}>
                               <Clock className="w-3 h-3" />
-                              <span>{msg.createdAt ? format(new Date(msg.createdAt), 'MMM d, h:mm a') : ''}</span>
+                              <span>{(msg.sentAt ?? msg.createdAt) ? format(new Date((msg.sentAt ?? msg.createdAt) as any), 'MMM d, h:mm a') : ''}</span>
                               {msg.status === 'sent' && <CheckCircle className="w-3 h-3" />}
                               {msg.status === 'failed' && <AlertCircle className="w-3 h-3 text-red-400" />}
                             </div>
@@ -508,6 +532,14 @@ export default function MessagesPage() {
                 </div>
               )}
             </Card>
+            {/* Buyer and order context beside the conversation, so replying
+                does not mean opening eBay in another tab. */}
+            {selectedThread && (
+              <div className="hidden xl:flex">
+                <BuyerContextPanel threadId={selectedThread.id} />
+              </div>
+            )}
+            </div>
           </div>
         </div>
       </main>
@@ -1004,5 +1036,109 @@ function AutoRulesDialog({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+
+/**
+ * Who this buyer is and what they bought.
+ *
+ * Answering a message means knowing what was ordered, whether it shipped and
+ * what it was worth — otherwise every reply means opening eBay in another tab.
+ */
+function BuyerContextPanel({ threadId }: { threadId: number }) {
+  const { data, isLoading } = useQuery<any>({
+    queryKey: ['/api/messages/threads', threadId, 'context'],
+    queryFn: async () => {
+      const r = await fetch(`/api/messages/threads/${threadId}/context`, { credentials: 'include' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    },
+  });
+
+  if (isLoading) return <div className="p-4 text-sm text-gray-400">Loading buyer…</div>;
+  if (!data?.success) return null;
+
+  const b = data.buyer;
+  const money = (n: number, c = 'EUR') => `${c === 'EUR' ? '€' : ''}${Number(n).toFixed(2)}`;
+
+  return (
+    <div className="w-80 border-l bg-gray-50 overflow-y-auto flex-shrink-0">
+      <div className="p-4 border-b bg-white">
+        <p className="font-medium">{b.name || b.username}</p>
+        <p className="text-xs text-gray-500">{b.username}</p>
+        {b.email && <p className="text-xs text-gray-500 break-all">{b.email}</p>}
+        {(b.city || b.country) && (
+          <p className="text-xs text-gray-500 mt-1">{[b.city, b.country].filter(Boolean).join(', ')}</p>
+        )}
+        {b.phone && <p className="text-xs text-gray-500">Tel: {b.phone}</p>}
+        <div className="flex gap-4 mt-3 text-xs">
+          <div>
+            <div className="text-gray-400">Orders</div>
+            <div className="font-semibold text-sm">{b.orderCount}</div>
+          </div>
+          <div>
+            <div className="text-gray-400">Total spent</div>
+            <div className="font-semibold text-sm">{money(b.totalSpent, b.currency)}</div>
+          </div>
+        </div>
+      </div>
+
+      {data.item && (
+        <div className="p-3 border-b bg-white">
+          <p className="text-xs text-gray-400 mb-1">Message is about</p>
+          <p className="text-xs">{data.item.title || data.item.itemId}</p>
+          <a
+            className="text-xs text-blue-600 hover:underline"
+            href={`https://www.ebay.de/itm/${data.item.itemId}`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            View listing on eBay
+          </a>
+        </div>
+      )}
+
+      <div className="p-3 space-y-3">
+        <p className="text-xs font-medium text-gray-600">Orders ({data.orders.length})</p>
+        {data.orders.length === 0 && (
+          // Most questions arrive BEFORE the sale; say so rather than looking broken.
+          <p className="text-xs text-gray-400">No orders from this buyer yet — likely a pre-sale question.</p>
+        )}
+        {data.orders.map((o: any) => (
+          <div key={o.id} className="border rounded bg-white p-2 text-xs space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="font-mono">#{o.marketplaceOrderId}</span>
+              <Badge variant={o.status === 'shipped' || o.status === 'delivered' ? 'default' : 'secondary'}>
+                {o.status}
+              </Badge>
+            </div>
+            <div className="text-gray-500">
+              {o.orderDate ? format(new Date(o.orderDate), 'd MMM yyyy') : ''} · {money(o.total, o.currency)}
+            </div>
+            {o.items.map((i: any, n: number) => (
+              <div key={n} className="flex items-center gap-2 pt-1">
+                {i.imageUrl && (
+                  <img src={i.imageUrl} alt="" className="w-8 h-8 object-contain bg-white border rounded" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="truncate">{i.quantity}× {i.title || i.sku}</div>
+                  <div className="text-gray-400 font-mono">{i.sku}</div>
+                </div>
+              </div>
+            ))}
+            {o.trackingNumber ? (
+              <div className="text-gray-600 pt-1">
+                Tracking: <span className="font-mono">{o.trackingNumber}</span>
+                {o.carrier ? ` (${o.carrier})` : ''}
+              </div>
+            ) : (
+              <div className="text-amber-600 pt-1">Not shipped yet</div>
+            )}
+            {o.shipTo && <div className="text-gray-400">{o.shipTo}</div>}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
