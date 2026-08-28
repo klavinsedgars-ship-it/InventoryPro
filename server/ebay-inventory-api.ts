@@ -547,6 +547,53 @@ export class EbayInventoryApiService {
     return { step: "publish", ok: false, httpStatus: r.status, error: this.firstEbayError(r.data, r.text) };
   }
 
+  /**
+   * Move ONE live listing to the category the (guarded) resolver chooses now.
+   *
+   * Order matters: the inventory item is rewritten FIRST because the new
+   * category's required aspects live on it; then the offer is PUT with the
+   * new categoryId — for a published offer eBay applies that to the live
+   * listing immediately, no publish call needed. Records the result in
+   * products.ebay_category_id, which is what makes /api/ebay/recategorize
+   * resumable.
+   */
+  async recategorizeOne(product: Product): Promise<{ ok: boolean; sku: string; categoryId?: string; error?: string }> {
+    const { id: categoryId } = await this.resolveCategoryDetailed(product);
+    if (!categoryId) {
+      return { ok: false, sku: product.sku, error: "no plausible category resolved (and no fallback learned)" };
+    }
+
+    const inv = await this.createOrReplaceInventoryItem(product.sku, product, categoryId);
+    if (!inv.ok) return { ok: false, sku: product.sku, categoryId, error: `inventory_item: ${inv.error}` };
+
+    let offerId = product.ebayOfferId || null;
+    if (offerId) {
+      const payload = await this.buildOffer(product, categoryId);
+      const r = await this.req("PUT", `/offer/${offerId}`, payload);
+      if (!r.ok) {
+        // Stale offer id (reconcile drift) — recover via the create/reuse path,
+        // which finds the real offer through eBay's 25002 "already exists".
+        const viaCreate = await this.createOffer(product, categoryId);
+        if (!viaCreate.ok || !viaCreate.offerId) {
+          return { ok: false, sku: product.sku, categoryId, error: `offer: ${viaCreate.error || this.firstEbayError(r.data, r.text)}` };
+        }
+        offerId = viaCreate.offerId;
+      }
+    } else {
+      const viaCreate = await this.createOffer(product, categoryId);
+      if (!viaCreate.ok || !viaCreate.offerId) {
+        return { ok: false, sku: product.sku, categoryId, error: `offer: ${viaCreate.error}` };
+      }
+      offerId = viaCreate.offerId;
+    }
+
+    // ebayListingError: null also clears a sweep "recategorize:" park marker
+    // when a manual retry succeeds — otherwise the product stays counted as a
+    // parked failure forever.
+    await storage.updateProduct(product.id, { ebayCategoryId: categoryId, ebayOfferId: offerId, ebayListingError: null });
+    return { ok: true, sku: product.sku, categoryId };
+  }
+
   // ─── Bulk operations (25 SKUs/call) for the listing ramp & updates ───
 
   /**
@@ -697,8 +744,43 @@ export class EbayInventoryApiService {
    * or errored — as opposed to eBay having no category for this product. The
    * caller must not treat the first as a defect of the product.
    */
+  /**
+   * Operator-pinned eBay categories per TME category — consulted BEFORE the
+   * Taxonomy suggester. The 2026-08-28 resolve-all showed a residue of
+   * suggestions no heuristic can save (tact switches classified as computer
+   * mice, screwdriver "Sets" as placemats): those get pinned by hand, from
+   * data, once. Stored as marketplace_settings 'ebay'/'category_override:<tme
+   * category lowercased>'; value = eBay category id, or "default" to force
+   * the learned catch-all, or "" to unset.
+   */
+  private categoryOverridesMemo: { map: Map<string, string>; at: number } | null = null;
+  async categoryOverrides(): Promise<Map<string, string>> {
+    if (this.categoryOverridesMemo && Date.now() - this.categoryOverridesMemo.at < 5 * 60_000) {
+      return this.categoryOverridesMemo.map;
+    }
+    const map = new Map<string, string>();
+    try {
+      const settings = await storage.getMarketplaceSettings("ebay");
+      for (const s of settings as any[]) {
+        if (String(s.setting).startsWith("category_override:") && s.value) {
+          map.set(String(s.setting).slice("category_override:".length), String(s.value));
+        }
+      }
+    } catch { /* overrides are an overlay — never block category resolution */ }
+    this.categoryOverridesMemo = { map, at: Date.now() };
+    return map;
+  }
+  clearCategoryOverridesCache(): void {
+    this.categoryOverridesMemo = null;
+  }
+
   async resolveCategoryDetailed(product: Product): Promise<{ id: string; transient: boolean }> {
     const fallback = await this.defaultCategoryId();
+    const override = (await this.categoryOverrides()).get((product.category ?? "").trim().toLowerCase());
+    if (override) {
+      if (override === "default") return { id: fallback, transient: !fallback };
+      return { id: override, transient: false };
+    }
     try {
       // Query by supplier CATEGORY, not by product name: the query string is
       // the cache key, so a per-product query meant a Taxonomy call per
@@ -815,6 +897,7 @@ export class EbayInventoryApiService {
     sku: string;
     offerId?: string;
     listingId?: string;
+    categoryId?: string;
     failedStep?: string;
     error?: string;
     steps: StepResult[];
@@ -852,6 +935,7 @@ export class EbayInventoryApiService {
       sku: product.sku,
       offerId: offer.offerId,
       listingId: pub.listingId,
+      categoryId,
       failedStep: pub.ok ? undefined : "publish",
       error: pub.error,
       steps,

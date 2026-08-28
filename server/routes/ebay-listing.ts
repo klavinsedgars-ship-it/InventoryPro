@@ -4,6 +4,8 @@ import { requireAuth } from "../middleware/auth";
 import { ebayApi } from "../ebay-api";
 import { ebayInventoryApi } from "../ebay-inventory-api";
 import { calculateEbayStock } from "../stock-manager";
+import { withLease, describeRefusal } from "../job-lease";
+import { leaseStore } from "../storage";
 
 /**
  * eBay listing operations: single + bulk listing (with a polled job record),
@@ -325,6 +327,228 @@ export function registerEbayListingRoutes(app: Express) {
       res.status(500).json({ success: false, error: (error as Error).message });
     }
   };
+  /**
+   * Re-file live listings whose category is wrong (2026-08-28: buyer
+   * complaints — see isImplausibleCategoryPath in ebay-category-query.ts).
+   *
+   * Scope with ?category=<TME category> (all its listed products) or
+   * ?sku=<SKU> (one listing). Dry-run unless confirm=1: reports the target
+   * category and how many listings still need moving. Real runs are
+   * lease-guarded, process up to ?limit (default 25, max 100) listings in
+   * time-bounded slices, and record products.ebay_category_id per success —
+   * call again until remaining is 0, exactly like reconcile.
+   */
+  const recategorizeHandler = async (req: any, res: any) => {
+    const q = { ...(req.query ?? {}), ...(req.body ?? {}) };
+    const category = String(q.category ?? "").trim();
+    const sku = String(q.sku ?? "").trim();
+    const limit = Math.min(100, Math.max(1, parseInt(String(q.limit ?? "25"), 10) || 25));
+    const confirm = q.confirm === "1" || q.confirm === true;
+    const sweep = String(q.sweep ?? "").trim();
+
+    // Catalogue-wide sweep controls: ?sweep=start|stop|status (&run=1 with
+    // start to execute the first slice inline instead of waiting for the
+    // cron). The sweep itself runs as /api/cron/recategorize slices.
+    if (sweep) {
+      try {
+        const { isSweepEnabled, setSweepEnabled, sweepProgress, runRecategorizeSweep } = await import("../recategorize-sweep");
+        if (sweep === "start") await setSweepEnabled(true);
+        if (sweep === "stop") await setSweepEnabled(false);
+        let slice = null;
+        if (sweep === "start" && (q.run === "1" || q.run === true)) {
+          const leased = await withLease(leaseStore, "recategorize", { ttlSeconds: 300 }, () => runRecategorizeSweep(240_000));
+          slice = leased.ran ? leased.result : { refused: describeRefusal("recategorize", leased) };
+        }
+        return res.json({
+          ok: true,
+          sweep,
+          enabled: await isSweepEnabled(),
+          progress: await sweepProgress(),
+          ...(slice ? { slice } : {}),
+          note: "the /api/cron/recategorize tick (every 10 min) works the sweep while enabled; it disables itself when done",
+        });
+      } catch (error) {
+        return res.status(500).json({ ok: false, error: (error as Error).message });
+      }
+    }
+
+    if (!category && !sku) {
+      return res.status(400).json({ ok: false, error: "pass ?category=<TME category> or ?sku=<SKU>, or ?sweep=start|stop|status" });
+    }
+    try {
+      const { db } = await import("../db");
+      const { products } = await import("@shared/schema");
+      const { and, eq, sql, asc } = await import("drizzle-orm");
+      const { categoryQueryFor } = await import("../ebay-category-query");
+
+      const scope = and(
+        eq(products.supplier, "TME"),
+        eq(products.listedOnEbay, true),
+        sku ? eq(products.sku, sku) : eq(products.category, category),
+      );
+      const [first] = await db.select().from(products).where(scope).orderBy(asc(products.id)).limit(1);
+      if (!first) {
+        return res.status(404).json({ ok: false, error: "no LISTED products match that scope" });
+      }
+
+      // The guarded resolution for this scope — cached, so this is cheap.
+      const target = await ebayInventoryApi.resolveCategoryDetailed(first);
+      if (!target.id) {
+        return res.status(502).json({
+          ok: false,
+          error: "no plausible category resolves for this scope and no fallback is learned — check /api/__default-category",
+        });
+      }
+      const suggestion = await ebayApi.getSuggestedCategory(categoryQueryFor(first)).catch(() => null);
+
+      const remainingCond = and(scope, sql`${products.ebayCategoryId} IS DISTINCT FROM ${target.id}`);
+      const countRows: any = await db.execute(
+        sql`SELECT count(*)::int AS c FROM products p WHERE p.supplier = 'TME' AND p.listed_on_ebay = true
+            AND ${sku ? sql`p.sku = ${sku}` : sql`p.category = ${category}`}
+            AND p.ebay_category_id IS DISTINCT FROM ${target.id}`,
+      );
+      const remainingBefore = (countRows.rows ?? countRows)?.[0]?.c ?? 0;
+
+      if (!confirm) {
+        return res.json({
+          ok: true,
+          dryRun: true,
+          scope: sku ? { sku } : { category },
+          target: { id: target.id, ...(suggestion?.id === target.id ? { name: suggestion.name, path: (suggestion as any).path } : { note: "learned fallback category" }) },
+          remaining: remainingBefore,
+          hint: "add &confirm=1 to move up to ?limit listings per call; repeat until remaining is 0",
+        });
+      }
+
+      const leased = await withLease(leaseStore, "recategorize", { ttlSeconds: 300 }, async () => {
+        const started = Date.now();
+        const budget = 230_000;
+        const batch = await db.select().from(products).where(remainingCond).orderBy(asc(products.id)).limit(limit);
+        const results: Array<{ sku: string; ok: boolean; categoryId?: string; error?: string }> = [];
+        // Small pool: each move is 2 eBay calls; 4 wide keeps a 100-listing
+        // slice inside the budget without hammering the API.
+        const POOL = 4;
+        let cursor = 0;
+        const worker = async () => {
+          while (cursor < batch.length && Date.now() - started < budget) {
+            const p = batch[cursor++];
+            results.push(await ebayInventoryApi.recategorizeOne(p).catch((e: Error) => ({ ok: false, sku: p.sku, error: e.message })));
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(POOL, batch.length) }, worker));
+        return { results, budgetHit: Date.now() - started >= budget };
+      });
+      if (!leased.ran) {
+        return res.status(409).json({ ok: false, error: describeRefusal("recategorize", leased) });
+      }
+
+      const { results, budgetHit } = leased.result;
+      const moved = results.filter((r) => r.ok).length;
+      const afterRows: any = await db.execute(
+        sql`SELECT count(*)::int AS c FROM products p WHERE p.supplier = 'TME' AND p.listed_on_ebay = true
+            AND ${sku ? sql`p.sku = ${sku}` : sql`p.category = ${category}`}
+            AND p.ebay_category_id IS DISTINCT FROM ${target.id}`,
+      );
+      res.json({
+        ok: true,
+        scope: sku ? { sku } : { category },
+        target: { id: target.id, name: suggestion?.name ?? null },
+        moved,
+        failed: results.length - moved,
+        budgetHit,
+        remaining: (afterRows.rows ?? afterRows)?.[0]?.c ?? 0,
+        results,
+      });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  };
+  /**
+   * Operator pins: TME category → eBay category id, consulted before the
+   * Taxonomy suggester (see categoryOverrides in ebay-inventory-api.ts).
+   * value = category id, "default" (force the learned catch-all), "" = unset.
+   * The sweep re-files a re-pinned category automatically on its next pass.
+   */
+  app.get("/api/ebay/category-overrides", requireAuth, async (_req, res) => {
+    try {
+      const settings = await storage.getMarketplaceSettings("ebay");
+      const overrides = (settings as any[])
+        .filter((s) => String(s.setting).startsWith("category_override:") && s.value)
+        .map((s) => ({ category: String(s.setting).slice("category_override:".length), value: s.value }));
+      res.json({ ok: true, overrides });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  });
+  app.post("/api/ebay/category-overrides", requireAuth, async (req, res) => {
+    try {
+      const list = req.body?.overrides;
+      if (!Array.isArray(list) || list.length === 0) {
+        return res.status(400).json({
+          ok: false,
+          error: 'body must be {"overrides":[{"category":"<TME category>","value":"<eBay category id>|default|"}]}',
+        });
+      }
+      let applied = 0;
+      for (const o of list) {
+        const category = String(o?.category ?? "").trim().toLowerCase();
+        const value = String(o?.value ?? "").trim();
+        if (!category) continue;
+        if (value && value !== "default" && !/^\d+$/.test(value)) {
+          return res.status(400).json({ ok: false, error: `"${value}" is not a category id, "default", or ""` });
+        }
+        await storage.setMarketplaceSetting({
+          marketplace: "ebay",
+          setting: `category_override:${category}`,
+          value,
+        });
+        applied++;
+      }
+      ebayInventoryApi.clearCategoryOverridesCache();
+      res.json({ ok: true, applied });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  });
+
+  app.get("/api/ebay/recategorize", requireAuth, recategorizeHandler);
+  app.post("/api/ebay/recategorize", requireAuth, recategorizeHandler);
+
+  /**
+   * Cron slice for the catalogue-wide recategorize sweep. No-ops unless the
+   * operator enabled the sweep (?sweep=start above); disables itself and
+   * writes a sync_log entry when every listed product has converged. Same
+   * no-auth posture as the other /api/cron/* handlers (Vercel cron calls
+   * carry no session).
+   */
+  const recategorizeCronHandler = async (_req: any, res: any) => {
+    try {
+      const { isSweepEnabled, setSweepEnabled, runRecategorizeSweep } = await import("../recategorize-sweep");
+      if (!(await isSweepEnabled())) {
+        return res.json({ ok: true, skipped: true, reason: "sweep not enabled" });
+      }
+      const leased = await withLease(leaseStore, "recategorize", { ttlSeconds: 300 }, () => runRecategorizeSweep(250_000));
+      if (!leased.ran) {
+        return res.json({ ok: true, skipped: true, reason: describeRefusal("recategorize", leased) });
+      }
+      const r = leased.result;
+      if (r.done) {
+        await setSweepEnabled(false);
+        await storage.createSyncLog({
+          source: "recategorize",
+          operation: "sweep_complete",
+          status: "success",
+          message: `recategorize sweep complete — moved this run: ${r.moved}, parked failures overall: ${r.parkedFailures}`,
+        });
+      }
+      res.json({ ok: true, ...r });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  };
+  app.get("/api/cron/recategorize", recategorizeCronHandler);
+  app.post("/api/cron/recategorize", recategorizeCronHandler);
+
   app.post("/api/ebay/reset-list-attempts", requireAuth, resetListAttemptsHandler);
   app.get("/api/ebay/reset-list-attempts", requireAuth, resetListAttemptsHandler);
 

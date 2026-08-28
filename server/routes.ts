@@ -18,6 +18,7 @@ import { registerResearchRoutes } from "./routes/research";
 import { registerAnalyticsRoutes } from "./routes/analytics";
 import { registerReportsRoutes } from "./routes/reports";
 import { registerBlocklistRoutes } from "./routes/blocklist";
+import { registerGeticRoutes } from "./routes/getic";
 import {
   insertCategorySchema,
   loginSchema,
@@ -559,6 +560,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   registerAnalyticsRoutes(app);
   registerReportsRoutes(app);
   registerBlocklistRoutes(app);
+  registerGeticRoutes(app);
   registerSyncRoutes(app);
 
   // Image processing endpoints

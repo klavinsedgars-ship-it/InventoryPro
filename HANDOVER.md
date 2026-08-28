@@ -92,6 +92,71 @@ sentence. This was the last thing changed and is the least proven; see below.
 7. Postage is priced from the tariff book, not from carrier invoices; orders
    whose products lack a weight are flagged as possibly under-charged.
 
+## Category incident (2026-08-28)
+
+Two buyers reported listings in absurd categories (a ball latch and a spacer
+sleeve under musical-instrument categories). Root cause: the resolver took
+eBay's FIRST Taxonomy text suggestion for the TME category name, unvalidated,
+and cached it per TME category — one bad hit miscategorised every product in
+that category. Fixed by a domain guard (`isImplausibleCategoryPath`,
+`pickPlausibleSuggestion` in `server/ebay-category-query.ts`): implausible
+suggestions are skipped in favour of the next plausible one, else the learned
+catch-all. The suggestion cache was version-bumped (`suggest2:`) so every
+category re-resolves through the guard; v1 rows remain as evidence.
+`products.ebay_category_id` now records each listing's category at publish.
+
+```
+/api/__category-map            damage report: TME category → eBay category, listed counts, flagged
+/api/ebay/recategorize         ?category=<TME cat> or ?sku=<SKU>; dry-run unless &confirm=1;
+                               &limit=25..100 per slice; repeat until remaining is 0
+```
+
+The live damage report showed the blocklist alone was not enough (screws under
+fishing bait via "Angelsport", crocodile clips under model airplanes, LEGO):
+when a suggestion carries its ancestor chain, the ROOT must also be in a small
+allowlist (`isPlausibleRoot`) — Business & Industrie, Heimwerker, Computer,
+TV/Video, Handys, Foto, Auto & Motorrad, Möbel & Wohnen, Bürobedarf.
+
+Remediation is a catalogue-wide SWEEP (`server/recategorize-sweep.ts`): every
+live listing is re-filed in place through the guarded resolver (offer PUT —
+item numbers survive, no unlist/relist), provably-miscategorised categories
+first. House pattern: `/api/cron/recategorize` every 10 min, DB kill-switch
+`recategorize_sweep`, lease, convergence in products.ebay_category_id,
+failures parked under an `ebay_listing_error` marker so they never loop.
+
+```
+/api/__category-map?resolve=1          fills guardedCategory (1 cached Taxonomy call/category), adds `changed`
+/api/ebay/recategorize?sweep=start     enable sweep (&run=1 = first slice inline); stop | status
+```
+
+Sweep disables itself and writes a sync_log entry when done (~40.7k listings,
+roughly half a day of 10-minute slices). The ramp was stopped by the operator
+during the incident — re-enable after the sweep; new listings resolve through
+the guard and record ebay_category_id at publish.
+
+## Getic (second distributor, staging only)
+
+Added 2026-08-28. The Getic XML feed (`https://api.getic.com/xml/rentbox/xml`,
+override with `GETIC_FEED_URL`) imports into **`supplier_offers`** — its own
+staging table, NOT `products`. Nothing there can reach the listing ramp, TME
+sync, or eBay; promotion into `products` deliberately does not exist yet.
+The feed's schema was unknown when this was built, so the parser discovers the
+record element and maps fields by name heuristics (`server/xml-feed.ts`,
+`server/getic-feed.ts` — both pure, both tested); every record's full JSON is
+kept in `raw`, unconsumed fields in `attributes`, and the probe endpoint shows
+which feed key each field was read from. UI: **Getic Browser** page.
+
+```
+GET  /api/getic/probe      fetch the feed, show structure + mapping — writes nothing
+POST /api/getic/import     ?dryRun=1 = sample without writing; real run is lease-guarded
+GET  /api/getic/status     import history + coverage counts
+GET  /api/getic/offers     paginated browse (also /offers/:id, /categories)
+GET  /api/getic/overlap    SKU/EAN collisions with the TME catalogue
+```
+
+First deploy: run the probe, check the mapping reads sensibly, dry-run, then
+import. If the record detection guesses wrong, `?record=<element>` overrides it.
+
 ## Diagnostics (all read-only unless noted)
 
 ```

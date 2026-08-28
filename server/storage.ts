@@ -88,6 +88,7 @@ import { eq, ne, and, gte, lte, lt, desc, asc, count, or, ilike, isNull, isNotNu
 import bcrypt from "bcryptjs";
 import { PRICING_CONFIG } from "./dynamic-pricing";
 import type { LeaseStore } from "./job-lease";
+import { SUPPLIER_SCHEMA_STATEMENTS } from "./getic-sync";
 
 export interface IStorage {
   // Users
@@ -485,6 +486,8 @@ export class DatabaseStorage implements IStorage {
       // sell us this" listing filter.
       `ALTER TABLE products ADD COLUMN IF NOT EXISTS tme_product_status text`,
       `ALTER TABLE products ADD COLUMN IF NOT EXISTS tme_parameters text`,
+      // Which eBay category the live listing sits in (see shared/schema.ts).
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS ebay_category_id text`,
       `CREATE INDEX IF NOT EXISTS products_supplier_stale_idx ON products (supplier, last_synced_at)`,
       `CREATE INDEX IF NOT EXISTS products_status_idx ON products (status)`,
       `CREATE INDEX IF NOT EXISTS products_ebay_idx ON products (listed_on_ebay, ebay_item_id)`,
@@ -545,6 +548,11 @@ export class DatabaseStorage implements IStorage {
          acquired_at timestamptz NOT NULL DEFAULT now(),
          expires_at timestamptz NOT NULL
        )`,
+      // Supplier feed staging (Getic and future XML distributors) — offers
+      // land in their own tables, never in products, until an explicit
+      // promotion step exists. Statements live in getic-sync.ts so the boot
+      // path and the lazy ensure cannot drift.
+      ...SUPPLIER_SCHEMA_STATEMENTS,
     ];
     // Each statement is isolated: an extension that a host does not allow, or
     // an index that cannot be built, must not stop the rest of the schema from
@@ -2129,7 +2137,8 @@ export class DatabaseStorage implements IStorage {
       await this.ensureTaxonomyTable();
       const rows: any = await db.execute(sql`
         SELECT value FROM ebay_taxonomy_cache
-        WHERE cache_key LIKE ${`suggest:${treeId}:%`} AND expires_at > now()
+        WHERE (cache_key LIKE ${`suggest:${treeId}:%`} OR cache_key LIKE ${`suggest2:${treeId}:%`})
+          AND expires_at > now()
         LIMIT ${limit}
       `);
       const out: Array<{ id?: string; name?: string }> = [];

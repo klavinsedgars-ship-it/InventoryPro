@@ -668,6 +668,100 @@ export function registerDebugRoutes(app: Express) {
    * evidence behind it. The fallback is learned from suggestions eBay returned
    * for this marketplace tree, so it is worth being able to see which one won.
    */
+  /**
+   * THE category damage report (2026-08-28, after two buyer complaints).
+   *
+   * Every product's eBay category comes from one cached Taxonomy suggestion
+   * per TME category, so this table IS the complete mapping: each TME
+   * category, how many products (and live listings) it carries, the v1
+   * suggestion that was used unvalidated, the v2 suggestion the domain guard
+   * now produces, and whether the v1 answer is implausible (flagged = these
+   * listings are live in a wrong category and need recategorizing).
+   */
+  app.get("/api/__category-map", async (_req, res) => {
+    try {
+      const { isImplausibleCategoryPath, categoryQueryFor } = await import("../ebay-category-query");
+      const { db } = await import("../db");
+      const { sql } = await import("drizzle-orm");
+      const treeId = process.env.EBAY_MARKETPLACE_SITE_ID || "77";
+
+      const prodQ: any = await db.execute(sql`
+        SELECT category,
+               count(*)::int AS products,
+               count(*) FILTER (WHERE listed_on_ebay = true)::int AS listed
+        FROM products
+        WHERE supplier = 'TME'
+        GROUP BY category
+        ORDER BY count(*) FILTER (WHERE listed_on_ebay = true) DESC, count(*) DESC
+      `);
+      const cacheQ: any = await db.execute(sql`
+        SELECT cache_key, value FROM ebay_taxonomy_cache
+        WHERE (cache_key LIKE ${"suggest:" + treeId + ":%"} OR cache_key LIKE ${"suggest2:" + treeId + ":%"})
+          AND expires_at > now()
+      `);
+      const v1 = new Map<string, any>();
+      const v2 = new Map<string, any>();
+      for (const r of cacheQ.rows ?? cacheQ) {
+        try {
+          const val = JSON.parse(r.value);
+          const k: string = r.cache_key;
+          if (k.startsWith("suggest2:")) v2.set(k.slice(`suggest2:${treeId}:`.length), val);
+          else v1.set(k.slice(`suggest:${treeId}:`.length), val);
+        } catch { /* skip malformed rows */ }
+      }
+
+      // ?resolve=1: actively resolve every category with live listings
+      // through the guarded path (one cached Taxonomy call each) so
+      // guardedCategory fills in and old-vs-new becomes definitive. ~1 call
+      // per category on the first run, cached 30 days after.
+      const doResolve = _req.query?.resolve === "1";
+      if (doResolve) {
+        const { ebayApi } = await import("../ebay-api");
+        for (const p of prodQ.rows ?? prodQ) {
+          if (!p.listed) continue;
+          const key = categoryQueryFor({ category: p.category, name: "" }).trim().toLowerCase();
+          if (v2.has(key)) continue;
+          const resolved = await ebayApi.getSuggestedCategory(key).catch(() => null);
+          v2.set(key, resolved ?? { id: "", name: "", path: "" });
+        }
+      }
+
+      let flaggedListed = 0;
+      const rows = (prodQ.rows ?? prodQ).map((p: any) => {
+        const key = categoryQueryFor({ category: p.category, name: "" }).trim().toLowerCase();
+        const old = v1.get(key) ?? null;
+        const now = v2.get(key) ?? null;
+        // v1 cached only id+name; judge what we can see. A name like
+        // "Synthesizer-Teile" is enough to convict.
+        const flagged = !!old?.id && isImplausibleCategoryPath(old.name ?? "");
+        if (flagged) flaggedListed += p.listed;
+        return {
+          tmeCategory: p.category,
+          products: p.products,
+          listed: p.listed,
+          usedCategory: old, // what live listings were filed under (v1)
+          guardedCategory: now, // what the guard resolves now (v2; null = not yet looked up, id "" = fallback)
+          // The definitive signal once both sides are known: the live
+          // listings sit somewhere the guarded resolver would not put them.
+          changed: !!old?.id && now != null && old.id !== (now.id || null),
+          flagged,
+        };
+      });
+
+      res.json({
+        ok: true,
+        treeId,
+        note: "flagged = the v1 name alone is provably wrong; v1 names without an obvious domain word can still be wrong — sort by listed and eyeball usedCategory.",
+        categories: rows.length,
+        flaggedCategories: rows.filter((r: any) => r.flagged).length,
+        flaggedListedListings: flaggedListed,
+        rows,
+      });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  });
+
   app.get("/api/__default-category", async (_req, res) => {
     try {
       const { ebayInventoryApi } = await import("../ebay-inventory-api");

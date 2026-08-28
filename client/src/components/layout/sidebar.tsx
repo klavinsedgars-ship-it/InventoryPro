@@ -19,7 +19,8 @@ import {
   Activity,
   Scale,
   Target,
-  TrendingUp
+  TrendingUp,
+  Boxes
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -30,6 +31,7 @@ const navigation = [
   { name: 'Orders', href: '/orders', icon: ClipboardList },
   { name: 'Messages', href: '/messages', icon: MessageSquare },
   { name: 'TME Browser', href: '/tme-browser', icon: Search },
+  { name: 'Getic Browser', href: '/getic-browser', icon: Boxes },
   { name: 'Opportunities', href: '/opportunities', icon: Target },
   { name: 'Sales Performance', href: '/sales-performance', icon: LineChart },
   { name: 'Market Research', href: '/market-research', icon: TrendingUp },
