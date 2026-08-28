@@ -129,6 +129,71 @@ describe("mapGeticRecord", () => {
   it("upper-cases SKUs to match blocklist/product-code conventions", () => {
     expect(mapGeticRecord({ code: "ab-12c" }).supplierSku).toBe("AB-12C");
   });
+
+  it("maps a Google Merchant (g:-namespaced) record", () => {
+    const offer = mapGeticRecord({
+      "g:id": "GM-1",
+      "g:title": "Wireless Mouse",
+      "g:price": "24.90 EUR",
+      "g:availability": "in stock",
+      "g:brand": "Logi",
+      "g:gtin": "4712345678901",
+      "g:image_link": "https://cdn/1.jpg",
+      "g:link": "https://shop/p/1",
+      "g:product_type": "Peripherals > Mice",
+      "g:shipping_weight": "0.2 kg",
+    });
+    expect(offer.supplierSku).toBe("GM-1");
+    expect(offer.name).toBe("Wireless Mouse");
+    expect(offer.price).toBe(24.9);
+    expect(offer.currency).toBe("EUR"); // extracted from the price value
+    expect(offer.sourceKeys.currency).toContain("from price value");
+    expect(offer.stock).toBeNull(); // in stock, qty unknown
+    expect(offer.manufacturer).toBe("Logi");
+    expect(offer.ean).toBe("4712345678901");
+    expect(offer.imageUrl).toBe("https://cdn/1.jpg");
+    expect(offer.productUrl).toBe("https://shop/p/1");
+    expect(offer.categoryPath).toBe("Peripherals > Mice");
+    expect(offer.weightG).toBe(200);
+  });
+
+  it("maps a Heureka-style SHOPITEM record (uppercase fields)", () => {
+    // nodeToJson keeps the feed's casing; the mapper matches case-insensitively.
+    const offer = mapGeticRecord({
+      ITEM_ID: "HK-9",
+      PRODUCTNAME: "HDMI Cable 2m",
+      PRICE_VAT: "7,99",
+      EAN: "4750000000012",
+      IMGURL: "https://cdn/x.jpg",
+      CATEGORYTEXT: "Cables | HDMI",
+      MANUFACTURER: "Gembird",
+    });
+    expect(offer.supplierSku).toBe("HK-9");
+    expect(offer.name).toBe("HDMI Cable 2m");
+    expect(offer.price).toBe(7.99);
+    expect(offer.imageUrl).toBe("https://cdn/x.jpg");
+    expect(offer.categoryPath).toBe("Cables | HDMI");
+  });
+
+  it("maps fields carried as attributes on the record element", () => {
+    const offer = mapGeticRecord({ "@id": "AT-3", "@name": "Attr Product", "@price": "5.00" });
+    expect(offer.supplierSku).toBe("AT-3");
+    expect(offer.name).toBe("Attr Product");
+    expect(offer.price).toBe(5);
+  });
+
+  it("maps Latvian field names", () => {
+    const offer = mapGeticRecord({ kods: "LV-1", nosaukums: "Prece", cena: "9,99", daudzums: "4" });
+    expect(offer.supplierSku).toBe("LV-1");
+    expect(offer.name).toBe("Prece");
+    expect(offer.price).toBe(9.99);
+    expect(offer.stock).toBe(4);
+  });
+
+  it("reads 'out of stock' as zero, not unknown", () => {
+    expect(mapGeticRecord({ code: "X", availability: "out of stock" }).stock).toBe(0);
+    expect(mapGeticRecord({ code: "X", availability: "in stock" }).stock).toBeNull();
+  });
 });
 
 describe("coverageOf", () => {

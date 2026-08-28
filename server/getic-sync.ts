@@ -14,7 +14,7 @@ import { sql } from "drizzle-orm";
 import { db } from "./db";
 import { supplierOffers, supplierFeedRuns, type SupplierFeedRun } from "@shared/schema";
 import { sniffFeedStructure, recordsOf, nodeToJson, detectXmlEncoding, type FeedStructure, type JsonRecord } from "./xml-feed";
-import { mapGeticRecord, coverageOf, type NormalizedOffer } from "./getic-feed";
+import { mapGeticRecord, coverageOf, flattenRecord, type NormalizedOffer } from "./getic-feed";
 
 export const GETIC_SUPPLIER = "GETIC";
 export const GETIC_FEED_URL = process.env.GETIC_FEED_URL || "https://api.getic.com/xml/rentbox/xml";
@@ -325,7 +325,14 @@ export async function runGeticImport(opts: GeticImportOptions = {}): Promise<Get
       const offer = mapGeticRecord(typeof json === "string" ? {} : json);
       if (!offer.supplierSku) {
         recordsFailed++;
-        if (errors.length < 5) errors.push(`record #${recordsSeen}: no SKU field found`);
+        // Self-describing: name the fields the record ACTUALLY has, so a
+        // synonym miss is diagnosable from the UI without re-probing.
+        if (errors.length === 0 && typeof json !== "string") {
+          const keys = flattenRecord(json).map((f) => f.path).slice(0, 20);
+          errors.push(`record #${recordsSeen}: no SKU field found — record fields: ${keys.join(", ") || "(none)"}`);
+        } else if (errors.length < 3) {
+          errors.push(`record #${recordsSeen}: no SKU field found`);
+        }
         continue;
       }
       if (seenSkus.has(offer.supplierSku)) {

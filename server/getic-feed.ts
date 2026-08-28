@@ -54,7 +54,12 @@ export function flattenRecord(rec: JsonRecord): FlatField[] {
     if (!v) return;
     let f = byPath.get(path);
     if (!f) {
-      const base = path.split(".").pop() ?? path;
+      // Basename with the attribute marker and any XML namespace prefix
+      // stripped: Google-Merchant-style feeds name everything <g:id>,
+      // <g:title>; attribute-style feeds write <product id=".." price="..">.
+      // Neither prefix may hide the field from the synonym match — the full
+      // path keeps the original spelling.
+      const base = (path.split(".").pop() ?? path).replace(/^@/, "").replace(/^[^:]+:/, "");
       f = { key: base.toLowerCase(), path, values: [] };
       byPath.set(path, f);
     }
@@ -102,7 +107,10 @@ export function parseFeedNumber(raw: string | null | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** "5" → 5, ">10"/"10+" → 10, "yes"/"in stock" → null (available, qty unknown). */
+/**
+ * "5" → 5, ">10"/"10+" → 10, "out of stock" → 0,
+ * "yes"/"in stock" → null (available, quantity unknown).
+ */
 export function parseFeedStock(raw: string | null | undefined): number | null {
   if (raw == null) return null;
   const s = String(raw).trim().toLowerCase();
@@ -110,6 +118,9 @@ export function parseFeedStock(raw: string | null | undefined): number | null {
   if (m) return parseInt(m[1], 10);
   const n = parseFeedNumber(s);
   if (n != null) return Math.max(0, Math.floor(n));
+  // Availability text: definite "no" is 0; a bare "yes" stays null because
+  // the quantity is unknown — inventing 1 would understate real stock.
+  if (/^(out.?of.?stock|not.?available|unavailable|no|false|none|nav pieejams|nav)$/.test(s)) return 0;
   return null;
 }
 
@@ -127,24 +138,28 @@ export function parseFeedWeight(key: string, raw: string): { grams: number | nul
   return { grams: n * 1000, assumed: true };
 }
 
-const SKU_KEYS = ["sku", "symbol", "product_code", "productcode", "code", "article", "artikuls", "item_code", "reference", "product_id", "id", "@id"];
-const NAME_KEYS = ["name", "title", "product_name", "model_name", "model"];
-const EAN_KEYS = ["ean", "ean13", "barcode", "bar_code", "gtin"];
+// Synonyms cover the feed dialects seen in the Baltics: generic shop XML,
+// Google Merchant (namespace prefix already stripped by flattenRecord),
+// Heureka-style SHOPITEM (uppercase in the feed, lowercased here), and
+// Latvian field names.
+const SKU_KEYS = ["sku", "symbol", "product_code", "productcode", "code", "kods", "article", "artikuls", "item_code", "item_id", "itemid", "reference", "product_id", "id"];
+const NAME_KEYS = ["name", "title", "product_name", "productname", "nosaukums", "model_name", "model", "product"];
+const EAN_KEYS = ["ean", "ean13", "barcode", "bar_code", "gtin", "gtin13"];
 const MANUFACTURER_KEYS = ["manufacturer", "brand", "producer", "vendor", "razotajs"];
 const MPN_KEYS = ["mpn", "manufacturer_code", "producer_code", "part_number", "partnumber", "manufacturer_sku", "vendor_code", "supplier_code"];
 // Supplier/net prices first — that is our cost; retail-ish prices only as a
 // fallback (and the sourceKeys entry makes the fallback visible).
-const PRICE_KEYS = ["wholesale_price", "purchase_price", "net_price", "price_net", "b2b_price", "dealer_price", "price"];
+const PRICE_KEYS = ["wholesale_price", "purchase_price", "net_price", "price_net", "b2b_price", "dealer_price", "price", "cena"];
 const PRICE_FALLBACK_KEYS = ["price_vat", "price_with_vat", "gross_price", "retail_price", "sale_price", "rrp", "msrp"];
-const CURRENCY_KEYS = ["currency", "currency_code", "cur"];
-const STOCK_KEYS = ["stock", "quantity", "qty", "stock_quantity", "stock_qty", "amount", "balance", "in_stock", "instock", "availability", "available"];
-const WEIGHT_KEYS = ["weight_g", "weight_gram", "weight_grams", "weight_kg", "weight", "mass"];
-const IMAGE_KEYS = ["image", "image_url", "image_link", "main_image", "picture", "photo", "img", "thumbnail"];
+const CURRENCY_KEYS = ["currency", "currency_code", "cur", "valuta"];
+const STOCK_KEYS = ["stock", "quantity", "qty", "stock_quantity", "stock_qty", "amount", "daudzums", "balance", "in_stock", "instock", "availability", "available", "pieejamiba"];
+const WEIGHT_KEYS = ["weight_g", "weight_gram", "weight_grams", "weight_kg", "shipping_weight", "weight", "svars", "mass"];
+const IMAGE_KEYS = ["image", "image_url", "image_link", "additional_image_link", "main_image", "picture", "photo", "img", "imgurl", "imgurl_alternative", "attels", "thumbnail"];
 const IMAGE_KEY_RE = /^(image|img|photo|picture)_?\d+$/;
-const PRODUCT_URL_KEYS = ["url", "link", "product_url", "product_link", "deeplink"];
+const PRODUCT_URL_KEYS = ["url", "link", "product_url", "product_link", "deeplink", "saite"];
 const DATASHEET_KEYS = ["datasheet", "datasheet_url", "data_sheet"];
-const CATEGORY_KEYS = ["category_path", "category_full", "categoryfullpath", "category", "categories", "category_name", "cat"];
-const DESCRIPTION_KEYS = ["description", "long_description", "short_description", "desc", "content"];
+const CATEGORY_KEYS = ["category_path", "category_full", "categoryfullpath", "category", "categories", "category_name", "categorytext", "product_type", "kategorija", "cat", "google_product_category"];
+const DESCRIPTION_KEYS = ["description", "long_description", "short_description", "desc", "apraksts", "content"];
 
 const MAX_DESCRIPTION = 20_000;
 
@@ -243,6 +258,17 @@ export function mapGeticRecord(rec: JsonRecord): NormalizedOffer {
   const productUrl = first(productUrlF);
   const datasheetUrl = first(datasheetF);
 
+  // Google-style feeds put the currency inside the price ("419.00 EUR") and
+  // have no separate currency field.
+  let currency = first(currencyF)?.toUpperCase() ?? null;
+  if (!currency && priceF) {
+    const iso = /\b(EUR|USD|GBP|PLN|SEK|DKK|NOK|CZK|HUF|RON|BGN|CHF)\b/i.exec(first(priceF)!);
+    if (iso) {
+      currency = iso[1].toUpperCase();
+      sourceKeys.currency = `${priceF.path} (from price value)`;
+    }
+  }
+
   const sku = first(skuF);
   return {
     supplierSku: sku ? sku.trim().toUpperCase() : null,
@@ -253,7 +279,7 @@ export function mapGeticRecord(rec: JsonRecord): NormalizedOffer {
     categoryPath,
     description: description ? description.slice(0, MAX_DESCRIPTION) : null,
     price: priceF ? parseFeedNumber(first(priceF)) : null,
-    currency: first(currencyF)?.toUpperCase() ?? null,
+    currency,
     stock: stockF ? parseFeedStock(first(stockF)) : null,
     weightG,
     imageUrl: imageUrls[0] ?? null,
