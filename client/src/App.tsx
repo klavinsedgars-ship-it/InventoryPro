@@ -8,6 +8,7 @@ import { Dashboard } from "@/pages/dashboard";
 import { Products } from "@/pages/products";
 import { Marketplaces } from "@/pages/marketplaces";
 import TMEBrowser from "@/pages/tme-browser";
+import GeticBrowser from "@/pages/getic-browser";
 import { Settings } from "@/pages/settings";
 import { Reports } from "@/pages/reports";
 import Configuration from "@/pages/configuration";
@@ -68,6 +69,7 @@ function AppContent() {
       <Route path="/products" component={() => <Products user={user} />} />
       <Route path="/marketplaces" component={() => <Marketplaces user={user} />} />
       <Route path="/tme-browser" component={() => <TMEBrowser user={user} />} />
+      <Route path="/getic-browser" component={() => <GeticBrowser user={user} />} />
       <Route path="/configuration" component={() => <Configuration user={user} />} />
       <Route path="/reports" component={() => <Reports user={user} />} />
       <Route path="/settings" component={() => <Settings user={user} />} />

@@ -88,6 +88,7 @@ import { eq, ne, and, gte, lte, lt, desc, asc, count, or, ilike, isNull, isNotNu
 import bcrypt from "bcryptjs";
 import { PRICING_CONFIG } from "./dynamic-pricing";
 import type { LeaseStore } from "./job-lease";
+import { SUPPLIER_SCHEMA_STATEMENTS } from "./getic-sync";
 
 export interface IStorage {
   // Users
@@ -545,6 +546,11 @@ export class DatabaseStorage implements IStorage {
          acquired_at timestamptz NOT NULL DEFAULT now(),
          expires_at timestamptz NOT NULL
        )`,
+      // Supplier feed staging (Getic and future XML distributors) — offers
+      // land in their own tables, never in products, until an explicit
+      // promotion step exists. Statements live in getic-sync.ts so the boot
+      // path and the lazy ensure cannot drift.
+      ...SUPPLIER_SCHEMA_STATEMENTS,
     ];
     // Each statement is isolated: an extension that a host does not allow, or
     // an index that cannot be built, must not stop the rest of the schema from

@@ -884,3 +884,89 @@ export const Marketplace = {
 } as const;
 
 export type MarketplaceType = typeof Marketplace[keyof typeof Marketplace];
+
+// ---------------------------------------------------------------------------
+// Supplier feed staging (Getic and future XML distributors)
+//
+// Offers land HERE, not in `products`. The products table is wired straight
+// into the listing ramp, the TME sync sweep and the dashboard counts, so a new
+// distributor's catalogue must stay quarantined until an explicit promotion
+// step (not yet built) copies selected rows across. A staging row keeps the
+// full parsed record (`raw`) so the field mapping can be corrected and
+// re-derived later without re-fetching the feed.
+// ---------------------------------------------------------------------------
+export const supplierOffers = pgTable("supplier_offers", {
+  id: serial("id").primaryKey(),
+  /** Supplier code, e.g. "GETIC". Unique together with supplierSku. */
+  supplier: text("supplier").notNull(),
+  supplierSku: text("supplier_sku").notNull(),
+  name: text("name"),
+  ean: text("ean"),
+  manufacturer: text("manufacturer"),
+  mpn: text("mpn"),
+  categoryPath: text("category_path"),
+  description: text("description"),
+  /** Feed price as given — meaning depends on the feed (see sourceKeys). */
+  price: decimal("price", { precision: 12, scale: 4 }),
+  currency: text("currency"),
+  /** Parsed stock quantity; NULL when the feed only says "available". */
+  stock: integer("stock"),
+  weightG: decimal("weight_g", { precision: 10, scale: 2 }),
+  imageUrl: text("image_url"),
+  additionalImages: text("additional_images"), // JSON array of URLs
+  datasheetUrl: text("datasheet_url"),
+  productUrl: text("product_url"),
+  /** JSON object: feed fields the mapper did not consume, verbatim. */
+  attributes: text("attributes"),
+  /** JSON of the complete parsed XML record — the re-derivable source. */
+  raw: text("raw"),
+  /** Which import run last touched this row. */
+  feedRunId: integer("feed_run_id"),
+  firstSeenAt: timestamp("first_seen_at").defaultNow(),
+  /** A row whose lastSeenAt stops advancing has left the feed. */
+  lastSeenAt: timestamp("last_seen_at").defaultNow(),
+});
+
+export const insertSupplierOfferSchema = createInsertSchema(supplierOffers).omit({
+  id: true,
+  firstSeenAt: true,
+  lastSeenAt: true,
+});
+
+export type SupplierOffer = typeof supplierOffers.$inferSelect;
+export type InsertSupplierOffer = z.infer<typeof insertSupplierOfferSchema>;
+
+/** One fetch+import of a supplier feed: what came back, what was written. */
+export const supplierFeedRuns = pgTable("supplier_feed_runs", {
+  id: serial("id").primaryKey(),
+  supplier: text("supplier").notNull(),
+  // running | completed | partial (time budget hit) | failed
+  status: text("status").notNull().default("running"),
+  url: text("url"),
+  httpStatus: integer("http_status"),
+  contentType: text("content_type"),
+  bytes: integer("bytes"),
+  encoding: text("encoding"),
+  recordElement: text("record_element"),
+  recordsSeen: integer("records_seen").notNull().default(0),
+  recordsUpserted: integer("records_upserted").notNull().default(0),
+  recordsFailed: integer("records_failed").notNull().default(0),
+  /** Rows that did not exist before this run. */
+  newRecords: integer("new_records").notNull().default(0),
+  duplicateSkus: integer("duplicate_skus").notNull().default(0),
+  error: text("error"),
+  /** JSON {field: non-null count} over everything this run parsed. */
+  fieldCoverage: text("field_coverage"),
+  /** JSON {normalized field: feed key it was read from} (first record). */
+  mappingSample: text("mapping_sample"),
+  startedAt: timestamp("started_at").defaultNow(),
+  finishedAt: timestamp("finished_at"),
+});
+
+export const insertSupplierFeedRunSchema = createInsertSchema(supplierFeedRuns).omit({
+  id: true,
+  startedAt: true,
+});
+
+export type SupplierFeedRun = typeof supplierFeedRuns.$inferSelect;
+export type InsertSupplierFeedRun = z.infer<typeof insertSupplierFeedRunSchema>;

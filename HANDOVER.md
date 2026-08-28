@@ -92,6 +92,29 @@ sentence. This was the last thing changed and is the least proven; see below.
 7. Postage is priced from the tariff book, not from carrier invoices; orders
    whose products lack a weight are flagged as possibly under-charged.
 
+## Getic (second distributor, staging only)
+
+Added 2026-08-28. The Getic XML feed (`https://api.getic.com/xml/rentbox/xml`,
+override with `GETIC_FEED_URL`) imports into **`supplier_offers`** — its own
+staging table, NOT `products`. Nothing there can reach the listing ramp, TME
+sync, or eBay; promotion into `products` deliberately does not exist yet.
+The feed's schema was unknown when this was built, so the parser discovers the
+record element and maps fields by name heuristics (`server/xml-feed.ts`,
+`server/getic-feed.ts` — both pure, both tested); every record's full JSON is
+kept in `raw`, unconsumed fields in `attributes`, and the probe endpoint shows
+which feed key each field was read from. UI: **Getic Browser** page.
+
+```
+GET  /api/getic/probe      fetch the feed, show structure + mapping — writes nothing
+POST /api/getic/import     ?dryRun=1 = sample without writing; real run is lease-guarded
+GET  /api/getic/status     import history + coverage counts
+GET  /api/getic/offers     paginated browse (also /offers/:id, /categories)
+GET  /api/getic/overlap    SKU/EAN collisions with the TME catalogue
+```
+
+First deploy: run the probe, check the mapping reads sensibly, dry-run, then
+import. If the record detection guesses wrong, `?record=<element>` overrides it.
+
 ## Diagnostics (all read-only unless noted)
 
 ```
