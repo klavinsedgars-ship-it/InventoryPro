@@ -455,6 +455,65 @@ export function registerSyncRoutes(app: Express) {
   app.get("/api/cron/orders", ordersCronHandler);
   app.post("/api/cron/orders", ordersCronHandler);
 
+  /**
+   * Nightly housekeeping.
+   *
+   * Nothing pruned any of these tables, so they grew for ever: sync_audit
+   * gains a row per changed product per sweep, sync_logs one per cron tick,
+   * and the caches and sessions keep rows long past expiry. That is the slow
+   * kind of failure — storage fills and queries degrade before anything looks
+   * broken.
+   */
+  const maintenanceHandler = async (req: any, res: any) => {
+    const auth = req.headers["authorization"] || "";
+    const cronSecret = process.env.CRON_SECRET;
+    const isVercelCron = cronSecret && auth === `Bearer ${cronSecret}`;
+    const isAuthed = !!req.session?.userId || process.env.BYPASS_AUTH === "true";
+    if (!isVercelCron && !isAuthed) return res.status(401).json({ message: "Unauthorized" });
+
+    const { withLease, describeRefusal } = await import("../job-lease");
+    const { leaseStore } = await import("../storage");
+    const leased = await withLease(leaseStore, "maintenance", { ttlSeconds: 120 }, async () => {
+      const deleted = await storage.pruneOldData();
+      const total = Object.values(deleted).filter((n) => n > 0).reduce((a, b) => a + b, 0);
+      if (total > 0) {
+        await storage.createSyncLog({
+          source: "system",
+          operation: "maintenance",
+          status: "success",
+          message: `Housekeeping: ${total} old row(s) removed`,
+          details: JSON.stringify(deleted),
+        });
+      }
+      return { success: true, deleted };
+    });
+
+    if (!leased.ran) {
+      return res.json({ success: true, skipped: true, reason: describeRefusal("maintenance", leased) });
+    }
+    return res.json(leased.result);
+  };
+  app.get("/api/cron/maintenance", maintenanceHandler);
+  app.post("/api/cron/maintenance", maintenanceHandler);
+
+  /** What is actually taking up space, and how fast is it growing? */
+  app.get("/api/ops/storage", requireAuth, async (_req, res) => {
+    try {
+      const tables = await storage.getStorageReport();
+      const total = tables.reduce((s: number, t: any) => s + Number(t.bytes || 0), 0);
+      res.json({
+        success: true,
+        totalBytes: total,
+        totalPretty: `${(total / 1024 / 1024).toFixed(1)} MB`,
+        tables: tables.map((t: any) => ({
+          table: t.table, rows: Number(t.rows), size: t.size, bytes: Number(t.bytes),
+        })),
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
   // Auto-message cron: sends delayed (days-after-delivery) rule messages and
   // due one-off scheduled messages. Needed because the setInterval scheduler
   // only runs on a long-lived server, which Vercel isn't — so without this

@@ -519,6 +519,12 @@ export class DatabaseStorage implements IStorage {
          created_at timestamptz NOT NULL DEFAULT now()
        )`,
       `CREATE INDEX IF NOT EXISTS blocked_products_code_idx ON blocked_products (code)`,
+      // The blocklist anti-join compares upper(products.sku), and a plain index
+      // on sku cannot serve that — Postgres would compute upper() for all
+      // 65k rows on EVERY products page, sync chunk and listing batch. The
+      // sync alone runs ~164 chunks an hour, so this is the difference between
+      // a cheap lookup and a full scan repeated thousands of times a day.
+      `CREATE INDEX IF NOT EXISTS products_sku_upper_idx ON products (upper(sku))`,
       // Run-once-at-a-time leases for background jobs (see job-lease.ts). The
       // primary key is what makes the acquire atomic: ON CONFLICT is evaluated
       // against it, so two callers racing cannot both win.
@@ -943,6 +949,55 @@ export class DatabaseStorage implements IStorage {
       )
     `);
     this.blockedTableReady = true;
+  }
+
+  /**
+   * Delete history nothing reads any more.
+   *
+   * Every table here grows without bound and none of them was ever pruned:
+   * sync_audit gains a row per changed product per sweep (~32k/day at current
+   * volume, and it scales with the catalogue), sync_logs a row per cron tick,
+   * and the caches and session table keep rows long past their expiry. Left
+   * alone this is the slow kind of outage — storage fills, queries degrade,
+   * and nothing looks wrong until it does.
+   */
+  async pruneOldData(opts: { auditDays?: number; logDays?: number } = {}): Promise<Record<string, number>> {
+    const auditDays = Math.max(7, opts.auditDays ?? (Number(process.env.RETAIN_AUDIT_DAYS) || 90));
+    const logDays = Math.max(7, opts.logDays ?? (Number(process.env.RETAIN_LOG_DAYS) || 60));
+    const out: Record<string, number> = {};
+    const run = async (label: string, statement: any) => {
+      try {
+        const r: any = await db.execute(statement);
+        out[label] = r.rowCount ?? 0;
+      } catch (e) {
+        // A missing table must not abort the rest of the sweep.
+        out[label] = -1;
+        console.warn(`prune ${label} failed:`, (e as Error).message);
+      }
+    };
+
+    await run("sync_audit", sql`DELETE FROM sync_audit WHERE created_at < now() - make_interval(days => ${auditDays})`);
+    await run("sync_logs", sql`DELETE FROM sync_logs WHERE synced_at < now() - make_interval(days => ${logDays})`);
+    await run("tme_product_cache", sql`DELETE FROM tme_product_cache WHERE expires_at < now()`);
+    await run("ebay_taxonomy_cache", sql`DELETE FROM ebay_taxonomy_cache WHERE expires_at < now()`);
+    // connect-pg-simple's own pruning is disabled (its timer cannot be relied
+    // on in a serverless process), so expired sessions accumulate for ever.
+    await run("user_sessions", sql`DELETE FROM user_sessions WHERE expire < now()`);
+    return out;
+  }
+
+  /** Row counts and on-disk size of the tables that grow. */
+  async getStorageReport(): Promise<any[]> {
+    const q: any = await db.execute(sql`
+      SELECT relname AS table,
+             n_live_tup::bigint AS rows,
+             pg_total_relation_size(relid) AS bytes,
+             pg_size_pretty(pg_total_relation_size(relid)) AS size
+      FROM pg_stat_user_tables
+      ORDER BY pg_total_relation_size(relid) DESC
+      LIMIT 25
+    `);
+    return (q.rows ?? q ?? []) as any[];
   }
 
   async getTmeProductCount(): Promise<number> {
