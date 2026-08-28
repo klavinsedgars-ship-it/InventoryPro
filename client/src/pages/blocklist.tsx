@@ -145,6 +145,8 @@ export default function Blocklist({ user }: { user?: any }) {
             </CardContent>
           </Card>
 
+          <FindSimilar onUse={(codes) => setCodes(codes)} />
+
           {stillListed.length > 0 && (
             <Card className="border-red-200 bg-red-50">
               <CardContent className="py-3 text-sm text-red-900">
@@ -216,5 +218,88 @@ export default function Blocklist({ user }: { user?: any }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Block a whole class, not one email's worth of codes.
+ *
+ * A marketplace removal is usually a category judgement — eBay refused a set
+ * of needles, not those 28 specific listings — and the catalogue holds more of
+ * the same waiting for the ramp to publish them. This finds them, shows what a
+ * term actually catches, and loads the codes into the box above for review.
+ * It never blocks directly: a careless term would take out half the catalogue.
+ */
+function FindSimilar({ onUse }: { onUse: (codes: string) => void }) {
+  const [term, setTerm] = useState("");
+  const [result, setResult] = useState<any>(null);
+  const [searching, setSearching] = useState(false);
+  const { toast } = useToast();
+
+  const search = async () => {
+    setSearching(true);
+    try {
+      const r = await fetch(`/api/blocklist/matching?q=${encodeURIComponent(term)}`, { credentials: "include" });
+      const d = await r.json();
+      if (!d.success) throw new Error(d.error);
+      setResult(d);
+    } catch (e: any) {
+      toast({ title: "Search failed", description: e.message, variant: "destructive" });
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Find everything like it</CardTitle>
+        <p className="text-sm text-gray-500">
+          A removal is usually about a category, not one item. Search the catalogue for the
+          same kind of product, then review the codes before blocking them.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex gap-2">
+          <Input
+            placeholder="e.g. needle"
+            value={term}
+            onChange={(e) => setTerm(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && term.trim().length >= 3 && search()}
+            data-testid="input-similar-term"
+          />
+          <Button variant="outline" onClick={search} disabled={term.trim().length < 3 || searching}>
+            {searching ? "Searching…" : "Search"}
+          </Button>
+        </div>
+
+        {result && (
+          <div className="text-sm border rounded p-3 bg-gray-50 space-y-2">
+            <p>
+              <strong>{result.matched}</strong> product(s) match “{result.term}”
+              {result.listed > 0 && (
+                <span className="text-red-700"> — {result.listed} currently listed on eBay</span>
+              )}
+            </p>
+            {result.matched > 0 && (
+              <>
+                <div className="max-h-40 overflow-y-auto text-xs font-mono bg-white border rounded p-2">
+                  {result.products.map((p: any) => (
+                    <div key={p.sku} className="flex justify-between gap-2">
+                      <span>{p.sku}</span>
+                      <span className="text-gray-500 truncate flex-1">{p.name}</span>
+                      {p.listed && <span className="text-red-600">listed</span>}
+                    </div>
+                  ))}
+                </div>
+                <Button size="sm" variant="outline" onClick={() => onUse(result.codes)}>
+                  Load {result.matched} code(s) into the box above
+                </Button>
+              </>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

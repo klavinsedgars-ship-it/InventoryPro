@@ -49,3 +49,41 @@ describe("parseProductCodes", () => {
     expect(parseProductCodes(null as any).codes).toEqual([]);
   });
 });
+
+describe("parseProductCodes — pasting a marketplace removal email", () => {
+  // Verbatim from eBay's removal notice, which is what the operator has to
+  // hand. Splitting these on separators yields prose fragments and blocks
+  // nothing, leaving 28 codes to be retyped by hand.
+  const EMAIL = `Item: 298622261187 10x Needle: steel; 1"; Size: 18; straight; Mounting: Luer - 918100-TE | EU Stock
+Reference ID: 2-108150915418
+
+Item: 307150129072 10x Needle: steel; 0.25"; Size: 23; straight; 0.33mm; - FIS-23-1/4-ES | EU Stock
+Reference ID: 2-108150865402
+
+Item: 298622261191 10x Needle: steel; 0.5"; Size: 30; bent at 45°; 0.15mm; p - FIS-30K45 | EU Stock
+Reference ID: 2-108150805197`;
+
+  it("pulls the supplier code out of each removal line", () => {
+    const r = parseProductCodes(EMAIL);
+    expect(r.codes).toEqual(["918100-TE", "FIS-23-1/4-ES", "FIS-30K45"]);
+  });
+
+  it("keeps codes containing slashes, which fractional sizes produce", () => {
+    expect(parseProductCodes(`x - FIS-22-1/2-ES | EU Stock`).codes).toEqual(["FIS-22-1/2-ES"]);
+  });
+
+  it("does not turn the eBay item number or reference id into a block", () => {
+    const r = parseProductCodes(EMAIL);
+    expect(r.codes).not.toContain("298622261187");
+    expect(r.codes.some((c) => c.startsWith("2-1081"))).toBe(false);
+  });
+
+  it("still accepts a plain list, so both paste styles work", () => {
+    expect(parseProductCodes("918100-TE\nFIS-30K45").codes).toEqual(["918100-TE", "FIS-30K45"]);
+  });
+
+  it("handles a mixed paste of email lines and bare codes", () => {
+    const r = parseProductCodes(`Item: 1 thing - 920100-TE | EU Stock\n914100-TE`);
+    expect(r.codes).toEqual(["920100-TE", "914100-TE"]);
+  });
+});

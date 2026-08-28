@@ -59,6 +59,35 @@ export function registerBlocklistRoutes(app: Express) {
     }
   });
 
+  /**
+   * What would blocking everything matching this term catch?
+   *
+   * Read-only on purpose. A removal email is a symptom of a category problem,
+   * and the useful response is usually "block all needles", not "block these
+   * 28 needles" — but only once you can see what that means.
+   */
+  app.get("/api/blocklist/matching", requireAuth, async (req, res) => {
+    try {
+      const term = String(req.query.q ?? "").trim();
+      if (term.length < 3) {
+        return res.status(400).json({ success: false, error: "Search term must be at least 3 characters" });
+      }
+      const rows = await storage.findProductsMatching(term);
+      res.json({
+        success: true,
+        term,
+        matched: rows.length,
+        listed: rows.filter((r: any) => r.listed_on_ebay).length,
+        products: rows.slice(0, 200).map((r: any) => ({
+          sku: r.sku, name: r.name, listed: !!r.listed_on_ebay, stock: r.stock,
+        })),
+        codes: rows.map((r: any) => r.sku).join("\n"),
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
   app.post("/api/blocklist", requireAuth, async (req, res) => {
     try {
       const parsed = parseProductCodes(String(req.body?.codes ?? ""));

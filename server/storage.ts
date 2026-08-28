@@ -865,6 +865,31 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
+  /**
+   * Products whose name or SKU matches a term — for blocking a whole class.
+   *
+   * A marketplace removal is rarely about one item: eBay refused these
+   * needles as a restricted category, and the catalogue holds many more that
+   * would be listed next. Blocking code-by-code from each email is a losing
+   * race against the ramp.
+   *
+   * Returns candidates for review rather than blocking them: the operator sees
+   * exactly what a term catches before anything is written, because a careless
+   * term ("SEN") would take out half the catalogue.
+   */
+  async findProductsMatching(term: string, limit = 500): Promise<any[]> {
+    const q = `%${term.trim()}%`;
+    const rows: any = await db.execute(sql`
+      SELECT id, sku, name, listed_on_ebay, stock, status
+      FROM products
+      WHERE (name ILIKE ${q} OR sku ILIKE ${q})
+        AND NOT EXISTS (SELECT 1 FROM blocked_products b WHERE b.code = upper(products.sku))
+      ORDER BY listed_on_ebay DESC, name
+      LIMIT ${limit}
+    `);
+    return (rows.rows ?? rows ?? []) as any[];
+  }
+
   /** Unblock. The product stays inactive until a sync restores its stock. */
   async removeBlockedProduct(code: string): Promise<boolean> {
     await this.ensureBlockedTable();
