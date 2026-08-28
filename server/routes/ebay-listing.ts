@@ -26,6 +26,7 @@ export function registerEbayListingRoutes(app: Express) {
         apply: String(req.query.apply) === "1",
         maxPages: req.query.maxPages ? Number(req.query.maxPages) : undefined,
         maxOfferLookups: req.query.maxOfferLookups ? Number(req.query.maxOfferLookups) : undefined,
+        startPage: req.query.startPage ? Number(req.query.startPage) : undefined,
       });
       res.json(report);
     } catch (error) {

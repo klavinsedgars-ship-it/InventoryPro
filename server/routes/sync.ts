@@ -518,6 +518,11 @@ export function registerSyncRoutes(app: Express) {
   // due one-off scheduled messages. Needed because the setInterval scheduler
   // only runs on a long-lived server, which Vercel isn't — so without this
   // these messages never sent. Same CRON_SECRET-or-session auth as daily-sync.
+  //
+  // NOT SCHEDULED at present: removed from vercel.json while there is no
+  // messaging in use, so it stops waking the database every hour for
+  // "delayed 0/0, scheduled 0/0". The endpoint stays, so re-adding the cron
+  // entry is the only step needed to turn it back on.
   const autoMessagesHandler = async (req: any, res: any) => {
     const auth = req.headers["authorization"] || "";
     const cronSecret = process.env.CRON_SECRET;

@@ -23,6 +23,10 @@ export interface ReconcileReport {
   activeOnEbay: number;
   pagesFetched: number;
   fetchedAllPages: boolean;
+  /** Where a time-bounded run stopped; pass as startPage to continue. */
+  startPage: number;
+  nextPage: number | null;
+  elapsedMs: number;
   matched: number;            // eBay listing SKU found in products table
   updated: number;            // rows updated (apply mode only)
   offerIdRecovered: number;   // matched listings whose Inventory-API offerId was found
@@ -38,8 +42,16 @@ export async function reconcileEbayListings(opts: {
   apply?: boolean;
   maxPages?: number;          // safety cap on Trading API pagination
   maxOfferLookups?: number;   // cap on per-SKU Inventory-API offer lookups
+  startPage?: number;         // resume point for a time-bounded run
+  budgetMs?: number;          // stop paging before the function is killed
 } = {}): Promise<ReconcileReport> {
   const apply = opts.apply === true;
+  const started = Date.now();
+  // The function is killed at 300s with no response at all, which is what a
+  // full walk of ~200 pages ran into: two minutes of nothing, then nothing.
+  // Stop early and hand back a resume point instead.
+  const budgetMs = Math.min(240_000, Math.max(10_000, opts.budgetMs ?? 200_000));
+  const startPage = Math.max(1, Math.floor(Number(opts.startPage) || 1));
   // 200 listings a page. The cap was 50 pages (10k), which silently truncated
   // an account with 39,777 active listings — and a truncated view is worse
   // than none, because everything unseen looks like it is missing from eBay.
@@ -53,19 +65,26 @@ export async function reconcileEbayListings(opts: {
 
   // 1) Walk the account's active listings.
   const live: Array<{ itemId: string; sku: string | null; title: string; price: number | null; quantity: number | null }> = [];
-  let page = 1;
+  let page = startPage;
   let totalPages = 1;
+  let ranOutOfTime = false;
   do {
     const r = await ebayApi.getMyActiveListings(page);
     live.push(...r.items);
     totalPages = r.totalPages || 1;
     page++;
-  } while (page <= totalPages && page <= maxPages);
-  const fetchedAllPages = totalPages <= maxPages;
+    if (Date.now() - started > budgetMs) { ranOutOfTime = true; break; }
+  } while (page <= totalPages && page < startPage + maxPages);
+
+  const lastPageRead = page - 1;
+  const fetchedAllPages = startPage === 1 && lastPageRead >= totalPages;
+  const nextPage = lastPageRead < totalPages ? lastPageRead + 1 : null;
   if (!fetchedAllPages) {
     errors.push(
-      `TRUNCATED: eBay reports ${totalPages} pages of listings and only ${maxPages} were read. ` +
-      `Findings below cover part of the account; raise maxPages before acting on them.`,
+      `PARTIAL: read pages ${startPage}-${lastPageRead} of ${totalPages}` +
+      (ranOutOfTime ? " (stopped on the time budget)" : "") +
+      `. Continue with ?startPage=${nextPage}. "Listed locally but missing from eBay" is NOT computed ` +
+      `on a partial run, because unread pages would look like missing listings.`,
     );
   }
 
@@ -130,7 +149,9 @@ export async function reconcileEbayListings(opts: {
   const liveSkus = new Set(withSku.map((l) => l.sku as string));
   let dbListed: any[] = [];
   try {
-    dbListed = await storage.getProductsWithFilters({ listedOnEbay: true });
+    // Only meaningful against the COMPLETE active list: on a partial walk
+    // every unread listing would be reported as missing from eBay.
+    if (fetchedAllPages) dbListed = await storage.getProductsWithFilters({ listedOnEbay: true });
   } catch (e) {
     errors.push(`db listed-products query: ${(e as Error).message}`);
   }
@@ -156,6 +177,9 @@ export async function reconcileEbayListings(opts: {
     activeOnEbay: live.length,
     pagesFetched: page - 1,
     fetchedAllPages,
+    startPage,
+    nextPage,
+    elapsedMs: Date.now() - started,
     matched: withSku.length - orphanedOnEbay.length,
     updated,
     offerIdRecovered,
