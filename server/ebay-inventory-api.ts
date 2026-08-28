@@ -547,6 +547,50 @@ export class EbayInventoryApiService {
     return { step: "publish", ok: false, httpStatus: r.status, error: this.firstEbayError(r.data, r.text) };
   }
 
+  /**
+   * Move ONE live listing to the category the (guarded) resolver chooses now.
+   *
+   * Order matters: the inventory item is rewritten FIRST because the new
+   * category's required aspects live on it; then the offer is PUT with the
+   * new categoryId — for a published offer eBay applies that to the live
+   * listing immediately, no publish call needed. Records the result in
+   * products.ebay_category_id, which is what makes /api/ebay/recategorize
+   * resumable.
+   */
+  async recategorizeOne(product: Product): Promise<{ ok: boolean; sku: string; categoryId?: string; error?: string }> {
+    const { id: categoryId } = await this.resolveCategoryDetailed(product);
+    if (!categoryId) {
+      return { ok: false, sku: product.sku, error: "no plausible category resolved (and no fallback learned)" };
+    }
+
+    const inv = await this.createOrReplaceInventoryItem(product.sku, product, categoryId);
+    if (!inv.ok) return { ok: false, sku: product.sku, categoryId, error: `inventory_item: ${inv.error}` };
+
+    let offerId = product.ebayOfferId || null;
+    if (offerId) {
+      const payload = await this.buildOffer(product, categoryId);
+      const r = await this.req("PUT", `/offer/${offerId}`, payload);
+      if (!r.ok) {
+        // Stale offer id (reconcile drift) — recover via the create/reuse path,
+        // which finds the real offer through eBay's 25002 "already exists".
+        const viaCreate = await this.createOffer(product, categoryId);
+        if (!viaCreate.ok || !viaCreate.offerId) {
+          return { ok: false, sku: product.sku, categoryId, error: `offer: ${viaCreate.error || this.firstEbayError(r.data, r.text)}` };
+        }
+        offerId = viaCreate.offerId;
+      }
+    } else {
+      const viaCreate = await this.createOffer(product, categoryId);
+      if (!viaCreate.ok || !viaCreate.offerId) {
+        return { ok: false, sku: product.sku, categoryId, error: `offer: ${viaCreate.error}` };
+      }
+      offerId = viaCreate.offerId;
+    }
+
+    await storage.updateProduct(product.id, { ebayCategoryId: categoryId, ebayOfferId: offerId });
+    return { ok: true, sku: product.sku, categoryId };
+  }
+
   // ─── Bulk operations (25 SKUs/call) for the listing ramp & updates ───
 
   /**
@@ -815,6 +859,7 @@ export class EbayInventoryApiService {
     sku: string;
     offerId?: string;
     listingId?: string;
+    categoryId?: string;
     failedStep?: string;
     error?: string;
     steps: StepResult[];
@@ -852,6 +897,7 @@ export class EbayInventoryApiService {
       sku: product.sku,
       offerId: offer.offerId,
       listingId: pub.listingId,
+      categoryId,
       failedStep: pub.ok ? undefined : "publish",
       error: pub.error,
       steps,

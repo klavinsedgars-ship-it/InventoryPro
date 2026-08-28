@@ -4,7 +4,7 @@ import { generateEbayListing } from "./ebay-listing-template";
 import { calculateEbayStock } from "./stock-manager";
 import { findEbayCategoryForTMEProduct } from "./tme-ebay-category-mapping";
 import { imageProcessingService } from "./image-processing";
-import { isTransientTaxonomyStatus } from "./ebay-category-query";
+import { isTransientTaxonomyStatus, pickPlausibleSuggestion } from "./ebay-category-query";
 
 /**
  * eBay's Taxonomy service was unavailable (throttled or erroring). Distinct
@@ -155,7 +155,7 @@ export class EbayApiService {
   // Cache eBay category suggestions per query so we make at most one
   // GetSuggestedCategories call per distinct product-type query, not per
   // listing. Keyed by lowercased query string.
-  private categorySuggestionCache = new Map<string, { id: string; name: string }>();
+  private categorySuggestionCache = new Map<string, { id: string; name: string; path?: string } | null>();
 
   constructor() {
     this.credentials = {
@@ -927,19 +927,27 @@ export class EbayApiService {
    * site (DE=77). Result cached per query. Returns null on any failure so
    * the caller can fall back to a default category.
    */
-  async getSuggestedCategory(query: string): Promise<{ id: string; name: string } | null> {
+  async getSuggestedCategory(query: string): Promise<{ id: string; name: string; path?: string } | null> {
     const key = query.trim().toLowerCase();
     if (!key) return null;
     if (this.categorySuggestionCache.has(key)) {
-      return this.categorySuggestionCache.get(key)!;
+      return this.categorySuggestionCache.get(key) ?? null;
     }
     // DB-backed cache: survives serverless cold starts (the in-memory Map
     // above empties on every new function instance).
-    const cacheKey = `suggest:${this.siteId}:${key}`;
+    //
+    // "suggest2" (2026-08-28): the v1 entries were eBay's FIRST suggestion
+    // taken unvalidated, which filed whole TME categories under absurd
+    // domains (see isImplausibleCategoryPath). The prefix bump makes every
+    // category re-resolve through the domain guard; v1 rows stay readable as
+    // evidence for /api/__category-map until their TTL expires.
+    const cacheKey = `suggest2:${this.siteId}:${key}`;
     const cached = await storage.getTaxonomyCache(cacheKey);
     if (cached) {
-      this.categorySuggestionCache.set(key, cached);
-      return cached;
+      // {id:""} is the cached "no plausible suggestion" marker.
+      const hit = cached.id ? cached : null;
+      this.categorySuggestionCache.set(key, hit);
+      return hit;
     }
     try {
       // Modern Taxonomy REST API (the legacy Trading GetSuggestedCategories
@@ -971,16 +979,24 @@ export class EbayApiService {
         return null;
       }
       const data = await resp.json();
-      const top = data?.categorySuggestions?.[0]?.category;
-      const id = top?.categoryId;
-      const name = top?.categoryName || "";
-      if (id) {
-        const result = { id: String(id), name };
-        this.categorySuggestionCache.set(key, result);
-        await storage.setTaxonomyCache(cacheKey, result); // 30-day TTL
-        console.log(`🗂️ eBay suggested category for "${query}": ${id} (${name})`);
-        return result;
+      // Take the first suggestion whose tree path passes the domain guard —
+      // NOT blindly the first one. eBay's top text hit for a mechanical part
+      // name can land in Musikinstrumente; the runner-up is usually right.
+      const picked = pickPlausibleSuggestion(data?.categorySuggestions);
+      if (picked) {
+        this.categorySuggestionCache.set(key, picked);
+        await storage.setTaxonomyCache(cacheKey, picked); // 30-day TTL
+        console.log(`eBay category for "${query}": ${picked.id} (${picked.path || picked.name})`);
+        return picked;
       }
+      // Every suggestion was implausible (or none came back). Cache the
+      // verdict so the ramp doesn't re-spend Taxonomy quota on a category
+      // that resolves to the fallback anyway.
+      if (Array.isArray(data?.categorySuggestions) && data.categorySuggestions.length > 0) {
+        console.warn(`Taxonomy suggestions for "${query}" all failed the domain guard — using fallback`);
+      }
+      this.categorySuggestionCache.set(key, null);
+      await storage.setTaxonomyCache(cacheKey, { id: "", name: "", path: "" });
       return null;
     } catch (err) {
       // Propagate transient failures so callers can retry rather than record a

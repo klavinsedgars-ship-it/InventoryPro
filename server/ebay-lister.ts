@@ -95,6 +95,7 @@ export async function listProductsViaInventory(allProducts: Product[]): Promise<
         ebayListingStatus: "published",
         ebayListingError: null,
         ebayListAttempts: 0,
+        ebayCategoryId: r.categoryId ?? null,
       });
       results.push({ sku: prod.sku, ok: true, listingId: r.listingId });
     } else {
@@ -351,6 +352,7 @@ export async function listProductsViaInventoryBulk(
     }
     if (withCat.length === 0) continue;
     const productBySku = new Map(withCat.map(({ product }) => [product.sku, product]));
+    const catBySku = new Map(withCat.map(({ product, categoryId }) => [product.sku, categoryId]));
 
     // 2) Inventory items.
     const invRes = await ebayInventoryApi.bulkCreateOrReplaceInventoryItem(withCat);
@@ -433,6 +435,7 @@ export async function listProductsViaInventoryBulk(
           ebayListingStatus: "published",
           ebayListingError: null,
           ebayListAttempts: 0,
+          ebayCategoryId: catBySku.get(sku) ?? null,
         });
       } else {
         failed++;

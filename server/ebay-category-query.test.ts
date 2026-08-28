@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { categoryQueryFor, isTransientTaxonomyStatus, pickDefaultCategory, scoreCategoryGenerality } from "./ebay-category-query";
+import { categoryQueryFor, isTransientTaxonomyStatus, pickDefaultCategory, scoreCategoryGenerality, isImplausibleCategoryPath, pickPlausibleSuggestion } from "./ebay-category-query";
 
 const p = (category: string, name: string) => ({ category, name }) as any;
 
@@ -126,5 +126,83 @@ describe("pickDefaultCategory — generality first, frequency only as tie-break"
     const a = pickDefaultCategory(expand(rows));
     const b = pickDefaultCategory(expand([...rows].reverse()));
     expect(a?.id).toBe(b?.id);
+  });
+});
+
+describe("isImplausibleCategoryPath (2026-08-28 miscategorisation incident)", () => {
+  it("convicts the domains buyers actually complained about", () => {
+    expect(isImplausibleCategoryPath("Musikinstrumente > Synthesizer > Teile")).toBe(true);
+    expect(isImplausibleCategoryPath("Synthesizer-Teile")).toBe(false); // leaf name alone: no domain word
+    expect(isImplausibleCategoryPath("Musikinstrumente & DJ-Equipment > Koffer & Cases > Beschläge")).toBe(true);
+  });
+
+  it("convicts other absurd domains", () => {
+    expect(isImplausibleCategoryPath("Kleidung & Accessoires > Herren > Hemden")).toBe(true);
+    expect(isImplausibleCategoryPath("Spielzeug > Baukästen")).toBe(true);
+    expect(isImplausibleCategoryPath("Uhren & Schmuck > Armbanduhren")).toBe(true);
+    expect(isImplausibleCategoryPath("Sammeln & Seltenes > Metallobjekte")).toBe(true);
+    expect(isImplausibleCategoryPath("Musical Instruments & Gear > Guitars")).toBe(true);
+  });
+
+  it("passes the legitimate homes of this catalogue", () => {
+    expect(isImplausibleCategoryPath("Business & Industrie > Elektronik & Messtechnik > Elektronische Bauelemente")).toBe(false);
+    expect(isImplausibleCategoryPath("Business & Industrie > Metallbearbeitung > Befestigungsmaterial")).toBe(false);
+    expect(isImplausibleCategoryPath("Heimwerker > Eisenwaren > Schrauben & Muttern")).toBe(false);
+    expect(isImplausibleCategoryPath("Computer, Tablets & Netzwerk > Kabel & Adapter")).toBe(false);
+    expect(isImplausibleCategoryPath("Möbel & Wohnen > Beleuchtung > Leuchtmittel")).toBe(false);
+  });
+
+  it("word boundaries keep industrial workwear/safety categories legitimate", () => {
+    // These are REAL destinations for a TME catalogue (gloves, safety shoes)
+    // and must not be blocked by the Kleidung/Schuhe root patterns.
+    expect(isImplausibleCategoryPath("Business & Industrie > Arbeitskleidung & -schutz")).toBe(false);
+    expect(isImplausibleCategoryPath("Business & Industrie > Sicherheitsschuhe")).toBe(false);
+    // Smartwatches (consumer electronics) must not trip the English "watches".
+    expect(isImplausibleCategoryPath("Handys & Kommunikation > Smartwatches")).toBe(false);
+  });
+});
+
+describe("pickPlausibleSuggestion", () => {
+  const sug = (id: string, name: string, ancestors: string[] = []) => ({
+    category: { categoryId: id, categoryName: name },
+    categoryTreeNodeAncestors: ancestors.map((categoryName) => ({ categoryName })),
+  });
+
+  it("takes eBay's first suggestion when it is plausible", () => {
+    const picked = pickPlausibleSuggestion([
+      sug("184063", "Sonstige", ["Elektronische Bauelemente", "Elektronik & Messtechnik", "Business & Industrie"]),
+      sug("1", "whatever"),
+    ]);
+    expect(picked?.id).toBe("184063");
+    // Ancestors arrive leaf-side first; the path renders root-first.
+    expect(picked?.path).toBe("Business & Industrie > Elektronik & Messtechnik > Elektronische Bauelemente > Sonstige");
+  });
+
+  it("skips an implausible top hit and takes the runner-up — the incident case", () => {
+    const picked = pickPlausibleSuggestion([
+      sug("619", "Teile", ["Synthesizer", "Musikinstrumente"]),
+      sug("57988", "Befestigungsmaterial", ["Metallbearbeitung", "Business & Industrie"]),
+    ]);
+    expect(picked?.id).toBe("57988");
+  });
+
+  it("returns null when every suggestion is implausible", () => {
+    expect(
+      pickPlausibleSuggestion([
+        sug("619", "Teile", ["Synthesizer", "Musikinstrumente"]),
+        sug("1", "Puppen", ["Spielzeug"]),
+      ]),
+    ).toBeNull();
+  });
+
+  it("judges by bare leaf name when no ancestors are present", () => {
+    expect(pickPlausibleSuggestion([sug("5", "Musikinstrumente")])).toBeNull();
+    expect(pickPlausibleSuggestion([sug("6", "Steckverbinder")])?.id).toBe("6");
+  });
+
+  it("tolerates empty and malformed input", () => {
+    expect(pickPlausibleSuggestion([])).toBeNull();
+    expect(pickPlausibleSuggestion(null)).toBeNull();
+    expect(pickPlausibleSuggestion([{}, { category: {} }])).toBeNull();
   });
 });

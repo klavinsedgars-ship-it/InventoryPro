@@ -128,3 +128,83 @@ export function pickDefaultCategory(
   if (!best) return null;
   return { ...best, sample, share: best.count / sample };
 }
+
+/**
+ * Sanity guard for Taxonomy suggestions.
+ *
+ * Why this exists (2026-08-28): two buyers reported listings sitting in
+ * absurd categories — a ball latch and a spacer sleeve filed under
+ * musical-instrument categories ("Das ist kein Synthesizer"). The resolver
+ * took eBay's FIRST text-classification hit for the TME category name and
+ * trusted it blindly; for mechanical hardware terms the top hit on eBay.de
+ * can land anywhere ("latch" → flight-case hardware under Musikinstrumente).
+ * Because the suggestion is cached per TME category, ONE bad hit
+ * miscategorised every product in that category — thousands of listings.
+ *
+ * The guard rejects suggestions whose tree path lands in a domain this
+ * catalogue (electronic components and industrial hardware) can never
+ * belong to. It is a BLOCKLIST of the absurd, not an allowlist of the
+ * expected: fasteners legitimately live under Möbel-Beschläge or Heimwerker,
+ * so only domains that are wrong for EVERY product we sell are listed.
+ */
+// Word-boundary anchors matter: bare substrings would convict legitimate
+// B&I categories — "Arbeitskleidung" (workwear) and "Sicherheitsschuhe"
+// (safety shoes) are real destinations for this catalogue, while the roots
+// "Kleidung & Accessoires" and "Schuhe" are not.
+const IMPLAUSIBLE_DOMAIN_RX = new RegExp(
+  [
+    // German roots (eBay.de tree)
+    "musikinstrument", "dj-equipment", "\\bkleidung\\b", "\\bschuhe\\b",
+    "uhren\\s*&\\s*schmuck", "\\bschmuck\\b",
+    "\\bbaby\\b", "beauty", "\\bgesundheit\\b", "parfum", "kosmetik",
+    "\\bbücher\\b", "zeitschriften", "\\bfilme\\b", "\\bdvds?\\b", "blu-ray",
+    "\\bmusik\\b", "\\bcds\\b", "vinyl",
+    "sammeln", "seltenes", "spielzeug", "\\bsport\\b", "tierbedarf",
+    "antiquitäten", "\\bkunst\\b", "münzen", "briefmarken",
+    "lebensmittel", "\\bgetränke\\b", "feinschmecker", "\\breisen\\b",
+    "\\btickets\\b", "immobilien",
+    // English safety net (in case a tree/locale answers in English)
+    "musical instrument", "\\bclothing\\b", "\\bshoes\\b", "jewell?ery", "\\bwatches\\b",
+    "health & beauty", "\\bbooks\\b", "\\bmovies\\b", "\\btoys\\b", "sporting goods",
+    "pet supplies", "collectibles", "antiques", "\\bart\\b", "\\bcoins\\b", "\\bstamps\\b",
+    "\\bfood\\b", "beverages", "\\btravel\\b", "real estate",
+  ].join("|"),
+  "i",
+);
+
+/**
+ * Is this category path (or bare name, when no ancestors are known) somewhere
+ * our catalogue cannot plausibly live?
+ */
+export function isImplausibleCategoryPath(pathOrName: string): boolean {
+  return IMPLAUSIBLE_DOMAIN_RX.test(pathOrName ?? "");
+}
+
+export interface TaxonomySuggestion {
+  category?: { categoryId?: string; categoryName?: string };
+  categoryTreeNodeAncestors?: Array<{ categoryName?: string }>;
+}
+
+/**
+ * The first PLAUSIBLE suggestion, in eBay's ranking order — when the top hit
+ * fails the domain guard, the second is usually right, and falling straight
+ * to the generic catch-all would waste eBay's better answers.
+ * Returns null when every suggestion is implausible.
+ */
+export function pickPlausibleSuggestion(
+  suggestions: TaxonomySuggestion[] | null | undefined,
+): { id: string; name: string; path: string } | null {
+  for (const s of suggestions ?? []) {
+    const id = s?.category?.categoryId;
+    if (!id) continue;
+    const name = s?.category?.categoryName ?? "";
+    const ancestors = (s?.categoryTreeNodeAncestors ?? [])
+      .map((a) => a?.categoryName ?? "")
+      .filter(Boolean);
+    // Ancestors arrive leaf-side first; reverse for a root-first display path.
+    const path = [...ancestors].reverse().concat(name).join(" > ");
+    if (isImplausibleCategoryPath(path || name)) continue;
+    return { id: String(id), name, path };
+  }
+  return null;
+}

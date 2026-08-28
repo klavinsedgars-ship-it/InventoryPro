@@ -92,6 +92,29 @@ sentence. This was the last thing changed and is the least proven; see below.
 7. Postage is priced from the tariff book, not from carrier invoices; orders
    whose products lack a weight are flagged as possibly under-charged.
 
+## Category incident (2026-08-28)
+
+Two buyers reported listings in absurd categories (a ball latch and a spacer
+sleeve under musical-instrument categories). Root cause: the resolver took
+eBay's FIRST Taxonomy text suggestion for the TME category name, unvalidated,
+and cached it per TME category — one bad hit miscategorised every product in
+that category. Fixed by a domain guard (`isImplausibleCategoryPath`,
+`pickPlausibleSuggestion` in `server/ebay-category-query.ts`): implausible
+suggestions are skipped in favour of the next plausible one, else the learned
+catch-all. The suggestion cache was version-bumped (`suggest2:`) so every
+category re-resolves through the guard; v1 rows remain as evidence.
+`products.ebay_category_id` now records each listing's category at publish.
+
+```
+/api/__category-map            damage report: TME category → eBay category, listed counts, flagged
+/api/ebay/recategorize         ?category=<TME cat> or ?sku=<SKU>; dry-run unless &confirm=1;
+                               &limit=25..100 per slice; repeat until remaining is 0
+```
+
+Workflow: run __category-map, work the flagged rows by listed count desc with
+recategorize (slices, like reconcile). The ramp was stopped by the operator
+during the incident — new listings resolve through the guard once re-enabled.
+
 ## Getic (second distributor, staging only)
 
 Added 2026-08-28. The Getic XML feed (`https://api.getic.com/xml/rentbox/xml`,

@@ -53,6 +53,11 @@ export const products = pgTable("products", {
   ebayListingId: text("ebay_listing_id"),
   ebayListingStatus: text("ebay_listing_status"), // unlisted|inventory_created|offer_created|published|error
   ebayListingError: text("ebay_listing_error"),
+  // The eBay category the live listing was filed under. Recorded at publish
+  // (and by /api/ebay/recategorize) so miscategorisations are auditable and
+  // re-categorisation is resumable — before this existed the chosen category
+  // lived only inside eBay and the Taxonomy cache.
+  ebayCategoryId: text("ebay_category_id"),
   // Failed-attempt counter for the listing ramp. Reset to 0 on a successful
   // publish; incremented on every failure. The candidate query excludes rows
   // ≥ EBAY_LIST_MAX_ATTEMPTS so permanently-broken SKUs stop wasting eBay
