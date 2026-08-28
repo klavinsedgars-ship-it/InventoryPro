@@ -23,10 +23,14 @@ async function syncEbayMessages(daysBack: number): Promise<{
   const errors: string[] = [];
   const touched = new Set<number>();
 
+  // BOTH folders. Reading only the Inbox showed half a conversation: a reply
+  // sent from eBay's own interface never appeared here, so the thread looked
+  // unanswered and there was no way to see what had already been said.
+  for (const folder of ['Inbox', 'Sent'] as const) {
   let pageNum = 1;
   let hasMore = true;
   while (hasMore) {
-    const result = await ebayMessagesApi.getMyMessages(startTime, undefined, 'Inbox', 100, pageNum);
+    const result = await ebayMessagesApi.getMyMessages(startTime, undefined, folder, 100, pageNum);
     if (!result.success) {
       errors.push(result.error || 'eBay message fetch failed');
       break;
@@ -34,13 +38,17 @@ async function syncEbayMessages(daysBack: number): Promise<{
     hasMore = result.hasMoreMessages || false;
 
     for (const msg of result.messages) {
-      let thread = await storage.getMessageThreadByBuyer(msg.sender, msg.itemId);
+      const outbound = folder === 'Sent';
+      // On a sent message WE are the sender; the thread belongs to the
+      // recipient, or the conversation would split in two.
+      const counterparty = outbound ? (msg.recipientUserId || msg.sender) : msg.sender;
+      let thread = await storage.getMessageThreadByBuyer(counterparty, msg.itemId);
       if (!thread) {
         thread = await storage.createMessageThread({
           marketplace: 'ebay',
           marketplaceThreadId: msg.messageId,
-          buyerUsername: msg.sender,
-          buyerEmail: msg.senderEmail,
+          buyerUsername: counterparty,
+          buyerEmail: outbound ? undefined : msg.senderEmail,
           itemId: msg.itemId,
           itemTitle: msg.itemTitle,
           subject: htmlToPlainText(msg.subject),
@@ -66,7 +74,7 @@ async function syncEbayMessages(daysBack: number): Promise<{
       if (!existingMsg) {
         await storage.createMessage({
           threadId: thread.id,
-          direction: 'inbound',
+          direction: outbound ? 'outbound' : 'inbound',
           subject: htmlToPlainText(msg.subject),
           // `body` is what a person reads: eBay's notification wrapper
           // stripped down to the words the buyer wrote. `bodyHtml` keeps the
@@ -74,7 +82,7 @@ async function syncEbayMessages(daysBack: number): Promise<{
           // demand. Both capped — a buyer's question is a few hundred bytes,
           // eBay's wrapper is a whole HTML document.
           body: extractBuyerMessage(htmlToPlainText(msg.body), {
-            buyerUsername: msg.sender,
+            buyerUsername: counterparty,
             itemTitle: msg.itemTitle,
             sellerUsername: process.env.EBAY_SELLER_USERNAME,
           }).text.slice(0, 8_000),
@@ -85,7 +93,7 @@ async function syncEbayMessages(daysBack: number): Promise<{
           marketplaceMessageId: msg.messageId,
           senderUsername: msg.sender,
           senderEmail: msg.senderEmail,
-          status: 'delivered',
+          status: outbound ? 'sent' : 'delivered',
         });
         newMessages++;
       } else if (
@@ -100,7 +108,7 @@ async function syncEbayMessages(daysBack: number): Promise<{
         await storage.updateMessage(existingMsg.id, {
           bodyHtml: sanitizeMessageHtml((msg as any).bodyHtml || msg.body, { maxLength: 20_000 }) || null,
           body: extractBuyerMessage(htmlToPlainText(msg.body), {
-            buyerUsername: msg.sender,
+            buyerUsername: counterparty,
             itemTitle: msg.itemTitle,
             sellerUsername: process.env.EBAY_SELLER_USERNAME,
           }).text.slice(0, 8_000),
@@ -108,6 +116,7 @@ async function syncEbayMessages(daysBack: number): Promise<{
       }
     }
     if (hasMore) pageNum++;
+  }
   }
 
   return { synced, updated, newMessages, threadsTouched: touched.size, errors };

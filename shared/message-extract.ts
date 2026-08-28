@@ -29,7 +29,33 @@ export interface ExtractedMessage {
  * languages this account sees (English, German, Italian): eBay localises these
  * notifications to the BUYER's language, not ours.
  */
+/**
+ * Where eBay's footer begins. Everything from the first of these onward is
+ * template: item facts, buyer profile, policy notices, legal text. Cutting at
+ * the marker beats listing every footer line, because the tail is endless and
+ * eBay adds to it.
+ */
+const FOOTER_MARKERS: RegExp[] = [
+  /^item\s*(id|nummer|nr)\s*[:#]/i,
+  /^(quantity remaining|verbleibende (menge|anzahl)|quantità rimanente)/i,
+  /^(view your listing|angebot ansehen|vedi la tua inserzione)/i,
+  /get to know the buyer|käufer kennenlernen|conosci l'acquirente/i,
+  /^(located|standort|posizione)\s*:/i,
+  /^(member since|mitglied seit|membro dal)\s*:/i,
+  /^(positive feedback|positive bewertungen|feedback positivi)\s*:/i,
+  /we scan messages|wir scannen nachrichten|scansioniamo i messaggi/i,
+  /purchase protection|käuferschutz|protezione acquisti/i,
+  /^email reference id|^referenz-id/i,
+  /we don'?t check this mailbox|dieses postfach wird nicht/i,
+  /ebay sent this message|ebay hat diese nachricht/i,
+  /learn more about account protection/i,
+  /privacy notice|user agreement|datenschutzerklärung|nutzungsbedingungen/i,
+];
+
 const NOISE_PATTERNS: RegExp[] = [
+  /^\(\d+\)$/,                            // a bare feedback score
+  /^&\w+;$/,                                // an entity left on its own line
+  /^[•·▪-]$/,                                // a lone bullet
   /^(re:\s*)?(new message|neue nachricht|nuovo messaggio)/i,
   /sent you a message|sent a message about|hat dir eine nachricht|ti ha inviato/i,
   /^(reply|antworten|rispondi)(\s+with\s+offer|\s+mit\s+angebot)?$/i,
@@ -70,9 +96,16 @@ export function extractBuyerMessage(
   const buyer = (ctx.buyerUsername ?? "").toLowerCase();
   const seller = (ctx.sellerUsername ?? "").toLowerCase();
 
-  const lines = original.split(/\r?\n/);
+  const allLines = original.split(/\r?\n/);
+
+  // Cut the footer first: everything from the first marker is eBay's template.
+  let cutAt = allLines.length;
+  for (let i = 0; i < allLines.length; i++) {
+    if (FOOTER_MARKERS.some((rx) => rx.test(allLines[i].trim()))) { cutAt = i; break; }
+  }
+  const lines = allLines.slice(0, cutAt);
+  let removed = allLines.length - lines.length;
   const kept: string[] = [];
-  let removed = 0;
 
   for (const raw of lines) {
     const line = raw.trim();

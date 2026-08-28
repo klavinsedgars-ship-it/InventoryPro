@@ -91,3 +91,55 @@ Rispondi
     expect(extractBuyerMessage(null as any, {}).text).toBe("");
   });
 });
+
+describe("the footer eBay appends after the message", () => {
+  // Exactly what was still showing in the thread after the first pass: item
+  // facts, buyer profile, policy notice, reference id and legal text.
+  const WITH_FOOTER = `gg303231giorgio sent a message about ROCKER; SPST; Pos: 2 | Stock UE #307148962757
+(179)
+vorrei sapere le misure grazie
+Item ID: 307148962757
+Quantity Remaining: 2
+View your listing
+Get to know the buyer gg303231giorgio
+&bull;
+Located: sesto san giovanni, MI, Italia
+Member since: Jan 18, 2005
+Positive Feedback: 100%
+We scan messages to enforce policies. Only purchases on eBay are covered by the eBay purchase protection programs.
+Email reference id: [#a11-8zuvn07rde#]_[#76c7a519878342c1975343bb626dbc5b#]
+We don't check this mailbox, so please don't reply to this message.
+eBay sent this message to Edgars Klavins (components_electronics).`;
+
+  it("keeps the question and nothing after it", () => {
+    const r = extractBuyerMessage(WITH_FOOTER, { buyerUsername: "gg303231giorgio" });
+    expect(r.text).toBe("vorrei sapere le misure grazie");
+  });
+
+  it("drops the buyer profile, the policy notice and the reference id", () => {
+    const r = extractBuyerMessage(WITH_FOOTER, { buyerUsername: "gg303231giorgio" });
+    for (const noise of [
+      "Item ID", "Quantity Remaining", "View your listing", "Get to know the buyer",
+      "Located", "Member since", "Positive Feedback", "We scan messages",
+      "Email reference id", "mailbox", "eBay sent this message",
+    ]) {
+      expect(r.text, noise).not.toContain(noise);
+    }
+  });
+
+  it("drops the bare feedback score and stray bullet", () => {
+    const r = extractBuyerMessage(WITH_FOOTER, { buyerUsername: "gg303231giorgio" });
+    expect(r.text).not.toContain("(179)");
+    expect(r.text).not.toContain("&bull;");
+  });
+
+  it("does not cut a message that merely mentions a footer word", () => {
+    // "located" inside a sentence is not a footer marker; only a line that
+    // STARTS one is. Cutting on a mention would truncate real questions.
+    const msg = `New message from: buyer (1)
+Where is your warehouse located, and how long is delivery?
+Reply`;
+    const r = extractBuyerMessage(msg, { buyerUsername: "buyer" });
+    expect(r.text).toContain("Where is your warehouse located");
+  });
+});
