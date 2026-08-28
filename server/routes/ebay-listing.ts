@@ -25,6 +25,7 @@ export function registerEbayListingRoutes(app: Express) {
       const report = await reconcileEbayListings({
         apply: String(req.query.apply) === "1",
         maxPages: req.query.maxPages ? Number(req.query.maxPages) : undefined,
+        maxOfferLookups: req.query.maxOfferLookups ? Number(req.query.maxOfferLookups) : undefined,
       });
       res.json(report);
     } catch (error) {

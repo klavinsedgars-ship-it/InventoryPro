@@ -40,8 +40,15 @@ export async function reconcileEbayListings(opts: {
   maxOfferLookups?: number;   // cap on per-SKU Inventory-API offer lookups
 } = {}): Promise<ReconcileReport> {
   const apply = opts.apply === true;
-  const maxPages = Math.min(50, Math.max(1, opts.maxPages ?? 25)); // 25×200 = 5k listings
-  const maxOfferLookups = Math.max(0, opts.maxOfferLookups ?? 500);
+  // 200 listings a page. The cap was 50 pages (10k), which silently truncated
+  // an account with 39,777 active listings — and a truncated view is worse
+  // than none, because everything unseen looks like it is missing from eBay.
+  const maxPages = Math.min(500, Math.max(1, opts.maxPages ?? 250)); // 250×200 = 50k
+  // Offer lookups are one Inventory-API call per SKU and are only needed to
+  // recover a missing offer id — not to detect drift. At ~40k listings the
+  // page walk alone fills much of the 300s function budget, so a dry run does
+  // none by default and the caller opts in when repairing.
+  const maxOfferLookups = Math.max(0, opts.maxOfferLookups ?? (opts.apply === true ? 500 : 0));
   const errors: string[] = [];
 
   // 1) Walk the account's active listings.
@@ -55,6 +62,12 @@ export async function reconcileEbayListings(opts: {
     page++;
   } while (page <= totalPages && page <= maxPages);
   const fetchedAllPages = totalPages <= maxPages;
+  if (!fetchedAllPages) {
+    errors.push(
+      `TRUNCATED: eBay reports ${totalPages} pages of listings and only ${maxPages} were read. ` +
+      `Findings below cover part of the account; raise maxPages before acting on them.`,
+    );
+  }
 
   // 2) Match by SKU.
   const withSku = live.filter((l) => l.sku);
