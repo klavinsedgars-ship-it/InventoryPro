@@ -55,6 +55,8 @@ export default function MessagesPage() {
   // The newest message is the one you need; a thread that opens at the top
   // makes you scroll every time.
   const threadScrollRef = useRef<HTMLDivElement | null>(null);
+  // Customer questions are the work; eBay's own emails are reference material.
+  const [inbox, setInbox] = useState<"conversations" | "notifications">("conversations");
   const [replyText, setReplyText] = useState("");
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
@@ -207,7 +209,14 @@ export default function MessagesPage() {
     }
   };
 
-  const threads = threadsData?.threads || [];
+  // Server splits these; fall back to a username check for rows stored before
+  // the kind column existed.
+  const allThreads = threadsData?.threads || [];
+  const conversations = (threadsData as any)?.conversations
+    ?? allThreads.filter((t: any) => !/^ebay/i.test(t.buyerUsername ?? ""));
+  const notifications = (threadsData as any)?.notifications
+    ?? allThreads.filter((t: any) => /^ebay/i.test(t.buyerUsername ?? ""));
+  const threads = inbox === "conversations" ? conversations : notifications;
   const threadMessages = messagesData?.messages || [];
 
   return (
@@ -317,7 +326,7 @@ export default function MessagesPage() {
                   </div>
                 ) : (
                   <div className="divide-y">
-                    {threads.map((thread) => (
+                    {threads.map((thread: any) => (
                       <button
                         key={thread.id}
                         onClick={() => setSelectedThreadId(thread.id)}

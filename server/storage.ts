@@ -519,6 +519,9 @@ export class DatabaseStorage implements IStorage {
          created_at timestamptz NOT NULL DEFAULT now()
        )`,
       `CREATE INDEX IF NOT EXISTS blocked_products_code_idx ON blocked_products (code)`,
+      // Buyer conversations vs eBay's own emails — see messageThreads.kind.
+      `ALTER TABLE message_threads ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'conversation'`,
+      `CREATE INDEX IF NOT EXISTS message_threads_kind_idx ON message_threads (kind, last_message_at DESC)`,
       // The blocklist anti-join compares upper(products.sku), and a plain index
       // on sku cannot serve that — Postgres would compute upper() for all
       // 65k rows on EVERY products page, sync chunk and listing batch. The

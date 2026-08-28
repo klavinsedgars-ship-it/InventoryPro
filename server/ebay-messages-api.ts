@@ -351,15 +351,19 @@ export async function getMemberMessages(
     const memberMessageBlocks = parseXmlArray(response, 'MemberMessage', 'MemberMessage');
     
     for (const block of memberMessageBlocks) {
+      const itemId = parseXmlValue(block, 'ItemID') || undefined;
       const questionBlock = parseXmlValue(block, 'Question') || block;
-      const message: EbayMessage = {
+
+      const question: EbayMessage = {
         messageId: parseXmlValue(questionBlock, 'MessageID') || '',
         subject: parseXmlValue(questionBlock, 'Subject') || '(No Subject)',
+        // GetMemberMessages gives the MESSAGE, not an email about it: this is
+        // the buyer's own words, with no wrapper to strip.
         body: parseXmlValue(questionBlock, 'Body') || '',
         sender: parseXmlValue(questionBlock, 'SenderID') || '',
         senderEmail: parseXmlValue(questionBlock, 'SenderEmail') || undefined,
         recipientUserId: parseXmlValue(questionBlock, 'RecipientID') || '',
-        itemId: parseXmlValue(block, 'ItemID') || undefined,
+        itemId,
         itemTitle: undefined,
         creationDate: parseXmlValue(questionBlock, 'CreationDate') || new Date().toISOString(),
         messageType: parseXmlValue(questionBlock, 'QuestionType') || 'General',
@@ -367,7 +371,29 @@ export async function getMemberMessages(
         flagged: false,
         responseEnabled: true,
       };
-      messages.push(message);
+      if (question.body || question.messageId) messages.push(question);
+
+      // Our own replies come back in the same envelope. Without them the
+      // thread shows only half the conversation.
+      for (const responseBlock of parseXmlArray(block, 'Response', 'Response')) {
+        const replyId = parseXmlValue(responseBlock, 'MessageID') || '';
+        const replyBody = parseXmlValue(responseBlock, 'Body') || '';
+        if (!replyBody && !replyId) continue;
+        messages.push({
+          messageId: replyId || `${question.messageId}-r`,
+          subject: parseXmlValue(responseBlock, 'Subject') || question.subject,
+          body: replyBody,
+          sender: parseXmlValue(responseBlock, 'SenderID') || '',
+          recipientUserId: parseXmlValue(responseBlock, 'RecipientID') || question.sender,
+          itemId,
+          itemTitle: undefined,
+          creationDate: parseXmlValue(responseBlock, 'CreationDate') || question.creationDate,
+          messageType: 'Response',
+          isRead: true,
+          flagged: false,
+          responseEnabled: false,
+        });
+      }
     }
 
     const hasMore = parseXmlValue(response, 'HasMoreItems') === 'true';

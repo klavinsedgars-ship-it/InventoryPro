@@ -611,6 +611,13 @@ export const messageThreads = pgTable("message_threads", {
   itemId: text("item_id"), // eBay listing ID
   itemTitle: text("item_title"),
   
+  /**
+   * conversation = a real exchange with a buyer (GetMemberMessages)
+   * notification = eBay writing to us: policy, statements, marketing
+   * Kept apart because an inbox that mixes them buries the customer.
+   */
+  kind: text("kind").notNull().default("conversation"),
+
   // Thread status
   status: text("status").notNull().default("open"), // open, closed, archived
   isRead: boolean("is_read").notNull().default(false),

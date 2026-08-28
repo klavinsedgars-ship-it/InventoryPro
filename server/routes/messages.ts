@@ -19,104 +19,104 @@ async function syncEbayMessages(daysBack: number): Promise<{
   synced: number; updated: number; newMessages: number; threadsTouched: number; errors: string[];
 }> {
   const startTime = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000);
+  const sellerId = (process.env.EBAY_SELLER_USERNAME || "").toLowerCase();
   let synced = 0, updated = 0, newMessages = 0;
   const errors: string[] = [];
   const touched = new Set<number>();
 
-  // BOTH folders. Reading only the Inbox showed half a conversation: a reply
-  // sent from eBay's own interface never appeared here, so the thread looked
-  // unanswered and there was no way to see what had already been said.
-  for (const folder of ['Inbox', 'Sent'] as const) {
-  let pageNum = 1;
-  let hasMore = true;
-  while (hasMore) {
-    const result = await ebayMessagesApi.getMyMessages(startTime, undefined, folder, 100, pageNum);
-    if (!result.success) {
-      errors.push(result.error || 'eBay message fetch failed');
-      break;
-    }
-    hasMore = result.hasMoreMessages || false;
+  /** One message into its thread. Shared by both sources. */
+  const store = async (msg: any, kind: "conversation" | "notification") => {
+    const outbound = !!sellerId && (msg.sender || "").toLowerCase() === sellerId;
+    // Thread by the OTHER party: we are the sender on our own replies, and
+    // keying on the sender would split a conversation into two threads.
+    const counterparty = outbound ? (msg.recipientUserId || msg.sender) : msg.sender;
+    if (!counterparty) return;
 
-    for (const msg of result.messages) {
-      const outbound = folder === 'Sent';
-      // On a sent message WE are the sender; the thread belongs to the
-      // recipient, or the conversation would split in two.
-      const counterparty = outbound ? (msg.recipientUserId || msg.sender) : msg.sender;
-      let thread = await storage.getMessageThreadByBuyer(counterparty, msg.itemId);
-      if (!thread) {
-        thread = await storage.createMessageThread({
-          marketplace: 'ebay',
-          marketplaceThreadId: msg.messageId,
+    let thread = await storage.getMessageThreadByBuyer(counterparty, msg.itemId);
+    if (!thread) {
+      thread = await storage.createMessageThread({
+        marketplace: "ebay",
+        marketplaceThreadId: msg.messageId,
+        buyerUsername: counterparty,
+        buyerEmail: outbound ? undefined : msg.senderEmail,
+        itemId: msg.itemId,
+        itemTitle: msg.itemTitle,
+        subject: htmlToPlainText(msg.subject).slice(0, 300),
+        kind,
+        status: "open",
+        isRead: !!msg.isRead,
+        lastMessageAt: new Date(msg.creationDate),
+      } as any);
+      synced++;
+    } else {
+      await storage.updateMessageThread(thread.id, {
+        lastMessageAt: new Date(msg.creationDate),
+        ...(thread.itemTitle ? {} : { itemTitle: msg.itemTitle }),
+      } as any);
+      updated++;
+    }
+    touched.add(thread.id);
+
+    const existing = await storage.getMessages(thread.id);
+    if (existing.some((m) => m.marketplaceMessageId === msg.messageId)) return;
+
+    // A member message is the words themselves; only eBay's notification
+    // emails need the wrapper stripped.
+    const plain = htmlToPlainText(msg.body);
+    const text = kind === "conversation"
+      ? plain
+      : extractBuyerMessage(plain, {
           buyerUsername: counterparty,
-          buyerEmail: outbound ? undefined : msg.senderEmail,
-          itemId: msg.itemId,
           itemTitle: msg.itemTitle,
-          subject: htmlToPlainText(msg.subject),
-          status: 'open',
-          isRead: msg.isRead,
-          lastMessageAt: new Date(msg.creationDate),
-        });
-        synced++;
-      } else {
-        const cleanedSubject = htmlToPlainText(msg.subject);
-        if (thread.subject !== cleanedSubject) {
-          await storage.updateMessageThread(thread.id, {
-            subject: cleanedSubject,
-            lastMessageAt: new Date(msg.creationDate),
-          });
-        }
-        updated++;
-      }
-      touched.add(thread.id);
+          sellerUsername: process.env.EBAY_SELLER_USERNAME,
+        }).text;
 
-      const existingMessages = await storage.getMessages(thread.id);
-      const existingMsg = existingMessages.find((m) => m.marketplaceMessageId === msg.messageId);
-      if (!existingMsg) {
-        await storage.createMessage({
-          threadId: thread.id,
-          direction: outbound ? 'outbound' : 'inbound',
-          subject: htmlToPlainText(msg.subject),
-          // `body` is what a person reads: eBay's notification wrapper
-          // stripped down to the words the buyer wrote. `bodyHtml` keeps the
-          // whole original, so nothing is lost and the UI can show it on
-          // demand. Both capped — a buyer's question is a few hundred bytes,
-          // eBay's wrapper is a whole HTML document.
-          body: extractBuyerMessage(htmlToPlainText(msg.body), {
-            buyerUsername: counterparty,
-            itemTitle: msg.itemTitle,
-            sellerUsername: process.env.EBAY_SELLER_USERNAME,
-          }).text.slice(0, 8_000),
-          // Sanitised at write time: nothing unsafe is ever stored, so the
-          // client never has to trust what it renders.
-          bodyHtml: sanitizeMessageHtml((msg as any).bodyHtml || msg.body, { maxLength: 20_000 }) || null,
-          sentAt: msg.creationDate ? new Date(msg.creationDate) : new Date(),
-          marketplaceMessageId: msg.messageId,
-          senderUsername: msg.sender,
-          senderEmail: msg.senderEmail,
-          status: outbound ? 'sent' : 'delivered',
-        });
-        newMessages++;
-      } else if (
-        !existingMsg.bodyHtml ||
-        existingMsg.bodyHtml.includes("@media") ||
-        (existingMsg.body?.length ?? 0) > 8_000 ||
-        /New message from|Reply with offer|sent a message about/i.test(existingMsg.body ?? "")
-      ) {
-        // Back-fill or REPAIR: rows written before the decode-order fix hold
-        // the whole document (CSS and all), which is both unreadable and the
-        // reason threads were slow to load.
-        await storage.updateMessage(existingMsg.id, {
-          bodyHtml: sanitizeMessageHtml((msg as any).bodyHtml || msg.body, { maxLength: 20_000 }) || null,
-          body: extractBuyerMessage(htmlToPlainText(msg.body), {
-            buyerUsername: counterparty,
-            itemTitle: msg.itemTitle,
-            sellerUsername: process.env.EBAY_SELLER_USERNAME,
-          }).text.slice(0, 8_000),
-        } as any);
-      }
-    }
-    if (hasMore) pageNum++;
+    await storage.createMessage({
+      threadId: thread.id,
+      direction: outbound ? "outbound" : "inbound",
+      subject: htmlToPlainText(msg.subject).slice(0, 300),
+      body: text.slice(0, 8_000),
+      bodyHtml: sanitizeMessageHtml(msg.bodyHtml || msg.body, { maxLength: 20_000 }) || null,
+      sentAt: msg.creationDate ? new Date(msg.creationDate) : new Date(),
+      marketplaceMessageId: msg.messageId,
+      senderUsername: msg.sender || counterparty,
+      senderEmail: msg.senderEmail,
+      status: outbound ? "sent" : "delivered",
+    } as any);
+    newMessages++;
+  };
+
+  // 1) THE conversations. GetMemberMessages returns member-to-member messages —
+  //    the buyer's actual words plus our replies — instead of the notification
+  //    EMAIL that GetMyMessages returns. Parsing eBay's email template was
+  //    never going to yield a clean thread; this is the right source.
+  try {
+    const r = await ebayMessagesApi.getMemberMessages(undefined, "All", "All", startTime, 100);
+    if (!r.success) errors.push(r.error || "GetMemberMessages failed");
+    for (const msg of r.messages) await store(msg, "conversation");
+  } catch (e) {
+    errors.push(`member messages: ${(e as Error).message}`);
   }
+
+  // 2) eBay's own emails — policy notices, statements, marketing. Kept, but
+  //    marked as notifications so they do not sit among customer conversations.
+  try {
+    let page = 1, hasMore = true;
+    while (hasMore && page <= 5) {
+      const r = await ebayMessagesApi.getMyMessages(startTime, undefined, "Inbox", 100, page);
+      if (!r.success) { errors.push(r.error || "GetMyMessages failed"); break; }
+      hasMore = !!r.hasMoreMessages;
+      for (const msg of r.messages) {
+        // A notification whose sender is a member is a duplicate of a message
+        // we already have from the proper source.
+        const fromEbay = /^ebay/i.test(msg.sender || "") || !msg.sender;
+        if (!fromEbay) continue;
+        await store(msg, "notification");
+      }
+      page++;
+    }
+  } catch (e) {
+    errors.push(`notifications: ${(e as Error).message}`);
   }
 
   return { synced, updated, newMessages, threadsTouched: touched.size, errors };
@@ -137,9 +137,17 @@ export function registerMessageRoutes(app: Express): void {
       const threads = await storage.getMessageThreads(filters);
       const unreadCount = await storage.getUnreadThreadCount();
 
+      // Split the inbox: customer conversations are the work, eBay's own
+      // emails are reference. Mixed together, four real questions hid among
+      // statements, policy notices and discount offers.
+      const kindOf = (t: any) =>
+        t.kind ?? (/^ebay/i.test(t.buyerUsername ?? "") ? "notification" : "conversation");
+
       res.json({
         success: true,
         threads,
+        conversations: threads.filter((t: any) => kindOf(t) === "conversation"),
+        notifications: threads.filter((t: any) => kindOf(t) === "notification"),
         unreadCount
       });
     } catch (error) {
