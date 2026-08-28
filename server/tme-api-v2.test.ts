@@ -113,17 +113,44 @@ describe("isListable — product statuses we previously ignored", () => {
     expect(isListable(["NEW", "PROMOTED", "AVAILABLE_WHILE_STOCKS_LAST"]).ok).toBe(true);
   });
   it("allows but flags products needing shipping or lead-time care", () => {
-    const r = isListable(["DANGEROUS", "EXTERNAL_WAREHOUSE"]);
+    const r = isListable(["OVERSIZED", "EXTERNAL_WAREHOUSE"]);
     expect(r.ok).toBe(true);
-    expect(r.cautions).toEqual(["DANGEROUS", "EXTERNAL_WAREHOUSE"]);
+    expect(r.cautions).toEqual(["OVERSIZED", "EXTERNAL_WAREHOUSE"]);
   });
   it("reports every blocking reason, not just the first", () => {
-    const r = isListable(["NOT_IN_OFFER", "DANGEROUS", "PRODUCT_BLOCKED"]);
+    const r = isListable(["NOT_IN_OFFER", "OVERSIZED", "PRODUCT_BLOCKED"]);
     expect(r.ok).toBe(false);
     expect(r.blockedBy).toEqual(["NOT_IN_OFFER", "PRODUCT_BLOCKED"]);
-    expect(r.cautions).toEqual(["DANGEROUS"]);
+    expect(r.cautions).toEqual(["OVERSIZED"]);
   });
   it("tolerates a missing status list", () => {
     expect(isListable(undefined).ok).toBe(true);
+  });
+});
+
+
+describe("DANGEROUS blocks listing, because we cannot post it", () => {
+  it("refuses a hazardous product outright", () => {
+    // Liquids, aerosols and flammables: Latvijas Pasts will not carry them and
+    // eBay restricts them. A product we cannot legally put in the box is not a
+    // caution, and treating it as one meant the ramp listed them.
+    const r = isListable(["DANGEROUS"]);
+    expect(r.ok).toBe(false);
+    expect(r.blockedBy).toEqual(["DANGEROUS"]);
+  });
+
+  it("can be opted out of, for an operator with a courier that carries them", () => {
+    process.env.TME_ALLOW_DANGEROUS = "true";
+    try {
+      const r = isListable(["DANGEROUS"]);
+      expect(r.ok).toBe(true);
+      expect(r.cautions).toEqual(["DANGEROUS"]);
+    } finally {
+      delete process.env.TME_ALLOW_DANGEROUS;
+    }
+  });
+
+  it("leaves genuinely harmless cautions listable", () => {
+    expect(isListable(["OVERSIZED", "HARDLY_AVAILABLE"]).ok).toBe(true);
   });
 });

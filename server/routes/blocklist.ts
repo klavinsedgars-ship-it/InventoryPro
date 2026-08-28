@@ -72,7 +72,9 @@ export function registerBlocklistRoutes(app: Express) {
       if (term.length < 3) {
         return res.status(400).json({ success: false, error: "Search term must be at least 3 characters" });
       }
-      const rows = await storage.findProductsMatching(term);
+      const rows = term.toUpperCase() === "DANGEROUS"
+        ? await storage.findDangerousProducts()
+        : await storage.findProductsMatching(term);
       res.json({
         success: true,
         term,
@@ -80,6 +82,7 @@ export function registerBlocklistRoutes(app: Express) {
         listed: rows.filter((r: any) => r.listed_on_ebay).length,
         products: rows.slice(0, 200).map((r: any) => ({
           sku: r.sku, name: r.name, listed: !!r.listed_on_ebay, stock: r.stock,
+          tmeStatus: r.tme_product_status ?? null,
         })),
         codes: rows.map((r: any) => r.sku).join("\n"),
       });

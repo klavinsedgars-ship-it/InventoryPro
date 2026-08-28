@@ -80,10 +80,24 @@ export const BLOCKING_PRODUCT_STATUSES = new Set([
   "INVALID",
 ]);
 
+/**
+ * DANGEROUS means TME cannot send it by air: liquids, aerosols, solvents,
+ * flammables, batteries. We post everything through Latvijas Pasts, which
+ * refuses dangerous goods in letter post and parcels, and eBay restricts
+ * hazardous listings on top of that. So a product we cannot legally put in the
+ * box is not a "caution" — it is unsellable, and treating it as a warning
+ * meant the ramp published them anyway.
+ *
+ * TME_ALLOW_DANGEROUS=true restores the old behaviour for an operator with a
+ * courier that will carry them.
+ */
+export function dangerousBlocksListing(): boolean {
+  return typeof process === "undefined" || process.env?.TME_ALLOW_DANGEROUS !== "true";
+}
+
 /** Statuses that don't block listing but must change how we ship or price. */
 export const CAUTION_PRODUCT_STATUSES = new Set([
-  "DANGEROUS",        // cannot go by air — shipping policy must account for it
-  "OVERSIZED",        // large package — likewise
+  "OVERSIZED",        // large package — shipping policy must account for it
   "EXTERNAL_WAREHOUSE", // longer lead time -> handling time
   "HARDLY_AVAILABLE",
   "MOQ_VALID_WHILE_STOCKS_LAST", // MOQ may change once sold out
@@ -91,8 +105,10 @@ export const CAUTION_PRODUCT_STATUSES = new Set([
 
 export function isListable(statuses: string[] | undefined | null): { ok: boolean; blockedBy: string[]; cautions: string[] } {
   const list = statuses ?? [];
-  const blockedBy = list.filter((s) => BLOCKING_PRODUCT_STATUSES.has(s));
-  const cautions = list.filter((s) => CAUTION_PRODUCT_STATUSES.has(s));
+  const blocking = new Set(BLOCKING_PRODUCT_STATUSES);
+  if (dangerousBlocksListing()) blocking.add("DANGEROUS");
+  const blockedBy = list.filter((s) => blocking.has(s));
+  const cautions = list.filter((s) => CAUTION_PRODUCT_STATUSES.has(s) || (s === "DANGEROUS" && !dangerousBlocksListing()));
   return { ok: blockedBy.length === 0, blockedBy, cautions };
 }
 

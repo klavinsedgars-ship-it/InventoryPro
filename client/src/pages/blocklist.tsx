@@ -255,14 +255,35 @@ function FindSimilar({ onUse }: { onUse: (codes: string) => void }) {
       <CardHeader>
         <CardTitle className="text-base">Find everything like it</CardTitle>
         <p className="text-sm text-gray-500">
-          A removal is usually about a category, not one item. Search the catalogue for the
-          same kind of product, then review the codes before blocking them.
+          A removal is usually about a category, not one item. Search several terms at once
+          (comma separated), or use <strong>DANGEROUS</strong> to find everything TME itself
+          flags as hazardous — liquids, aerosols and flammables, which Latvijas Pasts will not
+          carry. Review the codes before blocking.
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
+        <div className="flex flex-wrap gap-1 mb-2">
+          {[
+            ["DANGEROUS", "TME hazardous flag"],
+            ["needle, syringe, cannula", "Needles"],
+            ["liquid, fluid, aerosol, spray, solvent, alcohol, isopropanol, acetone, flux, adhesive, glue, paint, lacquer, oil, cleaner, etchant, acid, resin", "Liquids & chemicals"],
+            ["battery, akumulator, li-ion, lipo", "Batteries"],
+          ].map(([q, label]) => (
+            <Button
+              key={label}
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs border"
+              onClick={() => setTerm(q)}
+              data-testid={`preset-${label}`}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
         <div className="flex gap-2">
           <Input
-            placeholder="e.g. needle"
+            placeholder="e.g. needle — or several: liquid, aerosol, solvent"
             value={term}
             onChange={(e) => setTerm(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && term.trim().length >= 3 && search()}
@@ -288,6 +309,7 @@ function FindSimilar({ onUse }: { onUse: (codes: string) => void }) {
                     <div key={p.sku} className="flex justify-between gap-2">
                       <span>{p.sku}</span>
                       <span className="text-gray-500 truncate flex-1">{p.name}</span>
+                      {p.tmeStatus?.includes("DANGEROUS") && <span className="text-amber-600">hazmat</span>}
                       {p.listed && <span className="text-red-600">listed</span>}
                     </div>
                   ))}

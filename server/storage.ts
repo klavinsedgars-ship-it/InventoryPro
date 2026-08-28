@@ -878,11 +878,36 @@ export class DatabaseStorage implements IStorage {
    * term ("SEN") would take out half the catalogue.
    */
   async findProductsMatching(term: string, limit = 500): Promise<any[]> {
-    const q = `%${term.trim()}%`;
+    // Several terms at once: a restricted class is rarely one word ("liquid,
+    // aerosol, solvent"), and searching them one at a time invites missing one.
+    const terms = term.split(/[,;\n]+/).map((t) => t.trim()).filter((t) => t.length >= 3);
+    if (terms.length === 0) return [];
+    const conds = terms.map((t) => {
+      const q = `%${t}%`;
+      return sql`(name ILIKE ${q} OR sku ILIKE ${q} OR description ILIKE ${q})`;
+    });
     const rows: any = await db.execute(sql`
-      SELECT id, sku, name, listed_on_ebay, stock, status
+      SELECT id, sku, name, listed_on_ebay, stock, status, tme_product_status
       FROM products
-      WHERE (name ILIKE ${q} OR sku ILIKE ${q})
+      WHERE (${sql.join(conds, sql` OR `)})
+        AND NOT EXISTS (SELECT 1 FROM blocked_products b WHERE b.code = upper(products.sku))
+      ORDER BY listed_on_ebay DESC, name
+      LIMIT ${limit}
+    `);
+    return (rows.rows ?? rows ?? []) as any[];
+  }
+
+  /**
+   * Products TME flags as DANGEROUS — the supplier's own hazardous-goods
+   * declaration. More reliable than guessing from a title: it catches liquids,
+   * aerosols and flammables whatever they are called, and it is the set
+   * Latvijas Pasts will not carry.
+   */
+  async findDangerousProducts(limit = 1000): Promise<any[]> {
+    const rows: any = await db.execute(sql`
+      SELECT id, sku, name, listed_on_ebay, stock, status, tme_product_status
+      FROM products
+      WHERE tme_product_status ILIKE '%DANGEROUS%'
         AND NOT EXISTS (SELECT 1 FROM blocked_products b WHERE b.code = upper(products.sku))
       ORDER BY listed_on_ebay DESC, name
       LIMIT ${limit}
@@ -1104,7 +1129,7 @@ export class DatabaseStorage implements IStorage {
       // produce an order we cannot fulfil. NULL = never checked (pre-v2 rows).
       sql`(
         ${products.tmeProductStatus} IS NULL
-        OR ${products.tmeProductStatus} !~ 'CANNOT_BE_ORDERED|NOT_IN_OFFER|PRODUCT_BLOCKED|ONLY_FOR_SPECIAL_ORDER|INVALID'
+        OR ${products.tmeProductStatus} !~ 'CANNOT_BE_ORDERED|NOT_IN_OFFER|PRODUCT_BLOCKED|ONLY_FOR_SPECIAL_ORDER|INVALID|DANGEROUS'
       )`,
     ];
     if (opts?.minPrice != null) conds.push(gte(products.salePrice, String(opts.minPrice)));
