@@ -344,8 +344,36 @@ export function registerEbayListingRoutes(app: Express) {
     const sku = String(q.sku ?? "").trim();
     const limit = Math.min(100, Math.max(1, parseInt(String(q.limit ?? "25"), 10) || 25));
     const confirm = q.confirm === "1" || q.confirm === true;
+    const sweep = String(q.sweep ?? "").trim();
+
+    // Catalogue-wide sweep controls: ?sweep=start|stop|status (&run=1 with
+    // start to execute the first slice inline instead of waiting for the
+    // cron). The sweep itself runs as /api/cron/recategorize slices.
+    if (sweep) {
+      try {
+        const { isSweepEnabled, setSweepEnabled, sweepProgress, runRecategorizeSweep } = await import("../recategorize-sweep");
+        if (sweep === "start") await setSweepEnabled(true);
+        if (sweep === "stop") await setSweepEnabled(false);
+        let slice = null;
+        if (sweep === "start" && (q.run === "1" || q.run === true)) {
+          const leased = await withLease(leaseStore, "recategorize", { ttlSeconds: 300 }, () => runRecategorizeSweep(240_000));
+          slice = leased.ran ? leased.result : { refused: describeRefusal("recategorize", leased) };
+        }
+        return res.json({
+          ok: true,
+          sweep,
+          enabled: await isSweepEnabled(),
+          progress: await sweepProgress(),
+          ...(slice ? { slice } : {}),
+          note: "the /api/cron/recategorize tick (every 10 min) works the sweep while enabled; it disables itself when done",
+        });
+      } catch (error) {
+        return res.status(500).json({ ok: false, error: (error as Error).message });
+      }
+    }
+
     if (!category && !sku) {
-      return res.status(400).json({ ok: false, error: "pass ?category=<TME category> or ?sku=<SKU>" });
+      return res.status(400).json({ ok: false, error: "pass ?category=<TME category> or ?sku=<SKU>, or ?sweep=start|stop|status" });
     }
     try {
       const { db } = await import("../db");
@@ -437,6 +465,41 @@ export function registerEbayListingRoutes(app: Express) {
   };
   app.get("/api/ebay/recategorize", requireAuth, recategorizeHandler);
   app.post("/api/ebay/recategorize", requireAuth, recategorizeHandler);
+
+  /**
+   * Cron slice for the catalogue-wide recategorize sweep. No-ops unless the
+   * operator enabled the sweep (?sweep=start above); disables itself and
+   * writes a sync_log entry when every listed product has converged. Same
+   * no-auth posture as the other /api/cron/* handlers (Vercel cron calls
+   * carry no session).
+   */
+  const recategorizeCronHandler = async (_req: any, res: any) => {
+    try {
+      const { isSweepEnabled, setSweepEnabled, runRecategorizeSweep } = await import("../recategorize-sweep");
+      if (!(await isSweepEnabled())) {
+        return res.json({ ok: true, skipped: true, reason: "sweep not enabled" });
+      }
+      const leased = await withLease(leaseStore, "recategorize", { ttlSeconds: 300 }, () => runRecategorizeSweep(250_000));
+      if (!leased.ran) {
+        return res.json({ ok: true, skipped: true, reason: describeRefusal("recategorize", leased) });
+      }
+      const r = leased.result;
+      if (r.done) {
+        await setSweepEnabled(false);
+        await storage.createSyncLog({
+          source: "recategorize",
+          operation: "sweep_complete",
+          status: "success",
+          message: `recategorize sweep complete — moved this run: ${r.moved}, parked failures overall: ${r.parkedFailures}`,
+        });
+      }
+      res.json({ ok: true, ...r });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  };
+  app.get("/api/cron/recategorize", recategorizeCronHandler);
+  app.post("/api/cron/recategorize", recategorizeCronHandler);
 
   app.post("/api/ebay/reset-list-attempts", requireAuth, resetListAttemptsHandler);
   app.get("/api/ebay/reset-list-attempts", requireAuth, resetListAttemptsHandler);

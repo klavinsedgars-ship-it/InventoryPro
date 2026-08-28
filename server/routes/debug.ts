@@ -710,6 +710,22 @@ export function registerDebugRoutes(app: Express) {
         } catch { /* skip malformed rows */ }
       }
 
+      // ?resolve=1: actively resolve every category with live listings
+      // through the guarded path (one cached Taxonomy call each) so
+      // guardedCategory fills in and old-vs-new becomes definitive. ~1 call
+      // per category on the first run, cached 30 days after.
+      const doResolve = _req.query?.resolve === "1";
+      if (doResolve) {
+        const { ebayApi } = await import("../ebay-api");
+        for (const p of prodQ.rows ?? prodQ) {
+          if (!p.listed) continue;
+          const key = categoryQueryFor({ category: p.category, name: "" }).trim().toLowerCase();
+          if (v2.has(key)) continue;
+          const resolved = await ebayApi.getSuggestedCategory(key).catch(() => null);
+          v2.set(key, resolved ?? { id: "", name: "", path: "" });
+        }
+      }
+
       let flaggedListed = 0;
       const rows = (prodQ.rows ?? prodQ).map((p: any) => {
         const key = categoryQueryFor({ category: p.category, name: "" }).trim().toLowerCase();
@@ -724,7 +740,10 @@ export function registerDebugRoutes(app: Express) {
           products: p.products,
           listed: p.listed,
           usedCategory: old, // what live listings were filed under (v1)
-          guardedCategory: now, // what the guard resolves now (v2; null = not yet looked up)
+          guardedCategory: now, // what the guard resolves now (v2; null = not yet looked up, id "" = fallback)
+          // The definitive signal once both sides are known: the live
+          // listings sit somewhere the guarded resolver would not put them.
+          changed: !!old?.id && now != null && old.id !== (now.id || null),
           flagged,
         };
       });

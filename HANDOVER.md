@@ -111,9 +111,28 @@ category re-resolves through the guard; v1 rows remain as evidence.
                                &limit=25..100 per slice; repeat until remaining is 0
 ```
 
-Workflow: run __category-map, work the flagged rows by listed count desc with
-recategorize (slices, like reconcile). The ramp was stopped by the operator
-during the incident — new listings resolve through the guard once re-enabled.
+The live damage report showed the blocklist alone was not enough (screws under
+fishing bait via "Angelsport", crocodile clips under model airplanes, LEGO):
+when a suggestion carries its ancestor chain, the ROOT must also be in a small
+allowlist (`isPlausibleRoot`) — Business & Industrie, Heimwerker, Computer,
+TV/Video, Handys, Foto, Auto & Motorrad, Möbel & Wohnen, Bürobedarf.
+
+Remediation is a catalogue-wide SWEEP (`server/recategorize-sweep.ts`): every
+live listing is re-filed in place through the guarded resolver (offer PUT —
+item numbers survive, no unlist/relist), provably-miscategorised categories
+first. House pattern: `/api/cron/recategorize` every 10 min, DB kill-switch
+`recategorize_sweep`, lease, convergence in products.ebay_category_id,
+failures parked under an `ebay_listing_error` marker so they never loop.
+
+```
+/api/__category-map?resolve=1          fills guardedCategory (1 cached Taxonomy call/category), adds `changed`
+/api/ebay/recategorize?sweep=start     enable sweep (&run=1 = first slice inline); stop | status
+```
+
+Sweep disables itself and writes a sync_log entry when done (~40.7k listings,
+roughly half a day of 10-minute slices). The ramp was stopped by the operator
+during the incident — re-enable after the sweep; new listings resolve through
+the guard and record ebay_category_id at publish.
 
 ## Getic (second distributor, staging only)
 

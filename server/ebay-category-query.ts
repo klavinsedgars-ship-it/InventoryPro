@@ -180,6 +180,37 @@ export function isImplausibleCategoryPath(pathOrName: string): boolean {
   return IMPLAUSIBLE_DOMAIN_RX.test(pathOrName ?? "");
 }
 
+/**
+ * Root allowlist — the stronger check, used when the suggestion carries its
+ * ancestor chain. The live damage report showed the name blocklist alone is
+ * not enough: German single-word composites sail past word boundaries
+ * ("Angelsport" carried screws into fishing bait, "Modellbau" put crocodile
+ * clips under model airplanes, LEGO got the screwdriver sets). A components-
+ * and-industrial-hardware catalogue can only live under a handful of eBay.de
+ * roots, so when we KNOW the root, anything else is rejected. Modellbau is
+ * deliberately absent: TME's RC-adjacent parts are better served by the
+ * electronics catch-all than by risking the whole toy/model subtree.
+ */
+const PLAUSIBLE_ROOT_RX = new RegExp(
+  [
+    "^business & industrie",
+    "^heimwerker",
+    "^computer", // Computer, Tablets & Netzwerk
+    "^tv, video", // TV, Video & Audio
+    "^handys?", // Handys & Kommunikation
+    "^foto", // Foto & Camcorder
+    "^auto & motorrad", // car audio/antenna adapters are a real TME line
+    "^möbel & wohnen", // Möbelbeschläge, Beleuchtung
+    "^bürobedarf", // office & writing accessories
+  ].join("|"),
+  "i",
+);
+
+/** Only meaningful when the root is actually known — never call with a leaf. */
+export function isPlausibleRoot(rootName: string): boolean {
+  return PLAUSIBLE_ROOT_RX.test((rootName ?? "").trim());
+}
+
 export interface TaxonomySuggestion {
   category?: { categoryId?: string; categoryName?: string };
   categoryTreeNodeAncestors?: Array<{ categoryName?: string }>;
@@ -204,6 +235,8 @@ export function pickPlausibleSuggestion(
     // Ancestors arrive leaf-side first; reverse for a root-first display path.
     const path = [...ancestors].reverse().concat(name).join(" > ");
     if (isImplausibleCategoryPath(path || name)) continue;
+    // Root check only when the root is known (last ancestor = tree root).
+    if (ancestors.length > 0 && !isPlausibleRoot(ancestors[ancestors.length - 1])) continue;
     return { id: String(id), name, path };
   }
   return null;
