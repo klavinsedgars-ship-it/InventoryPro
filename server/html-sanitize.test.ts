@@ -86,3 +86,40 @@ describe("htmlToPlainText", () => {
     expect(htmlToPlainText("<p>a&nbsp;b</p>")).toBe("a b");
   });
 });
+
+describe("the real eBay message that rendered as raw source", () => {
+  // eBay delivers the body entity-encoded inside XML. Sanitizing before
+  // decoding meant no strip rule matched, and the whole document — DOCTYPE,
+  // head, and the CSS inside <style> — was printed into the thread as text.
+  const ENCODED_EBAY_BODY =
+    "&lt;!DOCTYPE html&gt;&lt;html&gt;&lt;head&gt;" +
+    '&lt;meta http-equiv="Content-Type" content="text/html; charset=utf-8"&gt;' +
+    '&lt;style id="DS3Style" type="text/css"&gt;@media only screen and (max-width: 620px) { body[yahoo] .device-width { width: 450px !important } }&lt;/style&gt;' +
+    "&lt;/head&gt;&lt;body&gt;&lt;p&gt;Hello, is this switch 12V?&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;";
+
+  it("shows the message, not the document", () => {
+    const out = sanitizeMessageHtml(ENCODED_EBAY_BODY);
+    expect(out).toContain("Hello, is this switch 12V?");
+    expect(out).not.toMatch(/DOCTYPE/i);
+    expect(out).not.toMatch(/@media/);
+    expect(out).not.toMatch(/device-width/);
+    expect(out).not.toMatch(/<style|<head|<meta/i);
+  });
+
+  it("still refuses a script that arrives entity-encoded", () => {
+    // Decoding first is only safe because sanitizing happens after it.
+    const out = sanitizeMessageHtml("&lt;script&gt;alert(1)&lt;/script&gt;&lt;p&gt;hi&lt;/p&gt;");
+    expect(out).not.toMatch(/script|alert/i);
+    expect(out).toContain("hi");
+  });
+
+  it("handles a double-encoded body", () => {
+    const out = sanitizeMessageHtml("&amp;lt;p&amp;gt;Twice encoded&amp;lt;/p&amp;gt;");
+    expect(out).toContain("Twice encoded");
+  });
+
+  it("caps a runaway body rather than storing a whole marketing email", () => {
+    const huge = "<p>" + "x".repeat(200_000) + "</p>";
+    expect(sanitizeMessageHtml(huge).length).toBeLessThanOrEqual(60_000);
+  });
+});

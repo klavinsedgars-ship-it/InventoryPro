@@ -1033,6 +1033,15 @@ export class DatabaseStorage implements IStorage {
     // connect-pg-simple's own pruning is disabled (its timer cannot be relied
     // on in a serverless process), so expired sessions accumulate for ever.
     await run("user_sessions", sql`DELETE FROM user_sessions WHERE expire < now()`);
+    // Message bodies: eBay marketing emails were stored whole, so a thread of
+    // ten of them was megabytes to load. Trim the stored copy rather than
+    // deleting the message — the text that matters is at the top.
+    await run("message_bodies_trimmed", sql`
+      UPDATE messages
+      SET body = left(body, 8000),
+          body_html = CASE WHEN body_html IS NULL THEN NULL ELSE left(body_html, 20000) END
+      WHERE length(body) > 8000 OR length(coalesce(body_html, '')) > 20000
+    `);
     return out;
   }
 

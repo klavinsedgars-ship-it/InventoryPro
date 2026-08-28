@@ -67,10 +67,13 @@ async function syncEbayMessages(daysBack: number): Promise<{
           threadId: thread.id,
           direction: 'inbound',
           subject: htmlToPlainText(msg.subject),
-          body: htmlToPlainText(msg.body),
+          // Capped on the way in. A buyer's question is a few hundred bytes;
+          // eBay's marketing emails are whole HTML documents, and a thread of
+          // ten of them is megabytes to fetch every time it is opened.
+          body: htmlToPlainText(msg.body).slice(0, 8_000),
           // Sanitised at write time: nothing unsafe is ever stored, so the
           // client never has to trust what it renders.
-          bodyHtml: sanitizeMessageHtml((msg as any).bodyHtml || msg.body) || null,
+          bodyHtml: sanitizeMessageHtml((msg as any).bodyHtml || msg.body, { maxLength: 20_000 }) || null,
           sentAt: msg.creationDate ? new Date(msg.creationDate) : new Date(),
           marketplaceMessageId: msg.messageId,
           senderUsername: msg.sender,
@@ -78,10 +81,13 @@ async function syncEbayMessages(daysBack: number): Promise<{
           status: 'delivered',
         });
         newMessages++;
-      } else if (!existingMsg.bodyHtml) {
-        // Back-fill formatting for messages stored before HTML was kept.
+      } else if (!existingMsg.bodyHtml || existingMsg.bodyHtml.includes("@media") || (existingMsg.body?.length ?? 0) > 8_000) {
+        // Back-fill or REPAIR: rows written before the decode-order fix hold
+        // the whole document (CSS and all), which is both unreadable and the
+        // reason threads were slow to load.
         await storage.updateMessage(existingMsg.id, {
-          bodyHtml: sanitizeMessageHtml((msg as any).bodyHtml || msg.body) || null,
+          bodyHtml: sanitizeMessageHtml((msg as any).bodyHtml || msg.body, { maxLength: 20_000 }) || null,
+          body: htmlToPlainText(msg.body).slice(0, 8_000),
         } as any);
       }
     }
