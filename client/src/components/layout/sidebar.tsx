@@ -8,6 +8,7 @@ import {
   Box,
   BarChart3,
   LineChart,
+  Ban,
   Cog,
   Search,
   ClipboardList,
@@ -33,6 +34,7 @@ const navigation = [
   { name: 'Sales Performance', href: '/sales-performance', icon: LineChart },
   { name: 'Market Research', href: '/market-research', icon: TrendingUp },
   { name: 'Repricing', href: '/repricing', icon: Scale },
+  { name: 'Blocked Products', href: '/blocklist', icon: Ban },
   { name: 'Configuration', href: '/configuration', icon: Cog },
   { name: 'Reports', href: '/reports', icon: BarChart3 },
 ];

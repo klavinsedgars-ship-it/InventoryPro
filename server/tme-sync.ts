@@ -85,7 +85,18 @@ export async function processTmeSyncChunk(
   // with the DB tiers.
   setActivePricingTiers(dbTiersToPricingTiers(await storage.getPricingTiers()));
 
+  // Blocked codes never enter the catalogue. Checked HERE, at the point of
+  // creation, because a block applied only to existing rows would be undone by
+  // the next import that returned the same symbol.
+  const blocked = await storage.filterBlockedCodes(
+    enhancedProducts.map((e: any) => e.product?.Symbol).filter(Boolean),
+  );
+  if (blocked.size > 0) {
+    result.errors.push(`${blocked.size} blocked product(s) skipped`);
+  }
+
   for (const enhanced of enhancedProducts) {
+    if (blocked.has(String(enhanced.product?.Symbol ?? "").toUpperCase())) continue;
     try {
       const { product, price, stock } = enhanced;
 

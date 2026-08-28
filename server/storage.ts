@@ -81,6 +81,7 @@ import {
   demandSnapshots,
   type DemandSnapshot,
   type InsertDemandSnapshot,
+  blockedProducts,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, ne, and, gte, lte, lt, desc, asc, count, or, ilike, isNull, isNotNull, sql, inArray, notInArray } from "drizzle-orm";
@@ -506,6 +507,18 @@ export class DatabaseStorage implements IStorage {
       `CREATE INDEX IF NOT EXISTS messages_thread_idx ON messages (thread_id)`,
       `CREATE INDEX IF NOT EXISTS message_threads_buyer_idx ON message_threads (marketplace, buyer_username)`,
       `CREATE INDEX IF NOT EXISTS sync_logs_synced_at_idx ON sync_logs (synced_at)`,
+      // Products we must never sell again (eBay policy removal, supplier
+      // problem). Separate table so a catalogue re-import cannot resurrect
+      // them: the block outlives the product row.
+      `CREATE TABLE IF NOT EXISTS blocked_products (
+         id serial PRIMARY KEY,
+         code text NOT NULL UNIQUE,
+         reason text,
+         notes text,
+         blocked_by text,
+         created_at timestamptz NOT NULL DEFAULT now()
+       )`,
+      `CREATE INDEX IF NOT EXISTS blocked_products_code_idx ON blocked_products (code)`,
       // Run-once-at-a-time leases for background jobs (see job-lease.ts). The
       // primary key is what makes the acquire atomic: ON CONFLICT is evaluated
       // against it, so two callers racing cannot both win.
@@ -580,6 +593,9 @@ export class DatabaseStorage implements IStorage {
       .where(
         and(
           eq(products.supplier, "TME"),
+          // Never re-sync something we have blocked: it would refresh its
+          // stock and quietly make it a listing candidate again.
+          sql`NOT EXISTS (SELECT 1 FROM blocked_products b WHERE b.code = upper(${products.sku}))`,
           or(
             isNull(products.lastSyncedAt),
             and(eq(products.listedOnEbay, true), lt(products.lastSyncedAt, listedBefore)),
@@ -604,6 +620,9 @@ export class DatabaseStorage implements IStorage {
       .where(
         and(
           eq(products.supplier, "TME"),
+          // Never re-sync something we have blocked: it would refresh its
+          // stock and quietly make it a listing candidate again.
+          sql`NOT EXISTS (SELECT 1 FROM blocked_products b WHERE b.code = upper(${products.sku}))`,
           or(
             isNull(products.lastSyncedAt),
             and(eq(products.listedOnEbay, true), lt(products.lastSyncedAt, listedBefore)),
@@ -762,6 +781,118 @@ export class DatabaseStorage implements IStorage {
       revenue: Number(r.revenue) || 0,
       cost: Number(r.cost) || 0,
     };
+  }
+
+  // ===== Blocked products =====
+
+  async listBlockedProducts(): Promise<any[]> {
+    await this.ensureBlockedTable();
+    const q: any = await db.execute(sql`
+      SELECT b.code, b.reason, b.notes, b.blocked_by, b.created_at,
+             p.id AS product_id, p.name, p.listed_on_ebay, p.ebay_offer_id
+      FROM blocked_products b
+      LEFT JOIN products p ON upper(p.sku) = b.code
+      ORDER BY b.created_at DESC
+      LIMIT 2000
+    `);
+    return (q.rows ?? q ?? []) as any[];
+  }
+
+  /** Which of these codes are blocked? Upper-cased comparison. */
+  async filterBlockedCodes(codes: string[]): Promise<Set<string>> {
+    const out = new Set<string>();
+    if (codes.length === 0) return out;
+    await this.ensureBlockedTable();
+    const upper = codes.map((c) => c.toUpperCase());
+    const rows = await db
+      .select({ code: blockedProducts.code })
+      .from(blockedProducts)
+      .where(inArray(blockedProducts.code, upper));
+    for (const r of rows) out.add(r.code);
+    return out;
+  }
+
+  /**
+   * Block codes and neutralise any products already carrying them.
+   *
+   * Blocking is not just a list entry: the product must stop being sellable
+   * immediately. Stock is zeroed so nothing can be ordered against it and no
+   * candidate query picks it up, and it is excluded from listing. Ending the
+   * live eBay listing is the caller's job — that needs a marketplace call.
+   */
+  async addBlockedProducts(
+    codes: string[],
+    meta: { reason?: string; notes?: string; blockedBy?: string } = {},
+  ): Promise<{ added: number; alreadyBlocked: number; productsAffected: number; listedProducts: Array<{ id: number; sku: string; ebayOfferId: string | null }> }> {
+    await this.ensureBlockedTable();
+    if (codes.length === 0) return { added: 0, alreadyBlocked: 0, productsAffected: 0, listedProducts: [] };
+    const upper = Array.from(new Set(codes.map((c) => c.toUpperCase())));
+
+    const before = await this.filterBlockedCodes(upper);
+    for (const code of upper) {
+      await db.execute(sql`
+        INSERT INTO blocked_products (code, reason, notes, blocked_by)
+        VALUES (${code}, ${meta.reason ?? null}, ${meta.notes ?? null}, ${meta.blockedBy ?? null})
+        ON CONFLICT (code) DO NOTHING
+      `);
+    }
+
+    // Which live products does this hit, and which are on eBay right now?
+    const matched: any = await db.execute(sql`
+      SELECT id, sku, ebay_offer_id, listed_on_ebay FROM products
+      WHERE upper(sku) IN (${sql.join(upper.map((c) => sql`${c}`), sql`, `)})
+    `);
+    const rows = (matched.rows ?? matched ?? []) as any[];
+
+    if (rows.length > 0) {
+      await db.execute(sql`
+        UPDATE products
+        SET exclude_from_listing = true,
+            status = 'blocked',
+            stock = 0,
+            ebay_listing_error = 'blocked by operator'
+        WHERE upper(sku) IN (${sql.join(upper.map((c) => sql`${c}`), sql`, `)})
+      `);
+    }
+
+    return {
+      added: upper.filter((c) => !before.has(c)).length,
+      alreadyBlocked: before.size,
+      productsAffected: rows.length,
+      listedProducts: rows
+        .filter((r) => r.listed_on_ebay)
+        .map((r) => ({ id: r.id, sku: r.sku, ebayOfferId: r.ebay_offer_id ?? null })),
+    };
+  }
+
+  /** Unblock. The product stays inactive until a sync restores its stock. */
+  async removeBlockedProduct(code: string): Promise<boolean> {
+    await this.ensureBlockedTable();
+    const r: any = await db.execute(sql`DELETE FROM blocked_products WHERE code = ${code.toUpperCase()}`);
+    await db.execute(sql`
+      UPDATE products
+      SET exclude_from_listing = false,
+          status = 'inactive',
+          ebay_listing_error = NULL
+      WHERE upper(sku) = ${code.toUpperCase()} AND status = 'blocked'
+    `);
+    return (r.rowCount ?? 0) > 0;
+  }
+
+  private blockedTableReady = false;
+  private async ensureBlockedTable(): Promise<void> {
+    if (this.blockedTableReady) return;
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS blocked_products (
+        id serial PRIMARY KEY,
+        code text NOT NULL UNIQUE,
+        reason text,
+        notes text,
+        blocked_by text,
+        created_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    this.blockedTableReady = true;
   }
 
   async getTmeProductCount(): Promise<number> {
@@ -931,6 +1062,9 @@ export class DatabaseStorage implements IStorage {
       // and starving fresh candidates. Operator can reset via the
       // /api/ebay/reset-list-attempts endpoint to retry.
       lt(products.ebayListAttempts, maxAttempts),
+      // A blocked product must never reach eBay again, whatever else its row
+      // says — this is the guarantee the blocklist exists to provide.
+      sql`NOT EXISTS (SELECT 1 FROM blocked_products b WHERE b.code = upper(${products.sku}))`,
       // eBay rejects an inventory item with no image ("imageUrls darf nicht
       // Null oder leer sein"), so a product without one can never list. Excluded
       // here rather than attempted: the check is free and local, whereas letting
@@ -1135,7 +1269,9 @@ export class DatabaseStorage implements IStorage {
     limit: number;
     offset: number;
   }): Promise<{ rows: Product[]; total: number }> {
-    const conds: any[] = [sql`TRUE`];
+    // Blocked products disappear from the catalogue view entirely: the point
+    // of a block is that nobody has to think about the item again.
+    const conds: any[] = [sql`NOT EXISTS (SELECT 1 FROM blocked_products b WHERE b.code = upper(products.sku))`];
     if (f.search) {
       const q = `%${f.search}%`;
       conds.push(sql`(name ILIKE ${q} OR sku ILIKE ${q} OR ean ILIKE ${q})`);

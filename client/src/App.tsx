@@ -22,6 +22,7 @@ import { Repricing } from "@/pages/repricing";
 import { Opportunities } from "@/pages/opportunities";
 import { MarketResearch } from "@/pages/market-research";
 import SalesPerformance from "@/pages/sales-performance";
+import Blocklist from "@/pages/blocklist";
 
 type User = {
   id: number;
@@ -78,6 +79,7 @@ function AppContent() {
       <Route path="/opportunities" component={() => <Opportunities />} />
       <Route path="/market-research" component={() => <MarketResearch />} />
       <Route path="/sales-performance" component={() => <SalesPerformance user={user} />} />
+      <Route path="/blocklist" component={() => <Blocklist user={user} />} />
       <Route component={NotFound} />
     </Switch>
   );

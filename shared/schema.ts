@@ -154,6 +154,24 @@ export const syncJobs = pgTable("sync_jobs", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+/**
+ * Products we must never sell again — an eBay policy removal, a supplier
+ * problem, anything. Kept in its OWN table rather than as a flag on products,
+ * because the product row is not durable: it is deleted and recreated by
+ * catalogue imports, so a flag would be silently wiped the next time TME
+ * returned that symbol. The block has to outlive the thing it blocks.
+ */
+export const blockedProducts = pgTable("blocked_products", {
+  id: serial("id").primaryKey(),
+  /** TME symbol / SKU, upper-cased for matching. */
+  code: text("code").notNull().unique(),
+  reason: text("reason"),
+  /** Free text: which eBay email, which policy, who decided. */
+  notes: text("notes"),
+  blockedBy: text("blocked_by"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const pricingTiers = pgTable("pricing_tiers", {
   id: serial("id").primaryKey(),
   min: decimal("min", { precision: 10, scale: 2 }).notNull(),
@@ -515,6 +533,7 @@ export const loginSchema = z.object({
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type Product = typeof products.$inferSelect;
+export type BlockedProduct = typeof blockedProducts.$inferSelect;
 export type InsertProduct = z.infer<typeof insertProductSchema>;
 export type Category = typeof categories.$inferSelect;
 export type InsertCategory = z.infer<typeof insertCategorySchema>;
