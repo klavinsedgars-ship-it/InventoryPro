@@ -144,6 +144,14 @@ export function OpsDashboard({ user, embedded = false }: OpsProps) {
     refetchInterval: 60000, // auto-refresh each minute
   });
 
+  // Category-repair sweep progress (2026-08-28 incident). Shown while the
+  // sweep is enabled or any listing is still unconverged/parked; disappears
+  // once everything is verified.
+  const { data: sweepData } = useQuery<any>({
+    queryKey: ["/api/ebay/recategorize?sweep=status"],
+    refetchInterval: 60000,
+  });
+
   const [preview, setPreview] = useState<any>(null);
   const [priceMin, setPriceMin] = useState("");
   const [priceMax, setPriceMax] = useState("");
@@ -284,6 +292,30 @@ export function OpsDashboard({ user, embedded = false }: OpsProps) {
         )}
 
         <div className={embedded ? "space-y-6" : "p-6 space-y-6"}>
+          {sweepData?.progress && (sweepData.enabled || sweepData.progress.remaining > 0 || sweepData.progress.parkedFailures > 0) && (() => {
+            const p = sweepData.progress;
+            const total = p.converged + p.remaining + p.parkedFailures;
+            const pct = total > 0 ? Math.round((p.converged / total) * 100) : 0;
+            return (
+              <Card className="border-amber-300 bg-amber-50">
+                <CardContent className="py-4">
+                  <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                    <p className="font-medium text-sm">
+                      Category repair sweep {sweepData.enabled ? "— running (works by itself, every 10 min)" : "— PAUSED"}
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      {p.converged.toLocaleString()} fixed · {p.remaining.toLocaleString()} to go
+                      {p.parkedFailures > 0 ? ` · ${p.parkedFailures.toLocaleString()} need attention` : ""}
+                    </p>
+                  </div>
+                  <div className="w-full bg-amber-200 rounded-full h-3">
+                    <div className="bg-amber-600 h-3 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">{pct}% — finishes on its own and this card turns green at 100%</p>
+                </CardContent>
+              </Card>
+            );
+          })()}
           <div className="flex items-center justify-between">
             <div className="text-sm text-gray-500 flex items-center gap-2">
               <Activity className="w-4 h-4" />
