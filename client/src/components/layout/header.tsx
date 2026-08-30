@@ -77,7 +77,7 @@ export function Header({ title, subtitle, actions }: HeaderProps) {
             className="flex items-center space-x-1 h-7 text-xs px-2"
           >
             <RefreshCw className={cn("w-3 h-3", syncing && "animate-spin")} />
-            <span>{syncing ? (progress || "Syncing…") : "Sync Now"}</span>
+            <span>{syncing ? (progress || "Syncing…") : "Sync Products"}</span>
           </Button>
 
           <Button variant="ghost" size="icon" className="relative h-7 w-7">
