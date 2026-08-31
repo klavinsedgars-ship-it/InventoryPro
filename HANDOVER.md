@@ -129,10 +129,16 @@ failures parked under an `ebay_listing_error` marker so they never loop.
 /api/ebay/recategorize?sweep=start     enable sweep (&run=1 = first slice inline); stop | status
 ```
 
-Sweep disables itself and writes a sync_log entry when done (~40.7k listings,
-roughly half a day of 10-minute slices). The ramp was stopped by the operator
-during the incident — re-enable after the sweep; new listings resolve through
-the guard and record ebay_category_id at publish.
+SWEEP COMPLETED: 45,526 listings verified/re-filed (98%), 860 parked with
+individual errors (ebay_listing_error LIKE 'recategorize: %') — triage via
+/api/ops/list-ramp/failures; expect mostly GPSR manufacturer-contact blocks
+(eBay 25019, an EU-compliance task of its own) . The transition trick that
+made moves work: eBay validates an inventory-item write against the LIVE
+offer's category, so recategorizeOne merges old+new aspects, moves the
+offer, then cleans up (see recategorizeOne). New ramp listings resolve
+through pins → guard → fallback and record ebay_category_id at publish.
+19 operator pins live in marketplace_settings 'category_override:*'
+(GET/POST /api/ebay/category-overrides).
 
 ## Getic (second distributor, staging only)
 
