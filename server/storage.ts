@@ -1190,15 +1190,22 @@ export class DatabaseStorage implements IStorage {
   // Look up current supplier prices for a specific SKU set. Used by analytics
   // as the fallback when an order item has no snapshotted cost-at-sale.
   // Replaces a full getProducts() load that OOMs at 100k.
+  /**
+   * PACKAGE supplier cost per SKU (unit price x MOQ) — what fulfilling one
+   * eBay unit actually costs, since a multi-pack listing sells MOQ pieces.
+   * Used as the fallback for orders imported before cost snapshotting.
+   */
   async getSupplierPricesBySkus(skus: string[]): Promise<Map<string, string>> {
     const out = new Map<string, string>();
     if (skus.length === 0) return out;
     const rows = await db
-      .select({ sku: products.sku, supplierPrice: products.supplierPrice })
+      .select({ sku: products.sku, supplierPrice: products.supplierPrice, moq: products.moq })
       .from(products)
       .where(inArray(products.sku, skus));
     for (const r of rows) {
-      if (r.supplierPrice != null) out.set(r.sku, r.supplierPrice);
+      if (r.supplierPrice != null) {
+        out.set(r.sku, (parseFloat(r.supplierPrice) * Math.max(1, r.moq ?? 1)).toFixed(2));
+      }
     }
     return out;
   }

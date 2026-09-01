@@ -426,7 +426,16 @@ export class EbayOrdersApiService {
         productId: product?.id ?? null,
         sku,
         tmeProductId: product?.supplierProductId ?? product?.tmeProductId ?? null,
-        supplierCostAtSale: product?.supplierPrice ?? null,
+        // PACKAGE cost per eBay unit, not TME's per-piece price: a listing
+        // with MOQ 50 sells a 50-pack, so fulfilling one eBay unit costs
+        // unit price x MOQ. Snapshotting the bare unit price overstated
+        // profit on every multi-pack order (a 50x pack showed EUR 0.04 of
+        // cost instead of ~EUR 2). Every consumer multiplies this by the
+        // order quantity, so this is the single point where MOQ belongs.
+        supplierCostAtSale:
+          product?.supplierPrice != null
+            ? (parseFloat(product.supplierPrice) * Math.max(1, product.moq ?? 1)).toFixed(2)
+            : null,
         title: item.title,
         quantity: item.quantity,
 

@@ -678,6 +678,71 @@ export function registerDebugRoutes(app: Express) {
    * now produces, and whether the v1 answer is implausible (flagged = these
    * listings are live in a wrong category and need recategorizing).
    */
+  /**
+   * Repair supplier-cost snapshots on existing orders (multi-pack bug,
+   * 2026-08-31): supplier_cost_at_sale was captured as TME's PER-PIECE price,
+   * but a listing with MOQ 50 sells a 50-pack — real cost is unit x MOQ.
+   * Dry-run by default; &confirm=1 applies. Only rows whose snapshot still
+   * EQUALS the product's current unit price are touched (proof they carry the
+   * buggy capture); rows where TME has since repriced are reported for a
+   * manual look instead of being guessed at.
+   */
+  app.get("/api/__fix-pack-cost-snapshots", async (req, res) => {
+    try {
+      const { db } = await import("../db");
+      const { sql } = await import("drizzle-orm");
+      const confirm = req.query.confirm === "1";
+
+      const affectedQ: any = await db.execute(sql`
+        SELECT oi.id, oi.sku, oi.quantity, oi.supplier_cost_at_sale, p.supplier_price, p.moq
+        FROM order_items oi JOIN products p ON p.id = oi.product_id
+        WHERE p.moq > 1 AND oi.supplier_cost_at_sale IS NOT NULL
+          AND abs(oi.supplier_cost_at_sale - p.supplier_price) < 0.005
+      `);
+      const fixable = (affectedQ.rows ?? affectedQ).map((r: any) => ({
+        orderItemId: r.id,
+        sku: r.sku,
+        moq: r.moq,
+        wrongCost: Number(r.supplier_cost_at_sale),
+        correctedCost: Math.round(Number(r.supplier_price) * r.moq * 100) / 100,
+      }));
+
+      const driftedQ: any = await db.execute(sql`
+        SELECT oi.id, oi.sku, oi.supplier_cost_at_sale, p.supplier_price, p.moq
+        FROM order_items oi JOIN products p ON p.id = oi.product_id
+        WHERE p.moq > 1 AND oi.supplier_cost_at_sale IS NOT NULL
+          AND abs(oi.supplier_cost_at_sale - p.supplier_price) >= 0.005
+          AND abs(oi.supplier_cost_at_sale - p.supplier_price * p.moq) >= 0.005
+      `);
+
+      let updated = 0;
+      if (confirm && fixable.length > 0) {
+        const r: any = await db.execute(sql`
+          UPDATE order_items oi
+          SET supplier_cost_at_sale = round(p.supplier_price * p.moq, 2)
+          FROM products p
+          WHERE p.id = oi.product_id AND p.moq > 1 AND oi.supplier_cost_at_sale IS NOT NULL
+            AND abs(oi.supplier_cost_at_sale - p.supplier_price) < 0.005
+        `);
+        updated = r.rowCount ?? 0;
+      }
+
+      res.json({
+        ok: true,
+        dryRun: !confirm,
+        fixable,
+        updated,
+        // Snapshot matches neither the unit nor the package price — TME
+        // repriced since the sale; decide these by hand (there should be
+        // very few orders in total).
+        needsManualLook: driftedQ.rows ?? driftedQ,
+        hint: confirm ? "done" : "add &confirm=1 to apply the corrections listed in fixable",
+      });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  });
+
   app.get("/api/__category-map", async (_req, res) => {
     try {
       const { isImplausibleCategoryPath, categoryQueryFor } = await import("../ebay-category-query");
