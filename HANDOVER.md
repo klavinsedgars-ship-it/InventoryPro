@@ -143,6 +143,26 @@ through pins → guard → fallback and record ebay_category_id at publish.
 19 operator pins live in marketplace_settings 'category_override:*'
 (GET/POST /api/ebay/category-overrides).
 
+## Margin correction (2026-08-31)
+
+Two real orders showed the profit floor undershooting its EUR 4 target: the
+floor's fee assumption (12% + 0.35) was ~half of eBay's actual take (~21% of
+gross — ad fees / category FVF), and order snapshots recorded TME's per-piece
+price instead of the pack cost (fixed; backfill:
+`/api/__fix-pack-cost-snapshots?confirm=1`). Levers, all data-driven:
+
+```
+GET  /api/ebay/fee-config     resolved config + MEASURED actual fee % from orders
+POST /api/ebay/fee-config     set fvfPct/fixedFee/vatPct/packagingCost/postageMarkup/targetMinNetProfit
+/api/ebay/reprice?sweep=start re-floor the whole catalogue with current config,
+                              push changed prices to live listings (cron
+                              /api/cron/reprice, cursor-resumable, self-stops;
+                              manual prices useCalculatedPrice=false untouched)
+```
+
+Order of operations: measure via GET, set config (fee evidence, VAT worst-case
+~0.25 for OSS), then start the reprice sweep.
+
 ## Getic (second distributor, staging only)
 
 Added 2026-08-28. The Getic XML feed (`https://api.getic.com/xml/rentbox/xml`,

@@ -20,6 +20,157 @@ import { calculateNetProfit } from "../fee-model";
  * behaviour is identical to the previous inline handlers.
  */
 export function registerPricingRoutes(app: Express) {
+  /**
+   * The fee assumptions behind the pricing floor — view and set.
+   * GET also measures what eBay ACTUALLY charged on recorded orders, so the
+   * fvf setting can be grounded in evidence instead of a brochure number
+   * (order #14-87824: modeled 12% + 0.35, actual 21.7% of gross).
+   * POST body: any of { fvfPct, fixedFee, vatPct, packagingCost,
+   * postageMarkup, targetMinNetProfit } — stored in marketplace_settings,
+   * picked up by every later price calculation.
+   */
+  app.get("/api/ebay/fee-config", requireAuth, async (_req, res) => {
+    try {
+      const config = await getFeeConfig("ebay");
+      const { db } = await import("../db");
+      const { sql } = await import("drizzle-orm");
+      const q: any = await db.execute(sql`
+        SELECT o.id, o.marketplace_order_id,
+               (o.subtotal + o.shipping_cost)::float AS gross,
+               COALESCE(SUM(f.amount), 0)::float AS actual_fee
+        FROM orders o LEFT JOIN order_fees f ON f.order_id = o.id
+        GROUP BY o.id ORDER BY o.order_date DESC LIMIT 50
+      `);
+      const orders = (q.rows ?? q)
+        .filter((r: any) => r.gross > 0 && r.actual_fee > 0)
+        .map((r: any) => ({
+          orderId: r.marketplace_order_id,
+          gross: r.gross,
+          actualFee: r.actual_fee,
+          feePctOfGross: Math.round((r.actual_fee / r.gross) * 1000) / 10,
+        }));
+      const avgFeePct = orders.length
+        ? Math.round((orders.reduce((s: number, o: any) => s + o.actualFee, 0) /
+            orders.reduce((s: number, o: any) => s + o.gross, 0)) * 1000) / 10
+        : null;
+      res.json({
+        ok: true,
+        config,
+        measured: {
+          ordersWithFees: orders.length,
+          avgActualFeePctOfGross: avgFeePct,
+          note: "config models fee as fvfPct*gross + fixedFee; if avgActualFeePctOfGross is well above fvfPct*100, the floor is being lied to (promoted-listing ad fees, category FVF differences)",
+          orders,
+        },
+      });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  });
+  app.post("/api/ebay/fee-config", requireAuth, async (req, res) => {
+    try {
+      const FIELDS: Record<string, { key: string; min: number; max: number }> = {
+        fvfPct: { key: "fee.fvf_pct", min: 0, max: 0.5 },
+        fixedFee: { key: "fee.fixed", min: 0, max: 5 },
+        vatPct: { key: "fee.vat_pct", min: 0, max: 0.3 },
+        packagingCost: { key: "fee.packaging", min: 0, max: 5 },
+        postageMarkup: { key: "fee.postage_markup", min: 0, max: 1 },
+        targetMinNetProfit: { key: "fee.target_min_profit", min: 0, max: 50 },
+      };
+      const applied: Record<string, number> = {};
+      for (const [field, spec] of Object.entries(FIELDS)) {
+        const raw = req.body?.[field];
+        if (raw === undefined) continue;
+        const v = Number(raw);
+        if (!Number.isFinite(v) || v < spec.min || v > spec.max) {
+          return res.status(400).json({ ok: false, error: `${field} must be a number in [${spec.min}, ${spec.max}]` });
+        }
+        await storage.setMarketplaceSetting({ marketplace: "ebay", setting: spec.key, value: String(v) });
+        applied[field] = v;
+      }
+      if (Object.keys(applied).length === 0) {
+        return res.status(400).json({ ok: false, error: "nothing to set — pass fvfPct, fixedFee, vatPct, packagingCost, postageMarkup and/or targetMinNetProfit" });
+      }
+      res.json({
+        ok: true,
+        applied,
+        config: await getFeeConfig("ebay"),
+        note: "applies to prices computed from now on; run /api/ebay/reprice?sweep=start to re-floor the existing catalogue",
+      });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  });
+
+  /**
+   * Catalogue-wide floor reprice: recompute every TME product with the
+   * CURRENT tiers + fee config and push changed prices to live listings.
+   * ?sweep=start|stop|status (&run=1 with start executes the first slice
+   * inline); slices continue via /api/cron/reprice until the cursor walks
+   * off the end, then it disables itself. Manual prices
+   * (useCalculatedPrice=false) are never touched.
+   */
+  const repriceHandler = async (req: any, res: any) => {
+    try {
+      const { isRepriceEnabled, setRepriceEnabled, repriceProgress, runRepriceSweep } = await import("../reprice-sweep");
+      const { withLease, describeRefusal } = await import("../job-lease");
+      const { leaseStore } = await import("../storage");
+      const sweep = String(req.query.sweep ?? req.body?.sweep ?? "").trim();
+      if (!["start", "stop", "status"].includes(sweep)) {
+        return res.status(400).json({ ok: false, error: "pass ?sweep=start|stop|status" });
+      }
+      if (sweep === "start") await setRepriceEnabled(true);
+      if (sweep === "stop") await setRepriceEnabled(false);
+      let slice = null;
+      if (sweep === "start" && (req.query.run === "1" || req.body?.run === true)) {
+        const leased = await withLease(leaseStore, "reprice", { ttlSeconds: 300 }, () => runRepriceSweep(240_000));
+        slice = leased.ran ? leased.result : { refused: describeRefusal("reprice", leased) };
+      }
+      res.json({
+        ok: true,
+        sweep,
+        enabled: await isRepriceEnabled(),
+        progress: await repriceProgress(),
+        ...(slice ? { slice } : {}),
+        note: "the /api/cron/reprice tick (every 10 min) works the sweep while enabled; it disables itself when the cursor reaches the end",
+      });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  };
+  app.get("/api/ebay/reprice", requireAuth, repriceHandler);
+  app.post("/api/ebay/reprice", requireAuth, repriceHandler);
+
+  const repriceCronHandler = async (_req: any, res: any) => {
+    try {
+      const { isRepriceEnabled, setRepriceEnabled, runRepriceSweep } = await import("../reprice-sweep");
+      const { withLease, describeRefusal } = await import("../job-lease");
+      const { leaseStore } = await import("../storage");
+      if (!(await isRepriceEnabled())) {
+        return res.json({ ok: true, skipped: true, reason: "reprice sweep not enabled" });
+      }
+      const leased = await withLease(leaseStore, "reprice", { ttlSeconds: 300 }, () => runRepriceSweep(250_000));
+      if (!leased.ran) {
+        return res.json({ ok: true, skipped: true, reason: describeRefusal("reprice", leased) });
+      }
+      const r = leased.result;
+      if (r.done) {
+        await setRepriceEnabled(false);
+        await storage.createSyncLog({
+          source: "reprice",
+          operation: "sweep_complete",
+          status: "success",
+          message: `floor reprice complete — last slice: ${r.repriced} repriced, ${r.pushedToEbay} pushed, ${r.pushFailed} push failures`,
+        });
+      }
+      res.json({ ok: true, ...r });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  };
+  app.get("/api/cron/reprice", repriceCronHandler);
+  app.post("/api/cron/reprice", repriceCronHandler);
+
   // Dynamic Pricing API routes
   app.post("/api/pricing/calculate", requireAuth, async (req, res) => {
     try {
