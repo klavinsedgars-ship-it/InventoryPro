@@ -80,11 +80,12 @@ sentence. This was the last thing changed and is the least proven; see below.
    blocked. The "Find everything like it" search on the Blocklist page has
    presets (DANGEROUS, needles, liquids, batteries) — the sweep was not
    confirmed as done.
-4. **eBay Taxonomy is the binding API limit**: 5,000/day, ~2,200 used. An
-   Application Growth Check was being filled in to raise it to 25,000 and to
-   request `buy.marketplace.insights`. Prerequisites are built:
-   `/api/ebay/account-deletion` (needs `EBAY_DELETION_VERIFICATION_TOKEN` and
-   `EBAY_DELETION_ENDPOINT_URL` set, then registered with eBay).
+4. ~~eBay Taxonomy limit~~ **RESOLVED 2026-08**: the Application Growth Check
+   passed — Taxonomy limit raised 5,000 → **100,000/day** for the production
+   App ID. Taxonomy is no longer the binding constraint on the ramp; nothing
+   in code assumed the old number, so no changes were needed. STILL OPEN from
+   the same application: whether `buy.marketplace.insights` was granted (it
+   gates the Repricing/Opportunities features) — check the developer portal.
 5. **Reconcile has never completed.** ~199 pages at 200 listings; it runs in
    time-bounded slices — call it, then follow `nextPage` until null.
 6. **`BYPASS_AUTH=true` is still set** in production. The user asked not to be
