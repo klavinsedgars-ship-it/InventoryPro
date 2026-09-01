@@ -33,11 +33,13 @@ Target is 200,000 listings.
 Crons in `vercel.json`:
 
 ```
-daily-sync     0 * * * *      TME price/stock sweep
-list-ramp      30 * * * *     publishes new listings to eBay
-orders         5 * * * *      pulls eBay orders
-messages       40 */2 * * *   pulls buyer messages
-maintenance    50 3 * * *     prunes old rows, trims message bodies
+daily-sync     0 * * * *          TME price/stock sweep
+list-ramp      3,18,33,48 * * * * publishes new listings (4x/hour since the
+                                  Taxonomy limit rose to 100k/day; ~3,400/h ceiling)
+orders         5 * * * *          pulls eBay orders
+messages       40 */2 * * *       pulls buyer messages
+maintenance    50 3 * * *         prunes old rows, trims message bodies
+recategorize   */10 * * * *       category-repair sweep slices (no-op unless enabled)
 ```
 
 Every job takes a **lease** (`server/job-lease.ts`) so it cannot run twice.
