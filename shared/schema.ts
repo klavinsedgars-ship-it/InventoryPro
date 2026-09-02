@@ -895,10 +895,11 @@ export type MarketplaceType = typeof Marketplace[keyof typeof Marketplace];
 //
 // Offers land HERE, not in `products`. The products table is wired straight
 // into the listing ramp, the TME sync sweep and the dashboard counts, so a new
-// distributor's catalogue must stay quarantined until an explicit promotion
-// step (not yet built) copies selected rows across. A staging row keeps the
-// full parsed record (`raw`) so the field mapping can be corrected and
-// re-derived later without re-fetching the feed.
+// distributor's catalogue stays quarantined until the explicit promotion step
+// (server/getic-promote.ts, POST /api/getic/promote) copies selected rows
+// across and stamps promotedProductId. A staging row keeps the full parsed
+// record (`raw`) so the field mapping can be corrected and re-derived later
+// without re-fetching the feed.
 // ---------------------------------------------------------------------------
 export const supplierOffers = pgTable("supplier_offers", {
   id: serial("id").primaryKey(),
@@ -927,6 +928,14 @@ export const supplierOffers = pgTable("supplier_offers", {
   raw: text("raw"),
   /** Which import run last touched this row. */
   feedRunId: integer("feed_run_id"),
+  /**
+   * Set when the offer has been promoted into `products` — the id of the
+   * product row it became. A promoted offer is live catalogue: imports keep
+   * refreshing the staging row, and the post-import refresh copies price and
+   * stock across to the product. NULL = still quarantined in staging.
+   */
+  promotedProductId: integer("promoted_product_id"),
+  promotedAt: timestamp("promoted_at"),
   firstSeenAt: timestamp("first_seen_at").defaultNow(),
   /** A row whose lastSeenAt stops advancing has left the feed. */
   lastSeenAt: timestamp("last_seen_at").defaultNow(),

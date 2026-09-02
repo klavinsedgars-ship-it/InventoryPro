@@ -21,17 +21,19 @@ import {
   ChevronLeft,
   ChevronRight,
   Package,
+  PackagePlus,
   AlertTriangle,
   ExternalLink,
 } from "lucide-react";
 
 /*
- * Getic feed browser — STAGING ONLY.
+ * Getic feed browser.
  *
- * Everything on this page reads and writes supplier_offers, never products.
- * A Getic offer cannot reach eBay, the listing ramp, or TME sync from here;
- * promotion into the live catalogue is a separate step that does not exist
- * yet, on purpose.
+ * Import and browsing work on the supplier_offers staging table. "Add to
+ * Products" (promotion) is the one door out of staging: selected offers
+ * become products with supplier=GETIC, priced through the same floor math
+ * as TME, and the listing ramp picks them up like any other candidate.
+ * An offer stays quarantined until someone promotes it here.
  */
 
 interface GeticOffer {
@@ -49,6 +51,8 @@ interface GeticOffer {
   image_url: string | null;
   product_url: string | null;
   last_seen_at: string | null;
+  promoted_product_id: number | null;
+  promoted_at: string | null;
 }
 
 interface GeticStatus {
@@ -61,6 +65,7 @@ interface GeticStatus {
     with_weight: number;
     with_image: number;
     with_price: number;
+    promoted: number;
     last_seen_at: string | null;
   } | null;
   runs: Array<{
@@ -78,35 +83,96 @@ interface GeticStatus {
   }>;
 }
 
+interface PromoteResult {
+  ok: boolean;
+  requested: number;
+  promoted: number;
+  skipped: {
+    alreadyPromoted: number;
+    blocked: number;
+    skuExists: number;
+    eanExists: number;
+    noPrice: number;
+  };
+  skippedSamples: Array<{ sku: string; reason: string }>;
+  budgetHit: boolean;
+  remaining: number;
+}
+
 const fmtPct = (part: number, total: number) => (total > 0 ? `${Math.round((part / total) * 100)}%` : "—");
 const fmtPrice = (p: string | null, cur: string | null) =>
   p != null ? `${parseFloat(p).toFixed(2)} ${cur ?? ""}`.trim() : "—";
+
+const SORT_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "id", label: "Feed order" },
+  { value: "name", label: "Name A→Z" },
+  { value: "price_asc", label: "Price ↑" },
+  { value: "price_desc", label: "Price ↓" },
+  { value: "stock_desc", label: "Stock ↓" },
+  { value: "newest", label: "Newest first" },
+];
 
 export default function GeticBrowser({ user }: { user?: any }) {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Draft inputs (typed) vs applied filters (what the queries use): text and
+  // price fields apply on Search/Enter so each keystroke isn't a request.
   const [searchInput, setSearchInput] = useState("");
+  const [priceMinInput, setPriceMinInput] = useState("");
+  const [priceMaxInput, setPriceMaxInput] = useState("");
   const [search, setSearch] = useState("");
+  const [priceMin, setPriceMin] = useState("");
+  const [priceMax, setPriceMax] = useState("");
   const [category, setCategory] = useState("");
+  const [manufacturer, setManufacturer] = useState("");
+  const [promotedFilter, setPromotedFilter] = useState(""); // "" | "yes" | "no"
+  const [sort, setSort] = useState("id");
   const [inStockOnly, setInStockOnly] = useState(false);
   const [page, setPage] = useState(1);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const [detailId, setDetailId] = useState<number | null>(null);
   const [probeOpen, setProbeOpen] = useState(false);
   const [preview, setPreview] = useState<any>(null);
   const [confirmImport, setConfirmImport] = useState(false);
+  const [confirmPromoteAll, setConfirmPromoteAll] = useState(false);
+  const [promoteResult, setPromoteResult] = useState<PromoteResult | null>(null);
 
   const { data: status, isLoading: statusLoading } = useQuery<GeticStatus>({
     queryKey: ["/api/getic/status"],
   });
 
-  const offersKey = `/api/getic/offers?page=${page}&limit=50&search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}${inStockOnly ? "&inStockOnly=1" : ""}`;
+  // The applied filter, in the exact shape the server's offerFilterFrom
+  // reads — reused verbatim as the "promote all filtered" body so the
+  // promotion matches what the table shows.
+  const appliedFilter = {
+    search,
+    category,
+    manufacturer,
+    inStockOnly,
+    priceMin: priceMin || undefined,
+    priceMax: priceMax || undefined,
+    promoted: promotedFilter || undefined,
+  };
+
+  const offersKey =
+    `/api/getic/offers?page=${page}&limit=50&sort=${sort}` +
+    `&search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}` +
+    `&manufacturer=${encodeURIComponent(manufacturer)}` +
+    (priceMin ? `&priceMin=${encodeURIComponent(priceMin)}` : "") +
+    (priceMax ? `&priceMax=${encodeURIComponent(priceMax)}` : "") +
+    (promotedFilter ? `&promoted=${promotedFilter}` : "") +
+    (inStockOnly ? "&inStockOnly=1" : "");
   const { data: offersData, isLoading: offersLoading, isError: offersError, error: offersErr } = useQuery<any>({
     queryKey: [offersKey],
   });
 
   const { data: categoriesData } = useQuery<any>({
     queryKey: ["/api/getic/categories"],
+  });
+
+  const { data: manufacturersData } = useQuery<any>({
+    queryKey: ["/api/getic/manufacturers"],
   });
 
   const { data: probeData, isFetching: probeLoading, isError: probeError, error: probeErr, refetch: refetchProbe } = useQuery<any>({
@@ -146,17 +212,63 @@ export default function GeticBrowser({ user }: { user?: any }) {
     },
   });
 
+  const promoteMutation = useMutation({
+    mutationFn: async (body: { ids?: number[]; all?: true; filter?: typeof appliedFilter }) =>
+      (await apiRequest("POST", "/api/getic/promote", body)).json(),
+    onSuccess: (d: PromoteResult & { error?: string }) => {
+      setConfirmPromoteAll(false);
+      if (!d.ok) {
+        toast({ title: "Promotion failed", description: d.error, variant: "destructive" });
+        return;
+      }
+      setSelected(new Set());
+      setPromoteResult(d);
+      qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith("/api/getic/") });
+      qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith("/api/products") });
+    },
+    onError: (e: any) => {
+      setConfirmPromoteAll(false);
+      toast({ title: "Promotion failed", description: e.message, variant: "destructive" });
+    },
+  });
+
   const counts = status?.counts;
   const lastRun = status?.runs?.[0];
   const offers: GeticOffer[] = offersData?.offers ?? [];
   const total: number = offersData?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / 50));
   const categories: Array<{ category_path: string; count: number }> = categoriesData?.categories ?? [];
+  const manufacturers: Array<{ manufacturer: string; count: number }> = manufacturersData?.manufacturers ?? [];
   const detail = detailData?.offer;
 
-  const runSearch = () => {
+  const selectableOnPage = offers.filter((o) => o.promoted_product_id == null);
+  const allPageSelected = selectableOnPage.length > 0 && selectableOnPage.every((o) => selected.has(o.id));
+
+  const applyFilters = () => {
     setPage(1);
     setSearch(searchInput.trim());
+    setPriceMin(priceMinInput.trim());
+    setPriceMax(priceMaxInput.trim());
+  };
+
+  const toggleSelect = (id: number, on: boolean) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const togglePage = (on: boolean) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const o of selectableOnPage) {
+        if (on) next.add(o.id);
+        else next.delete(o.id);
+      }
+      return next;
+    });
   };
 
   return (
@@ -165,7 +277,7 @@ export default function GeticBrowser({ user }: { user?: any }) {
       <div className={`transition-all duration-200 ${sidebarCollapsed ? "ml-16" : "ml-64"}`}>
         <Header
           title="Getic Browser"
-          subtitle="Staging catalogue from the Getic XML feed — nothing here syncs to products or eBay"
+          subtitle="Getic XML feed catalogue — browse the staging import, promote selected offers into Products"
         />
 
         <div className="p-6 space-y-6">
@@ -212,8 +324,9 @@ export default function GeticBrowser({ user }: { user?: any }) {
                 <p className="text-sm text-gray-500">Loading status…</p>
               ) : (
                 <>
-                  <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+                  <div className="grid grid-cols-2 md:grid-cols-7 gap-4">
                     <Stat label="Products" value={counts ? String(counts.total) : "0"} />
+                    <Stat label="Promoted" value={counts ? String(counts.promoted ?? 0) : "0"} />
                     <Stat label="In stock" value={counts ? `${counts.in_stock} (${fmtPct(counts.in_stock, counts.total)})` : "—"} />
                     <Stat label="With price" value={counts ? fmtPct(counts.with_price, counts.total) : "—"} />
                     <Stat label="With EAN" value={counts ? fmtPct(counts.with_ean, counts.total) : "—"} />
@@ -250,17 +363,35 @@ export default function GeticBrowser({ user }: { user?: any }) {
             <div className="relative">
               <Search className="w-4 h-4 absolute left-2.5 top-2.5 text-gray-400" />
               <Input
-                className="pl-8 w-72"
+                className="pl-8 w-64"
                 placeholder="Search name, SKU, EAN, manufacturer…"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && runSearch()}
+                onKeyDown={(e) => e.key === "Enter" && applyFilters()}
                 data-testid="input-search"
               />
             </div>
-            <Button variant="outline" size="sm" onClick={runSearch}>Search</Button>
+            <Input
+              className="w-24"
+              placeholder="€ min"
+              inputMode="decimal"
+              value={priceMinInput}
+              onChange={(e) => setPriceMinInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && applyFilters()}
+              data-testid="input-price-min"
+            />
+            <Input
+              className="w-24"
+              placeholder="€ max"
+              inputMode="decimal"
+              value={priceMaxInput}
+              onChange={(e) => setPriceMaxInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && applyFilters()}
+              data-testid="input-price-max"
+            />
+            <Button variant="outline" size="sm" onClick={applyFilters}>Search</Button>
             <Select value={category || "__all"} onValueChange={(v) => { setCategory(v === "__all" ? "" : v); setPage(1); }}>
-              <SelectTrigger className="w-72" data-testid="select-category">
+              <SelectTrigger className="w-56" data-testid="select-category">
                 <SelectValue placeholder="All categories" />
               </SelectTrigger>
               <SelectContent>
@@ -272,11 +403,93 @@ export default function GeticBrowser({ user }: { user?: any }) {
                 ))}
               </SelectContent>
             </Select>
+            <Select value={manufacturer || "__all"} onValueChange={(v) => { setManufacturer(v === "__all" ? "" : v); setPage(1); }}>
+              <SelectTrigger className="w-52" data-testid="select-manufacturer">
+                <SelectValue placeholder="All manufacturers" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all">All manufacturers</SelectItem>
+                {manufacturers.map((m) => (
+                  <SelectItem key={m.manufacturer} value={m.manufacturer}>
+                    {m.manufacturer} ({m.count})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={promotedFilter || "__all"} onValueChange={(v) => { setPromotedFilter(v === "__all" ? "" : v); setPage(1); }}>
+              <SelectTrigger className="w-44" data-testid="select-promoted">
+                <SelectValue placeholder="Promoted: all" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all">Promoted: all</SelectItem>
+                <SelectItem value="no">Not promoted</SelectItem>
+                <SelectItem value="yes">Promoted only</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={sort} onValueChange={(v) => { setSort(v); setPage(1); }}>
+              <SelectTrigger className="w-40" data-testid="select-sort">
+                <SelectValue placeholder="Sort" />
+              </SelectTrigger>
+              <SelectContent>
+                {SORT_OPTIONS.map((s) => (
+                  <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <label className="flex items-center gap-2 text-sm text-gray-600">
               <Checkbox checked={inStockOnly} onCheckedChange={(v) => { setInStockOnly(!!v); setPage(1); }} data-testid="checkbox-in-stock" />
               In stock only
             </label>
             <span className="text-sm text-gray-500 ml-auto">{total} product(s)</span>
+          </div>
+
+          {/* Promotion action bar */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <Button
+              size="sm"
+              disabled={selected.size === 0 || promoteMutation.isPending}
+              onClick={() => promoteMutation.mutate({ ids: Array.from(selected) })}
+              data-testid="button-promote-selected"
+            >
+              {promoteMutation.isPending ? (
+                <><RefreshCw className="w-4 h-4 mr-1 animate-spin" /> Adding…</>
+              ) : (
+                <><PackagePlus className="w-4 h-4 mr-1" /> Add selected to Products ({selected.size})</>
+              )}
+            </Button>
+            {!confirmPromoteAll ? (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={total === 0 || promoteMutation.isPending}
+                onClick={() => setConfirmPromoteAll(true)}
+                data-testid="button-promote-all"
+              >
+                <PackagePlus className="w-4 h-4 mr-1" /> Add all {total} filtered
+              </Button>
+            ) : (
+              <Button
+                variant="destructive"
+                size="sm"
+                disabled={promoteMutation.isPending}
+                onClick={() => promoteMutation.mutate({ all: true, filter: appliedFilter })}
+                data-testid="button-promote-all-confirm"
+              >
+                {promoteMutation.isPending ? (
+                  <><RefreshCw className="w-4 h-4 mr-1 animate-spin" /> Adding…</>
+                ) : (
+                  `Confirm: add all ${total} filtered to Products`
+                )}
+              </Button>
+            )}
+            {selected.size > 0 && (
+              <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+                Clear selection
+              </Button>
+            )}
+            <span className="text-xs text-gray-500">
+              Promoted products go live: they get floor pricing and the listing ramp lists them on eBay.
+            </span>
           </div>
 
           {/* Catalogue table */}
@@ -296,15 +509,22 @@ export default function GeticBrowser({ user }: { user?: any }) {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b bg-gray-50 text-left text-xs uppercase text-gray-500">
+                        <th className="px-4 py-2 w-8">
+                          <Checkbox
+                            checked={allPageSelected}
+                            onCheckedChange={(v) => togglePage(!!v)}
+                            aria-label="Select page"
+                            data-testid="checkbox-select-page"
+                          />
+                        </th>
                         <th className="px-4 py-2 w-12"></th>
                         <th className="px-4 py-2">SKU</th>
                         <th className="px-4 py-2">Name</th>
                         <th className="px-4 py-2">Manufacturer</th>
                         <th className="px-4 py-2 text-right">Price</th>
                         <th className="px-4 py-2 text-right">Stock</th>
-                        <th className="px-4 py-2 text-right">Weight</th>
                         <th className="px-4 py-2">EAN</th>
-                        <th className="px-4 py-2">Category</th>
+                        <th className="px-4 py-2">Status</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -315,6 +535,16 @@ export default function GeticBrowser({ user }: { user?: any }) {
                           onClick={() => setDetailId(o.id)}
                           data-testid={`row-offer-${o.id}`}
                         >
+                          <td className="px-4 py-2" onClick={(e) => e.stopPropagation()}>
+                            {o.promoted_product_id == null && (
+                              <Checkbox
+                                checked={selected.has(o.id)}
+                                onCheckedChange={(v) => toggleSelect(o.id, !!v)}
+                                aria-label={`Select ${o.supplier_sku}`}
+                                data-testid={`checkbox-offer-${o.id}`}
+                              />
+                            )}
+                          </td>
                           <td className="px-4 py-2">
                             {o.image_url ? (
                               <img src={o.image_url} alt="" className="w-8 h-8 object-contain rounded" loading="lazy" />
@@ -327,9 +557,16 @@ export default function GeticBrowser({ user }: { user?: any }) {
                           <td className="px-4 py-2 whitespace-nowrap">{o.manufacturer ?? "—"}</td>
                           <td className="px-4 py-2 text-right whitespace-nowrap">{fmtPrice(o.price, o.currency)}</td>
                           <td className="px-4 py-2 text-right">{o.stock ?? "?"}</td>
-                          <td className="px-4 py-2 text-right whitespace-nowrap">{o.weight_g != null ? `${parseFloat(o.weight_g)} g` : "—"}</td>
                           <td className="px-4 py-2 font-mono text-xs">{o.ean ?? "—"}</td>
-                          <td className="px-4 py-2 max-w-xs truncate text-xs text-gray-500">{o.category_path ?? "—"}</td>
+                          <td className="px-4 py-2">
+                            {o.promoted_product_id != null ? (
+                              <Badge className="whitespace-nowrap" data-testid={`badge-promoted-${o.id}`}>
+                                In Products #{o.promoted_product_id}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="whitespace-nowrap text-gray-500">staging</Badge>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -353,6 +590,55 @@ export default function GeticBrowser({ user }: { user?: any }) {
           )}
         </div>
       </div>
+
+      {/* Promotion result dialog */}
+      <Dialog open={promoteResult != null} onOpenChange={(o) => !o && setPromoteResult(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {promoteResult?.promoted ?? 0} product(s) added
+            </DialogTitle>
+            <DialogDescription>
+              Promoted offers are now in Products with supplier GETIC — the listing ramp will pick them up on its next tick.
+            </DialogDescription>
+          </DialogHeader>
+          {promoteResult && (
+            <div className="space-y-3 text-sm">
+              <div className="flex flex-wrap gap-2">
+                <Badge>{promoteResult.promoted} added</Badge>
+                {promoteResult.skipped.alreadyPromoted > 0 && <Badge variant="secondary">{promoteResult.skipped.alreadyPromoted} already promoted</Badge>}
+                {promoteResult.skipped.skuExists > 0 && <Badge variant="secondary">{promoteResult.skipped.skuExists} SKU already in Products</Badge>}
+                {promoteResult.skipped.eanExists > 0 && <Badge variant="secondary">{promoteResult.skipped.eanExists} EAN already carried</Badge>}
+                {promoteResult.skipped.blocked > 0 && <Badge variant="destructive">{promoteResult.skipped.blocked} blocked</Badge>}
+                {promoteResult.skipped.noPrice > 0 && <Badge variant="destructive">{promoteResult.skipped.noPrice} without usable price</Badge>}
+              </div>
+              {promoteResult.remaining > 0 && (
+                <p className="text-amber-600">
+                  <AlertTriangle className="w-4 h-4 inline mr-1" />
+                  Time budget hit — {promoteResult.remaining} offer(s) not processed yet. Run the same promotion again to continue; nothing is duplicated.
+                </p>
+              )}
+              {promoteResult.skippedSamples.length > 0 && (
+                <div>
+                  <p className="font-medium mb-1">Skipped (first {promoteResult.skippedSamples.length})</p>
+                  <ScrollArea className="max-h-56 border rounded">
+                    <table className="w-full text-xs">
+                      <tbody>
+                        {promoteResult.skippedSamples.map((s, i) => (
+                          <tr key={i} className="border-b">
+                            <td className="px-2 py-1 font-mono whitespace-nowrap">{s.sku}</td>
+                            <td className="px-2 py-1 text-gray-600">{s.reason}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </ScrollArea>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Probe dialog */}
       <Dialog open={probeOpen} onOpenChange={setProbeOpen}>
@@ -457,6 +743,12 @@ export default function GeticBrowser({ user }: { user?: any }) {
           ) : detail ? (
             <ScrollArea className="max-h-[65vh]">
               <div className="space-y-4 text-sm pr-4">
+                {detail.promoted_product_id != null && (
+                  <Badge>
+                    In Products as #{detail.promoted_product_id}
+                    {detail.promoted_at ? ` since ${new Date(detail.promoted_at).toLocaleString()}` : ""}
+                  </Badge>
+                )}
                 <div className="flex gap-4">
                   {detail.image_url && (
                     <img src={detail.image_url} alt="" className="w-32 h-32 object-contain rounded border" />

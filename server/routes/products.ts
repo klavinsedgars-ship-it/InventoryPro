@@ -53,6 +53,7 @@ export function registerProductRoutes(app: Express): void {
         stock: (q.stock as string) || undefined,
         marketplace: (q.marketplace as string) || undefined,
         moq: (q.moq as string) || undefined,
+        supplier: (q.supplier as string) || undefined,
         sortField,
         sortDir: q.sortDir === "asc" ? "asc" : "desc",
         limit,

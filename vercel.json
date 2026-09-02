@@ -17,6 +17,7 @@
     { "path": "/api/cron/messages", "schedule": "40 */2 * * *" },
     { "path": "/api/cron/maintenance", "schedule": "50 3 * * *" },
     { "path": "/api/cron/recategorize", "schedule": "*/10 * * * *" },
-    { "path": "/api/cron/reprice", "schedule": "6,16,26,36,46,56 * * * *" }
+    { "path": "/api/cron/reprice", "schedule": "6,16,26,36,46,56 * * * *" },
+    { "path": "/api/cron/getic-import", "schedule": "24 * * * *" }
   ]
 }

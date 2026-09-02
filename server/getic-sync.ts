@@ -15,6 +15,7 @@ import { db } from "./db";
 import { supplierOffers, supplierFeedRuns, type SupplierFeedRun } from "@shared/schema";
 import { sniffFeedStructure, recordsOf, nodeToJson, detectXmlEncoding, type FeedStructure, type JsonRecord } from "./xml-feed";
 import { mapGeticRecord, coverageOf, flattenRecord, type NormalizedOffer } from "./getic-feed";
+import type { GeticRefreshStats } from "./getic-promote";
 
 export const GETIC_SUPPLIER = "GETIC";
 export const GETIC_FEED_URL = process.env.GETIC_FEED_URL || "https://api.getic.com/xml/rentbox/xml";
@@ -63,9 +64,14 @@ export const SUPPLIER_SCHEMA_STATEMENTS: string[] = [
      attributes text,
      raw text,
      feed_run_id integer,
+     promoted_product_id integer,
+     promoted_at timestamp,
      first_seen_at timestamp DEFAULT now(),
      last_seen_at timestamp DEFAULT now()
    )`,
+  // Existing deployments predate the promotion columns.
+  `ALTER TABLE supplier_offers ADD COLUMN IF NOT EXISTS promoted_product_id integer`,
+  `ALTER TABLE supplier_offers ADD COLUMN IF NOT EXISTS promoted_at timestamp`,
   `CREATE UNIQUE INDEX IF NOT EXISTS supplier_offers_supplier_sku_uniq ON supplier_offers (supplier, supplier_sku)`,
   `CREATE INDEX IF NOT EXISTS supplier_offers_category_idx ON supplier_offers (supplier, category_path)`,
   // Browse-page search is ILIKE '%term%'; trigram is the only index that
@@ -174,6 +180,8 @@ export interface GeticImportResult {
   mappingSample: Record<string, string> | null;
   /** Dry run only: the mapped sample for eyeballing. */
   sample?: NormalizedOffer[];
+  /** Real runs: promoted products refreshed from the new feed state. */
+  refresh?: GeticRefreshStats | { skipped: string } | { error: string };
   runId?: number;
   status?: string;
   error?: string;
@@ -399,6 +407,26 @@ export async function runGeticImport(opts: GeticImportOptions = {}): Promise<Get
     mappingSample: mappingSample ? JSON.stringify(mappingSample) : null,
   });
 
+  // Freshness: promoted products must follow the feed. Dynamic import —
+  // getic-promote imports this module at top level, so a static import here
+  // would be a cycle. Refresh errors are reported, never thrown: the import
+  // itself succeeded and its result must say so.
+  let refresh: GeticImportResult["refresh"];
+  const remainingMs = timeBudgetMs - (Date.now() - started);
+  if (budgetHit || remainingMs < 20_000) {
+    refresh = { skipped: budgetHit ? "import hit its time budget" : "not enough time budget left" };
+  } else {
+    try {
+      const { promotedGeticCount, refreshPromotedGeticProducts } = await import("./getic-promote");
+      refresh =
+        (await promotedGeticCount()) > 0
+          ? await refreshPromotedGeticProducts(remainingMs)
+          : { skipped: "nothing promoted yet" };
+    } catch (e) {
+      refresh = { error: (e as Error).message };
+    }
+  }
+
   return {
     ...base,
     ok: true,
@@ -411,6 +439,7 @@ export async function runGeticImport(opts: GeticImportOptions = {}): Promise<Get
     newRecords,
     coverage: coverageTotals,
     mappingSample,
+    refresh,
   };
 }
 

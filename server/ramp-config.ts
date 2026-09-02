@@ -1,5 +1,7 @@
 import { storage } from "./storage";
 
+export { LISTING_SUPPLIERS } from "@shared/suppliers";
+
 /**
  * Persisted ramp sale-price band (marketplace_settings ebay/ramp_min_price,
  * ramp_max_price). Stored so every self-chained run and the scheduled cron use

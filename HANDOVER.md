@@ -163,28 +163,59 @@ POST /api/ebay/fee-config     set fvfPct/fixedFee/vatPct/packagingCost/postageMa
 Order of operations: measure via GET, set config (fee evidence, VAT worst-case
 ~0.25 for OSS), then start the reprice sweep.
 
-## Getic (second distributor, staging only)
+## Getic (second distributor: staging + promotion)
 
-Added 2026-08-28. The Getic XML feed (`https://api.getic.com/xml/rentbox/xml`,
-override with `GETIC_FEED_URL`) imports into **`supplier_offers`** — its own
-staging table, NOT `products`. Nothing there can reach the listing ramp, TME
-sync, or eBay; promotion into `products` deliberately does not exist yet.
+Added 2026-08-28, promotion built 2026-09-02. The Getic XML feed
+(`https://api.getic.com/xml/rentbox/xml`, override with `GETIC_FEED_URL`)
+imports into **`supplier_offers`** — its own staging table, NOT `products`.
 The feed's schema was unknown when this was built, so the parser discovers the
 record element and maps fields by name heuristics (`server/xml-feed.ts`,
 `server/getic-feed.ts` — both pure, both tested); every record's full JSON is
 kept in `raw`, unconsumed fields in `attributes`, and the probe endpoint shows
-which feed key each field was read from. UI: **Getic Browser** page.
+which feed key each field was read from. The feed turned out to carry NO
+product-code field, so **EAN is used as the SKU** (MPN as second choice); it
+also has no category, weight, MOQ, or currency — prices are assumed EUR.
+UI: **Getic Browser** page.
+
+**Promotion** (`server/getic-promote.ts`) is the one door out of staging:
+selected offers are copied into `products` with `supplier='GETIC'`,
+`moq=1/multiples=1`, category `"Electronics"` (generic → Taxonomy resolves by
+product NAME at listing time), and a floor-priced `salePrice` via
+`calculatePriceWithFloor`. Skipped, with reasons reported: already promoted,
+blocked SKUs, SKU already in `products`, EAN already carried (TME overlap —
+never list the same physical item twice), no usable price. The offer row is
+stamped `promoted_product_id`/`promoted_at`. `LISTING_SUPPLIERS`
+(`shared/suppliers.ts`) now includes GETIC, so the listing ramp lists promoted
+products like TME ones; the TME v2 shippability guard applies only to
+`supplier='TME'` rows.
+
+**Freshness:** every successful real import refreshes promoted products
+(stock + supplier price from the feed, floor reprice unless
+`useCalculatedPrice=false`, changed listed prices pushed to eBay). Cron
+`/api/cron/getic-import` (hourly at :24) is self-gated — it no-ops until at
+least one product with `supplier='GETIC'` exists, so pure staging costs no
+hourly fetches.
 
 ```
-GET  /api/getic/probe      fetch the feed, show structure + mapping — writes nothing
-POST /api/getic/import     ?dryRun=1 = sample without writing; real run is lease-guarded
-GET  /api/getic/status     import history + coverage counts
-GET  /api/getic/offers     paginated browse (also /offers/:id, /categories)
-GET  /api/getic/overlap    SKU/EAN collisions with the TME catalogue
+GET  /api/getic/probe        fetch the feed, show structure + mapping — writes nothing
+POST /api/getic/import       ?dryRun=1 = sample without writing; real run is lease-guarded,
+                             and ends by refreshing promoted products
+POST /api/getic/promote      {ids:[...]} or {all:true, filter:{...}} — lease-guarded,
+                             time-bounded (partial result carries `remaining`)
+GET  /api/getic/status       import history + coverage counts (incl. promoted)
+GET  /api/getic/offers       paginated browse: search/category/manufacturer/priceMin/
+                             priceMax/promoted=yes|no/inStockOnly/sort
+                             (also /offers/:id, /categories, /manufacturers)
+GET  /api/getic/overlap      SKU/EAN collisions with the TME catalogue
+GET  /api/cron/getic-import  hourly feed refresh, gated on promoted products existing
 ```
 
 First deploy: run the probe, check the mapping reads sensibly, dry-run, then
 import. If the record detection guesses wrong, `?record=<element>` overrides it.
+The Products page has a Distributor filter (TME / Getic / Manual) to watch the
+promoted cohort. Open question flagged to the operator: the feed prices may be
+RETAIL rather than dealer prices — margin on promoted items needs a spot-check
+against a real Getic invoice before scaling promotion up.
 
 ## Diagnostics (all read-only unless noted)
 

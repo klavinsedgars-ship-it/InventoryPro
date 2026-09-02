@@ -89,6 +89,7 @@ import bcrypt from "bcryptjs";
 import { PRICING_CONFIG } from "./dynamic-pricing";
 import type { LeaseStore } from "./job-lease";
 import { SUPPLIER_SCHEMA_STATEMENTS } from "./getic-sync";
+import { LISTING_SUPPLIERS } from "@shared/suppliers";
 
 export interface IStorage {
   // Users
@@ -1232,7 +1233,10 @@ export class DatabaseStorage implements IStorage {
   private listingCandidateConds(opts?: { minPrice?: number; maxPrice?: number }) {
     const maxAttempts = Math.max(1, Number(process.env.EBAY_LIST_MAX_ATTEMPTS) || 3);
     const conds = [
-      eq(products.supplier, "TME"),
+      // The supplier allowlist is the quarantine boundary (see
+      // LISTING_SUPPLIERS in ramp-config.ts) — was eq(supplier, "TME") until
+      // the Getic promotion step went live.
+      inArray(products.supplier, [...LISTING_SUPPLIERS]),
       eq(products.listedOnEbay, false),
       gte(products.stock, 1),
       or(eq(products.excludeFromListing, false), isNull(products.excludeFromListing)),
@@ -1304,7 +1308,7 @@ export class DatabaseStorage implements IStorage {
    */
   async getListingBlockedByMissingImageCount(opts?: { minPrice?: number; maxPrice?: number }): Promise<number> {
     const conds = [
-      eq(products.supplier, "TME"),
+      inArray(products.supplier, [...LISTING_SUPPLIERS]),
       eq(products.listedOnEbay, false),
       gte(products.stock, 1),
       or(eq(products.excludeFromListing, false), isNull(products.excludeFromListing)),
@@ -1446,6 +1450,7 @@ export class DatabaseStorage implements IStorage {
     stock?: string;        // low | high | out | available
     marketplace?: string;  // listed | ebay | amazon | unlisted
     moq?: string;          // single | multipack
+    supplier?: string;     // TME | GETIC | manual | ...
     sortField?: "price" | "stock" | null;
     sortDir?: "asc" | "desc";
     limit: number;
@@ -1472,6 +1477,12 @@ export class DatabaseStorage implements IStorage {
     else if (f.marketplace === "unlisted") conds.push(sql`(listed_on_ebay IS NOT TRUE AND listed_on_amazon IS NOT TRUE)`);
     if (f.moq === "single") conds.push(sql`(moq IS NULL OR moq = 1)`);
     else if (f.moq === "multipack") conds.push(sql`moq > 1`);
+    // The stored default is "manual", so treat NULL and "manual" as the same
+    // bucket — hand-created rows predate the column default.
+    if (f.supplier && f.supplier !== "all") {
+      if (f.supplier === "manual") conds.push(sql`(supplier IS NULL OR supplier = 'manual')`);
+      else conds.push(sql`supplier = ${f.supplier}`);
+    }
     const where = sql.join(conds, sql` AND `);
 
     const dir = f.sortDir === "asc" ? sql.raw("ASC") : sql.raw("DESC");

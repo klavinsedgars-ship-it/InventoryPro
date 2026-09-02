@@ -65,6 +65,7 @@ export function Products({ user }: ProductsProps) {
   const [stockFilter, setStockFilter] = useState<string>("all");
   const [marketplaceFilter, setMarketplaceFilter] = useState<string>("all");
   const [moqFilter, setMoqFilter] = useState<string>("all");
+  const [supplierFilter, setSupplierFilter] = useState<string>("all");
   const [itemsPerPage, setItemsPerPage] = useState<number>(250);
   const [currentPage, setCurrentPage] = useState(1);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -107,6 +108,7 @@ export function Products({ user }: ProductsProps) {
   if (stockFilter !== "all") productsParams.set("stock", stockFilter);
   if (marketplaceFilter !== "all") productsParams.set("marketplace", marketplaceFilter);
   if (moqFilter !== "all") productsParams.set("moq", moqFilter);
+  if (supplierFilter !== "all") productsParams.set("supplier", supplierFilter);
   if (sortField) productsParams.set("sortField", sortField);
 
   const {
@@ -126,7 +128,7 @@ export function Products({ user }: ProductsProps) {
     setCurrentPage(1);
     setSelectedProducts(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchTerm, selectedCategory, selectedStatus, priceRange, stockFilter, marketplaceFilter, moqFilter, sortField, sortDir, itemsPerPage]);
+  }, [searchTerm, selectedCategory, selectedStatus, priceRange, stockFilter, marketplaceFilter, moqFilter, supplierFilter, sortField, sortDir, itemsPerPage]);
 
   // Selection is page-scoped (only the current page is loaded), so clear it
   // when the page changes.
@@ -684,6 +686,18 @@ export function Products({ user }: ProductsProps) {
                 </SelectContent>
               </Select>
 
+              <Select value={supplierFilter} onValueChange={setSupplierFilter}>
+                <SelectTrigger className="w-32 h-9" data-testid="select-supplier">
+                  <SelectValue placeholder="Distributor" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Distributors</SelectItem>
+                  <SelectItem value="TME">TME</SelectItem>
+                  <SelectItem value="GETIC">Getic</SelectItem>
+                  <SelectItem value="manual">Manual</SelectItem>
+                </SelectContent>
+              </Select>
+
               <Select value={String(itemsPerPage)} onValueChange={(val) => setItemsPerPage(Number(val))}>
                 <SelectTrigger className="w-24 h-9" data-testid="select-items-per-page">
                   <SelectValue placeholder="Show" />
@@ -839,6 +853,8 @@ export function Products({ user }: ProductsProps) {
                           setSelectedStatus("all");
                           setStockFilter("all");
                           setMarketplaceFilter("all");
+                          setMoqFilter("all");
+                          setSupplierFilter("all");
                           setPriceRange([0, 1000]);
                         }}
                       >

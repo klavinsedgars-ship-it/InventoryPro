@@ -256,22 +256,30 @@ export async function listProductsViaInventoryBulk(
     //    about to publish can actually ship today. v1 could only report a
     //    stock number; v2's delivery scope answers per requested quantity,
     //    which is the check that would have prevented the 2026-06 incident.
-    if (process.env.TME_API_VERSION === "v2") {
+    //    Only TME products are asked about: other suppliers' SKUs mean
+    //    nothing to TME's API, and a coincidental symbol match could block
+    //    or resize a product TME doesn't even carry.
+    const tmeInBatch = batch.filter((p) => p.supplier === "TME");
+    if (process.env.TME_API_VERSION === "v2" && tmeInBatch.length > 0) {
       try {
         const { tmeApiV2 } = await import("./tme-api-v2");
-        const symbols = batch.map((p) => p.supplierProductId || p.sku);
-        const wanted = batch.map((p) => Math.max(1, calculateEbayStock(p).ebayStock));
-        const ship = await tmeApiV2.checkShippable(symbols, wanted);
+        const symbols = tmeInBatch.map((p) => p.supplierProductId || p.sku);
+        const wantedBySymbol = new Map(
+          tmeInBatch.map((p) => [p.supplierProductId || p.sku, Math.max(1, calculateEbayStock(p).ebayStock)]),
+        );
+        const ship = await tmeApiV2.checkShippable(symbols, symbols.map((s) => wantedBySymbol.get(s)!));
         const blocked: typeof batch = [];
-        batch = batch.flatMap((p, idx) => {
-          const r = ship.get(symbols[idx]);
+        batch = batch.flatMap((p) => {
+          if (p.supplier !== "TME") return [p];
+          const symbol = p.supplierProductId || p.sku;
+          const r = ship.get(symbol);
           if (!r) return [p]; // TME said nothing about it — don't invent a block
           if (r.shippableNow <= 0) { blocked.push(p); return []; }
           // Partial availability is a smaller listing, not a skipped one. A
           // product with 1 unit shippable of the 2 we wanted was being dropped
           // entirely; now it lists at 1. Capping stock here is enough — every
           // downstream quantity flows from calculateEbayStock(product).
-          if (r.shippableNow < wanted[idx]) {
+          if (r.shippableNow < (wantedBySymbol.get(symbol) ?? 1)) {
             return [{ ...p, stock: Math.min(p.stock ?? 0, r.shippableNow) }];
           }
           return [p];

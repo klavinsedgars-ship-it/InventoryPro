@@ -1,10 +1,11 @@
 /**
- * Getic distributor feed — probe, import, and catalogue browsing.
+ * Getic distributor feed — probe, import, catalogue browsing, and promotion.
  *
- * Everything here reads/writes the supplier_offers STAGING tables only.
- * Nothing touches `products`, the listing ramp, or TME sync — a Getic offer
- * cannot reach eBay from this surface. (See shared/schema.ts on why the
- * quarantine matters.)
+ * Probe/import/browse read and write the supplier_offers STAGING tables
+ * only. POST /promote is the one deliberate door out of the quarantine: it
+ * copies selected offers into `products` (supplier='GETIC'), from where the
+ * listing ramp treats them like any other candidate. (See shared/schema.ts
+ * and server/getic-promote.ts.)
  */
 
 import type { Express } from "express";
@@ -20,8 +21,38 @@ import {
   runGeticImport,
   ensureSupplierTables,
 } from "../getic-sync";
+import {
+  geticOfferConds,
+  geticSortSql,
+  promoteGeticOffers,
+  promotableIdsFor,
+  type GeticOfferFilter,
+} from "../getic-promote";
 import { sniffFeedStructure, recordsOf, nodeToJson } from "../xml-feed";
 import { mapGeticRecord } from "../getic-feed";
+
+/**
+ * One filter parser for both surfaces — GET /offers (query params) and
+ * POST /promote {all, filter} (JSON body) — so "Add all N filtered"
+ * promotes exactly the rows the browse view is showing.
+ */
+function offerFilterFrom(src: Record<string, unknown>): GeticOfferFilter {
+  const s = (k: string) => String(src[k] ?? "").trim();
+  const num = (k: string) => {
+    const v = parseFloat(String(src[k] ?? ""));
+    return Number.isFinite(v) ? v : undefined;
+  };
+  const promoted = s("promoted");
+  return {
+    search: s("search") || undefined,
+    category: s("category") || undefined,
+    manufacturer: s("manufacturer") || undefined,
+    inStockOnly: src["inStockOnly"] === "1" || src["inStockOnly"] === true,
+    priceMin: num("priceMin"),
+    priceMax: num("priceMax"),
+    promoted: promoted === "yes" || promoted === "no" ? promoted : undefined,
+  };
+}
 
 export function registerGeticRoutes(app: Express): void {
   /**
@@ -90,6 +121,34 @@ export function registerGeticRoutes(app: Express): void {
     }
   });
 
+  /**
+   * Hourly feed refresh — but only once something is promoted. While the
+   * catalogue is pure staging, the operator imports by hand from the browser
+   * page; the moment promoted products exist, their price/stock must track
+   * the feed unattended (the post-import refresh inside runGeticImport does
+   * the propagation). Same no-auth posture as the other /api/cron/*
+   * handlers (Vercel cron calls carry no session).
+   */
+  const geticImportCronHandler = async (_req: any, res: any) => {
+    try {
+      const { promotedGeticCount } = await import("../getic-promote");
+      if ((await promotedGeticCount()) === 0) {
+        return res.json({ ok: true, skipped: true, reason: "no promoted Getic products yet — import manually from the browser page" });
+      }
+      const r = await withLease(leaseStore, "getic-import", { ttlSeconds: 300 }, () =>
+        runGeticImport({ dryRun: false }),
+      );
+      if (!r.ran) {
+        return res.json({ ok: true, skipped: true, reason: describeRefusal("getic-import", r) });
+      }
+      res.json(r.result);
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  };
+  app.get("/api/cron/getic-import", geticImportCronHandler);
+  app.post("/api/cron/getic-import", geticImportCronHandler);
+
   /** Import history + headline counts for the browser page. */
   app.get("/api/getic/status", requireAuth, async (_req, res) => {
     try {
@@ -110,6 +169,7 @@ export function registerGeticRoutes(app: Express): void {
                count(*) FILTER (WHERE weight_g IS NOT NULL)::int AS with_weight,
                count(*) FILTER (WHERE image_url IS NOT NULL)::int AS with_image,
                count(*) FILTER (WHERE price IS NOT NULL)::int AS with_price,
+               count(*) FILTER (WHERE promoted_product_id IS NOT NULL)::int AS promoted,
                max(last_seen_at) AS last_seen_at
         FROM supplier_offers
         WHERE supplier = ${GETIC_SUPPLIER}
@@ -135,25 +195,17 @@ export function registerGeticRoutes(app: Express): void {
       await ensureSupplierTables();
       const page = Math.max(1, parseInt(String(req.query.page ?? "1"), 10) || 1);
       const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? "50"), 10) || 50));
-      const search = String(req.query.search ?? "").trim();
-      const category = String(req.query.category ?? "").trim();
-      const inStockOnly = req.query.inStockOnly === "1";
 
-      const conds = [sql`supplier = ${GETIC_SUPPLIER}`];
-      if (search) {
-        const like = `%${search}%`;
-        conds.push(sql`(name ILIKE ${like} OR supplier_sku ILIKE ${like} OR ean ILIKE ${like} OR manufacturer ILIKE ${like})`);
-      }
-      if (category) conds.push(sql`category_path = ${category}`);
-      if (inStockOnly) conds.push(sql`stock > 0`);
-      const where = sql.join(conds, sql` AND `);
+      const where = sql.join(geticOfferConds(offerFilterFrom(req.query as Record<string, unknown>)), sql` AND `);
+      const orderBy = geticSortSql(String(req.query.sort ?? "id"));
 
       const rowsQ: any = await db.execute(sql`
         SELECT id, supplier_sku, name, ean, manufacturer, mpn, category_path,
-               price, currency, stock, weight_g, image_url, product_url, last_seen_at
+               price, currency, stock, weight_g, image_url, product_url, last_seen_at,
+               promoted_product_id, promoted_at
         FROM supplier_offers
         WHERE ${where}
-        ORDER BY id
+        ORDER BY ${orderBy}
         LIMIT ${limit} OFFSET ${(page - 1) * limit}
       `);
       const totalQ: any = await db.execute(
@@ -200,6 +252,57 @@ export function registerGeticRoutes(app: Express): void {
         LIMIT 300
       `);
       res.json({ ok: true, categories: q.rows ?? q });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  });
+
+  /** Distinct manufacturers with counts, for the browse filter. */
+  app.get("/api/getic/manufacturers", requireAuth, async (_req, res) => {
+    try {
+      await ensureSupplierTables();
+      const q: any = await db.execute(sql`
+        SELECT manufacturer, count(*)::int AS count
+        FROM supplier_offers
+        WHERE supplier = ${GETIC_SUPPLIER} AND manufacturer IS NOT NULL AND manufacturer <> ''
+        GROUP BY manufacturer
+        ORDER BY count DESC
+        LIMIT 500
+      `);
+      res.json({ ok: true, manufacturers: q.rows ?? q });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  });
+
+  /**
+   * Promote offers into `products`. Body is either {ids: [...]} (explicit
+   * selection) or {all: true, filter: {...}} (everything the current browse
+   * filter matches). Lease-guarded: a double click must not race two
+   * promotions into duplicate-SKU errors. Time-bounded: a huge "all"
+   * returns a partial result with `remaining` — call again to continue
+   * (already-promoted rows are skipped, so repeats converge).
+   */
+  app.post("/api/getic/promote", requireAuth, async (req, res) => {
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      let ids: number[];
+      if (Array.isArray(body.ids) && body.ids.length > 0) {
+        ids = (body.ids as unknown[])
+          .map((n) => parseInt(String(n), 10))
+          .filter((n) => Number.isFinite(n));
+      } else if (body.all === true) {
+        ids = await promotableIdsFor(offerFilterFrom((body.filter ?? {}) as Record<string, unknown>));
+      } else {
+        return res.status(400).json({ ok: false, error: "pass {ids:[...]} or {all:true, filter:{...}}" });
+      }
+      const r = await withLease(leaseStore, "getic-promote", { ttlSeconds: 300 }, () =>
+        promoteGeticOffers(ids),
+      );
+      if (!r.ran) {
+        return res.status(409).json({ ok: false, error: describeRefusal("getic-promote", r) });
+      }
+      res.json(r.result);
     } catch (error) {
       res.status(500).json({ ok: false, error: (error as Error).message });
     }
