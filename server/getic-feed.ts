@@ -317,12 +317,29 @@ export function mapGeticRecord(rec: JsonRecord): NormalizedOffer {
   }
 
   const sku = first(skuF);
+  const ean = first(eanF)?.replace(/[^0-9Xx]/g, "") || null;
+  const mpn = first(mpnF);
+
+  // Some feeds carry NO product-code field at all (the live Getic feed's
+  // records are exactly: title, link, price, image, qty, brand, mpn, ean).
+  // The EAN is unique and stable per product, which is all a supplier SKU
+  // must be — derive it, and say so in sourceKeys. MPN is the second resort
+  // (unique only per brand).
+  let supplierSku = sku ? sku.trim().toUpperCase() : null;
+  if (!supplierSku && ean) {
+    supplierSku = ean.toUpperCase();
+    sourceKeys.sku = `${eanF!.path} (EAN used as SKU — feed has no code field)`;
+  } else if (!supplierSku && mpn) {
+    supplierSku = mpn.trim().toUpperCase();
+    sourceKeys.sku = `${mpnF!.path} (MPN used as SKU — feed has no code field)`;
+  }
+
   return {
-    supplierSku: sku ? sku.trim().toUpperCase() : null,
+    supplierSku,
     name: first(nameF),
-    ean: first(eanF)?.replace(/[^0-9Xx]/g, "") || null,
+    ean,
     manufacturer: first(manufacturerF),
-    mpn: first(mpnF),
+    mpn: mpn ?? null,
     categoryPath,
     description: description ? description.slice(0, MAX_DESCRIPTION) : null,
     price: priceF ? parseFeedNumber(first(priceF)) : null,

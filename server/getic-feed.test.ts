@@ -261,3 +261,40 @@ describe("dialects the first live probe could not see (2026-08-31 hardening)", (
     expect(offer.attributes.preces_kods).toBe("FUZZY-1");
   });
 });
+
+describe("SKU derivation when the feed has no code field (live Getic shape)", () => {
+  const geticRecord = {
+    title: "Ubiquiti airMAX 5 GHz, 19 dBi Sector AM-5G19-120",
+    link: "https://getic.com/p/am-5g19-120",
+    price: "123.99",
+    image: "https://cdn.getic.com/am.jpg",
+    qty: "31",
+    brand: "Ubiquiti",
+    mpn: "AM-5G19-120",
+    ean: "0810354020919",
+  };
+
+  it("uses the EAN as the SKU and says so", () => {
+    const offer = mapGeticRecord({ ...geticRecord });
+    expect(offer.supplierSku).toBe("0810354020919");
+    expect(offer.ean).toBe("0810354020919");
+    expect(offer.sourceKeys.sku).toContain("EAN used as SKU");
+    expect(offer.name).toBe(geticRecord.title);
+    expect(offer.mpn).toBe("AM-5G19-120");
+    expect(offer.price).toBe(123.99);
+    expect(offer.stock).toBe(31);
+  });
+
+  it("falls to MPN when there is no EAN either", () => {
+    const { ean, ...noEan } = geticRecord;
+    const offer = mapGeticRecord(noEan as any);
+    expect(offer.supplierSku).toBe("AM-5G19-120");
+    expect(offer.sourceKeys.sku).toContain("MPN used as SKU");
+  });
+
+  it("an explicit code still beats the EAN fallback", () => {
+    const offer = mapGeticRecord({ ...geticRecord, sku: "GT-1" });
+    expect(offer.supplierSku).toBe("GT-1");
+    expect(offer.ean).toBe("0810354020919");
+  });
+});
