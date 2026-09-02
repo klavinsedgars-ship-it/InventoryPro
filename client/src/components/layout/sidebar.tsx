@@ -32,6 +32,7 @@ const navigation = [
   { name: 'Messages', href: '/messages', icon: MessageSquare },
   { name: 'TME Browser', href: '/tme-browser', icon: Search },
   { name: 'Getic Browser', href: '/getic-browser', icon: Boxes },
+  { name: 'Green Cell Browser', href: '/greencell-browser', icon: Boxes },
   { name: 'Opportunities', href: '/opportunities', icon: Target },
   { name: 'Sales Performance', href: '/sales-performance', icon: LineChart },
   { name: 'Market Research', href: '/market-research', icon: TrendingUp },

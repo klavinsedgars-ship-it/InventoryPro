@@ -1,9 +1,16 @@
 /**
- * Getic XML feed → supplier_offers staging table.
+ * XML supplier feed → supplier_offers staging table.
  *
- * DELIBERATELY does not touch `products`: everything here writes to the
- * staging tables only (see the comment on supplierOffers in shared/schema.ts).
- * Promotion into the live catalogue is a separate, not-yet-built step.
+ * Built for Getic (2026-08-28), generalized when Green Cell arrived
+ * (2026-09-02): every distributor that hands us a product XML runs through
+ * this same engine, keyed by the `supplier` column. Adding a distributor is
+ * one entry in FEED_SUPPLIERS below — the parser discovers the record
+ * element, the mapper reads fields by name heuristics (server/getic-feed.ts,
+ * generic despite the name), and the routes/UI are registered per config.
+ *
+ * Everything here writes to the staging tables only (see the comment on
+ * supplierOffers in shared/schema.ts); promotion into `products` lives in
+ * server/supplier-promote.ts.
  *
  * The import is a single pass: fetch the whole feed (it is one document — no
  * pagination to resume), stream-scan it record by record, upsert in batches.
@@ -15,10 +22,39 @@ import { db } from "./db";
 import { supplierOffers, supplierFeedRuns, type SupplierFeedRun } from "@shared/schema";
 import { sniffFeedStructure, recordsOf, nodeToJson, detectXmlEncoding, type FeedStructure, type JsonRecord } from "./xml-feed";
 import { mapGeticRecord, coverageOf, flattenRecord, type NormalizedOffer } from "./getic-feed";
-import type { GeticRefreshStats } from "./getic-promote";
+import type { SupplierRefreshStats } from "./supplier-promote";
 
-export const GETIC_SUPPLIER = "GETIC";
-export const GETIC_FEED_URL = process.env.GETIC_FEED_URL || "https://api.getic.com/xml/rentbox/xml";
+export interface SupplierFeedConfig {
+  /** Value of the `supplier` column, e.g. "GETIC". Uppercase, stable. */
+  supplier: string;
+  /** URL path segment: /api/<slug>/*, /api/cron/<slug>-import. */
+  slug: string;
+  /** What the UI calls it. */
+  displayName: string;
+  feedUrl: string;
+}
+
+export const GETIC_FEED: SupplierFeedConfig = {
+  supplier: "GETIC",
+  slug: "getic",
+  displayName: "Getic",
+  feedUrl: process.env.GETIC_FEED_URL || "https://api.getic.com/xml/rentbox/xml",
+};
+
+// The default URL carries the b2b portal's secure key. That is how Green
+// Cell hands the feed out; set GREENCELL_FEED_URL to rotate the key without
+// a deploy.
+export const GREENCELL_FEED: SupplierFeedConfig = {
+  supplier: "GREENCELL",
+  slug: "greencell",
+  displayName: "Green Cell",
+  feedUrl:
+    process.env.GREENCELL_FEED_URL ||
+    "https://b2b.greencell.global/modules/xmlgenerator/get.php?secure_key=f82911a066faf27873aaa5d80c875fd2",
+};
+
+/** Every XML-feed distributor. Routes, crons and the UI iterate this. */
+export const FEED_SUPPLIERS: SupplierFeedConfig[] = [GETIC_FEED, GREENCELL_FEED];
 
 /** Refuse to buffer a feed beyond this — something is wrong upstream. */
 const MAX_FEED_BYTES = 150 * 1024 * 1024;
@@ -113,8 +149,8 @@ export interface FetchedFeed {
   encoding: string;
 }
 
-export async function fetchGeticFeed(opts?: { timeoutMs?: number; url?: string }): Promise<FetchedFeed> {
-  const url = opts?.url ?? GETIC_FEED_URL;
+export async function fetchSupplierFeed(config: SupplierFeedConfig, opts?: { timeoutMs?: number; url?: string }): Promise<FetchedFeed> {
+  const url = opts?.url ?? config.feedUrl;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), opts?.timeoutMs ?? 120_000);
   (timer as any).unref?.();
@@ -155,7 +191,7 @@ export async function fetchGeticFeed(opts?: { timeoutMs?: number; url?: string }
 // ---------------------------------------------------------------------------
 // Import
 // ---------------------------------------------------------------------------
-export interface GeticImportOptions {
+export interface SupplierImportOptions {
   dryRun?: boolean;
   /** Dry run: how many records to sample (default 25). */
   limit?: number;
@@ -164,7 +200,7 @@ export interface GeticImportOptions {
   timeBudgetMs?: number;
 }
 
-export interface GeticImportResult {
+export interface SupplierImportResult {
   ok: boolean;
   dryRun: boolean;
   structure: FeedStructure;
@@ -181,22 +217,22 @@ export interface GeticImportResult {
   /** Dry run only: the mapped sample for eyeballing. */
   sample?: NormalizedOffer[];
   /** Real runs: promoted products refreshed from the new feed state. */
-  refresh?: GeticRefreshStats | { skipped: string } | { error: string };
+  refresh?: SupplierRefreshStats | { skipped: string } | { error: string };
   runId?: number;
   status?: string;
   error?: string;
 }
 
-export async function runGeticImport(opts: GeticImportOptions = {}): Promise<GeticImportResult> {
+export async function runSupplierFeedImport(config: SupplierFeedConfig, opts: SupplierImportOptions = {}): Promise<SupplierImportResult> {
   const dryRun = !!opts.dryRun;
   const started = Date.now();
   const timeBudgetMs = opts.timeBudgetMs ?? 240_000;
 
-  const feed = await fetchGeticFeed();
+  const feed = await fetchSupplierFeed(config);
   const structure = sniffFeedStructure(feed.xml);
   const recordElement = opts.recordElement || structure.recordElement;
 
-  const base: Omit<GeticImportResult, "ok"> = {
+  const base: Omit<SupplierImportResult, "ok"> = {
     dryRun,
     structure,
     recordElement,
@@ -241,9 +277,9 @@ export async function runGeticImport(opts: GeticImportOptions = {}): Promise<Get
   const [runRow] = await db
     .insert(supplierFeedRuns)
     .values({
-      supplier: GETIC_SUPPLIER,
+      supplier: config.supplier,
       status: "running",
-      url: GETIC_FEED_URL,
+      url: config.feedUrl,
       httpStatus: feed.httpStatus,
       contentType: feed.contentType,
       bytes: feed.bytes,
@@ -253,7 +289,7 @@ export async function runGeticImport(opts: GeticImportOptions = {}): Promise<Get
     .returning();
   const runId = runRow.id;
 
-  const countBefore = await countOffers();
+  const countBefore = await countOffers(config.supplier);
 
   const seenSkus = new Set<string>();
   type OfferRow = typeof supplierOffers.$inferInsert;
@@ -268,7 +304,7 @@ export async function runGeticImport(opts: GeticImportOptions = {}): Promise<Get
   const errors: string[] = [];
 
   const toRow = (o: NormalizedOffer, rawJson: JsonRecord): OfferRow => ({
-    supplier: GETIC_SUPPLIER,
+    supplier: config.supplier,
     supplierSku: o.supplierSku!,
     name: o.name,
     ean: o.ean,
@@ -365,7 +401,7 @@ export async function runGeticImport(opts: GeticImportOptions = {}): Promise<Get
     }
     await flush();
   } catch (e) {
-    const countAfterErr = await countOffers().catch(() => countBefore);
+    const countAfterErr = await countOffers(config.supplier).catch(() => countBefore);
     await finishRun(runId, {
       status: "failed",
       error: (e as Error).message,
@@ -392,7 +428,7 @@ export async function runGeticImport(opts: GeticImportOptions = {}): Promise<Get
     };
   }
 
-  const countAfter = await countOffers();
+  const countAfter = await countOffers(config.supplier);
   const newRecords = Math.max(0, countAfter - countBefore);
   const status = budgetHit ? "partial" : "completed";
   await finishRun(runId, {
@@ -408,19 +444,19 @@ export async function runGeticImport(opts: GeticImportOptions = {}): Promise<Get
   });
 
   // Freshness: promoted products must follow the feed. Dynamic import —
-  // getic-promote imports this module at top level, so a static import here
-  // would be a cycle. Refresh errors are reported, never thrown: the import
-  // itself succeeded and its result must say so.
-  let refresh: GeticImportResult["refresh"];
+  // supplier-promote imports this module at top level, so a static import
+  // here would be a cycle. Refresh errors are reported, never thrown: the
+  // import itself succeeded and its result must say so.
+  let refresh: SupplierImportResult["refresh"];
   const remainingMs = timeBudgetMs - (Date.now() - started);
   if (budgetHit || remainingMs < 20_000) {
     refresh = { skipped: budgetHit ? "import hit its time budget" : "not enough time budget left" };
   } else {
     try {
-      const { promotedGeticCount, refreshPromotedGeticProducts } = await import("./getic-promote");
+      const { promotedProductCount, refreshPromotedProducts } = await import("./supplier-promote");
       refresh =
-        (await promotedGeticCount()) > 0
-          ? await refreshPromotedGeticProducts(remainingMs)
+        (await promotedProductCount(config.supplier)) > 0
+          ? await refreshPromotedProducts(config.supplier, remainingMs)
           : { skipped: "nothing promoted yet" };
     } catch (e) {
       refresh = { error: (e as Error).message };
@@ -443,9 +479,9 @@ export async function runGeticImport(opts: GeticImportOptions = {}): Promise<Get
   };
 }
 
-async function countOffers(): Promise<number> {
+async function countOffers(supplier: string): Promise<number> {
   const q: any = await db.execute(
-    sql`SELECT count(*)::int AS c FROM supplier_offers WHERE supplier = ${GETIC_SUPPLIER}`,
+    sql`SELECT count(*)::int AS c FROM supplier_offers WHERE supplier = ${supplier}`,
   );
   return (q.rows ?? q)?.[0]?.c ?? 0;
 }

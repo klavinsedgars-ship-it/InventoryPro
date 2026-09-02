@@ -27,16 +27,18 @@ import {
 } from "lucide-react";
 
 /*
- * Getic feed browser.
+ * Supplier feed browser — one page per XML distributor (Getic, Green Cell,
+ * …), parameterized by the API slug. App.tsx mounts an instance per
+ * distributor route.
  *
  * Import and browsing work on the supplier_offers staging table. "Add to
  * Products" (promotion) is the one door out of staging: selected offers
- * become products with supplier=GETIC, priced through the same floor math
+ * become products under this supplier, priced through the same floor math
  * as TME, and the listing ramp picks them up like any other candidate.
  * An offer stays quarantined until someone promotes it here.
  */
 
-interface GeticOffer {
+interface SupplierOffer {
   id: number;
   supplier_sku: string;
   name: string | null;
@@ -55,7 +57,7 @@ interface GeticOffer {
   promoted_at: string | null;
 }
 
-interface GeticStatus {
+interface SupplierFeedStatus {
   ok: boolean;
   feedUrl: string;
   counts: {
@@ -93,6 +95,7 @@ interface PromoteResult {
     skuExists: number;
     eanExists: number;
     noPrice: number;
+    wrongCurrency: number;
   };
   skippedSamples: Array<{ sku: string; reason: string }>;
   budgetHit: boolean;
@@ -112,7 +115,7 @@ const SORT_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "newest", label: "Newest first" },
 ];
 
-export default function GeticBrowser({ user }: { user?: any }) {
+export default function SupplierBrowser({ user, slug, name }: { user?: any; slug: string; name: string }) {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -138,8 +141,8 @@ export default function GeticBrowser({ user }: { user?: any }) {
   const [confirmPromoteAll, setConfirmPromoteAll] = useState(false);
   const [promoteResult, setPromoteResult] = useState<PromoteResult | null>(null);
 
-  const { data: status, isLoading: statusLoading } = useQuery<GeticStatus>({
-    queryKey: ["/api/getic/status"],
+  const { data: status, isLoading: statusLoading } = useQuery<SupplierFeedStatus>({
+    queryKey: [`/api/${slug}/status`],
   });
 
   // The applied filter, in the exact shape the server's offerFilterFrom
@@ -156,7 +159,7 @@ export default function GeticBrowser({ user }: { user?: any }) {
   };
 
   const offersKey =
-    `/api/getic/offers?page=${page}&limit=50&sort=${sort}` +
+    `/api/${slug}/offers?page=${page}&limit=50&sort=${sort}` +
     `&search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}` +
     `&manufacturer=${encodeURIComponent(manufacturer)}` +
     (priceMin ? `&priceMin=${encodeURIComponent(priceMin)}` : "") +
@@ -168,32 +171,32 @@ export default function GeticBrowser({ user }: { user?: any }) {
   });
 
   const { data: categoriesData } = useQuery<any>({
-    queryKey: ["/api/getic/categories"],
+    queryKey: [`/api/${slug}/categories`],
   });
 
   const { data: manufacturersData } = useQuery<any>({
-    queryKey: ["/api/getic/manufacturers"],
+    queryKey: [`/api/${slug}/manufacturers`],
   });
 
   const { data: probeData, isFetching: probeLoading, isError: probeError, error: probeErr, refetch: refetchProbe } = useQuery<any>({
-    queryKey: ["/api/getic/probe"],
+    queryKey: [`/api/${slug}/probe`],
     enabled: probeOpen,
     staleTime: 60_000,
   });
 
   const { data: detailData, isFetching: detailLoading } = useQuery<any>({
-    queryKey: [`/api/getic/offers/${detailId}`],
+    queryKey: [`/api/${slug}/offers/${detailId}`],
     enabled: detailId != null,
   });
 
   const dryRunMutation = useMutation({
-    mutationFn: async () => (await apiRequest("POST", "/api/getic/import?dryRun=1&limit=25")).json(),
+    mutationFn: async () => (await apiRequest("POST", `/api/${slug}/import?dryRun=1&limit=25`)).json(),
     onSuccess: (d: any) => setPreview(d),
     onError: (e: any) => toast({ title: "Dry run failed", description: e.message, variant: "destructive" }),
   });
 
   const importMutation = useMutation({
-    mutationFn: async () => (await apiRequest("POST", "/api/getic/import")).json(),
+    mutationFn: async () => (await apiRequest("POST", `/api/${slug}/import`)).json(),
     onSuccess: (d: any) => {
       setConfirmImport(false);
       if (!d.ok) {
@@ -204,7 +207,7 @@ export default function GeticBrowser({ user }: { user?: any }) {
         title: d.status === "partial" ? "Import ran out of time — run again to continue" : "Feed imported",
         description: `${d.recordsSeen} records seen, ${d.recordsUpserted} upserted, ${d.newRecords} new, ${d.recordsFailed} failed`,
       });
-      qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith("/api/getic/") });
+      qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith(`/api/${slug}/`) });
     },
     onError: (e: any) => {
       setConfirmImport(false);
@@ -214,7 +217,7 @@ export default function GeticBrowser({ user }: { user?: any }) {
 
   const promoteMutation = useMutation({
     mutationFn: async (body: { ids?: number[]; all?: true; filter?: typeof appliedFilter }) =>
-      (await apiRequest("POST", "/api/getic/promote", body)).json(),
+      (await apiRequest("POST", `/api/${slug}/promote`, body)).json(),
     onSuccess: (d: PromoteResult & { error?: string }) => {
       setConfirmPromoteAll(false);
       if (!d.ok) {
@@ -223,7 +226,7 @@ export default function GeticBrowser({ user }: { user?: any }) {
       }
       setSelected(new Set());
       setPromoteResult(d);
-      qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith("/api/getic/") });
+      qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith(`/api/${slug}/`) });
       qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith("/api/products") });
     },
     onError: (e: any) => {
@@ -234,7 +237,7 @@ export default function GeticBrowser({ user }: { user?: any }) {
 
   const counts = status?.counts;
   const lastRun = status?.runs?.[0];
-  const offers: GeticOffer[] = offersData?.offers ?? [];
+  const offers: SupplierOffer[] = offersData?.offers ?? [];
   const total: number = offersData?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / 50));
   const categories: Array<{ category_path: string; count: number }> = categoriesData?.categories ?? [];
@@ -276,8 +279,8 @@ export default function GeticBrowser({ user }: { user?: any }) {
       <Sidebar user={user} collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
       <div className={`transition-all duration-200 ${sidebarCollapsed ? "ml-16" : "ml-64"}`}>
         <Header
-          title="Getic Browser"
-          subtitle="Getic XML feed catalogue — browse the staging import, promote selected offers into Products"
+          title={`${name} Browser`}
+          subtitle={`${name} XML feed catalogue — browse the staging import, promote selected offers into Products`}
         />
 
         <div className="p-6 space-y-6">
@@ -286,7 +289,7 @@ export default function GeticBrowser({ user }: { user?: any }) {
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between flex-wrap gap-3">
                 <CardTitle className="flex items-center gap-2 text-base">
-                  <Package className="w-4 h-4" /> Getic feed
+                  <Package className="w-4 h-4" /> {name} feed
                   <span className="text-xs font-normal text-gray-400">{status?.feedUrl}</span>
                 </CardTitle>
                 <div className="flex items-center gap-2">
@@ -599,7 +602,7 @@ export default function GeticBrowser({ user }: { user?: any }) {
               {promoteResult?.promoted ?? 0} product(s) added
             </DialogTitle>
             <DialogDescription>
-              Promoted offers are now in Products with supplier GETIC — the listing ramp will pick them up on its next tick.
+              Promoted offers are now in Products under {name} — the listing ramp will pick them up on its next tick.
             </DialogDescription>
           </DialogHeader>
           {promoteResult && (
@@ -611,6 +614,7 @@ export default function GeticBrowser({ user }: { user?: any }) {
                 {promoteResult.skipped.eanExists > 0 && <Badge variant="secondary">{promoteResult.skipped.eanExists} EAN already carried</Badge>}
                 {promoteResult.skipped.blocked > 0 && <Badge variant="destructive">{promoteResult.skipped.blocked} blocked</Badge>}
                 {promoteResult.skipped.noPrice > 0 && <Badge variant="destructive">{promoteResult.skipped.noPrice} without usable price</Badge>}
+                {promoteResult.skipped.wrongCurrency > 0 && <Badge variant="destructive">{promoteResult.skipped.wrongCurrency} non-EUR price</Badge>}
               </div>
               {promoteResult.remaining > 0 && (
                 <p className="text-amber-600">

@@ -1,33 +1,36 @@
 /**
- * Getic promotion: copy selected staging offers into `products`.
+ * Supplier promotion: copy selected staging offers into `products`.
  *
  * This is the one deliberate door in the staging quarantine (see the comment
  * on supplierOffers in shared/schema.ts). A promoted offer becomes a normal
- * product row with supplier='GETIC', priced through the same
+ * product row carrying its supplier code, priced through the same
  * calculatePriceWithFloor path as TME products, and from there the listing
- * ramp picks it up like any other candidate (LISTING_SUPPLIERS includes
- * GETIC as of 2026-09).
+ * ramp picks it up like any other candidate — IF the supplier is named in
+ * LISTING_SUPPLIERS (shared/suppliers.ts); that list stays the boundary.
  *
  * What refuses to cross the door, per offer:
  *  - already promoted (promoted_product_id set) — idempotence;
  *  - SKU on the operator's blocked list;
  *  - a product with the same SKU already exists (collision — usually the
- *    part is already carried via TME under the same code);
+ *    part is already carried by another supplier under the same code);
  *  - a product with the same EAN already exists (same physical item under a
  *    different code — listing it twice means bidding against ourselves);
- *  - no usable feed price (salePrice is NOT NULL; nothing to price from).
+ *  - no usable feed price (salePrice is NOT NULL; nothing to price from);
+ *  - a price in a currency that is not EUR — the whole pricing pipeline is
+ *    EUR, so a PLN/USD feed price would silently become a wrong eBay price.
+ *    A feed that states no currency is taken as EUR (Getic's case).
  *
- * The feed carries no MOQ/multiples/weight, so promoted products get
- * moq=1, multiples=1, weight NULL — the profit floor then works from the
- * unit price and the config's default shipping assumption. Prices in the
- * feed are assumed EUR (the feed states no currency).
+ * Feeds rarely carry MOQ/multiples/weight, so promoted products get
+ * moq=1, multiples=1, weight from the feed when present else NULL — the
+ * profit floor then works from the unit price and the config's default
+ * shipping assumption.
  */
 
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { db } from "./db";
 import { products, supplierOffers, type SupplierOffer } from "@shared/schema";
 import { storage } from "./storage";
-import { GETIC_SUPPLIER, ensureSupplierTables } from "./getic-sync";
+import { ensureSupplierTables } from "./supplier-feed-sync";
 import {
   calculatePriceWithFloor,
   setActivePricingTiers,
@@ -35,13 +38,20 @@ import {
 } from "./dynamic-pricing";
 import { getFeeConfig } from "./fee-config";
 
+/** EUR, or an unstated currency we take to be EUR. */
+function isEurOrUnstated(currency: string | null): boolean {
+  const c = (currency ?? "").trim();
+  return c === "" || /^(eur|euro|€)$/i.test(c);
+}
+
 const CHUNK = 200;
 
 /**
  * When the feed gives no category (Getic's doesn't), file the product under a
  * deliberately generic name: categoryQueryFor() treats it as "no signal" and
  * falls back to the product NAME for the Taxonomy query at listing time,
- * which is the right lever for this feed — its names are full product titles.
+ * which is the right lever for these feeds — their names are full product
+ * titles.
  */
 const FALLBACK_CATEGORY = "Electronics";
 
@@ -49,7 +59,7 @@ const FALLBACK_CATEGORY = "Electronics";
 // Shared browse/promote filter — one builder so "Add all N filtered" promotes
 // exactly the rows the operator is looking at.
 // ---------------------------------------------------------------------------
-export interface GeticOfferFilter {
+export interface SupplierOfferFilter {
   search?: string;
   category?: string;
   manufacturer?: string;
@@ -60,8 +70,8 @@ export interface GeticOfferFilter {
   promoted?: "yes" | "no";
 }
 
-export function geticOfferConds(f: GeticOfferFilter): SQL[] {
-  const conds: SQL[] = [sql`supplier = ${GETIC_SUPPLIER}`];
+export function offerConds(supplier: string, f: SupplierOfferFilter): SQL[] {
+  const conds: SQL[] = [sql`supplier = ${supplier}`];
   if (f.search) {
     const like = `%${f.search}%`;
     conds.push(
@@ -79,7 +89,7 @@ export function geticOfferConds(f: GeticOfferFilter): SQL[] {
 }
 
 /** Whitelisted ORDER BY clauses; anything else falls back to id. */
-export const GETIC_SORTS: Record<string, SQL> = {
+export const OFFER_SORTS: Record<string, SQL> = {
   id: sql`id`,
   name: sql`name ASC NULLS LAST, id`,
   price_asc: sql`price ASC NULLS LAST, id`,
@@ -88,8 +98,8 @@ export const GETIC_SORTS: Record<string, SQL> = {
   newest: sql`first_seen_at DESC, id`,
 };
 
-export function geticSortSql(sort: string | undefined): SQL {
-  return GETIC_SORTS[sort ?? "id"] ?? GETIC_SORTS.id;
+export function offerSortSql(sort: string | undefined): SQL {
+  return OFFER_SORTS[sort ?? "id"] ?? OFFER_SORTS.id;
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +115,7 @@ export interface PromoteResult {
     skuExists: number;
     eanExists: number;
     noPrice: number;
+    wrongCurrency: number;
   };
   /** First 50 skips, with reasons — enough to see WHY without a log dive. */
   skippedSamples: Array<{ sku: string; reason: string }>;
@@ -118,7 +129,8 @@ export interface PromoteResult {
  * gets a partial result with `remaining` instead of a 504. Safe to re-run —
  * everything it did is stamped, everything it skipped is stable.
  */
-export async function promoteGeticOffers(
+export async function promoteSupplierOffers(
+  supplier: string,
   ids: number[],
   opts: { budgetMs?: number } = {},
 ): Promise<PromoteResult> {
@@ -130,7 +142,7 @@ export async function promoteGeticOffers(
     ok: true,
     requested: ids.length,
     promoted: 0,
-    skipped: { alreadyPromoted: 0, blocked: 0, skuExists: 0, eanExists: 0, noPrice: 0 },
+    skipped: { alreadyPromoted: 0, blocked: 0, skuExists: 0, eanExists: 0, noPrice: 0, wrongCurrency: 0 },
     skippedSamples: [],
     budgetHit: false,
     remaining: 0,
@@ -157,7 +169,7 @@ export async function promoteGeticOffers(
     const offers = (await db
       .select()
       .from(supplierOffers)
-      .where(and(eq(supplierOffers.supplier, GETIC_SUPPLIER), inArray(supplierOffers.id, chunkIds)))) as SupplierOffer[];
+      .where(and(eq(supplierOffers.supplier, supplier), inArray(supplierOffers.id, chunkIds)))) as SupplierOffer[];
 
     const fresh = offers.filter((o) => {
       if (o.promotedProductId != null) {
@@ -202,6 +214,10 @@ export async function promoteGeticOffers(
         skip(sku, "eanExists", `EAN ${o.ean} already carried by an existing product`);
         continue;
       }
+      if (!isEurOrUnstated(o.currency)) {
+        skip(sku, "wrongCurrency", `feed price is in ${o.currency} — only EUR can be promoted`);
+        continue;
+      }
       const unit = o.price != null ? parseFloat(String(o.price)) : NaN;
       if (!Number.isFinite(unit) || unit <= 0) {
         skip(sku, "noPrice", "offer has no usable price");
@@ -244,7 +260,7 @@ export async function promoteGeticOffers(
           multiples: 1,
           weight: o.weightG != null ? String(o.weightG) : null,
           status: "active",
-          supplier: GETIC_SUPPLIER,
+          supplier,
           supplierProductId: sku,
           imageUrl: o.imageUrl,
           dataSheetUrl: o.datasheetUrl,
@@ -287,7 +303,7 @@ export async function promoteGeticOffers(
 // ---------------------------------------------------------------------------
 // Freshness: after each feed import, promoted products must follow the feed.
 // ---------------------------------------------------------------------------
-export interface GeticRefreshStats {
+export interface SupplierRefreshStats {
   scanned: number;
   updated: number;
   pushedToEbay: number;
@@ -300,12 +316,12 @@ export interface GeticRefreshStats {
  * Copy the latest feed price/stock from promoted offers onto their product
  * rows, recompute the floor price (manual-priced products keep their price —
  * same rule as everywhere else), and push changes for live listings to eBay.
- * Called after every successful real import (see runGeticImport), so a
- * promoted product tracks the feed exactly like a TME product tracks TME.
+ * Called after every successful real import (see runSupplierFeedImport), so
+ * a promoted product tracks its feed exactly like a TME product tracks TME.
  */
-export async function refreshPromotedGeticProducts(budgetMs = 120_000): Promise<GeticRefreshStats> {
+export async function refreshPromotedProducts(supplier: string, budgetMs = 120_000): Promise<SupplierRefreshStats> {
   const started = Date.now();
-  const stats: GeticRefreshStats = {
+  const stats: SupplierRefreshStats = {
     scanned: 0,
     updated: 0,
     pushedToEbay: 0,
@@ -316,9 +332,10 @@ export async function refreshPromotedGeticProducts(budgetMs = 120_000): Promise<
 
   setActivePricingTiers(dbTiersToPricingTiers(await storage.getPricingTiers()));
   const feeConfig = await getFeeConfig("ebay");
-  // Lazy: keeps getic-sync → getic-promote import-safe (getic-promote
-  // imports getic-sync at module scope; the eBay client pulls in a large
-  // graph that must not load for a plain import with nothing promoted).
+  // Lazy: keeps supplier-feed-sync → supplier-promote import-safe (this
+  // module imports supplier-feed-sync at module scope; the eBay client pulls
+  // in a large graph that must not load for a plain import with nothing
+  // promoted).
   const { ebayInventoryApi } = await import("./ebay-inventory-api");
   const { calculateEbayStock } = await import("./stock-manager");
 
@@ -333,7 +350,7 @@ export async function refreshPromotedGeticProducts(budgetMs = 120_000): Promise<
       .select({ offer: supplierOffers, product: products })
       .from(supplierOffers)
       .innerJoin(products, eq(products.id, supplierOffers.promotedProductId))
-      .where(and(eq(supplierOffers.supplier, GETIC_SUPPLIER), sql`${supplierOffers.id} > ${cursor}`))
+      .where(and(eq(supplierOffers.supplier, supplier), sql`${supplierOffers.id} > ${cursor}`))
       .orderBy(supplierOffers.id)
       .limit(500);
     if (pairs.length === 0) break;
@@ -348,7 +365,9 @@ export async function refreshPromotedGeticProducts(budgetMs = 120_000): Promise<
 
       const unit = offer.price != null ? parseFloat(String(offer.price)) : NaN;
       let newSale = parseFloat(product.salePrice) || 0;
-      if (Number.isFinite(unit) && unit > 0) {
+      // A non-EUR price never flows into the catalogue (same rule as
+      // promotion); stock still refreshes below.
+      if (Number.isFinite(unit) && unit > 0 && isEurOrUnstated(offer.currency)) {
         if (unit.toFixed(2) !== product.supplierPrice) patch.supplierPrice = unit.toFixed(2);
         if (product.useCalculatedPrice !== false) {
           try {
@@ -408,9 +427,9 @@ export async function refreshPromotedGeticProducts(budgetMs = 120_000): Promise<
 }
 
 /** How many offers have been promoted — the gate for the hourly cron. */
-export async function promotedGeticCount(): Promise<number> {
+export async function promotedProductCount(supplier: string): Promise<number> {
   const q: any = await db.execute(
-    sql`SELECT count(*)::int AS c FROM products WHERE supplier = ${GETIC_SUPPLIER}`,
+    sql`SELECT count(*)::int AS c FROM products WHERE supplier = ${supplier}`,
   );
   return (q.rows ?? q)?.[0]?.c ?? 0;
 }
@@ -419,9 +438,9 @@ export async function promotedGeticCount(): Promise<number> {
  * Resolve a filter to the promotable (still-unpromoted) offer ids, oldest
  * first so repeat calls after a budget hit continue rather than reshuffle.
  */
-export async function promotableIdsFor(filter: GeticOfferFilter): Promise<number[]> {
+export async function promotableIdsFor(supplier: string, filter: SupplierOfferFilter): Promise<number[]> {
   await ensureSupplierTables();
-  const conds = geticOfferConds({ ...filter, promoted: "no" });
+  const conds = offerConds(supplier, { ...filter, promoted: "no" });
   const q: any = await db.execute(sql`
     SELECT id FROM supplier_offers WHERE ${sql.join(conds, sql` AND `)} ORDER BY id
   `);

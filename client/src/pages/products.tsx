@@ -694,6 +694,7 @@ export function Products({ user }: ProductsProps) {
                   <SelectItem value="all">All Distributors</SelectItem>
                   <SelectItem value="TME">TME</SelectItem>
                   <SelectItem value="GETIC">Getic</SelectItem>
+                  <SelectItem value="GREENCELL">Green Cell</SelectItem>
                   <SelectItem value="manual">Manual</SelectItem>
                 </SelectContent>
               </Select>

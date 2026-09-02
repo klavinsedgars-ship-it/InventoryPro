@@ -163,59 +163,76 @@ POST /api/ebay/fee-config     set fvfPct/fixedFee/vatPct/packagingCost/postageMa
 Order of operations: measure via GET, set config (fee evidence, VAT worst-case
 ~0.25 for OSS), then start the reprice sweep.
 
-## Getic (second distributor: staging + promotion)
+## XML feed distributors (Getic, Green Cell)
 
-Added 2026-08-28, promotion built 2026-09-02. The Getic XML feed
-(`https://api.getic.com/xml/rentbox/xml`, override with `GETIC_FEED_URL`)
-imports into **`supplier_offers`** — its own staging table, NOT `products`.
-The feed's schema was unknown when this was built, so the parser discovers the
-record element and maps fields by name heuristics (`server/xml-feed.ts`,
-`server/getic-feed.ts` — both pure, both tested); every record's full JSON is
-kept in `raw`, unconsumed fields in `attributes`, and the probe endpoint shows
-which feed key each field was read from. The feed turned out to carry NO
-product-code field, so **EAN is used as the SKU** (MPN as second choice); it
-also has no category, weight, MOQ, or currency — prices are assumed EUR.
-UI: **Getic Browser** page.
+Staging built 2026-08-28 for Getic, promotion 2026-09-02, generalized the
+same day when Green Cell arrived. **One engine serves every XML
+distributor** (`server/supplier-feed-sync.ts`): adding one is a config entry
+in `FEED_SUPPLIERS` (supplier code, URL slug, display name, feed URL) plus a
+route in `App.tsx`, a sidebar link, a `vercel.json` cron line, and — once
+promotion is wanted — the code in `LISTING_SUPPLIERS`. Feeds import into
+**`supplier_offers`** (keyed by `supplier`), NOT `products`. Feed schemas
+are unknown up front, so the parser discovers the record element and maps
+fields by name heuristics (`server/xml-feed.ts`, `server/getic-feed.ts` —
+generic despite the name; both pure, both tested); every record's full JSON
+is kept in `raw`, and the probe shows which feed key each field was read
+from.
 
-**Promotion** (`server/getic-promote.ts`) is the one door out of staging:
-selected offers are copied into `products` with `supplier='GETIC'`,
-`moq=1/multiples=1`, category `"Electronics"` (generic → Taxonomy resolves by
-product NAME at listing time), and a floor-priced `salePrice` via
-`calculatePriceWithFloor`. Skipped, with reasons reported: already promoted,
-blocked SKUs, SKU already in `products`, EAN already carried (TME overlap —
-never list the same physical item twice), no usable price. The offer row is
-stamped `promoted_product_id`/`promoted_at`. `LISTING_SUPPLIERS`
-(`shared/suppliers.ts`) now includes GETIC, so the listing ramp lists promoted
-products like TME ones; the TME v2 shippability guard applies only to
-`supplier='TME'` rows.
+**Promotion** (`server/supplier-promote.ts`) is the one door out of staging:
+selected offers become `products` rows (`supplier=<code>`,
+`moq=1/multiples=1`, category `"Electronics"` → Taxonomy resolves by product
+NAME at listing time, floor-priced `salePrice` via `calculatePriceWithFloor`).
+Skipped with reasons: already promoted, blocked SKU, SKU collision, EAN
+already carried (never list the same physical item twice), no usable price,
+**non-EUR currency** (the whole pricing pipeline is EUR; unstated currency is
+taken as EUR). Offers get stamped `promoted_product_id`/`promoted_at`.
+`LISTING_SUPPLIERS` (`shared/suppliers.ts`) = TME, GETIC, GREENCELL; the TME
+v2 shippability guard applies only to `supplier='TME'` rows.
 
-**Freshness:** every successful real import refreshes promoted products
-(stock + supplier price from the feed, floor reprice unless
-`useCalculatedPrice=false`, changed listed prices pushed to eBay). Cron
-`/api/cron/getic-import` (hourly at :24) is self-gated — it no-ops until at
-least one product with `supplier='GETIC'` exists, so pure staging costs no
-hourly fetches.
+**Freshness:** every successful real import ends by refreshing that
+supplier's promoted products (stock + price from the feed, floor reprice
+unless `useCalculatedPrice=false`, changed listed prices pushed to eBay).
+Per-supplier hourly crons (`/api/cron/getic-import` :24,
+`/api/cron/greencell-import` :42) are self-gated — no-ops until that
+supplier has promoted products, so pure staging costs no hourly fetches.
+
+Endpoints, identical per supplier under `/api/getic/*` and `/api/greencell/*`:
 
 ```
-GET  /api/getic/probe        fetch the feed, show structure + mapping — writes nothing
-POST /api/getic/import       ?dryRun=1 = sample without writing; real run is lease-guarded,
-                             and ends by refreshing promoted products
-POST /api/getic/promote      {ids:[...]} or {all:true, filter:{...}} — lease-guarded,
-                             time-bounded (partial result carries `remaining`)
-GET  /api/getic/status       import history + coverage counts (incl. promoted)
-GET  /api/getic/offers       paginated browse: search/category/manufacturer/priceMin/
-                             priceMax/promoted=yes|no/inStockOnly/sort
-                             (also /offers/:id, /categories, /manufacturers)
-GET  /api/getic/overlap      SKU/EAN collisions with the TME catalogue
-GET  /api/cron/getic-import  hourly feed refresh, gated on promoted products existing
+GET  probe          fetch the feed, show structure + mapping — writes nothing
+POST import         ?dryRun=1 = sample without writing; real run lease-guarded,
+                    ends by refreshing promoted products
+POST promote        {ids:[...]} or {all:true, filter:{...}} — lease-guarded,
+                    time-bounded (partial result carries `remaining`)
+GET  status         import history + coverage counts (incl. promoted)
+GET  offers         paginated browse: search/category/manufacturer/priceMin/
+                    priceMax/promoted=yes|no/inStockOnly/sort
+                    (also /offers/:id, /categories, /manufacturers)
+GET  overlap        SKU/EAN collisions with the live products table
 ```
 
-First deploy: run the probe, check the mapping reads sensibly, dry-run, then
-import. If the record detection guesses wrong, `?record=<element>` overrides it.
-The Products page has a Distributor filter (TME / Getic / Manual) to watch the
-promoted cohort. Open question flagged to the operator: the feed prices may be
-RETAIL rather than dealer prices — margin on promoted items needs a spot-check
-against a real Getic invoice before scaling promotion up.
+UI: one parameterized page (`client/src/pages/supplier-browser.tsx`) mounted
+as **Getic Browser** and **Green Cell Browser**; the Products page
+Distributor filter has TME / Getic / Green Cell / Manual.
+
+Per-supplier notes:
+- **Getic** (`https://api.getic.com/xml/rentbox/xml`, override
+  `GETIC_FEED_URL`): feed has NO product-code field → **EAN used as SKU**
+  (MPN second choice); no category/weight/MOQ/currency — prices assumed EUR
+  and possibly RETAIL, spot-check margin against a real invoice before bulk
+  promotion.
+- **Green Cell** (b2b portal XML, PrestaShop-style; the default URL embeds
+  the portal's `secure_key` — rotate via `GREENCELL_FEED_URL` env var
+  without a deploy). Schema unseen at build time (sandbox egress blocks the
+  host): run probe + dry-run after deploy. The mapper already prefers
+  `wholesale_price` over `price` and knows `reference`/`ean13`/`quantity`.
+  CHECK THE CURRENCY in the probe — if the portal serves PLN unstated, the
+  EUR assumption would misprice; a stated non-EUR currency is refused by
+  the promotion guard.
+
+First deploy of any new feed: probe → check mapping → dry-run → import →
+promote a handful → verify price/category on eBay → bulk. If record
+detection guesses wrong, `?record=<element>` overrides it.
 
 ## Diagnostics (all read-only unless noted)
 

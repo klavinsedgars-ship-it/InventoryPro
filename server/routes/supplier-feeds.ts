@@ -1,11 +1,13 @@
 /**
- * Getic distributor feed — probe, import, catalogue browsing, and promotion.
+ * XML feed distributors — probe, import, catalogue browsing, and promotion.
+ * One set of handlers, registered once per FEED_SUPPLIERS entry:
+ * /api/getic/*, /api/greencell/*, … plus /api/cron/<slug>-import each.
  *
  * Probe/import/browse read and write the supplier_offers STAGING tables
  * only. POST /promote is the one deliberate door out of the quarantine: it
- * copies selected offers into `products` (supplier='GETIC'), from where the
- * listing ramp treats them like any other candidate. (See shared/schema.ts
- * and server/getic-promote.ts.)
+ * copies selected offers into `products`, from where the listing ramp treats
+ * them like any other candidate — provided the supplier is also named in
+ * LISTING_SUPPLIERS. (See shared/schema.ts and server/supplier-promote.ts.)
  */
 
 import type { Express } from "express";
@@ -15,19 +17,20 @@ import { db } from "../db";
 import { withLease, describeRefusal } from "../job-lease";
 import { leaseStore } from "../storage";
 import {
-  GETIC_SUPPLIER,
-  GETIC_FEED_URL,
-  fetchGeticFeed,
-  runGeticImport,
+  FEED_SUPPLIERS,
+  fetchSupplierFeed,
+  runSupplierFeedImport,
   ensureSupplierTables,
-} from "../getic-sync";
+  type SupplierFeedConfig,
+} from "../supplier-feed-sync";
 import {
-  geticOfferConds,
-  geticSortSql,
-  promoteGeticOffers,
+  offerConds,
+  offerSortSql,
+  promoteSupplierOffers,
   promotableIdsFor,
-  type GeticOfferFilter,
-} from "../getic-promote";
+  promotedProductCount,
+  type SupplierOfferFilter,
+} from "../supplier-promote";
 import { sniffFeedStructure, recordsOf, nodeToJson } from "../xml-feed";
 import { mapGeticRecord } from "../getic-feed";
 
@@ -36,7 +39,7 @@ import { mapGeticRecord } from "../getic-feed";
  * POST /promote {all, filter} (JSON body) — so "Add all N filtered"
  * promotes exactly the rows the browse view is showing.
  */
-function offerFilterFrom(src: Record<string, unknown>): GeticOfferFilter {
+function offerFilterFrom(src: Record<string, unknown>): SupplierOfferFilter {
   const s = (k: string) => String(src[k] ?? "").trim();
   const num = (k: string) => {
     const v = parseFloat(String(src[k] ?? ""));
@@ -54,16 +57,26 @@ function offerFilterFrom(src: Record<string, unknown>): GeticOfferFilter {
   };
 }
 
-export function registerGeticRoutes(app: Express): void {
+export function registerSupplierFeedRoutes(app: Express): void {
+  for (const config of FEED_SUPPLIERS) {
+    registerOneSupplier(app, config);
+  }
+}
+
+function registerOneSupplier(app: Express, config: SupplierFeedConfig): void {
+  const base = `/api/${config.slug}`;
+  const importLease = `${config.slug}-import`;
+  const promoteLease = `${config.slug}-promote`;
+
   /**
    * What does the feed actually look like? Fetches it and reports transport
    * details, the sniffed structure, the first raw record and how the mapper
    * reads it — WITHOUT writing anything. This is the post-deploy checkpoint
    * for the feed, in the ?maxBatches=1 tradition: look first, then import.
    */
-  app.get("/api/getic/probe", requireAuth, async (req, res) => {
+  app.get(`${base}/probe`, requireAuth, async (req, res) => {
     try {
-      const feed = await fetchGeticFeed();
+      const feed = await fetchSupplierFeed(config);
       const structure = sniffFeedStructure(feed.xml);
       const recordElement = (req.query.record as string) || structure.recordElement;
 
@@ -80,7 +93,7 @@ export function registerGeticRoutes(app: Express): void {
 
       res.json({
         ok: true,
-        url: GETIC_FEED_URL,
+        url: config.feedUrl,
         httpStatus: feed.httpStatus,
         contentType: feed.contentType,
         bytes: feed.bytes,
@@ -101,19 +114,19 @@ export function registerGeticRoutes(app: Express): void {
    * returns the mapping without writing; a real run is lease-guarded so a
    * double click cannot run two imports over each other.
    */
-  app.post("/api/getic/import", requireAuth, async (req, res) => {
+  app.post(`${base}/import`, requireAuth, async (req, res) => {
     const dryRun = req.query.dryRun === "1" || req.body?.dryRun === true;
     const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
     const recordElement = (req.query.record as string) || req.body?.record || undefined;
     try {
       if (dryRun) {
-        return res.json(await runGeticImport({ dryRun: true, limit, recordElement }));
+        return res.json(await runSupplierFeedImport(config, { dryRun: true, limit, recordElement }));
       }
-      const r = await withLease(leaseStore, "getic-import", { ttlSeconds: 300 }, () =>
-        runGeticImport({ dryRun: false, recordElement }),
+      const r = await withLease(leaseStore, importLease, { ttlSeconds: 300 }, () =>
+        runSupplierFeedImport(config, { dryRun: false, recordElement }),
       );
       if (!r.ran) {
-        return res.status(409).json({ ok: false, error: describeRefusal("getic-import", r) });
+        return res.status(409).json({ ok: false, error: describeRefusal(importLease, r) });
       }
       res.json(r.result);
     } catch (error) {
@@ -125,32 +138,31 @@ export function registerGeticRoutes(app: Express): void {
    * Hourly feed refresh — but only once something is promoted. While the
    * catalogue is pure staging, the operator imports by hand from the browser
    * page; the moment promoted products exist, their price/stock must track
-   * the feed unattended (the post-import refresh inside runGeticImport does
-   * the propagation). Same no-auth posture as the other /api/cron/*
+   * the feed unattended (the post-import refresh inside runSupplierFeedImport
+   * does the propagation). Same no-auth posture as the other /api/cron/*
    * handlers (Vercel cron calls carry no session).
    */
-  const geticImportCronHandler = async (_req: any, res: any) => {
+  const importCronHandler = async (_req: any, res: any) => {
     try {
-      const { promotedGeticCount } = await import("../getic-promote");
-      if ((await promotedGeticCount()) === 0) {
-        return res.json({ ok: true, skipped: true, reason: "no promoted Getic products yet — import manually from the browser page" });
+      if ((await promotedProductCount(config.supplier)) === 0) {
+        return res.json({ ok: true, skipped: true, reason: `no promoted ${config.displayName} products yet — import manually from the browser page` });
       }
-      const r = await withLease(leaseStore, "getic-import", { ttlSeconds: 300 }, () =>
-        runGeticImport({ dryRun: false }),
+      const r = await withLease(leaseStore, importLease, { ttlSeconds: 300 }, () =>
+        runSupplierFeedImport(config, { dryRun: false }),
       );
       if (!r.ran) {
-        return res.json({ ok: true, skipped: true, reason: describeRefusal("getic-import", r) });
+        return res.json({ ok: true, skipped: true, reason: describeRefusal(importLease, r) });
       }
       res.json(r.result);
     } catch (error) {
       res.status(500).json({ ok: false, error: (error as Error).message });
     }
   };
-  app.get("/api/cron/getic-import", geticImportCronHandler);
-  app.post("/api/cron/getic-import", geticImportCronHandler);
+  app.get(`/api/cron/${config.slug}-import`, importCronHandler);
+  app.post(`/api/cron/${config.slug}-import`, importCronHandler);
 
   /** Import history + headline counts for the browser page. */
-  app.get("/api/getic/status", requireAuth, async (_req, res) => {
+  app.get(`${base}/status`, requireAuth, async (_req, res) => {
     try {
       await ensureSupplierTables();
       const runsQ: any = await db.execute(sql`
@@ -158,7 +170,7 @@ export function registerGeticRoutes(app: Express): void {
                records_seen, records_upserted, records_failed, new_records,
                duplicate_skus, error, started_at, finished_at
         FROM supplier_feed_runs
-        WHERE supplier = ${GETIC_SUPPLIER}
+        WHERE supplier = ${config.supplier}
         ORDER BY id DESC
         LIMIT 10
       `);
@@ -172,11 +184,11 @@ export function registerGeticRoutes(app: Express): void {
                count(*) FILTER (WHERE promoted_product_id IS NOT NULL)::int AS promoted,
                max(last_seen_at) AS last_seen_at
         FROM supplier_offers
-        WHERE supplier = ${GETIC_SUPPLIER}
+        WHERE supplier = ${config.supplier}
       `);
       res.json({
         ok: true,
-        feedUrl: GETIC_FEED_URL,
+        feedUrl: config.feedUrl,
         counts: (countsQ.rows ?? countsQ)?.[0] ?? null,
         runs: runsQ.rows ?? runsQ,
       });
@@ -190,14 +202,14 @@ export function registerGeticRoutes(app: Express): void {
    * attributes and raw stay out of the list (the getStaleTmeProducts egress
    * lesson) — the detail endpoint serves them one row at a time.
    */
-  app.get("/api/getic/offers", requireAuth, async (req, res) => {
+  app.get(`${base}/offers`, requireAuth, async (req, res) => {
     try {
       await ensureSupplierTables();
       const page = Math.max(1, parseInt(String(req.query.page ?? "1"), 10) || 1);
       const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? "50"), 10) || 50));
 
-      const where = sql.join(geticOfferConds(offerFilterFrom(req.query as Record<string, unknown>)), sql` AND `);
-      const orderBy = geticSortSql(String(req.query.sort ?? "id"));
+      const where = sql.join(offerConds(config.supplier, offerFilterFrom(req.query as Record<string, unknown>)), sql` AND `);
+      const orderBy = offerSortSql(String(req.query.sort ?? "id"));
 
       const rowsQ: any = await db.execute(sql`
         SELECT id, supplier_sku, name, ean, manufacturer, mpn, category_path,
@@ -224,12 +236,12 @@ export function registerGeticRoutes(app: Express): void {
   });
 
   /** Full detail for one offer, raw record included. */
-  app.get("/api/getic/offers/:id", requireAuth, async (req, res) => {
+  app.get(`${base}/offers/:id`, requireAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id, 10);
       if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: "bad id" });
       const q: any = await db.execute(
-        sql`SELECT * FROM supplier_offers WHERE id = ${id} AND supplier = ${GETIC_SUPPLIER}`,
+        sql`SELECT * FROM supplier_offers WHERE id = ${id} AND supplier = ${config.supplier}`,
       );
       const row = (q.rows ?? q)?.[0];
       if (!row) return res.status(404).json({ ok: false, error: "not found" });
@@ -240,13 +252,13 @@ export function registerGeticRoutes(app: Express): void {
   });
 
   /** Distinct categories with counts, for the browse filter. */
-  app.get("/api/getic/categories", requireAuth, async (_req, res) => {
+  app.get(`${base}/categories`, requireAuth, async (_req, res) => {
     try {
       await ensureSupplierTables();
       const q: any = await db.execute(sql`
         SELECT category_path, count(*)::int AS count
         FROM supplier_offers
-        WHERE supplier = ${GETIC_SUPPLIER} AND category_path IS NOT NULL
+        WHERE supplier = ${config.supplier} AND category_path IS NOT NULL
         GROUP BY category_path
         ORDER BY count DESC
         LIMIT 300
@@ -258,18 +270,42 @@ export function registerGeticRoutes(app: Express): void {
   });
 
   /** Distinct manufacturers with counts, for the browse filter. */
-  app.get("/api/getic/manufacturers", requireAuth, async (_req, res) => {
+  app.get(`${base}/manufacturers`, requireAuth, async (_req, res) => {
     try {
       await ensureSupplierTables();
       const q: any = await db.execute(sql`
         SELECT manufacturer, count(*)::int AS count
         FROM supplier_offers
-        WHERE supplier = ${GETIC_SUPPLIER} AND manufacturer IS NOT NULL AND manufacturer <> ''
+        WHERE supplier = ${config.supplier} AND manufacturer IS NOT NULL AND manufacturer <> ''
         GROUP BY manufacturer
         ORDER BY count DESC
         LIMIT 500
       `);
       res.json({ ok: true, manufacturers: q.rows ?? q });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  });
+
+  /**
+   * Overlap with the rest of the live catalogue, by SKU and by EAN. If two
+   * suppliers both carry a part and both get listed, we bid against
+   * ourselves on eBay — this is the number to look at before a bulk
+   * promotion.
+   */
+  app.get(`${base}/overlap`, requireAuth, async (_req, res) => {
+    try {
+      await ensureSupplierTables();
+      const q: any = await db.execute(sql`
+        SELECT
+          (SELECT count(*)::int FROM supplier_offers o
+             JOIN products p ON upper(p.sku) = o.supplier_sku
+           WHERE o.supplier = ${config.supplier}) AS sku_overlap,
+          (SELECT count(*)::int FROM supplier_offers o
+             JOIN products p ON p.ean = o.ean AND o.ean IS NOT NULL AND o.ean <> ''
+           WHERE o.supplier = ${config.supplier}) AS ean_overlap
+      `);
+      res.json({ ok: true, overlap: (q.rows ?? q)?.[0] ?? null });
     } catch (error) {
       res.status(500).json({ ok: false, error: (error as Error).message });
     }
@@ -283,7 +319,7 @@ export function registerGeticRoutes(app: Express): void {
    * returns a partial result with `remaining` — call again to continue
    * (already-promoted rows are skipped, so repeats converge).
    */
-  app.post("/api/getic/promote", requireAuth, async (req, res) => {
+  app.post(`${base}/promote`, requireAuth, async (req, res) => {
     try {
       const body = (req.body ?? {}) as Record<string, unknown>;
       let ids: number[];
@@ -292,40 +328,17 @@ export function registerGeticRoutes(app: Express): void {
           .map((n) => parseInt(String(n), 10))
           .filter((n) => Number.isFinite(n));
       } else if (body.all === true) {
-        ids = await promotableIdsFor(offerFilterFrom((body.filter ?? {}) as Record<string, unknown>));
+        ids = await promotableIdsFor(config.supplier, offerFilterFrom((body.filter ?? {}) as Record<string, unknown>));
       } else {
         return res.status(400).json({ ok: false, error: "pass {ids:[...]} or {all:true, filter:{...}}" });
       }
-      const r = await withLease(leaseStore, "getic-promote", { ttlSeconds: 300 }, () =>
-        promoteGeticOffers(ids),
+      const r = await withLease(leaseStore, promoteLease, { ttlSeconds: 300 }, () =>
+        promoteSupplierOffers(config.supplier, ids),
       );
       if (!r.ran) {
-        return res.status(409).json({ ok: false, error: describeRefusal("getic-promote", r) });
+        return res.status(409).json({ ok: false, error: describeRefusal(promoteLease, r) });
       }
       res.json(r.result);
-    } catch (error) {
-      res.status(500).json({ ok: false, error: (error as Error).message });
-    }
-  });
-
-  /**
-   * Overlap with the live TME catalogue, by SKU and by EAN. If Getic and TME
-   * both carry a part and both get listed, we bid against ourselves on eBay —
-   * this is the number to look at before any promotion step gets built.
-   */
-  app.get("/api/getic/overlap", requireAuth, async (_req, res) => {
-    try {
-      await ensureSupplierTables();
-      const q: any = await db.execute(sql`
-        SELECT
-          (SELECT count(*)::int FROM supplier_offers o
-             JOIN products p ON upper(p.sku) = o.supplier_sku
-           WHERE o.supplier = ${GETIC_SUPPLIER}) AS sku_overlap,
-          (SELECT count(*)::int FROM supplier_offers o
-             JOIN products p ON p.ean = o.ean AND o.ean IS NOT NULL AND o.ean <> ''
-           WHERE o.supplier = ${GETIC_SUPPLIER}) AS ean_overlap
-      `);
-      res.json({ ok: true, overlap: (q.rows ?? q)?.[0] ?? null });
     } catch (error) {
       res.status(500).json({ ok: false, error: (error as Error).message });
     }

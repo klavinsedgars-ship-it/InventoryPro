@@ -88,7 +88,7 @@ import { eq, ne, and, gte, lte, lt, desc, asc, count, or, ilike, isNull, isNotNu
 import bcrypt from "bcryptjs";
 import { PRICING_CONFIG } from "./dynamic-pricing";
 import type { LeaseStore } from "./job-lease";
-import { SUPPLIER_SCHEMA_STATEMENTS } from "./getic-sync";
+import { SUPPLIER_SCHEMA_STATEMENTS } from "./supplier-feed-sync";
 import { LISTING_SUPPLIERS } from "@shared/suppliers";
 
 export interface IStorage {
@@ -549,10 +549,11 @@ export class DatabaseStorage implements IStorage {
          acquired_at timestamptz NOT NULL DEFAULT now(),
          expires_at timestamptz NOT NULL
        )`,
-      // Supplier feed staging (Getic and future XML distributors) — offers
-      // land in their own tables, never in products, until an explicit
-      // promotion step exists. Statements live in getic-sync.ts so the boot
-      // path and the lazy ensure cannot drift.
+      // Supplier feed staging (Getic, Green Cell, future XML distributors) —
+      // offers land in their own tables, never in products, until the
+      // promotion step copies them across. Statements live in
+      // supplier-feed-sync.ts so the boot path and the lazy ensure cannot
+      // drift.
       ...SUPPLIER_SCHEMA_STATEMENTS,
     ];
     // Each statement is isolated: an extension that a host does not allow, or
