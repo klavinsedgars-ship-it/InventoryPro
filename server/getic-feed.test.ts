@@ -209,3 +209,55 @@ describe("coverageOf", () => {
     expect(c.ean).toBe(0);
   });
 });
+
+describe("dialects the first live probe could not see (2026-08-31 hardening)", () => {
+  it("reads key-in-attribute fields: <field name='sku'>ABC</field>", () => {
+    // nodeToJson renders that element as {"@name":"sku","#text":"ABC"}.
+    const offer = mapGeticRecord({
+      fields: {
+        field: [
+          { "@name": "sku", "#text": "KA-77" },
+          { "@name": "name", "#text": "Keyed Product" },
+          { "@name": "price", "#text": "12,50" },
+          { "@name": "quantity", "#text": "3" },
+        ],
+      },
+    } as any);
+    expect(offer.supplierSku).toBe("KA-77");
+    expect(offer.name).toBe("Keyed Product");
+    expect(offer.price).toBe(12.5);
+    expect(offer.stock).toBe(3);
+  });
+
+  it("falls back to compound Latvian names: preces_kods / preces_nosaukums / cena_bez_pvn", () => {
+    const offer = mapGeticRecord({
+      preces_kods: "LV-9",
+      preces_nosaukums: "Prece ar garu nosaukumu",
+      cena_bez_pvn: "8,26",
+      noliktava_daudzums: "12",
+    });
+    expect(offer.supplierSku).toBe("LV-9");
+    expect(offer.name).toBe("Prece ar garu nosaukumu");
+    expect(offer.price).toBe(8.26);
+    expect(offer.stock).toBe(12);
+  });
+
+  it("fuzzy matching never grabs a known other-purpose key", () => {
+    // category_code must not become the SKU; manufacturer_name not the name.
+    const offer = mapGeticRecord({
+      category_code: "CAT-1",
+      manufacturer_name: "Acme",
+      old_price: "99,99",
+    });
+    expect(offer.supplierSku).toBeNull();
+    expect(offer.name).toBeNull();
+    expect(offer.price).toBeNull();
+  });
+
+  it("exact matches still win over fuzzy candidates", () => {
+    const offer = mapGeticRecord({ sku: "EXACT-1", preces_kods: "FUZZY-1" });
+    expect(offer.supplierSku).toBe("EXACT-1");
+    // the unconsumed compound key stays visible in attributes
+    expect(offer.attributes.preces_kods).toBe("FUZZY-1");
+  });
+});

@@ -59,7 +59,11 @@ export function flattenRecord(rec: JsonRecord): FlatField[] {
       // <g:title>; attribute-style feeds write <product id=".." price="..">.
       // Neither prefix may hide the field from the synonym match — the full
       // path keeps the original spelling.
-      const base = (path.split(".").pop() ?? path).replace(/^@/, "").replace(/^[^:]+:/, "");
+      let base = (path.split(".").pop() ?? path).replace(/^@/, "").replace(/^[^:]+:/, "");
+      // A "[key]" suffix comes from the key-in-attribute dialect above and IS
+      // the field's real name.
+      const bracket = /\[([^\]]+)\]$/.exec(base);
+      if (bracket) base = bracket[1];
       f = { key: base.toLowerCase(), path, values: [] };
       byPath.set(path, f);
     }
@@ -75,7 +79,22 @@ export function flattenRecord(rec: JsonRecord): FlatField[] {
       for (const item of value) walk(item, path);
       return;
     }
+    // Key-in-attribute dialect: <field name="sku">ABC</field> parses to
+    // {"@name":"sku","#text":"ABC"} — the field's NAME is an attribute VALUE,
+    // invisible to element-name matching. Register the text under that name
+    // (as well as under the element's own path, for the raw record).
+    const keyAttr = value["@name"] ?? value["@key"] ?? value["@field"];
+    const text = value["#text"];
+    const keyed =
+      typeof keyAttr === "string" && typeof text === "string" && /^[\w.-]{1,64}$/.test(keyAttr.trim());
+    if (keyed) {
+      add(path ? `${path}[${(keyAttr as string).trim()}]` : (keyAttr as string).trim(), text as string);
+    }
     for (const [k, v] of Object.entries(value)) {
+      // In the keyed dialect the marker attribute and the text are ALREADY the
+      // field — walking them as ordinary entries would invent a bogus "name"
+      // field whose value is the literal key ("sku").
+      if (keyed && (k === "@name" || k === "@key" || k === "@field" || k === "#text")) continue;
       walk(v, path ? `${path}.${k}` : k);
     }
   };
@@ -187,8 +206,30 @@ export function mapGeticRecord(rec: JsonRecord): NormalizedOffer {
   const sourceKeys: Record<string, string> = {};
   const first = (f: FlatField | null): string | null => (f ? f.values[0] : null);
 
-  const skuF = find(SKU_KEYS);
-  const nameF = find(NAME_KEYS);
+  // Fuzzy fallback for the identity-critical fields: exact basename matching
+  // misses compound names (Latvian "preces_kods", "cena_bez_pvn"; English
+  // "product_sku_code"). Fires only when the exact pass found nothing, and
+  // only on keys free of known other-purpose substrings, so "category_code"
+  // can never become the SKU.
+  const fuzzyFind = (tokens: string[], excludes: RegExp): FlatField | null => {
+    for (const token of tokens) {
+      const f = fields.find(
+        (x) => !consumed.has(x) && x.key.includes(token) && !excludes.test(x.key),
+      );
+      if (f) {
+        consumed.add(f);
+        return f;
+      }
+    }
+    return null;
+  };
+
+  const skuF =
+    find(SKU_KEYS) ??
+    fuzzyFind(["sku", "kods", "code", "symbol", "artikul"], /categor|manufactur|producer|vendor|country|postal|zip|color|barcode|currenc/);
+  const nameF =
+    find(NAME_KEYS) ??
+    fuzzyFind(["nosaukum", "title", "name"], /manufactur|producer|brand|categor|file|attach|user|shop|supplier/);
   const eanF = find(EAN_KEYS);
   const manufacturerF = find(MANUFACTURER_KEYS);
   const mpnF = find(MPN_KEYS);
@@ -203,8 +244,14 @@ export function mapGeticRecord(rec: JsonRecord): NormalizedOffer {
     const fb = find(PRICE_FALLBACK_KEYS);
     if (fb && parseFeedNumber(first(fb)) != null) priceF = fb;
   }
+  if (!priceF || parseFeedNumber(first(priceF)) == null) {
+    const fz = fuzzyFind(["cena", "price"], /old|rrp|retail|msrp|shipping|delivery|ar_pvn/);
+    if (fz && parseFeedNumber(first(fz)) != null) priceF = fz;
+  }
 
-  const stockF = find(STOCK_KEYS);
+  const stockF =
+    find(STOCK_KEYS) ??
+    fuzzyFind(["daudzum", "noliktav", "quantity", "stock", "qty"], /min|max|limit|warehouse_id|location/);
   const weightF = find(WEIGHT_KEYS);
 
   // Images: every matching field, keeping feed order; primary = first URL.
