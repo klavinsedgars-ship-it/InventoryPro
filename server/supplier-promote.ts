@@ -263,6 +263,9 @@ export async function promoteSupplierOffers(
           supplier,
           supplierProductId: sku,
           imageUrl: o.imageUrl,
+          // Staging keeps the gallery as a JSON array; carried verbatim so
+          // the eBay listing gets every picture, not just the first.
+          additionalImages: o.additionalImages,
           dataSheetUrl: o.datasheetUrl,
           productUrl: o.productUrl,
           lastSyncedAt: new Date(),
@@ -362,6 +365,14 @@ export async function refreshPromotedProducts(supplier: string, budgetMs = 120_0
 
       const newStock = offer.stock ?? 0;
       if (newStock !== product.stock) patch.stock = newStock;
+
+      // Keep the catalogue's images following the feed (DB only — a live
+      // listing's photos are not rewritten here; the next inventory-item
+      // write picks them up).
+      if (offer.imageUrl && offer.imageUrl !== product.imageUrl) patch.imageUrl = offer.imageUrl;
+      if ((offer.additionalImages ?? null) !== (product.additionalImages ?? null)) {
+        patch.additionalImages = offer.additionalImages;
+      }
 
       const unit = offer.price != null ? parseFloat(String(offer.price)) : NaN;
       let newSale = parseFloat(product.salePrice) || 0;

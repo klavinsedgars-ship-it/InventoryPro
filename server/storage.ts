@@ -489,6 +489,7 @@ export class DatabaseStorage implements IStorage {
       `ALTER TABLE products ADD COLUMN IF NOT EXISTS tme_parameters text`,
       // Which eBay category the live listing sits in (see shared/schema.ts).
       `ALTER TABLE products ADD COLUMN IF NOT EXISTS ebay_category_id text`,
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS additional_images text`,
       `CREATE INDEX IF NOT EXISTS products_supplier_stale_idx ON products (supplier, last_synced_at)`,
       `CREATE INDEX IF NOT EXISTS products_status_idx ON products (status)`,
       `CREATE INDEX IF NOT EXISTS products_ebay_idx ON products (listed_on_ebay, ebay_item_id)`,

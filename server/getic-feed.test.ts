@@ -103,6 +103,23 @@ describe("mapGeticRecord", () => {
     expect(offer.additionalImages).toEqual(["https://a/2.jpg"]);
   });
 
+  it("finds gallery URLs nested under generic children (PrestaShop shape)", () => {
+    // <images><image><url>…</url></image></images> flattens to leaf key
+    // "url" — only the image-ish ANCESTOR says what these are.
+    const offer = mapGeticRecord({
+      code: "X2",
+      images: { image: [{ url: "https://a/main.jpg" }, { url: "https://a/side.jpg" }] },
+    });
+    expect(offer.imageUrl).toBe("https://a/main.jpg");
+    expect(offer.additionalImages).toEqual(["https://a/side.jpg"]);
+  });
+
+  it("an image-ish path without URL values is not an image", () => {
+    const offer = mapGeticRecord({ code: "X3", image_count: "4", images: { note: "none yet" } });
+    expect(offer.imageUrl).toBeNull();
+    expect(offer.additionalImages).toEqual([]);
+  });
+
   it("joins multi-valued categories into a path", () => {
     const offer = mapGeticRecord({ code: "X1", category: ["Electronics", "Cables"] });
     expect(offer.categoryPath).toBe("Electronics > Cables");

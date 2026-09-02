@@ -383,25 +383,46 @@ export class EbayInventoryApiService {
   // the current ramp behaviour until the operator opts in.
   private async resolveImages(product: Product): Promise<string[]> {
     if (!product.imageUrl) return [];
-    const fixed = product.imageUrl.startsWith("//") ? "https:" + product.imageUrl : product.imageUrl;
+    const fixProtocol = (u: string) => (u.startsWith("//") ? "https:" + u : u);
+    const fixed = fixProtocol(product.imageUrl);
+
+    // Gallery beyond the primary image (feed distributors ship these; TME
+    // rows have none). Appended raw: only the TME primary image carries the
+    // competitor watermark, and running the removal service per gallery
+    // image would multiply publish latency across a 25-item batch.
+    // eBay's Inventory API caps imageUrls at 24.
+    let gallery: string[] = [];
+    if (product.additionalImages) {
+      try {
+        const parsed = JSON.parse(product.additionalImages);
+        if (Array.isArray(parsed)) {
+          gallery = parsed
+            .filter((u): u is string => typeof u === "string" && /^(https?:)?\/\//.test(u))
+            .map(fixProtocol);
+        }
+      } catch { /* malformed JSON — list with the primary image only */ }
+    }
+    const withGallery = (primary: string) =>
+      Array.from(new Set([primary, ...gallery])).slice(0, 24);
+
     const hasBlob = !!process.env.BLOB_READ_WRITE_TOKEN;
     const publicBaseUrl = process.env.PUBLIC_BASE_URL || process.env.REPL_URL;
     const strict = process.env.REQUIRE_WATERMARK_REMOVAL === "true";
     if (!hasBlob && !publicBaseUrl) {
       if (strict) throw new Error("watermark removal not configured (no BLOB_READ_WRITE_TOKEN / PUBLIC_BASE_URL)");
-      return [fixed];
+      return withGallery(fixed);
     }
     try {
       const r = await imageProcessingService.removeWatermark(fixed);
       if (r.success && r.processedImageUrl) {
-        return [r.processedImageUrl.startsWith("http") ? r.processedImageUrl : `${publicBaseUrl}${r.processedImageUrl}`];
+        return withGallery(r.processedImageUrl.startsWith("http") ? r.processedImageUrl : `${publicBaseUrl}${r.processedImageUrl}`);
       }
       if (strict) throw new Error(`watermark removal failed: ${r.error || "unknown"}`);
     } catch (e) {
       if (strict) throw e instanceof Error ? e : new Error(String(e));
       /* fall through to raw image */
     }
-    return [fixed];
+    return withGallery(fixed);
   }
 
   /** Build a <=80-char eBay title that always contains the SKU (findability). */

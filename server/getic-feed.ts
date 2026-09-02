@@ -224,6 +224,26 @@ export function mapGeticRecord(rec: JsonRecord): NormalizedOffer {
     return null;
   };
 
+  // Images FIRST: every matching field, keeping feed order; primary = first
+  // URL. Matched by leaf key AND by path: gallery dialects nest the URL
+  // under a generic child (<images><image><url>…</url></image></images>
+  // flattens to key "url") — and that generic "url"/"link" leaf is exactly
+  // what PRODUCT_URL_KEYS would grab, so images must claim their fields
+  // before any URL-ish find runs. No other synonym list overlaps these.
+  const imagePathRe = /(^|\.)@?(images?|imgs?|photos?|pictures?|gallery|foto)s?(\.|\[|$)/i;
+  const imageFields = fields.filter(
+    (f) =>
+      !consumed.has(f) &&
+      (IMAGE_KEYS.includes(f.key) ||
+        IMAGE_KEY_RE.test(f.key) ||
+        (imagePathRe.test(f.path) && f.values.some((v) => isHttpUrl(v)))),
+  );
+  const imageUrls: string[] = [];
+  for (const f of imageFields) {
+    consumed.add(f);
+    for (const v of f.values) if (isHttpUrl(v) && !imageUrls.includes(v.trim())) imageUrls.push(v.trim());
+  }
+
   const skuF =
     find(SKU_KEYS) ??
     fuzzyFind(["sku", "kods", "code", "symbol", "artikul"], /categor|manufactur|producer|vendor|country|postal|zip|color|barcode|currenc/);
@@ -253,16 +273,6 @@ export function mapGeticRecord(rec: JsonRecord): NormalizedOffer {
     find(STOCK_KEYS) ??
     fuzzyFind(["daudzum", "noliktav", "quantity", "stock", "qty"], /min|max|limit|warehouse_id|location/);
   const weightF = find(WEIGHT_KEYS);
-
-  // Images: every matching field, keeping feed order; primary = first URL.
-  const imageFields = fields.filter(
-    (f) => !consumed.has(f) && (IMAGE_KEYS.includes(f.key) || IMAGE_KEY_RE.test(f.key)),
-  );
-  const imageUrls: string[] = [];
-  for (const f of imageFields) {
-    consumed.add(f);
-    for (const v of f.values) if (isHttpUrl(v) && !imageUrls.includes(v.trim())) imageUrls.push(v.trim());
-  }
 
   // Lossy parses keep their original value visible in attributes.
   const attributes: Record<string, string | string[]> = {};

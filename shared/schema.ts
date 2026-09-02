@@ -69,6 +69,10 @@ export const products = pgTable("products", {
   supplier: text("supplier").default("manual"), // manual, TME, etc.
   supplierProductId: text("supplier_product_id"),
   imageUrl: text("image_url"),
+  // JSON array of further image URLs beyond imageUrl. Feed distributors
+  // (Getic, Green Cell) ship galleries; TME rows leave this NULL. All of
+  // them go onto the eBay listing (see resolveImages).
+  additionalImages: text("additional_images"),
   dataSheetUrl: text("datasheet_url"),
   productUrl: text("product_url"),
   createdAt: timestamp("created_at").defaultNow(),

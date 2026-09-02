@@ -178,6 +178,15 @@ generic despite the name; both pure, both tested); every record's full JSON
 is kept in `raw`, and the probe shows which feed key each field was read
 from.
 
+**Images:** the mapper collects the whole gallery (primary → `image_url`,
+rest → `additional_images` JSON), including PrestaShop-style nesting where
+the URL sits under a generic child (`<images><image><url>`) — image fields
+are claimed BEFORE the product-URL synonym match, or that generic `url` leaf
+would be mis-read as the product link. The browser shows a +N badge and a
+gallery in the offer detail; promotion copies the gallery to
+`products.additional_images`, and the eBay lister sends primary + gallery
+(≤24) — only the primary goes through watermark removal (TME-only concern).
+
 **Promotion** (`server/supplier-promote.ts`) is the one door out of staging:
 selected offers become `products` rows (`supplier=<code>`,
 `moq=1/multiples=1`, category `"Electronics"` → Taxonomy resolves by product

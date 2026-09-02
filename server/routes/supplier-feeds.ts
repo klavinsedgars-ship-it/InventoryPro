@@ -213,8 +213,8 @@ function registerOneSupplier(app: Express, config: SupplierFeedConfig): void {
 
       const rowsQ: any = await db.execute(sql`
         SELECT id, supplier_sku, name, ean, manufacturer, mpn, category_path,
-               price, currency, stock, weight_g, image_url, product_url, last_seen_at,
-               promoted_product_id, promoted_at
+               price, currency, stock, weight_g, image_url, additional_images,
+               product_url, last_seen_at, promoted_product_id, promoted_at
         FROM supplier_offers
         WHERE ${where}
         ORDER BY ${orderBy}

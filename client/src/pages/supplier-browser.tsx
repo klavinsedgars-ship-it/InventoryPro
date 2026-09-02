@@ -51,10 +51,22 @@ interface SupplierOffer {
   stock: number | null;
   weight_g: string | null;
   image_url: string | null;
+  additional_images: string | null; // JSON array of URLs
   product_url: string | null;
   last_seen_at: string | null;
   promoted_product_id: number | null;
   promoted_at: string | null;
+}
+
+/** Parse the additional_images JSON column; malformed rows count as none. */
+function extraImages(json: string | null | undefined): string[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json);
+    return Array.isArray(parsed) ? parsed.filter((u) => typeof u === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 interface SupplierFeedStatus {
@@ -549,11 +561,18 @@ export default function SupplierBrowser({ user, slug, name }: { user?: any; slug
                             )}
                           </td>
                           <td className="px-4 py-2">
-                            {o.image_url ? (
-                              <img src={o.image_url} alt="" className="w-8 h-8 object-contain rounded" loading="lazy" />
-                            ) : (
-                              <div className="w-8 h-8 bg-gray-100 rounded" />
-                            )}
+                            <div className="relative w-8 h-8">
+                              {o.image_url ? (
+                                <img src={o.image_url} alt="" className="w-8 h-8 object-contain rounded" loading="lazy" />
+                              ) : (
+                                <div className="w-8 h-8 bg-gray-100 rounded" />
+                              )}
+                              {extraImages(o.additional_images).length > 0 && (
+                                <span className="absolute -bottom-1 -right-1 bg-blue-600 text-white text-[10px] leading-none rounded px-0.5 py-0.5">
+                                  +{extraImages(o.additional_images).length}
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="px-4 py-2 font-mono text-xs whitespace-nowrap">{o.supplier_sku}</td>
                           <td className="px-4 py-2 max-w-md truncate">{o.name ?? "—"}</td>
@@ -755,7 +774,9 @@ export default function SupplierBrowser({ user, slug, name }: { user?: any; slug
                 )}
                 <div className="flex gap-4">
                   {detail.image_url && (
-                    <img src={detail.image_url} alt="" className="w-32 h-32 object-contain rounded border" />
+                    <a href={detail.image_url} target="_blank" rel="noreferrer">
+                      <img src={detail.image_url} alt="" className="w-32 h-32 object-contain rounded border" />
+                    </a>
                   )}
                   <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm flex-1">
                     <Field k="Price" v={fmtPrice(detail.price, detail.currency)} />
@@ -768,6 +789,18 @@ export default function SupplierBrowser({ user, slug, name }: { user?: any; slug
                     <Field k="Last seen" v={detail.last_seen_at ? new Date(detail.last_seen_at).toLocaleString() : "—"} />
                   </div>
                 </div>
+                {extraImages(detail.additional_images).length > 0 && (
+                  <div>
+                    <p className="font-medium mb-1">All images ({1 + extraImages(detail.additional_images).length})</p>
+                    <div className="flex flex-wrap gap-2">
+                      {extraImages(detail.additional_images).map((u, i) => (
+                        <a key={i} href={u} target="_blank" rel="noreferrer">
+                          <img src={u} alt="" className="w-20 h-20 object-contain rounded border" loading="lazy" />
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {detail.product_url && (
                   <a href={detail.product_url} target="_blank" rel="noreferrer" className="text-blue-600 inline-flex items-center gap-1">
                     Product page <ExternalLink className="w-3 h-3" />
