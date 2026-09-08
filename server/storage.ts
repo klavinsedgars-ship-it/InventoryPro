@@ -490,6 +490,14 @@ export class DatabaseStorage implements IStorage {
       // Which eBay category the live listing sits in (see shared/schema.ts).
       `ALTER TABLE products ADD COLUMN IF NOT EXISTS ebay_category_id text`,
       `ALTER TABLE products ADD COLUMN IF NOT EXISTS additional_images text`,
+      // Amazon listing state (2026-09). Offers attach to existing ASINs, so
+      // the catalogue match is tracked separately from the listing itself.
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS amazon_match_status text`,
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS amazon_matched_at timestamp`,
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS amazon_listing_status text`,
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS amazon_listing_error text`,
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS amazon_list_attempts integer NOT NULL DEFAULT 0`,
+      `CREATE INDEX IF NOT EXISTS products_amazon_match_idx ON products (amazon_match_status)`,
       `CREATE INDEX IF NOT EXISTS products_supplier_stale_idx ON products (supplier, last_synced_at)`,
       `CREATE INDEX IF NOT EXISTS products_status_idx ON products (status)`,
       `CREATE INDEX IF NOT EXISTS products_ebay_idx ON products (listed_on_ebay, ebay_item_id)`,

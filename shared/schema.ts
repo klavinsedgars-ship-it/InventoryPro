@@ -64,6 +64,16 @@ export const products = pgTable("products", {
   // quota and starving fresh candidates.
   ebayListAttempts: integer("ebay_list_attempts").notNull().default(0),
   amazonAsin: text("amazon_asin"),
+  // Amazon listing state, mirroring the eBay columns above. We sell on Amazon
+  // as offers against EXISTING ASINs (see server/amazon-listing.ts), so the
+  // catalogue match is a distinct step with its own outcome: amazonMatchStatus
+  // is matched | no_asin | ambiguous | no_ean | error, and amazonMatchedAt
+  // marks when the lookup last ran so a sweep is resumable and re-runnable.
+  amazonMatchStatus: text("amazon_match_status"),
+  amazonMatchedAt: timestamp("amazon_matched_at"),
+  amazonListingStatus: text("amazon_listing_status"), // unlisted|published|error
+  amazonListingError: text("amazon_listing_error"),
+  amazonListAttempts: integer("amazon_list_attempts").notNull().default(0),
   tmeProductId: text("tme_product_id"),
   tmeCategoryId: text("tme_category_id"), // TME category ID for synced products
   supplier: text("supplier").default("manual"), // manual, TME, etc.

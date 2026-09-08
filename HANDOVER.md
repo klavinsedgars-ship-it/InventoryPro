@@ -243,6 +243,63 @@ First deploy of any new feed: probe → check mapping → dry-run → import →
 promote a handful → verify price/category on eBay → bulk. If record
 detection guesses wrong, `?record=<element>` overrides it.
 
+## Amazon (SP-API) — foundation, not yet live
+
+Built 2026-09-08, before credentials existed; everything degrades gracefully
+until they do (`/api/amazon/status` reports which env vars are missing).
+
+**Strategy: offer-only listings on EXISTING ASINs.** We resell branded goods,
+so we attach an offer to the manufacturer's existing Amazon page rather than
+create ASINs (which needs brand ownership or a GTIN exemption and full
+product-type attributes). Consequence: **a product with no EAN can never be
+listed on Amazon** — there is nothing to attach to. Matching EAN→ASIN is
+therefore the gate before any listing.
+
+Auth is **LWA only** — AWS IAM / SigV4 has not been required since
+2023-10-02, so there is no AWS SDK and no request signing. Rate limits are
+per operation (token bucket in `amazon-sp-api.ts`); a 429 is `transient` and
+never burns a listing attempt, the lesson from the eBay Taxonomy incident.
+
+```
+server/amazon-config.ts    endpoints, EU marketplace ids, env, readiness report
+server/amazon-sp-api.ts    LWA token cache, rate-limited request, catalog/listings ops
+server/amazon-listing.ts   PURE + tested: preflight, offer payload, ASIN picking
+server/amazon-matcher.ts   EAN→ASIN sweep (cursor, lease, kill-switch, self-stopping)
+server/routes/amazon.ts    status/test-connection/match/preview/list/sync-offer
+client/src/pages/amazon.tsx  readiness + match coverage + per-SKU tools
+```
+
+```
+GET  /api/amazon/status          readiness + match coverage (works unconfigured)
+GET  /api/amazon/test-connection Sellers API — no restricted role needed
+GET  /api/amazon/match?sweep=start|stop|status
+POST /api/amazon/match/<sku>     match one product
+GET  /api/amazon/preview/<sku>   the payload we WOULD send — pure, no API call
+POST /api/amazon/list/<sku>?dryRun=1   mode=VALIDATION_PREVIEW: Amazon validates,
+                                 creates nothing. THE post-credential checkpoint.
+POST /api/amazon/sync-offer/<sku>  patch price+quantity on a live listing
+GET  /api/cron/amazon-match      :12,:32,:52 — gated on config + sweep enabled
+```
+
+Match outcomes recorded per product (`amazon_match_status`): `matched`,
+`no_ean` (permanent), `no_asin`, `ambiguous` (needs a human), `error`
+(retried). Settled states are not re-queried, so the sweep converges.
+
+**Deliberately NOT built yet:** a bulk Amazon ramp. First listings go one at a
+time through `?dryRun=1` — same "look first, then ramp" order the eBay
+pipeline earned the hard way.
+
+Env vars: `AMAZON_LWA_CLIENT_ID`, `AMAZON_LWA_CLIENT_SECRET`,
+`AMAZON_LWA_REFRESH_TOKEN`, `AMAZON_SELLER_ID`, optional
+`AMAZON_MARKETPLACE` (default DE), `AMAZON_SP_API_REGION` (eu),
+`AMAZON_SP_API_SANDBOX`, `AMAZON_SHIPPING_GROUP`.
+
+**Business blockers that are not code** (see the operator checklist): Amazon's
+dropshipping policy requires we are the sole seller of record on every
+packing slip and invoice — supplier-direct shipping with supplier paperwork
+is a suspension risk; EU EPR registrations (LUCID packaging, WEEE/EAR,
+batteries) are legally required before the first sale into Germany.
+
 ## Diagnostics (all read-only unless noted)
 
 ```
