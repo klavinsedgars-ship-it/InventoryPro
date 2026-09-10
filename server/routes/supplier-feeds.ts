@@ -31,6 +31,7 @@ import {
   promotedProductCount,
   type SupplierOfferFilter,
 } from "../supplier-promote";
+import { describeProxy, checkProxyEgressIp } from "../http-proxy";
 import { sniffFeedStructure, recordsOf, nodeToJson } from "../xml-feed";
 import { mapGeticRecord } from "../getic-feed";
 
@@ -61,6 +62,32 @@ export function registerSupplierFeedRoutes(app: Express): void {
   for (const config of FEED_SUPPLIERS) {
     registerOneSupplier(app, config);
   }
+
+  /**
+   * Is the outbound proxy working, and WHICH IP does a supplier see?
+   *
+   * A whitelist is granted for one address, so this answers the only question
+   * that matters before asking a distributor to enable access — and finding
+   * out the address is wrong here beats finding out from their 403.
+   */
+  app.get("/api/suppliers/proxy-check", requireAuth, async (_req, res) => {
+    try {
+      const egress = await checkProxyEgressIp();
+      res.json({
+        ok: egress.ok,
+        proxy: describeProxy(),
+        egressIp: egress.ip ?? null,
+        viaProxy: egress.viaProxy,
+        error: egress.error,
+        note: egress.viaProxy
+          ? "This is the address suppliers will see. It must match the IP they whitelisted."
+          : "No proxy configured — requests leave from Vercel's rotating pool, which cannot be whitelisted.",
+        proxiedSuppliers: FEED_SUPPLIERS.filter((s) => s.useProxy).map((s) => s.displayName),
+      });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  });
 }
 
 function registerOneSupplier(app: Express, config: SupplierFeedConfig): void {

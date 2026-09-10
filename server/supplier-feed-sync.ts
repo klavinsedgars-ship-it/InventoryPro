@@ -23,6 +23,7 @@ import { supplierOffers, supplierFeedRuns, type SupplierFeedRun } from "@shared/
 import { sniffFeedStructure, recordsOf, nodeToJson, detectXmlEncoding, type FeedStructure, type JsonRecord } from "./xml-feed";
 import { mapGeticRecord, coverageOf, flattenRecord, type NormalizedOffer } from "./getic-feed";
 import type { SupplierRefreshStats } from "./supplier-promote";
+import { proxyDispatcher, isProxyConfigured } from "./http-proxy";
 
 export interface SupplierFeedConfig {
   /** Value of the `supplier` column, e.g. "GETIC". Uppercase, stable. */
@@ -32,6 +33,12 @@ export interface SupplierFeedConfig {
   /** What the UI calls it. */
   displayName: string;
   feedUrl: string;
+  /**
+   * Route this supplier's requests through FEED_PROXY_URL. Set it for
+   * distributors that whitelist a fixed IP; leave it off for everyone else,
+   * so a proxy outage cannot take down feeds that never needed one.
+   */
+  useProxy?: boolean;
 }
 
 export const GETIC_FEED: SupplierFeedConfig = {
@@ -154,6 +161,16 @@ export async function fetchSupplierFeed(config: SupplierFeedConfig, opts?: { tim
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), opts?.timeoutMs ?? 120_000);
   (timer as any).unref?.();
+  // Only proxy the suppliers that asked for it, and say plainly when one
+  // wants a proxy that is not configured — an IP-whitelisted feed failing
+  // with a bare 403 is a genuinely confusing thing to debug.
+  const dispatcher = config.useProxy ? proxyDispatcher() : undefined;
+  if (config.useProxy && !isProxyConfigured()) {
+    clearTimeout(timer);
+    throw new Error(
+      `${config.displayName} requires a whitelisted IP but FEED_PROXY_URL is not set — requests would go out from Vercel's rotating pool and be rejected`,
+    );
+  }
   let res: Response;
   try {
     res = await fetch(url, {
@@ -163,7 +180,8 @@ export async function fetchSupplierFeed(config: SupplierFeedConfig, opts?: { tim
         "User-Agent": "InventoryPro/1.0 (catalogue import)",
         Accept: "application/xml, text/xml, */*",
       },
-    });
+      ...(dispatcher ? { dispatcher } : {}),
+    } as RequestInit);
   } finally {
     clearTimeout(timer);
   }

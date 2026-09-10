@@ -342,6 +342,32 @@ prices postage as a small packet. For light items actually posted as letters
 that is conservative by ~2 EUR an order — real margin on those is better than
 the floor assumes, and there is pricing headroom there if it is ever wanted.
 
+## Static-IP proxy for whitelisted suppliers (2026-09-10)
+
+ACC Distribution — and B2B distributors generally — only accept API calls from
+an IP they have whitelisted. Vercel functions egress from a rotating pool, so
+there is no address to give them. Fix: a small VPS (netcup, ~2 EUR/month)
+running tinyproxy, with only the suppliers that need it routed through it.
+
+**The trap:** Node's global fetch does NOT honour HTTP_PROXY/HTTPS_PROXY.
+Setting them looks like it works and silently changes nothing — a dispatcher
+must be passed explicitly. `server/http-proxy.ts` builds one from
+`FEED_PROXY_URL` (cached, since it holds a connection pool).
+
+Opt-in per supplier via `useProxy` on the feed config, so a proxy outage
+cannot take down feeds that never needed one. A supplier marked `useProxy`
+with no `FEED_PROXY_URL` set fails with that sentence rather than a bare 403.
+`AMAZON_USE_PROXY=true` does the same for SP-API (off by default — Amazon
+does not whitelist).
+
+```
+GET /api/suppliers/proxy-check   is the proxy up, and WHICH IP do suppliers see?
+```
+
+That endpoint is the one to run before asking any distributor to enable
+access: a whitelist is granted for one address, and finding out it is wrong
+here beats finding out from their 403. It never echoes the proxy password.
+
 ## Diagnostics (all read-only unless noted)
 
 ```
