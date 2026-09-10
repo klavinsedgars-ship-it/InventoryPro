@@ -20,7 +20,7 @@
 
 import { getAmazonConfig, isAmazonConfigured, LWA_TOKEN_URL, type AmazonConfig } from "./amazon-config";
 import { storage } from "./storage";
-import { proxyDispatcher } from "./http-proxy";
+import { fetchMaybeProxied } from "./http-proxy";
 
 export interface SpApiResult<T> {
   ok: boolean;
@@ -185,18 +185,20 @@ export class AmazonSpApiService {
         // AMAZON_USE_PROXY routes SP-API through the static-IP proxy too.
         // Off by default: Amazon does not whitelist, so the extra hop only
         // earns its keep if their side ever cares about our egress address.
-        const dispatcher = process.env.AMAZON_USE_PROXY === "true" ? proxyDispatcher() : undefined;
-        res = await fetch(url, {
-          method,
-          headers: {
-            "x-amz-access-token": token,
-            "content-type": "application/json",
-            accept: "application/json",
-            "user-agent": "InventoryPro/1.0 (Language=TypeScript)",
+        res = await fetchMaybeProxied(
+          url,
+          {
+            method,
+            headers: {
+              "x-amz-access-token": token,
+              "content-type": "application/json",
+              accept: "application/json",
+              "user-agent": "InventoryPro/1.0 (Language=TypeScript)",
+            },
+            body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
           },
-          body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-          ...(dispatcher ? { dispatcher } : {}),
-        } as RequestInit);
+          { useProxy: process.env.AMAZON_USE_PROXY === "true" },
+        );
         text = await res.text();
       } catch (e) {
         // Network failure: transient by nature.
