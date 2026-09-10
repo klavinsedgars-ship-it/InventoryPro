@@ -16,6 +16,14 @@
  * countries in it, which is also how this table was verified after extraction.
  * eBay expects tracking, so tracked is the default.
  *
+ * VERIFIED AGAINST REAL RECEIPTS (2026-09-08 and 2026-09-09, 13 shipments):
+ * every Sikpaka figure matched the counter price to the cent (SE 34g 5.16,
+ * DK 33g 5.39, DK 9g 5.35, RO 77g 4.13, DE 9/16/18g 5.03, DE 34/73g 5.08),
+ * and the tracking surcharge billed as exactly 2.54. What those receipts also
+ * showed is what the table was MISSING, added below: the Korespondence
+ * (letter) service, which is roughly half the price of a Sikpaka for a light
+ * flat item, and Latvia itself, which had no row at all.
+ *
  * VAT: postal services are exempt, except the tracking fee and parcels over
  * 10 kg (21% to EU destinations, 0% outside). The published tariffs already
  * include it, so these figures are what we actually pay - and there is no
@@ -29,6 +37,28 @@ export const SIKPAKA_BANDS_G = [20, 100, 500, 1000, 2000] as const;
 
 /** Flat fee that turns an untracked item into a tracked one. */
 export const TRACKING_FEE = 2.54;
+
+/**
+ * Korespondence — ordinary letter post. Cheaper than Sikpaka for a light flat
+ * item and, from the receipts, priced FLAT for every international
+ * destination: Ireland and Czechia both cost 3.00 under 20g although their
+ * Sikpaka rates differ by 2.23, and Austria (79g) and Portugal (44g) both
+ * cost 3.85. That is a big saving where it applies — Ireland at 3.00 against
+ * a 6.29 Sikpaka is less than half.
+ *
+ * Only two bands are evidenced, so anything over 100g deliberately falls back
+ * to Sikpaka pricing rather than being guessed at: over-estimating postage
+ * costs nothing but caution, under-estimating silently inflates profit.
+ *
+ * Note this is a POSTAL CLASS choice, not a service level: correspondence
+ * carries no barcode and cannot be tracked, and whether goods may travel this
+ * way is a decision for the operator, not for this table.
+ */
+export const KORESPONDENCE_BANDS_G = [20, 100] as const;
+export const KORESPONDENCE_INTERNATIONAL = [3.0, 3.85];
+
+/** Per-item "Pasta sutijuma markesana" charged alongside each letter. */
+export const MARKING_FEE = 0.06;
 
 /** Discount for booking through manspasts.lv, on tracked/registered items. */
 export const MANS_PASTS_DISCOUNT = 0.46;
@@ -84,6 +114,13 @@ export const LATVIAN_POST_TARIFFS: Record<string, CountryTariff> = {
   LI: { name: "Lihtenšteina", economy: [4.62, 4.82, 6.93, 11.04, 15.26], tracked: [7.16, 7.36, 9.47, 13.58, 17.8], parcel: [23.31, 5.65] },
   LT: { name: "Lietuva", economy: [4.07, 4.17, 5.62, 8.47, 10.96], tracked: [6.61, 6.71, 8.16, 11.01, 13.5], parcel: [13.08, 2.05] },
   LU: { name: "Luksemburga", economy: [5.13, 5.17, 6.12, 8.0, 9.16], tracked: [7.67, 7.71, 8.66, 10.54, 11.7], parcel: [14.77, 1.95] },
+  // Latvia — DOMESTIC. The tariff book prices home delivery separately and it
+  // was simply absent here, so every Latvian order was priced at the unlisted
+  // fallback (6.29 for a light item against a real 3.56) and its profit
+  // understated by nearly 3 EUR. Bands 1 and 2 are receipted (54g = 3.56,
+  // 203g = 4.70); band 0 repeats band 1 rather than guessing lower, and the
+  // two heavy bands extrapolate the observed step — all three erring high.
+  LV: { name: "Latvija", economy: [3.56, 3.56, 4.7, 5.9, 7.1], tracked: [6.1, 6.1, 7.24, 8.44, 9.64], parcel: [5.5, 1.2] },
   MT: { name: "Malta", economy: [4.18, 4.33, 6.05, 9.41, 12.6], tracked: [6.72, 6.87, 8.59, 11.95, 15.14], parcel: [17.77, 3.42] },
   NL: { name: "Nīderlande", economy: [4.57, 4.68, 6.16, 9.07, 11.63], tracked: [7.11, 7.22, 8.7, 11.61, 14.17], parcel: [14.74, 1.71] },
   NO: { name: "Norvēģija", economy: [5.28, 5.34, 6.39, 8.49, 9.94], tracked: [7.82, 7.88, 8.93, 11.03, 12.48], parcel: [20.25, 2.3] },
@@ -110,13 +147,23 @@ export const FALLBACK_TARIFF: CountryTariff = {
 
 export interface PostageQuote {
   cost: number;
-  service: "sikpaka" | "paka";
+  service: "sikpaka" | "paka" | "korespondence";
   tracked: boolean;
   bandLabel: string;
   country: string;
   estimated: boolean;
   note?: string;
 }
+
+/**
+ * Which postal class to price.
+ *   "sikpaka"       - small packet. The safe default and what the profit model
+ *                     has always assumed.
+ *   "korespondence" - letter. Cheaper, untrackable, and only priced up to
+ *                     100g and only abroad; outside that it falls back to
+ *                     sikpaka rather than inventing a rate.
+ */
+export type PostalClass = "sikpaka" | "korespondence";
 
 /**
  * What it costs us to send `grams` to `country`.
@@ -127,7 +174,7 @@ export interface PostageQuote {
 export function quotePostage(
   grams: number,
   country: string | null | undefined,
-  opts: { tracked?: boolean; mansPastsDiscount?: boolean } = {},
+  opts: { tracked?: boolean; mansPastsDiscount?: boolean; postalClass?: PostalClass } = {},
 ): PostageQuote {
   const iso = (country ?? "").trim().toUpperCase();
   const tariff = LATVIAN_POST_TARIFFS[iso];
@@ -136,6 +183,24 @@ export function quotePostage(
   const discount = opts.mansPastsDiscount === true && tracked ? MANS_PASTS_DISCOUNT : 0;
   // A missing or nonsensical weight must not price as free.
   const w = Number.isFinite(grams) && grams > 0 ? grams : 1;
+
+  // Letter post, where the operator has chosen it and the evidence covers it:
+  // international only, at most 100g, never tracked. Anything else falls
+  // through to the sikpaka pricing below.
+  const isDomestic = iso === "LV";
+  if (opts.postalClass === "korespondence" && !isDomestic && w <= KORESPONDENCE_BANDS_G[KORESPONDENCE_BANDS_G.length - 1]) {
+    const idx = KORESPONDENCE_BANDS_G.findIndex((b) => w <= b);
+    const lower = idx === 0 ? 0 : KORESPONDENCE_BANDS_G[idx - 1];
+    return {
+      cost: round2(KORESPONDENCE_INTERNATIONAL[idx] + MARKING_FEE),
+      service: "korespondence",
+      tracked: false,
+      bandLabel: `${lower}-${KORESPONDENCE_BANDS_G[idx]}g letter`,
+      country: iso || "??",
+      estimated: false,
+      note: "Letter post, flat international rate, includes the 0.06 marking fee. Not trackable.",
+    };
+  }
 
   if (w <= 2000) {
     const table = tracked ? t.tracked : t.economy;

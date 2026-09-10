@@ -34,6 +34,13 @@ export interface OrderEconomicsInput {
   actualPaymentFee?: number | null;
   /** What we paid the carrier. */
   postageCost?: number | null;
+  /**
+   * True when postageCost came from a carrier receipt rather than the tariff
+   * book. The estimate is accurate per postal class, but it cannot know which
+   * class was chosen at the counter — a letter costs about half a small
+   * packet — so a receipted figure is the only one worth calling actual.
+   */
+  postageIsActual?: boolean;
   packagingCost?: number | null;
 }
 
@@ -65,6 +72,8 @@ export interface OrderEconomics {
   marketplaceFee: number;
   paymentFee: number;
   postageCost: number;
+  /** Did the postage figure come from a receipt? */
+  postageIsActual: boolean;
   packagingCost: number;
   totalCosts: number;
   netProfit: number;
@@ -103,6 +112,7 @@ export function computeOrderEconomics(
 
   const paymentFee = r2(Math.max(0, input.actualPaymentFee ?? 0));
   const postageCost = r2(Math.max(0, input.postageCost ?? 0));
+  const postageIsActual = postageCost > 0 && input.postageIsActual === true;
   const packagingCost = r2(input.packagingCost ?? config.packagingCost ?? 0);
 
   const totalCosts = r2(supplierCost + marketplaceFee + paymentFee + postageCost + packagingCost);
@@ -164,8 +174,13 @@ export function computeOrderEconomics(
     label: "Postage paid",
     amount: postageCost,
     kind: "out",
-    actual: postageCost > 0,
-    note: postageCost > 0 ? undefined : "No postage cost recorded on this order",
+    actual: postageIsActual,
+    note:
+      postageCost <= 0
+        ? "No postage cost recorded on this order"
+        : postageIsActual
+          ? "From the carrier receipt"
+          : "Estimated from the Latvijas Pasts tariff book by weight band and destination",
   });
   ledger.push({ key: "packaging", label: "Packaging", amount: packagingCost, kind: "out", actual: false });
   ledger.push({ key: "profit", label: "Net profit", amount: netProfit, kind: "total" });
@@ -179,12 +194,13 @@ export function computeOrderEconomics(
     marketplaceFee,
     paymentFee,
     postageCost,
+    postageIsActual,
     packagingCost,
     totalCosts,
     netProfit,
     netMarginPct: netRevenue > 0 ? r2((netProfit / netRevenue) * 100) : null,
     grossMarginPct: grossReceived > 0 ? r2((netProfit / grossReceived) * 100) : null,
-    fullyActual: feeIsActual && supplierCost > 0 && postageCost > 0,
+    fullyActual: feeIsActual && supplierCost > 0 && postageIsActual,
     ledger,
   };
 }

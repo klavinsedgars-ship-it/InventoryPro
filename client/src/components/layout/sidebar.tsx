@@ -20,7 +20,7 @@ import {
   Scale,
   Target,
   TrendingUp,
-  Boxes, ShoppingCart } from "lucide-react";
+  Boxes, ShoppingCart, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const navigation = [
@@ -33,6 +33,7 @@ const navigation = [
   { name: 'Getic Browser', href: '/getic-browser', icon: Boxes },
   { name: 'Green Cell Browser', href: '/greencell-browser', icon: Boxes },
   { name: 'Amazon', href: '/amazon', icon: ShoppingCart },
+  { name: 'Postage', href: '/postage', icon: Receipt },
   { name: 'Opportunities', href: '/opportunities', icon: Target },
   { name: 'Sales Performance', href: '/sales-performance', icon: LineChart },
   { name: 'Market Research', href: '/market-research', icon: TrendingUp },

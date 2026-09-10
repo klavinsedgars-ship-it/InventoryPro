@@ -24,6 +24,20 @@ const shipOpts = () => ({ mansPastsDiscount: mansPasts(), tracked: trackedShippi
  * breakdown and the totals on the reports page can never disagree — they run
  * the same function over the same rows.
  */
+/**
+ * What did this order's postage actually cost?
+ *
+ * A receipted figure always wins: the tariff estimate is exact per postal
+ * class (verified to the cent against 9 real small packets) but blind to
+ * WHICH class was used at the counter, and a letter costs about half a small
+ * packet. Falling back to the estimate keeps every historical order priced.
+ */
+function resolvePostage(order: any, estimate: { cost: number }): { cost: number; isActual: boolean } {
+  const actual = order.actualPostageCost != null ? Number(order.actualPostageCost) : null;
+  if (actual != null && Number.isFinite(actual) && actual > 0) return { cost: actual, isActual: true };
+  return { cost: estimate.cost, isActual: false };
+}
+
 export function registerReportsRoutes(app: Express) {
   const periodStart = (d: Date, groupBy: string): string => {
     const x = new Date(d);
@@ -119,6 +133,7 @@ export function registerReportsRoutes(app: Express) {
       let ordersMissingCost = 0;
       let ordersMissingFee = 0;
       let ordersMissingWeight = 0;
+      let ordersWithReceiptedPostage = 0;
 
       for (const o of live as any[]) {
         const items = itemsByOrder.get(o.id) ?? [];
@@ -129,7 +144,8 @@ export function registerReportsRoutes(app: Express) {
         );
 
         const w = weightsByOrder.get(o.id) ?? { grams: 0, linesWithWeight: 0, linesTotal: 0 };
-        const postage = quotePostage(w.grams + packagingGrams(), o.shippingCountry, shipOpts());
+        const postageEstimate = quotePostage(w.grams + packagingGrams(), o.shippingCountry, shipOpts());
+        const postage = resolvePostage(o, postageEstimate);
 
         const e = computeOrderEconomics(
           {
@@ -140,9 +156,11 @@ export function registerReportsRoutes(app: Express) {
             actualMarketplaceFee: o.marketplaceFee != null ? Number(o.marketplaceFee) : null,
             actualPaymentFee: o.paymentProcessingFee != null ? Number(o.paymentProcessingFee) : null,
             postageCost: postage.cost,
+            postageIsActual: postage.isActual,
           },
           config,
         );
+        if (postage.isActual) ordersWithReceiptedPostage++;
 
         if (supplierCost <= 0) ordersMissingCost++;
         if (w.linesWithWeight < w.linesTotal) ordersMissingWeight++;
@@ -208,9 +226,10 @@ export function registerReportsRoutes(app: Express) {
           ordersMissingActualFee: ordersMissingFee,
           postageCostTracked: true,
           ordersWithIncompleteWeight: ordersMissingWeight,
+          ordersWithReceiptedPostage,
           weightError,
           note:
-            "Postage is priced from the Latvijas Pasts tariff book by weight band and destination, not from a carrier invoice — an order whose products carry no weight is under-weighed and therefore under-charged. Supplier cost is recorded at sale time on orders imported since that column existed.",
+            "Postage is a receipted figure where one has been entered (see /api/postage/receipt), otherwise priced from the Latvijas Pasts tariff book by weight band and destination — the tariff matched real counter receipts to the cent, but it assumes a small packet, and a letter costs about half that. An order whose products carry no weight is under-weighed and therefore under-charged. Supplier cost is recorded at sale time on orders imported since that column existed.",
         },
         orders: perOrder.slice(0, 200),
       });
@@ -237,7 +256,8 @@ export function registerReportsRoutes(app: Express) {
         console.error("order weight unavailable:", e);
         return new Map();
       })).get(id) ?? { grams: 0, linesWithWeight: 0, linesTotal: 0 };
-      const postage = quotePostage(w.grams + packagingGrams(), order.shippingCountry, shipOpts());
+      const postageEstimate = quotePostage(w.grams + packagingGrams(), order.shippingCountry, shipOpts());
+      const postage = resolvePostage(order, postageEstimate);
 
       const economics = computeOrderEconomics(
         {
@@ -248,6 +268,7 @@ export function registerReportsRoutes(app: Express) {
           actualMarketplaceFee: order.marketplaceFee != null ? Number(order.marketplaceFee) : null,
           actualPaymentFee: order.paymentProcessingFee != null ? Number(order.paymentProcessingFee) : null,
           postageCost: postage.cost,
+          postageIsActual: postage.isActual,
         },
         {
           feePct: feeConfig.ebayFvfPct,

@@ -498,6 +498,12 @@ export class DatabaseStorage implements IStorage {
       `ALTER TABLE products ADD COLUMN IF NOT EXISTS amazon_listing_error text`,
       `ALTER TABLE products ADD COLUMN IF NOT EXISTS amazon_list_attempts integer NOT NULL DEFAULT 0`,
       `CREATE INDEX IF NOT EXISTS products_amazon_match_idx ON products (amazon_match_status)`,
+      // Actual postage from carrier receipts (2026-09), which overrides the
+      // tariff-book estimate wherever it is known.
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS actual_postage_cost numeric(10,2)`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS actual_postage_source text`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS postage_receipt_ref text`,
+      `ALTER TABLE orders ADD COLUMN IF NOT EXISTS postal_class_used text`,
       `CREATE INDEX IF NOT EXISTS products_supplier_stale_idx ON products (supplier, last_synced_at)`,
       `CREATE INDEX IF NOT EXISTS products_status_idx ON products (status)`,
       `CREATE INDEX IF NOT EXISTS products_ebay_idx ON products (listed_on_ebay, ebay_item_id)`,

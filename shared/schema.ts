@@ -364,6 +364,19 @@ export const orders = pgTable("orders", {
   expectedDeliveryStart: timestamp("expected_delivery_start"),
   expectedDeliveryEnd: timestamp("expected_delivery_end"),
   
+  // What the carrier ACTUALLY charged, from the counter receipt, versus the
+  // tariff-book estimate the profit model otherwise uses. The estimate is
+  // good — it matched 9 of 9 receipted small packets to the cent — but it
+  // cannot know which postal class was chosen at the counter, and a letter
+  // costs about half a small packet. Where this is set, it wins.
+  actualPostageCost: decimal("actual_postage_cost", { precision: 10, scale: 2 }),
+  // receipt | manual — how the figure got here, so a reconciled book can say.
+  actualPostageSource: text("actual_postage_source"),
+  // Receipt identifier (date + document number) for the audit trail.
+  postageReceiptRef: text("postage_receipt_ref"),
+  // The postal class actually used: sikpaka | korespondence | paka.
+  postalClassUsed: text("postal_class_used"),
+
   // Logistics Integration (for Latvian Post, etc.)
   logisticsCarrier: text("logistics_carrier"), // pasts_lv, dhl, ups, etc.
   logisticsLabelUrl: text("logistics_label_url"),

@@ -300,6 +300,48 @@ packing slip and invoice — supplier-direct shipping with supplier paperwork
 is a suspension risk; EU EPR registrations (LUCID packaging, WEEE/EAR,
 batteries) are legally required before the first sale into Germany.
 
+## Postage: real receipts vs the model (2026-09-10)
+
+Two Latvijas Pasts counter receipts (2026-09-08, 2026-09-09; 16 shipments,
+EUR 73.08) were checked against the tariff estimate. Result:
+
+- **The Sīkpaka table is exactly right** — all 9 receipted small packets
+  matched to the cent (SE 34g 5.16, DK 33g 5.39, DK 9g 5.35, RO 77g 4.13,
+  DE 9/16/18g 5.03, DE 34/73g 5.08), and the tracking surcharge billed as
+  exactly 2.54. No corrections needed there.
+- **Letters were being priced as small packets.** Korespondence is a flat
+  international rate — 3.00 up to 20g, 3.85 to 100g, plus a 0.06 marking fee —
+  regardless of destination. Ireland at 3.06 against a 6.29 Sīkpaka is less
+  than half. Five of the sixteen shipments went this way.
+- **Latvia had no row at all**, so domestic orders were priced at the
+  unlisted-destination fallback (6.37 against a real 3.56).
+
+Net: the model overstated postage by EUR 11.68 across those 16 shipments
+(14%), so profit on them was understated by about the same. The one tracked
+parcel went the other way — modelled untracked, so understated by 2.54.
+
+**Actual beats modelled.** `orders.actual_postage_cost` now holds the
+receipted figure and the P&L prefers it; the ledger line says which it used
+and `fullyActual` demands a receipt, not an estimate. The tariff estimate
+remains the fallback for every order without one.
+
+```
+POST /api/postage/receipt/parse   paste the receipt, see proposed matches, writes NOTHING
+POST /api/postage/receipt/apply   record confirmed costs ({reference, assignments:[{orderId,cost}]})
+GET  /api/postage/coverage        how much of the P&L is receipted vs modelled
+```
+
+Matching is by tracking number first (exact), then recipient name + country,
+and NEVER between two orders sharing a recipient — those are offered as
+alternatives for a human to pick. Note the printed line number is **not
+unique** on a receipt (a real one carried two lines numbered 2512), so lines
+are identified by position. UI: **Postage** page.
+
+Still modelled, not receipted: the profit floor in `calculatePriceWithFloor`
+prices postage as a small packet. For light items actually posted as letters
+that is conservative by ~2 EUR an order — real margin on those is better than
+the floor assumes, and there is pricing headroom there if it is ever wanted.
+
 ## Diagnostics (all read-only unless noted)
 
 ```

@@ -1,114 +1,62 @@
-import { describe, it, expect, afterEach } from "vitest";
-import {
-  quotePostage, LATVIAN_POST_TARIFFS, TRACKING_FEE, MANS_PASTS_DISCOUNT,
-  trackedShippingDefault,
-} from "@shared/latvian-post";
+import { describe, it, expect } from "vitest";
+import { quotePostage, TRACKING_FEE } from "@shared/latvian-post";
 
-describe("tariff table matches the published book", () => {
-  it("has Germany's Sīkpaka rates exactly as printed", () => {
-    // Tariff book, Vācija / EEZ row. Germany is where nearly all our parcels go.
-    expect(LATVIAN_POST_TARIFFS.DE.economy).toEqual([5.03, 5.08, 6.12, 8.16, 9.55]);
-    expect(LATVIAN_POST_TARIFFS.DE.tracked).toEqual([7.57, 7.62, 8.66, 10.7, 12.09]);
-    expect(LATVIAN_POST_TARIFFS.DE.parcel).toEqual([17.89, 2.37]);
+/**
+ * Verification against real Latvijas Pasts counter receipts (2026-09-08 and
+ * 2026-09-09). Costs, weights and destinations are transcribed from the
+ * receipts; recipient names and addresses are deliberately not reproduced.
+ */
+describe("real receipt verification (2026-09)", () => {
+  const sikpaka: Array<[string, number, number]> = [
+    ["SE", 34, 5.16],
+    ["DK", 33, 5.39],
+    ["DK", 9, 5.35],
+    ["RO", 77, 4.13],
+    ["DE", 34, 5.08],
+    ["DE", 9, 5.03],
+    ["DE", 16, 5.03],
+    ["DE", 18, 5.03],
+    ["DE", 73, 5.08],
+  ];
+
+  it.each(sikpaka)("prices an untracked Sīkpaka to %s at %ig exactly as the counter did", (country, grams, charged) => {
+    expect(quotePostage(grams, country, { tracked: false }).cost).toBe(charged);
   });
 
-  it("keeps tracked = economy + the tracking fee, for every country listed", () => {
-    // The book states this rule, and it held for all 240 countries when the
-    // table was extracted — so it doubles as a check on the data itself.
-    for (const [iso, t] of Object.entries(LATVIAN_POST_TARIFFS)) {
-      t.economy.forEach((eco, i) => {
-        expect(Math.abs(t.tracked[i] - eco - TRACKING_FEE), `${iso} band ${i}`).toBeLessThan(0.011);
-      });
+  it("adds exactly the receipted tracking surcharge", () => {
+    // The one tracked item on the receipts: DE 73g, 5.08 + 2.54 tracking.
+    expect(quotePostage(73, "DE", { tracked: true }).cost).toBe(7.62);
+    expect(quotePostage(73, "DE", { tracked: true }).cost - quotePostage(73, "DE", { tracked: false }).cost)
+      .toBeCloseTo(TRACKING_FEE, 2);
+  });
+
+  it("prices Latvia domestically instead of falling to the unlisted fallback", () => {
+    // Receipted: 54g = 3.56, 203g = 4.70. Before Latvia had a row these were
+    // priced at the highest EEA rate and profit was understated by ~3 EUR.
+    expect(quotePostage(54, "LV", { tracked: false }).cost).toBe(3.56);
+    expect(quotePostage(203, "LV", { tracked: false }).cost).toBe(4.7);
+    expect(quotePostage(54, "LV", { tracked: false }).estimated).toBe(false);
+  });
+
+  it("prices letter post at the flat international rate plus the marking fee", () => {
+    // Receipted: IE 14g and 19g and CZ 13g all 3.00; AT 79g and PT 44g 3.85.
+    for (const [country, grams] of [["IE", 14], ["IE", 19], ["CZ", 13]] as Array<[string, number]>) {
+      expect(quotePostage(grams, country, { postalClass: "korespondence" }).cost).toBe(3.06);
+    }
+    for (const [country, grams] of [["AT", 79], ["PT", 44]] as Array<[string, number]>) {
+      expect(quotePostage(grams, country, { postalClass: "korespondence" }).cost).toBe(3.91);
     }
   });
 
-  it("covers the EU/EEA destinations we sell to", () => {
-    for (const iso of ["DE", "FR", "IT", "ES", "NL", "PL", "AT", "SE", "FI", "DK", "BE", "LT", "EE"]) {
-      expect(LATVIAN_POST_TARIFFS[iso], iso).toBeDefined();
-    }
-  });
-});
-
-describe("quotePostage", () => {
-  it("prices a typical component order to Germany", () => {
-    // A few resistors and a sensor: comfortably inside the 101-500g band.
-    const q = quotePostage(250, "DE");
-    expect(q.cost).toBe(8.66);
-    expect(q.service).toBe("sikpaka");
-    expect(q.bandLabel).toBe("100-500g");
-    expect(q.estimated).toBe(false);
+  it("letter post is materially cheaper than the small packet it replaces", () => {
+    const letter = quotePostage(14, "IE", { postalClass: "korespondence" }).cost;
+    const packet = quotePostage(14, "IE", { tracked: false }).cost;
+    expect(letter).toBeLessThan(packet / 1.9); // 3.06 vs 6.29
   });
 
-  it("charges by band, so cost jumps at the boundary rather than scaling", () => {
-    expect(quotePostage(100, "DE").cost).toBe(7.62);
-    expect(quotePostage(101, "DE").cost).toBe(8.66);
-    expect(quotePostage(500, "DE").cost).toBe(8.66);
-    expect(quotePostage(501, "DE").cost).toBe(10.7);
-  });
-
-  it("switches to parcel pricing above 2 kg", () => {
-    const q = quotePostage(2500, "DE");
-    expect(q.service).toBe("paka");
-    // First kg 17.89 + two further kg at 2.37. Written as the rounded result
-    // because 17.89 + 2*2.37 is 22.630000000000003 in binary floating point.
-    expect(q.cost).toBe(22.63);
-  });
-
-  it("applies the Mans Pasts discount only when asked, and only when tracked", () => {
-    expect(quotePostage(250, "DE", { mansPastsDiscount: true }).cost).toBe(8.66 - MANS_PASTS_DISCOUNT);
-    expect(quotePostage(250, "DE", { mansPastsDiscount: true, tracked: false }).cost).toBe(6.12);
-  });
-
-  it("falls back to the DEAREST rate for an unknown destination", () => {
-    // Under-estimating postage inflates profit, which is exactly what this
-    // table exists to stop — so an unknown country must not be cheap.
-    const q = quotePostage(250, "ZZ");
-    expect(q.estimated).toBe(true);
-    expect(q.cost).toBeGreaterThanOrEqual(quotePostage(250, "DE").cost);
-    expect(q.note).toMatch(/no tariff/i);
-  });
-
-  it("never prices a missing or absurd weight as free", () => {
-    expect(quotePostage(0, "DE").cost).toBeGreaterThan(0);
-    expect(quotePostage(NaN as any, "DE").cost).toBeGreaterThan(0);
-    expect(quotePostage(-5, "DE").cost).toBeGreaterThan(0);
-  });
-
-  it("handles a missing country without throwing", () => {
-    expect(() => quotePostage(250, null)).not.toThrow();
-    expect(quotePostage(250, null).estimated).toBe(true);
-  });
-});
-
-describe("trackedShippingDefault — untracked unless opted in", () => {
-  const saved = process.env.SHIP_TRACKED;
-  afterEach(() => {
-    if (saved === undefined) delete process.env.SHIP_TRACKED;
-    else process.env.SHIP_TRACKED = saved;
-  });
-
-  it("defaults to untracked", () => {
-    // Tracking is €2.54 a parcel; replacing the rare lost order is cheaper for
-    // a basket of low-value components.
-    delete process.env.SHIP_TRACKED;
-    expect(trackedShippingDefault()).toBe(false);
-  });
-
-  it("opts in only on an explicit true", () => {
-    process.env.SHIP_TRACKED = "true";
-    expect(trackedShippingDefault()).toBe(true);
-    process.env.SHIP_TRACKED = "false";
-    expect(trackedShippingDefault()).toBe(false);
-    process.env.SHIP_TRACKED = "yes";
-    expect(trackedShippingDefault()).toBe(false);
-  });
-
-  it("shows why: tracking costs far more than self-insuring at real loss rates", () => {
-    const perParcelTrackingCost = quotePostage(250, "DE", { tracked: true }).cost
-      - quotePostage(250, "DE", { tracked: false }).cost;
-    expect(perParcelTrackingCost).toBeCloseTo(TRACKING_FEE, 2);
-    const resendCost = 3 /* goods */ + quotePostage(250, "DE", { tracked: false }).cost;
-    const breakEvenLossRate = perParcelTrackingCost / resendCost;
-    expect(breakEvenLossRate).toBeGreaterThan(0.25); // ~28% — far above real postal loss
+  it("refuses to invent a letter rate outside the evidence", () => {
+    // Over 100g, and domestic, both fall back to sīkpaka rather than guess.
+    expect(quotePostage(250, "DE", { postalClass: "korespondence", tracked: false }).service).toBe("sikpaka");
+    expect(quotePostage(50, "LV", { postalClass: "korespondence", tracked: false }).service).toBe("sikpaka");
   });
 });

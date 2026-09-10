@@ -10,6 +10,7 @@ import { Marketplaces } from "@/pages/marketplaces";
 import TMEBrowser from "@/pages/tme-browser";
 import SupplierBrowser from "@/pages/supplier-browser";
 import AmazonPage from "@/pages/amazon";
+import PostagePage from "@/pages/postage";
 import { Settings } from "@/pages/settings";
 import { Reports } from "@/pages/reports";
 import Configuration from "@/pages/configuration";
@@ -73,6 +74,7 @@ function AppContent() {
       <Route path="/getic-browser" component={() => <SupplierBrowser user={user} slug="getic" name="Getic" />} />
       <Route path="/greencell-browser" component={() => <SupplierBrowser user={user} slug="greencell" name="Green Cell" />} />
       <Route path="/amazon" component={() => <AmazonPage user={user} />} />
+      <Route path="/postage" component={() => <PostagePage user={user} />} />
       <Route path="/configuration" component={() => <Configuration user={user} />} />
       <Route path="/reports" component={() => <Reports user={user} />} />
       <Route path="/settings" component={() => <Settings user={user} />} />
