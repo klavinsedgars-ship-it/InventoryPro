@@ -368,6 +368,56 @@ That endpoint is the one to run before asking any distributor to enable
 access: a whitelist is granted for one address, and finding out it is wrong
 here beats finding out from their 403. It never echoes the proxy password.
 
+## Order search (2026-09-12)
+
+`/api/orders` used to accept `search` and match it against three columns
+(marketplace order id, buyer username, shipping name), and the Orders page
+never sent it — it fetched every order and filtered them in the browser. So
+the only reliable way to find an order was its order number.
+
+Search is now server-side and spans the item lines:
+
+| Scope | Columns |
+|---|---|
+| Order number | `orders.marketplace_order_id` |
+| Part no / SKU / EAN | `order_items.sku`, `order_items.tme_product_id`, `order_items.marketplace_item_id`, `products.sku`, `products.supplier_product_id`, `products.ean` |
+| Item title | `order_items.title`, `products.name` |
+| Buyer | `orders.buyer_username`, `buyer_email`, `shipping_name` |
+| Address | both address lines, city, postal code, country |
+| Tracking number | `orders.tracking_number` |
+
+Plus non-text filters: marketplace, destination country, and an order-date
+range. `Everything` (the default) searches all of the above at once.
+
+Three things worth knowing before changing it:
+
+- **The item columns are reached through a subquery, not a join.** An order
+  with four lines must appear once, not four times, so the condition is
+  `orders.id in (select order_id from order_items left join products ...)`.
+  The join to `products` is a LEFT join on purpose — an item whose
+  `product_id` never got mapped still matches on its own sku/symbol.
+- **Identifier columns are matched twice**: as typed, and with every
+  non-alphanumeric stripped from both sides
+  (`regexp_replace(col, '[^A-Za-z0-9]', '', 'g')`). That is what lets
+  `NE 555 P` find `NE555P` and a de-hyphenated paste find `12-34567-89012`.
+  `compactIdentifier()` in `shared/order-search.ts` must strip exactly the
+  same character set or the fallback silently stops matching.
+- **`getOrdersCount` takes the same filter object as `getOrders`.** It used
+  to accept only marketplace/status, so a searched page reported the
+  unfiltered total. If you add a filter, add it to `orderFilterConditions`
+  and both get it.
+
+The matching SQL lives in `server/order-search-sql.ts`, deliberately free of
+any `db` import so `orderFilterConditions()` can be rendered to SQL and
+asserted in `server/order-search-sql.test.ts` — the generated query is
+checked offline rather than only observed against Neon. The scope list is in
+`shared/order-search.ts` so the dropdown and the server cannot drift.
+
+Performance: these are `ilike '%…%'` scans with no supporting index. At the
+current scale (hundreds of orders, low thousands of items) that is nothing.
+If the orders table reaches six figures, the fix is a pg_trgm GIN index on
+the identifier columns, not a narrower search.
+
 ## Diagnostics (all read-only unless noted)
 
 ```

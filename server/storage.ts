@@ -85,6 +85,8 @@ import {
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, ne, and, gte, lte, lt, desc, asc, count, or, ilike, isNull, isNotNull, sql, inArray, notInArray } from "drizzle-orm";
+import { orderFilterConditions, type OrderQueryFilters } from "./order-search-sql";
+export type { OrderQueryFilters } from "./order-search-sql";
 import bcrypt from "bcryptjs";
 import { PRICING_CONFIG } from "./dynamic-pricing";
 import type { LeaseStore } from "./job-lease";
@@ -234,22 +236,14 @@ export interface IStorage {
   deleteEbayReturnPolicy(policyId: string): Promise<boolean>;
 
   // Orders Management
-  getOrders(filters?: {
-    marketplace?: string;
-    status?: string;
-    search?: string;
-    fromDate?: Date;
-    toDate?: Date;
-    limit?: number;
-    offset?: number;
-  }): Promise<Order[]>;
+  getOrders(filters?: OrderQueryFilters): Promise<Order[]>;
   getOrder(id: number): Promise<Order | undefined>;
   getOrderByMarketplaceId(marketplace: string, marketplaceOrderId: string): Promise<Order | undefined>;
   ensureOrderIntegritySchema(): Promise<void>;
   createOrder(order: InsertOrder): Promise<Order>;
   updateOrder(id: number, order: Partial<InsertOrder>): Promise<Order | undefined>;
   deleteOrder(id: number): Promise<boolean>;
-  getOrdersCount(filters?: { marketplace?: string; status?: string }): Promise<number>;
+  getOrdersCount(filters?: OrderQueryFilters): Promise<number>;
 
   // Order Items
   getOrderItems(orderId: number): Promise<OrderItem[]>;
@@ -2321,38 +2315,8 @@ export class DatabaseStorage implements IStorage {
   // ORDERS MANAGEMENT
   // ==========================================
 
-  async getOrders(filters?: {
-    marketplace?: string;
-    status?: string;
-    search?: string;
-    fromDate?: Date;
-    toDate?: Date;
-    limit?: number;
-    offset?: number;
-  }): Promise<Order[]> {
-    const conditions = [];
-    
-    if (filters?.marketplace) {
-      conditions.push(eq(orders.marketplace, filters.marketplace));
-    }
-    if (filters?.status) {
-      conditions.push(eq(orders.status, filters.status));
-    }
-    if (filters?.fromDate) {
-      conditions.push(gte(orders.orderDate, filters.fromDate));
-    }
-    if (filters?.toDate) {
-      conditions.push(lte(orders.orderDate, filters.toDate));
-    }
-    if (filters?.search) {
-      conditions.push(
-        or(
-          ilike(orders.marketplaceOrderId, `%${filters.search}%`),
-          ilike(orders.buyerUsername, `%${filters.search}%`),
-          ilike(orders.shippingName, `%${filters.search}%`)
-        )
-      );
-    }
+  async getOrders(filters?: OrderQueryFilters): Promise<Order[]> {
+    const conditions = orderFilterConditions(filters);
 
     let query = db.select().from(orders);
     
@@ -2408,15 +2372,13 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
-  async getOrdersCount(filters?: { marketplace?: string; status?: string }): Promise<number> {
-    const conditions = [];
-    
-    if (filters?.marketplace) {
-      conditions.push(eq(orders.marketplace, filters.marketplace));
-    }
-    if (filters?.status) {
-      conditions.push(eq(orders.status, filters.status));
-    }
+  /**
+   * Takes the SAME filter shape as getOrders. It used to accept only
+   * marketplace/status, so a searched or date-bounded page reported the
+   * unfiltered total and the UI claimed matches it had not returned.
+   */
+  async getOrdersCount(filters?: OrderQueryFilters): Promise<number> {
+    const conditions = orderFilterConditions(filters);
 
     let query = db.select({ count: count() }).from(orders);
     

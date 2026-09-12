@@ -8,6 +8,13 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -23,13 +30,18 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { countryName, labelAddressLines } from "@shared/country-names";
 import { previousStatus, revertLabel } from "@shared/order-status";
+import {
+  ORDER_SEARCH_FIELDS,
+  compactIdentifier,
+  type OrderSearchField,
+} from "@shared/order-search";
 import { Separator } from "@/components/ui/separator";
 import { 
   Package, Search, RefreshCw, Loader2, ExternalLink, 
   Truck, CheckCircle, Clock, XCircle, RotateCcw, 
   Printer, MapPin, Copy, ChevronDown, ChevronRight,
   ShoppingBag, Box, ClipboardCheck, History, DollarSign, Undo2,
-  User, StickyNote, Check, AlertTriangle
+  User, StickyNote, Check, AlertTriangle, X
 } from "lucide-react";
 import { SiEbay, SiAmazon } from "react-icons/si";
 import { formatCurrency } from "@/lib/utils";
@@ -47,6 +59,14 @@ interface OrderWithDetails extends Order {
 interface OrdersProps {
   user: any;
 }
+
+/**
+ * The queue is a working list, not an archive: pull one screenful's worth of
+ * the most recent matches and let the filter bar narrow, rather than shipping
+ * every order ever placed to the browser on each keystroke. The count line
+ * says when a result set was cut off, so a hidden match is never silent.
+ */
+const ORDER_PAGE_LIMIT = 300;
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bgColor: string }> = {
   new: { label: "New", color: "text-blue-700", bgColor: "bg-blue-100" },
@@ -74,6 +94,11 @@ export function Orders({ user }: OrdersProps) {
   const [activeTab, setActiveTab] = useState<string>("to-pack");
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [searchField, setSearchField] = useState<OrderSearchField>("all");
+  const [marketplaceFilter, setMarketplaceFilter] = useState("all");
+  const [countryFilter, setCountryFilter] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [trackingNumber, setTrackingNumber] = useState("");
   const [trackingCarrier, setTrackingCarrier] = useState("");
   const [showHistory, setShowHistory] = useState(false);
@@ -83,15 +108,66 @@ export function Orders({ user }: OrdersProps) {
 
   const statusFilter = activeTab === "to-pack" ? "new" : activeTab === "to-ship" ? "packed" : undefined;
 
-  // Build the API URL with status filter
-  const ordersUrl = statusFilter ? `/api/orders?status=${statusFilter}` : '/api/orders';
+  // Typing shouldn't fire a query per keystroke. The two free-text inputs are
+  // debounced; the selects and date pickers change one value at a time and go
+  // straight through.
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [debouncedCountry, setDebouncedCountry] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedCountry(countryFilter.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [countryFilter]);
+
+  const ordersUrl = (() => {
+    const params = new URLSearchParams();
+    if (statusFilter) params.set("status", statusFilter);
+    if (debouncedSearch) {
+      params.set("search", debouncedSearch);
+      params.set("searchField", searchField);
+    }
+    if (marketplaceFilter !== "all") params.set("marketplace", marketplaceFilter);
+    if (debouncedCountry) params.set("country", debouncedCountry);
+    if (fromDate) params.set("fromDate", fromDate);
+    if (toDate) params.set("toDate", toDate);
+    params.set("limit", String(ORDER_PAGE_LIMIT));
+    return `/api/orders?${params.toString()}`;
+  })();
+
+  const filtersActive = Boolean(
+    debouncedSearch || debouncedCountry || fromDate || toDate || marketplaceFilter !== "all"
+  );
+
+  const clearFilters = () => {
+    setSearchTerm("");
+    setSearchField("all");
+    setMarketplaceFilter("all");
+    setCountryFilter("");
+    setFromDate("");
+    setToDate("");
+  };
+
+  /**
+   * Searching means "find this order", which is rarely a question about the
+   * tab you happen to be standing on. Move to All Orders so the visible state
+   * always matches the query that ran — no hidden widening.
+   */
+  const handleSearchChange = (value: string) => {
+    setSearchTerm(value);
+    if (value.trim() && activeTab !== "all") setActiveTab("all");
+  };
 
   const { data: ordersData, isLoading, isError: ordersError, error: ordersErrorObj, refetch } = useQuery<{
     success: boolean;
     orders: OrderWithDetails[];
     total: number;
   }>({
-    queryKey: ["/api/orders", statusFilter],
+    // The URL is the key: every filter is already encoded in it, so a new
+    // filter can never be forgotten here and serve a stale cached page.
+    queryKey: ["/api/orders", ordersUrl],
     // res.ok check matters: without it a 401/500 parsed as JSON and rendered
     // as "no orders" — a failed fetch must be an error, not an empty inbox.
     queryFn: async () => {
@@ -99,6 +175,7 @@ export function Orders({ user }: OrdersProps) {
       if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
       return res.json();
     },
+    placeholderData: (previous) => previous,
   });
 
   const { data: statsData } = useQuery<{
@@ -176,6 +253,8 @@ export function Orders({ user }: OrdersProps) {
   });
 
   const orders = ordersData?.orders || [];
+  const totalMatching = ordersData?.total ?? orders.length;
+  const truncated = totalMatching > orders.length;
   const stats = statsData?.stats;
   const selectedOrder = orders.find(o => o.id === selectedOrderId) || null;
 
@@ -190,18 +269,27 @@ export function Orders({ user }: OrdersProps) {
     }
   }, [selectedOrderId, selectedOrder?.trackingNumber, selectedOrder?.shippingCarrier]);
 
-  // Filter orders by search term
-  const filteredOrders = orders.filter(order => {
-    if (!searchTerm) return true;
-    const search = searchTerm.toLowerCase();
-    return (
-      order.marketplaceOrderId.toLowerCase().includes(search) ||
-      order.buyerUsername.toLowerCase().includes(search) ||
-      order.shippingName.toLowerCase().includes(search) ||
-      order.shippingCity?.toLowerCase().includes(search) ||
-      order.shippingPostalCode?.toLowerCase().includes(search)
-    );
-  });
+  /**
+   * Which article numbers on this order the term hit, so a result row can say
+   * why it is there. Purely a display aid over the items already in the
+   * payload — an order matched on a product EAN or catalogue name (fields the
+   * list response doesn't carry) simply shows nothing rather than a guess.
+   *
+   * Compacted on both sides to mirror the server's separator-insensitive
+   * identifier match.
+   */
+  const matchedParts = (order: OrderWithDetails): string[] => {
+    if (!debouncedSearch) return [];
+    const needle = compactIdentifier(debouncedSearch).toLowerCase();
+    if (!needle) return [];
+    const hits = new Set<string>();
+    for (const item of order.items ?? []) {
+      for (const code of [item.tmeProductId, item.sku]) {
+        if (code && compactIdentifier(code).toLowerCase().includes(needle)) hits.add(code);
+      }
+    }
+    return Array.from(hits);
+  };
 
   const handleMarkPacked = (orderId: number) => {
     updateStatusMutation.mutate({ id: orderId, status: 'packed' });
@@ -312,24 +400,106 @@ export function Orders({ user }: OrdersProps) {
             </Button>
           </div>
 
-          <div className="flex gap-3 h-[calc(100vh-130px)]">
+          <div className="mb-3 rounded-lg border bg-white p-2" data-testid="orders-filter-bar">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative min-w-[240px] flex-1">
+                <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <Input
+                  placeholder="Order no, part no, SKU, EAN, item title, buyer, address, tracking…"
+                  value={searchTerm}
+                  onChange={(e) => handleSearchChange(e.target.value)}
+                  className="h-8 pl-8 text-sm"
+                  data-testid="input-search-orders"
+                />
+              </div>
+
+              <Select value={searchField} onValueChange={(v) => setSearchField(v as OrderSearchField)}>
+                <SelectTrigger className="h-8 w-[185px] text-sm" data-testid="select-search-field">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ORDER_SEARCH_FIELDS.map((f) => (
+                    <SelectItem key={f.value} value={f.value}>
+                      {f.value === "all" ? "Search: everything" : `Search: ${f.label.toLowerCase()}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={marketplaceFilter} onValueChange={setMarketplaceFilter}>
+                <SelectTrigger className="h-8 w-[130px] text-sm" data-testid="select-marketplace">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All channels</SelectItem>
+                  <SelectItem value="ebay">eBay</SelectItem>
+                  <SelectItem value="amazon">Amazon</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Input
+                placeholder="Country"
+                value={countryFilter}
+                onChange={(e) => setCountryFilter(e.target.value)}
+                maxLength={2}
+                className="h-8 w-[92px] text-sm uppercase"
+                data-testid="input-filter-country"
+              />
+
+              <div className="flex items-center gap-1">
+                <Label htmlFor="orders-from-date" className="text-xs text-gray-500">From</Label>
+                <Input
+                  id="orders-from-date"
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="h-8 w-[140px] text-sm"
+                  data-testid="input-filter-from"
+                />
+                <Label htmlFor="orders-to-date" className="ml-1 text-xs text-gray-500">To</Label>
+                <Input
+                  id="orders-to-date"
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => setToDate(e.target.value)}
+                  className="h-8 w-[140px] text-sm"
+                  data-testid="input-filter-to"
+                />
+              </div>
+
+              {filtersActive && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearFilters}
+                  className="h-8 text-gray-500"
+                  data-testid="btn-clear-filters"
+                >
+                  <X className="mr-1 h-3.5 w-3.5" />
+                  Clear
+                </Button>
+              )}
+            </div>
+
+            {filtersActive && (
+              <p className="mt-1.5 text-xs text-gray-500" data-testid="text-filter-summary">
+                {totalMatching} order{totalMatching === 1 ? "" : "s"} match
+                {activeTab === "all" ? " across all statuses" : activeTab === "to-pack" ? " in To Pack" : " in To Ship"}
+                {truncated && ` — showing the ${orders.length} most recent`}
+              </p>
+            )}
+          </div>
+
+          <div className="flex gap-3 h-[calc(100vh-180px)]">
             {/* Left Panel - Order Queue */}
             <div className="w-72 flex-shrink-0 bg-white rounded-lg shadow-sm border overflow-hidden flex flex-col">
-              <div className="p-2 border-b bg-gray-50 space-y-2">
+              <div className="p-2 border-b bg-gray-50">
                 <p className="text-sm font-medium text-gray-700">
-                  {activeTab === "to-pack" ? "Orders to Pack" : activeTab === "to-ship" ? "Orders to Ship" : "All Orders"}
-                  <span className="text-gray-400 ml-2">({filteredOrders.length})</span>
+                  {debouncedSearch
+                    ? "Search results"
+                    : activeTab === "to-pack" ? "Orders to Pack" : activeTab === "to-ship" ? "Orders to Ship" : "All Orders"}
+                  <span className="text-gray-400 ml-2">({totalMatching})</span>
                 </p>
-                <div className="relative">
-                  <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                  <Input
-                    placeholder="Search orders..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-8 h-7 text-sm"
-                    data-testid="input-search-orders"
-                  />
-                </div>
               </div>
               
               <div className="flex-1 overflow-y-auto">
@@ -346,16 +516,21 @@ export function Orders({ user }: OrdersProps) {
                       {(ordersErrorObj as Error)?.message || "Request failed"}
                     </p>
                   </div>
-                ) : filteredOrders.length === 0 ? (
+                ) : orders.length === 0 ? (
                   <div className="p-8 text-center">
                     <CheckCircle className="w-10 h-10 mx-auto text-green-400 mb-2" />
                     <p className="text-sm text-gray-500">
-                      {searchTerm ? "No orders match your search" : activeTab === "to-pack" ? "All packed!" : activeTab === "to-ship" ? "All shipped!" : "No orders"}
+                      {filtersActive ? "No orders match these filters" : activeTab === "to-pack" ? "All packed!" : activeTab === "to-ship" ? "All shipped!" : "No orders"}
                     </p>
+                    {filtersActive && (
+                      <Button variant="link" size="sm" onClick={clearFilters} data-testid="btn-clear-filters-empty">
+                        Clear filters
+                      </Button>
+                    )}
                   </div>
                 ) : (
                   <div className="divide-y">
-                    {filteredOrders.map((order: any) => {
+                    {orders.map((order: any) => {
                       const itemCount = order.items?.reduce((sum: number, item: any) => sum + (item.quantity || 1), 0) || 0;
                       const isSelected = order.id === selectedOrderId;
                       
@@ -384,6 +559,15 @@ export function Orders({ user }: OrdersProps) {
                             <span>{itemCount} item{itemCount !== 1 ? 's' : ''} → {order.shippingCountry}</span>
                             <span>{order.orderDate ? format(new Date(order.orderDate), 'MMM d') : '-'}</span>
                           </div>
+                          {matchedParts(order).length > 0 && (
+                            <p
+                              className="mt-1 truncate font-mono text-[11px] text-blue-700"
+                              title={matchedParts(order).join(", ")}
+                              data-testid={`queue-match-${order.id}`}
+                            >
+                              {matchedParts(order).join(", ")}
+                            </p>
+                          )}
                         </div>
                       );
                     })}

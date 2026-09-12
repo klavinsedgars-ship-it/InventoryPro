@@ -4,35 +4,57 @@ import { requireAuth } from "../middleware/auth";
 import { ebayOAuth } from "../ebay-oauth";
 import { ebayOrdersApi } from "../ebay-orders-api";
 import { autoMessageScheduler } from "../auto-message-scheduler";
+import { isOrderSearchField } from "@shared/order-search";
+import type { OrderQueryFilters } from "../storage";
+
+/**
+ * A `<input type="date">` sends a bare day, which parses to midnight UTC.
+ * Used as an upper bound that excludes the whole day the operator picked,
+ * so widen it — but only when the caller gave no time of day.
+ */
+function endOfDayIfMidnight(date: Date): Date {
+  if (Number.isNaN(date.getTime())) return date;
+  const isMidnight =
+    date.getUTCHours() === 0 && date.getUTCMinutes() === 0 &&
+    date.getUTCSeconds() === 0 && date.getUTCMilliseconds() === 0;
+  if (!isMidnight) return date;
+  return new Date(date.getTime() + 24 * 60 * 60 * 1000 - 1);
+}
 
 // Orders: listing, detail, status/tracking/notes/events, label print, delete,
 // and eBay order sync. Extracted from the routes.ts monolith (unchanged).
 export function registerOrderRoutes(app: Express): void {
   app.get('/api/orders', requireAuth, async (req, res) => {
     try {
-      const filters: {
-        marketplace?: string;
-        status?: string;
-        search?: string;
-        fromDate?: Date;
-        toDate?: Date;
-        limit?: number;
-        offset?: number;
-      } = {};
+      const filters: OrderQueryFilters = {};
 
       if (req.query.marketplace) filters.marketplace = req.query.marketplace as string;
       if (req.query.status) filters.status = req.query.status as string;
       if (req.query.search) filters.search = req.query.search as string;
+      // An unknown scope falls back to searching everything (planOrderSearch),
+      // which is the safe direction: too many hits, never a silent zero.
+      if (isOrderSearchField(req.query.searchField)) filters.searchField = req.query.searchField;
+      if (req.query.country) filters.country = (req.query.country as string).trim();
       if (req.query.fromDate) filters.fromDate = new Date(req.query.fromDate as string);
-      if (req.query.toDate) filters.toDate = new Date(req.query.toDate as string);
+      // A date input sends midnight; without this an order placed later that
+      // day falls outside its own "to" date.
+      if (req.query.toDate) filters.toDate = endOfDayIfMidnight(new Date(req.query.toDate as string));
       if (req.query.limit) filters.limit = parseInt(req.query.limit as string);
       if (req.query.offset) filters.offset = parseInt(req.query.offset as string);
 
+      // Reject unparseable dates rather than passing Invalid Date to the DB,
+      // where it becomes an opaque 500.
+      for (const key of ["fromDate", "toDate"] as const) {
+        const value = filters[key];
+        if (value && Number.isNaN(value.getTime())) {
+          return res.status(400).json({ success: false, error: `Invalid ${key}` });
+        }
+      }
+
       const orders = await storage.getOrders(filters);
-      const total = await storage.getOrdersCount({
-        marketplace: filters.marketplace,
-        status: filters.status
-      });
+      // Same filters as the page, minus paging, so "N of M" is truthful.
+      const { limit: _l, offset: _o, ...countFilters } = filters;
+      const total = await storage.getOrdersCount(countFilters);
 
       // Include items for each order — single batched query keyed by orderId
       // (was N queries in Promise.all; bounded by page size but still N×RTT).
