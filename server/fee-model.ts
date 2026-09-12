@@ -59,11 +59,21 @@ export interface ProfitBreakdown {
 }
 
 // eBay DE defaults. Overridable per-marketplace via marketplaceSettings.
+//
+// CALIBRATED AGAINST REAL FEES (2026-09-12, 28 orders, EUR 813 gross).
+// eBay actually took 17.7% of gross; the previous 12% + 0.35 under-provisioned
+// on 28 of 28 orders — not one was covered — so a EUR 4.00 profit floor was
+// really delivering about EUR 2.70. Fee rates ran 13.1%-21.8%; a least-squares
+// fit gives 14.7% + 0.88, but a fit sits in the middle by construction and a
+// floor is a MINIMUM, so these values are set where 89% of observed orders are
+// fully covered and the worst miss is EUR 0.27. (19% + 0.70 would cover 100%
+// but over-provisions by EUR 30 across the same orders, i.e. needlessly higher
+// prices.) Re-derive from /api/ebay/fee-config, which reports measured fees.
 export const DEFAULT_FEE_CONFIG: Record<Marketplace, FeeConfig> = {
   ebay: {
     marketplace: "ebay",
-    ebayFvfPct: 0.12,
-    ebayFixedFee: 0.35,
+    ebayFvfPct: 0.18,
+    ebayFixedFee: 0.6,
     amazonReferralPct: 0.15,
     vatPct: 0.21,
     packagingCost: 0.3,
