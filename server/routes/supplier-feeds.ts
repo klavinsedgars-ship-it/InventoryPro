@@ -21,8 +21,13 @@ import {
   fetchSupplierFeed,
   runSupplierFeedImport,
   ensureSupplierTables,
+  isXmlSource,
   type SupplierFeedConfig,
+  type SupplierImportResult,
 } from "../supplier-feed-sync";
+import { runAccImport, type AccImportResult } from "../acc-sync";
+import { describeAccConfig, accApi, ACC_DEMO_LICENSE_KEY } from "../acc-api";
+import { mapAccProduct, branchPathResolver } from "../acc-map";
 import {
   offerConds,
   offerSortSql,
@@ -55,6 +60,62 @@ function offerFilterFrom(src: Record<string, unknown>): SupplierOfferFilter {
     priceMin: num("priceMin"),
     priceMax: num("priceMax"),
     promoted: promoted === "yes" || promoted === "no" ? promoted : undefined,
+  };
+}
+
+/** ISO timestamp N days back, for ACC's `updatedAfter` delta filter. */
+function isoDaysAgo(days: number): string {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+/**
+ * The API-supplier equivalent of the XML probe: what we are configured to
+ * send, whether the whitelisted IP is in play, and the first few products as
+ * the mapper reads them — without writing anything.
+ *
+ * Reports a missing licence key as a plain, actionable state rather than an
+ * exception, because "not credentialed yet" is the expected condition until
+ * ACC issues one.
+ */
+async function probeApiSupplier(config: SupplierFeedConfig) {
+  const describe = describeAccConfig();
+  const api = accApi();
+  if (!api) {
+    return {
+      ok: false,
+      sourceKind: "api",
+      config: describe,
+      error: "ACC_LICENSE_KEY is not set",
+      hint: `Set ACC_LICENSE_KEY to the key ACC issues you. To see the shape of the data before then, their published demo key is ${ACC_DEMO_LICENSE_KEY} (production demo account: EUR, and every stock figure is capped at 1).`,
+    };
+  }
+
+  const branchesR = await api.getTreeBranches();
+  const resolve = branchesR.ok && branchesR.data?.length ? branchPathResolver(branchesR.data) : undefined;
+  const page = await api.getProducts({ offset: 0, limit: 3 });
+
+  return {
+    ok: page.ok,
+    sourceKind: "api",
+    config: describe,
+    branches: {
+      ok: branchesR.ok,
+      count: branchesR.data?.length ?? 0,
+      error: branchesR.error,
+      sample: (branchesR.data ?? []).slice(0, 5),
+    },
+    products: {
+      ok: page.ok,
+      error: page.error,
+      ms: page.ms,
+      count: page.data?.products.length ?? 0,
+      // The untouched first record, so a field we never mapped is still
+      // visible when something looks wrong.
+      firstRaw: page.data?.products?.[0] ?? null,
+      mapped: (page.data?.products ?? []).map((p) => mapAccProduct(p, { resolveBranch: resolve })),
+    },
+    note:
+      "Weight is absent from ACC's product list. Promoted products will price against the shipping model's fallback until a weight is supplied, so check the mapped preview before promoting anything heavy.",
   };
 }
 
@@ -103,6 +164,7 @@ function registerOneSupplier(app: Express, config: SupplierFeedConfig): void {
    */
   app.get(`${base}/probe`, requireAuth, async (req, res) => {
     try {
+      if (!isXmlSource(config)) return res.json(await probeApiSupplier(config));
       const feed = await fetchSupplierFeed(config);
       const structure = sniffFeedStructure(feed.xml);
       const recordElement = (req.query.record as string) || structure.recordElement;
@@ -146,6 +208,24 @@ function registerOneSupplier(app: Express, config: SupplierFeedConfig): void {
     const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
     const recordElement = (req.query.record as string) || req.body?.record || undefined;
     try {
+      if (!isXmlSource(config)) {
+        // Paged API: the query string carries its own knobs (resume offset,
+        // updatedAfter for a delta run, branch for a first look).
+        const accOpts = {
+          limit,
+          offset: req.query.offset ? parseInt(String(req.query.offset), 10) : undefined,
+          updatedAfter: (req.query.updatedAfter as string) || undefined,
+          branch: (req.query.branch as string) || undefined,
+        };
+        if (dryRun) return res.json(await runAccImport(config, { ...accOpts, dryRun: true }));
+        const accRun = await withLease(leaseStore, importLease, { ttlSeconds: 300 }, () =>
+          runAccImport(config, { ...accOpts, dryRun: false }),
+        );
+        if (!accRun.ran) {
+          return res.status(409).json({ ok: false, error: describeRefusal(importLease, accRun) });
+        }
+        return res.json(accRun.result);
+      }
       if (dryRun) {
         return res.json(await runSupplierFeedImport(config, { dryRun: true, limit, recordElement }));
       }
@@ -174,9 +254,14 @@ function registerOneSupplier(app: Express, config: SupplierFeedConfig): void {
       if ((await promotedProductCount(config.supplier)) === 0) {
         return res.json({ ok: true, skipped: true, reason: `no promoted ${config.displayName} products yet — import manually from the browser page` });
       }
-      const r = await withLease(leaseStore, importLease, { ttlSeconds: 300 }, () =>
-        runSupplierFeedImport(config, { dryRun: false }),
-      );
+      const runImport = (): Promise<SupplierImportResult | AccImportResult> =>
+        isXmlSource(config)
+          ? runSupplierFeedImport(config, { dryRun: false })
+          : // Daily delta: ask ACC only for what changed, which sidesteps
+            // their 15-minute identical-request refusal and finishes in one
+            // slice instead of paging the whole 25k catalogue every hour.
+            runAccImport(config, { dryRun: false, updatedAfter: isoDaysAgo(2) });
+      const r = await withLease(leaseStore, importLease, { ttlSeconds: 300 }, runImport);
       if (!r.ran) {
         return res.json({ ok: true, skipped: true, reason: describeRefusal(importLease, r) });
       }
@@ -215,7 +300,9 @@ function registerOneSupplier(app: Express, config: SupplierFeedConfig): void {
       `);
       res.json({
         ok: true,
-        feedUrl: config.feedUrl,
+        sourceKind: config.sourceKind ?? "xml",
+        feedUrl: config.feedUrl ?? null,
+        api: isXmlSource(config) ? undefined : describeAccConfig(),
         counts: (countsQ.rows ?? countsQ)?.[0] ?? null,
         runs: runsQ.rows ?? runsQ,
       });

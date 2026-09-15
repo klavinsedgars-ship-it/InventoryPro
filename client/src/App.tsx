@@ -73,6 +73,7 @@ function AppContent() {
       <Route path="/tme-browser" component={() => <TMEBrowser user={user} />} />
       <Route path="/getic-browser" component={() => <SupplierBrowser user={user} slug="getic" name="Getic" />} />
       <Route path="/greencell-browser" component={() => <SupplierBrowser user={user} slug="greencell" name="Green Cell" />} />
+      <Route path="/acc-browser" component={() => <SupplierBrowser user={user} slug="acc" name="ACC Distribution" />} />
       <Route path="/amazon" component={() => <AmazonPage user={user} />} />
       <Route path="/postage" component={() => <PostagePage user={user} />} />
       <Route path="/configuration" component={() => <Configuration user={user} />} />

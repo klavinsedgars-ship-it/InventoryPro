@@ -32,6 +32,7 @@ const navigation = [
   { name: 'TME Browser', href: '/tme-browser', icon: Search },
   { name: 'Getic Browser', href: '/getic-browser', icon: Boxes },
   { name: 'Green Cell Browser', href: '/greencell-browser', icon: Boxes },
+  { name: 'ACC Browser', href: '/acc-browser', icon: Boxes },
   { name: 'Amazon', href: '/amazon', icon: ShoppingCart },
   { name: 'Postage', href: '/postage', icon: Receipt },
   { name: 'Opportunities', href: '/opportunities', icon: Target },

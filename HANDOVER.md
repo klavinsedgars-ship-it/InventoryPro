@@ -368,6 +368,83 @@ That endpoint is the one to run before asking any distributor to enable
 access: a whitelist is granted for one address, and finding out it is wrong
 here beats finding out from their 403. It never echoes the proxy password.
 
+## ACC Distribution (2026-09-15)
+
+The third staged distributor, and the first that is an API rather than a feed
+document. Consumer electronics out of Lithuania — a different catalogue shape
+from TME's components.
+
+**Transport.** `POST https://api.accdistribution.net/v1/<Method>`, JSON, body
+`{"request": {...}}`. Auth is a **LicenseKey inside the body**, not a header —
+so a request body must never be logged. Methods used: `GetProducts` (paged
+list), `GetProduct` (detail, the only place parameters live), and
+`GetTreeBranches` (the category tree, so a branch id becomes
+"Computers > Storage" rather than a bare leaf name).
+
+**Their throttle shapes the importer.** 300 requests/minute overall, but
+`GetProducts` separately refuses *identical* requests inside a 15-minute
+window ("Repeated requests not allowed"). Paging is safe because each page
+differs by Offset; re-running the same import twice is not. The client
+recognises that message and reports it as transient rather than as a parse
+failure.
+
+**Layout:**
+
+| File | What it is |
+|---|---|
+| `server/acc-api.ts` | Client. Proxy-forced, per-minute budget, never throws for an API-level failure. |
+| `server/acc-map.ts` | Pure: ACC product JSON → the same `NormalizedOffer` the XML feeds produce. |
+| `server/acc-sync.ts` | Paged, time-bounded, resumable import into `supplier_offers`. |
+
+Everything downstream — browsing, promotion, the listing ramp, repricing — is
+the code that already existed; ACC reaches it because its rows land in the same
+staging table. `ACC` is in `LISTING_SUPPLIERS`, so promoted rows are *allowed*
+to list; promotion itself is still per-offer and manual.
+
+Three things that will bite whoever touches this next:
+
+- **There is no weight in ACC's product list. None.** Not in `GetProducts`, not
+  as a first-class field in `GetProduct`. Postage is the largest single cost
+  line in this business, so a promoted ACC product with no weight is priced
+  against the shipping model's fallback, not against what the parcel will
+  actually cost. `pickWeightGrams()` recovers one from `GetProduct`'s parameter
+  list where the vendor publishes it, and **refuses a bare number with no
+  unit** — 2 could be kilograms or grams, and guessing is a 1000× error on the
+  one input that decides whether an order makes money. The import result and
+  the UI both report how many offers arrived weightless. Fix this before
+  listing anything heavy.
+- **Picture URLs are incomplete.** `Picture` and `Medias[].Uri` are
+  directories; a size must be appended (`/440x440.png` — the largest size
+  guaranteed to exist; 1920 only exists where the source TIFF was bigger).
+  Fetched as returned, they 404.
+- **A cursor belongs to one query shape.** A full-catalogue run and a filtered
+  run (daily `updatedAfter` delta, or one branch) walk completely different
+  result sets. Runs are tagged in `record_element`, and only full runs carry a
+  resumable cursor — without that, a delta would resume a full import at an
+  offset past the end of its own short result set and silently declare the
+  catalogue complete.
+
+**Environment:** `ACC_LICENSE_KEY` (required), `ACC_COMPANY_ID` (default
+`_al`), `ACC_LOCALE` (`en`), `ACC_CURRENCY` (`EUR`), `ACC_BASE_URL`. Requests
+go through `FEED_PROXY_URL` and **fail** without it, because ACC whitelists one
+address and going direct means a rejection whose reason is invisible from here.
+
+Their specification publishes a demo key, `498ec72c-e8e7-48f2-b300-d95666aeb141`
+— a real production account with **every stock figure capped at 1**. Useful for
+seeing the shape of the data; mistaking it for real stock would look like a
+catastrophic collapse. The UI badges it in red when that key is in use.
+
+```
+GET  /api/acc/probe    connection, branch tree, first 3 products raw + mapped
+POST /api/acc/import?dryRun=1&limit=25      map a page, write nothing
+POST /api/acc/import                         a slice; repeat while nextOffset
+POST /api/acc/import?offset=0                force a full re-walk
+GET  /api/cron/acc-import                    hourly; 2-day updatedAfter delta
+```
+
+The cron only runs once something is promoted, same posture as the other
+distributors: while the catalogue is pure staging, the operator imports by hand.
+
 ## Order search (2026-09-12)
 
 `/api/orders` used to accept `search` and match it against three columns

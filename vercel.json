@@ -20,6 +20,7 @@
     { "path": "/api/cron/reprice", "schedule": "6,16,26,36,46,56 * * * *" },
     { "path": "/api/cron/getic-import", "schedule": "24 * * * *" },
     { "path": "/api/cron/greencell-import", "schedule": "42 * * * *" },
+    { "path": "/api/cron/acc-import", "schedule": "51 * * * *" },
     { "path": "/api/cron/amazon-match", "schedule": "12,32,52 * * * *" }
   ]
 }

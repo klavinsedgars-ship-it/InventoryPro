@@ -32,7 +32,15 @@ export interface SupplierFeedConfig {
   slug: string;
   /** What the UI calls it. */
   displayName: string;
-  feedUrl: string;
+  /**
+   * How the catalogue arrives. "xml" is one document this module streams;
+   * "api" is a paged JSON API with its own importer (server/acc-sync.ts).
+   * Everything downstream of supplier_offers — browsing, promotion, the
+   * listing ramp — is identical either way. Defaults to "xml".
+   */
+  sourceKind?: "xml" | "api";
+  /** XML sources only. */
+  feedUrl?: string;
   /**
    * Route this supplier's requests through FEED_PROXY_URL. Set it for
    * distributors that whitelist a fixed IP; leave it off for everyone else,
@@ -60,8 +68,27 @@ export const GREENCELL_FEED: SupplierFeedConfig = {
     "https://b2b.greencell.global/modules/xmlgenerator/get.php?secure_key=f82911a066faf27873aaa5d80c875fd2",
 };
 
-/** Every XML-feed distributor. Routes, crons and the UI iterate this. */
-export const FEED_SUPPLIERS: SupplierFeedConfig[] = [GETIC_FEED, GREENCELL_FEED];
+/**
+ * ACC Distribution: a paged JSON API rather than a feed URL, and behind an
+ * IP whitelist — hence useProxy. Credentials live in ACC_LICENSE_KEY et al
+ * (server/acc-api.ts); this entry only says the supplier exists and how its
+ * catalogue is fetched.
+ */
+export const ACC_FEED: SupplierFeedConfig = {
+  supplier: "ACC",
+  slug: "acc",
+  displayName: "ACC Distribution",
+  sourceKind: "api",
+  useProxy: true,
+};
+
+/** Every distributor with a staged catalogue. Routes, crons and the UI iterate this. */
+export const FEED_SUPPLIERS: SupplierFeedConfig[] = [GETIC_FEED, GREENCELL_FEED, ACC_FEED];
+
+/** True for configs this module's XML engine can actually import. */
+export function isXmlSource(config: SupplierFeedConfig): boolean {
+  return (config.sourceKind ?? "xml") === "xml";
+}
 
 /** Refuse to buffer a feed beyond this — something is wrong upstream. */
 const MAX_FEED_BYTES = 150 * 1024 * 1024;
@@ -158,6 +185,9 @@ export interface FetchedFeed {
 
 export async function fetchSupplierFeed(config: SupplierFeedConfig, opts?: { timeoutMs?: number; url?: string }): Promise<FetchedFeed> {
   const url = opts?.url ?? config.feedUrl;
+  if (!url) {
+    throw new Error(`${config.displayName} has no feed URL — its catalogue comes from an API, not an XML document`);
+  }
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), opts?.timeoutMs ?? 120_000);
   (timer as any).unref?.();
@@ -200,6 +230,96 @@ export async function fetchSupplierFeed(config: SupplierFeedConfig, opts?: { tim
     xml = new TextDecoder("utf-8").decode(buf); // unknown label — best effort
   }
   return { xml, bytes: buf.byteLength, httpStatus: res.status, contentType, encoding };
+}
+
+// ---------------------------------------------------------------------------
+// The staging sink, shared by every importer
+//
+// Getic and Green Cell arrive as XML and ACC as a paged JSON API, but all
+// three land in the same table through the same column list. Keeping one
+// copy of it is not tidiness: the last mapper bug here was a field handled in
+// one place and forgotten in another, and a second upsert would be a standing
+// invitation to repeat it.
+// ---------------------------------------------------------------------------
+export type SupplierOfferRow = typeof supplierOffers.$inferInsert;
+
+export function offerToRow(
+  supplier: string,
+  o: NormalizedOffer,
+  raw: unknown,
+  runId: number,
+): SupplierOfferRow {
+  return {
+    supplier,
+    supplierSku: o.supplierSku!,
+    name: o.name,
+    ean: o.ean,
+    manufacturer: o.manufacturer,
+    mpn: o.mpn,
+    categoryPath: o.categoryPath,
+    description: o.description,
+    price: o.price != null ? String(o.price) : null,
+    currency: o.currency,
+    stock: o.stock,
+    weightG: o.weightG != null ? String(Math.round(o.weightG * 100) / 100) : null,
+    imageUrl: o.imageUrl,
+    additionalImages: o.additionalImages.length ? JSON.stringify(o.additionalImages) : null,
+    datasheetUrl: o.datasheetUrl,
+    productUrl: o.productUrl,
+    attributes: JSON.stringify(o.attributes),
+    raw: JSON.stringify({ record: raw, sourceKeys: o.sourceKeys }),
+    feedRunId: runId,
+  };
+}
+
+export async function upsertOfferRows(rows: SupplierOfferRow[]): Promise<void> {
+  if (rows.length === 0) return;
+  await db
+    .insert(supplierOffers)
+    .values(rows)
+    .onConflictDoUpdate({
+      target: [supplierOffers.supplier, supplierOffers.supplierSku],
+      set: {
+        name: sql`excluded.name`,
+        ean: sql`excluded.ean`,
+        manufacturer: sql`excluded.manufacturer`,
+        mpn: sql`excluded.mpn`,
+        categoryPath: sql`excluded.category_path`,
+        description: sql`excluded.description`,
+        price: sql`excluded.price`,
+        currency: sql`excluded.currency`,
+        stock: sql`excluded.stock`,
+        weightG: sql`excluded.weight_g`,
+        imageUrl: sql`excluded.image_url`,
+        additionalImages: sql`excluded.additional_images`,
+        datasheetUrl: sql`excluded.datasheet_url`,
+        productUrl: sql`excluded.product_url`,
+        attributes: sql`excluded.attributes`,
+        raw: sql`excluded.raw`,
+        feedRunId: sql`excluded.feed_run_id`,
+        lastSeenAt: sql`now()`,
+      },
+    });
+}
+
+/** Open a row in supplier_feed_runs and return its id. */
+export async function startFeedRun(values: Partial<SupplierFeedRun> & { supplier: string }): Promise<number> {
+  const [row] = await db
+    .insert(supplierFeedRuns)
+    .values({ status: "running", ...values } as any)
+    .returning();
+  return row.id;
+}
+
+export async function countSupplierOffers(supplier: string): Promise<number> {
+  return countOffers(supplier);
+}
+
+export async function finishFeedRun(
+  id: number,
+  patch: Partial<SupplierFeedRun> & { status: string },
+): Promise<void> {
+  return finishRun(id, patch);
 }
 
 // ---------------------------------------------------------------------------
@@ -293,7 +413,7 @@ export async function runSupplierFeedImport(config: SupplierFeedConfig, opts: Su
     .values({
       supplier: config.supplier,
       status: "running",
-      url: config.feedUrl,
+      url: config.feedUrl ?? null,
       httpStatus: feed.httpStatus,
       contentType: feed.contentType,
       bytes: feed.bytes,
@@ -317,58 +437,14 @@ export async function runSupplierFeedImport(config: SupplierFeedConfig, opts: Su
   const coverageTotals: Record<string, number> = {};
   const errors: string[] = [];
 
-  const toRow = (o: NormalizedOffer, rawJson: JsonRecord): OfferRow => ({
-    supplier: config.supplier,
-    supplierSku: o.supplierSku!,
-    name: o.name,
-    ean: o.ean,
-    manufacturer: o.manufacturer,
-    mpn: o.mpn,
-    categoryPath: o.categoryPath,
-    description: o.description,
-    price: o.price != null ? String(o.price) : null,
-    currency: o.currency,
-    stock: o.stock,
-    weightG: o.weightG != null ? String(Math.round(o.weightG * 100) / 100) : null,
-    imageUrl: o.imageUrl,
-    additionalImages: o.additionalImages.length ? JSON.stringify(o.additionalImages) : null,
-    datasheetUrl: o.datasheetUrl,
-    productUrl: o.productUrl,
-    attributes: JSON.stringify(o.attributes),
-    raw: JSON.stringify({ record: rawJson, sourceKeys: o.sourceKeys }),
-    feedRunId: runId,
-  });
+  const toRow = (o: NormalizedOffer, rawJson: JsonRecord): OfferRow =>
+    offerToRow(config.supplier, o, rawJson, runId);
 
   const flush = async () => {
     if (batch.length === 0) return;
     const rows = batch;
     batch = [];
-    await db
-      .insert(supplierOffers)
-      .values(rows)
-      .onConflictDoUpdate({
-        target: [supplierOffers.supplier, supplierOffers.supplierSku],
-        set: {
-          name: sql`excluded.name`,
-          ean: sql`excluded.ean`,
-          manufacturer: sql`excluded.manufacturer`,
-          mpn: sql`excluded.mpn`,
-          categoryPath: sql`excluded.category_path`,
-          description: sql`excluded.description`,
-          price: sql`excluded.price`,
-          currency: sql`excluded.currency`,
-          stock: sql`excluded.stock`,
-          weightG: sql`excluded.weight_g`,
-          imageUrl: sql`excluded.image_url`,
-          additionalImages: sql`excluded.additional_images`,
-          datasheetUrl: sql`excluded.datasheet_url`,
-          productUrl: sql`excluded.product_url`,
-          attributes: sql`excluded.attributes`,
-          raw: sql`excluded.raw`,
-          feedRunId: sql`excluded.feed_run_id`,
-          lastSeenAt: sql`now()`,
-        },
-      });
+    await upsertOfferRows(rows);
     recordsUpserted += rows.length;
   };
 

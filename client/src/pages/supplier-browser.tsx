@@ -71,7 +71,18 @@ function extraImages(json: string | null | undefined): string[] {
 
 interface SupplierFeedStatus {
   ok: boolean;
-  feedUrl: string;
+  /** "xml" = one document we stream; "api" = a paged JSON API. */
+  sourceKind?: "xml" | "api";
+  feedUrl: string | null;
+  /** API sources only: what we are configured to send. Never the key itself. */
+  api?: {
+    configured: boolean;
+    baseUrl: string | null;
+    companyId: string | null;
+    currency: string | null;
+    usingDemoKey: boolean;
+    proxy: { configured: boolean; host: string | null; hasCredentials: boolean };
+  };
   counts: {
     total: number;
     in_stock: number;
@@ -215,9 +226,20 @@ export default function SupplierBrowser({ user, slug, name }: { user?: any; slug
         toast({ title: "Import failed", description: d.error, variant: "destructive" });
         return;
       }
+      const counted = `${d.recordsSeen} records seen, ${d.recordsUpserted} upserted, ${d.newRecords} new, ${d.recordsFailed} failed`;
       toast({
-        title: d.status === "partial" ? "Import ran out of time — run again to continue" : "Feed imported",
-        description: `${d.recordsSeen} records seen, ${d.recordsUpserted} upserted, ${d.newRecords} new, ${d.recordsFailed} failed`,
+        title:
+          d.status === "partial"
+            ? d.nextOffset != null
+              ? `Paused at ${d.nextOffset} — import again to continue`
+              : "Import ran out of time — run again to continue"
+            : "Catalogue imported",
+        // A product with no weight cannot be priced against a real postage
+        // cost, so say how many arrived that way rather than leaving it to be
+        // discovered at the first loss-making sale.
+        description: d.missingWeight
+          ? `${counted}. ${d.missingWeight} of them carry no weight.`
+          : counted,
       });
       qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith(`/api/${slug}/`) });
     },
@@ -248,6 +270,7 @@ export default function SupplierBrowser({ user, slug, name }: { user?: any; slug
   });
 
   const counts = status?.counts;
+  const isApi = status?.sourceKind === "api";
   const lastRun = status?.runs?.[0];
   const offers: SupplierOffer[] = offersData?.offers ?? [];
   const total: number = offersData?.total ?? 0;
@@ -292,7 +315,7 @@ export default function SupplierBrowser({ user, slug, name }: { user?: any; slug
       <div className={`transition-all duration-200 ${sidebarCollapsed ? "ml-16" : "ml-64"}`}>
         <Header
           title={`${name} Browser`}
-          subtitle={`${name} XML feed catalogue — browse the staging import, promote selected offers into Products`}
+          subtitle={`${name} catalogue — browse the staging import, promote selected offers into Products`}
         />
 
         <div className="p-6 space-y-6">
@@ -301,12 +324,22 @@ export default function SupplierBrowser({ user, slug, name }: { user?: any; slug
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between flex-wrap gap-3">
                 <CardTitle className="flex items-center gap-2 text-base">
-                  <Package className="w-4 h-4" /> {name} feed
-                  <span className="text-xs font-normal text-gray-400">{status?.feedUrl}</span>
+                  <Package className="w-4 h-4" /> {name} {isApi ? "catalogue" : "feed"}
+                  <span className="text-xs font-normal text-gray-400">
+                    {isApi ? status?.api?.baseUrl : status?.feedUrl}
+                  </span>
+                  {status?.api?.usingDemoKey && (
+                    <Badge variant="destructive" data-testid="badge-demo-key">
+                      demo key — every stock figure is capped at 1
+                    </Badge>
+                  )}
+                  {isApi && status?.api?.configured === false && (
+                    <Badge variant="secondary" data-testid="badge-no-key">no licence key set</Badge>
+                  )}
                 </CardTitle>
                 <div className="flex items-center gap-2">
                   <Button variant="outline" size="sm" onClick={() => { setProbeOpen(true); refetchProbe(); }} data-testid="button-probe">
-                    <Eye className="w-4 h-4 mr-1" /> Probe feed
+                    <Eye className="w-4 h-4 mr-1" /> {isApi ? "Probe API" : "Probe feed"}
                   </Button>
                   <Button
                     variant="outline"
@@ -320,14 +353,14 @@ export default function SupplierBrowser({ user, slug, name }: { user?: any; slug
                   </Button>
                   {!confirmImport ? (
                     <Button size="sm" onClick={() => setConfirmImport(true)} disabled={importMutation.isPending} data-testid="button-import">
-                      <Download className="w-4 h-4 mr-1" /> Import feed
+                      <Download className="w-4 h-4 mr-1" /> {isApi ? "Import catalogue" : "Import feed"}
                     </Button>
                   ) : (
                     <Button size="sm" variant="destructive" onClick={() => importMutation.mutate()} disabled={importMutation.isPending} data-testid="button-import-confirm">
                       {importMutation.isPending ? (
                         <><RefreshCw className="w-4 h-4 mr-1 animate-spin" /> Importing… (can take minutes)</>
                       ) : (
-                        "Confirm: import whole feed"
+                        isApi ? "Confirm: import catalogue" : "Confirm: import whole feed"
                       )}
                     </Button>
                   )}
@@ -364,8 +397,9 @@ export default function SupplierBrowser({ user, slug, name }: { user?: any; slug
                   )}
                   {counts?.total === 0 && !lastRun && (
                     <p className="text-sm text-gray-500 mt-3">
-                      Nothing imported yet. Start with <b>Probe feed</b> to see what the XML looks like, then{" "}
-                      <b>Preview (dry run)</b> to check the field mapping, then import.
+                      Nothing imported yet. Start with <b>{isApi ? "Probe API" : "Probe feed"}</b> to see what{" "}
+                      {isApi ? "the API returns" : "the XML looks like"}, then <b>Preview (dry run)</b> to check the
+                      field mapping, then import.
                     </p>
                   )}
                 </>
@@ -667,13 +701,54 @@ export default function SupplierBrowser({ user, slug, name }: { user?: any; slug
       <Dialog open={probeOpen} onOpenChange={setProbeOpen}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>Feed probe</DialogTitle>
-            <DialogDescription>What the XML actually looks like — fetched live, nothing written.</DialogDescription>
+            <DialogTitle>{isApi ? "API probe" : "Feed probe"}</DialogTitle>
+            <DialogDescription>
+              {isApi
+                ? "What the distributor's API returns right now — fetched live, nothing written."
+                : "What the XML actually looks like — fetched live, nothing written."}
+            </DialogDescription>
           </DialogHeader>
           {probeLoading ? (
-            <p className="text-sm text-gray-500">Fetching feed…</p>
+            <p className="text-sm text-gray-500">{isApi ? "Calling the API…" : "Fetching feed…"}</p>
           ) : probeError ? (
             <p className="text-sm text-red-600">{(probeErr as Error)?.message}</p>
+          ) : probeData?.sourceKind === "api" ? (
+            <ScrollArea className="max-h-[65vh]">
+              <div className="space-y-3 text-sm pr-4">
+                {probeData.error && (
+                  <p className="text-red-600">
+                    <AlertTriangle className="w-3 h-3 inline mr-1" />
+                    {probeData.error}
+                  </p>
+                )}
+                {probeData.hint && <p className="text-gray-600">{probeData.hint}</p>}
+                <div>
+                  <p className="font-medium mb-1">Connection</p>
+                  <pre className="bg-gray-50 rounded p-3 text-xs overflow-x-auto">{JSON.stringify(probeData.config, null, 2)}</pre>
+                </div>
+                {probeData.branches && (
+                  <p>
+                    Category tree: {probeData.branches.ok ? `${probeData.branches.count} branches` : `failed — ${probeData.branches.error}`}
+                  </p>
+                )}
+                {probeData.products && (
+                  <>
+                    <p>
+                      Products: {probeData.products.ok ? `${probeData.products.count} returned in ${probeData.products.ms} ms` : `failed — ${probeData.products.error}`}
+                    </p>
+                    <div>
+                      <p className="font-medium mb-1">First product, untouched</p>
+                      <pre className="bg-gray-50 rounded p-3 text-xs overflow-x-auto">{JSON.stringify(probeData.products.firstRaw, null, 2)}</pre>
+                    </div>
+                    <div>
+                      <p className="font-medium mb-1">How the mapper reads it</p>
+                      <pre className="bg-gray-50 rounded p-3 text-xs overflow-x-auto">{JSON.stringify(probeData.products.mapped?.[0] ?? {}, null, 2)}</pre>
+                    </div>
+                  </>
+                )}
+                {probeData.note && <p className="text-amber-700">{probeData.note}</p>}
+              </div>
+            </ScrollArea>
           ) : probeData ? (
             <ScrollArea className="max-h-[65vh]">
               <div className="space-y-3 text-sm pr-4">
