@@ -441,6 +441,17 @@ Two things to know before touching it:
   Nothing records what was already pushed, and stock stays above the cap after
   the push. `remaining` — what is still beyond the cursor — is the honest
   progress number.
+- **`remaining` falling is NOT evidence that eBay accepted anything.** The
+  cursor advances whether a push succeeded or failed, so a pass where every
+  single write was rejected looks identical to a healthy one. `pushedToEbay` /
+  `pushFailed` / `lastErrors` in the progress output are the counters that
+  actually answer it; they are persisted per batch because each slice is a
+  separate function invocation whose in-memory stats die with it.
+- **`apply` counts rows off-target either side of its UPDATE** rather than
+  trusting `rowCount`, which drizzle's `db.execute` does not reliably surface —
+  an UPDATE has no RETURNING rows to fall back on, so a missing count reads as
+  a confident "0 rows changed" on a statement that rewrote the catalogue.
+  `capDistribution` in the progress output shows what the column really holds.
 
 Reversible: `action=apply&target=2` then `action=start` puts it back.
 Products with `use_stock_limit = false` are the operator's explicit "sell as

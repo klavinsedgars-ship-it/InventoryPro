@@ -22,12 +22,20 @@ import { db } from "./db";
 import { products, type Product } from "@shared/schema";
 import { storage } from "./storage";
 import { ebayInventoryApi } from "./ebay-inventory-api";
+import { mapPool } from "./concurrency";
 import { DEFAULT_EBAY_STOCK_LIMIT, clampTarget } from "@shared/stock-policy";
 
 export { clampTarget };
 
 const BATCH = 200;
 const PUSH_CHUNK = 25; // eBay's bulk_update_price_quantity ceiling
+/**
+ * Bulk calls in flight at once. Each 200-product batch is 8 calls, and run
+ * sequentially those calls — not the database — are the whole cost of a slice.
+ * Four at a time is a meaningful speedup over ~84k listings while staying far
+ * below anything eBay would consider abusive.
+ */
+const PUSH_CONCURRENCY = 4;
 
 export interface QuantitySweepStats {
   enabled: boolean;
@@ -40,6 +48,9 @@ export interface QuantitySweepStats {
   cursor: number;
   budgetHit: boolean;
   sampleErrors: string[];
+  /** Reset each time the running totals are written; not part of the report. */
+  pushedSinceLastPersist: number;
+  failedSinceLastPersist: number;
 }
 
 async function getSetting(name: string): Promise<string | undefined> {
@@ -61,7 +72,44 @@ export async function setQuantitySweepEnabled(on: boolean): Promise<void> {
   await storage.setMarketplaceSetting({ marketplace: "ebay", setting: "quantity_sweep", value: on ? "on" : "off" });
   if (on) {
     await storage.setMarketplaceSetting({ marketplace: "ebay", setting: "quantity_cursor", value: "0" });
+    // A fresh pass starts a fresh tally, or the counters would describe two
+    // runs at once.
+    for (const k of ["quantity_pushed", "quantity_failed"]) {
+      await storage.setMarketplaceSetting({ marketplace: "ebay", setting: k, value: "0" });
+    }
+    await storage.setMarketplaceSetting({ marketplace: "ebay", setting: "quantity_errors", value: "" });
   }
+}
+
+/**
+ * Fold this slice's push tally into the running totals.
+ *
+ * Each slice is a separate function invocation, so its in-memory stats vanish
+ * when it ends; without this the only record of 84k eBay writes would be
+ * whichever slice's response an operator happened to be looking at.
+ */
+async function persistTotals(stats: QuantitySweepStats): Promise<void> {
+  const prevPushed = Number((await getSetting("quantity_pushed")) ?? 0) || 0;
+  const prevFailed = Number((await getSetting("quantity_failed")) ?? 0) || 0;
+  await storage.setMarketplaceSetting({
+    marketplace: "ebay",
+    setting: "quantity_pushed",
+    value: String(prevPushed + stats.pushedSinceLastPersist),
+  });
+  await storage.setMarketplaceSetting({
+    marketplace: "ebay",
+    setting: "quantity_failed",
+    value: String(prevFailed + stats.failedSinceLastPersist),
+  });
+  if (stats.sampleErrors.length) {
+    await storage.setMarketplaceSetting({
+      marketplace: "ebay",
+      setting: "quantity_errors",
+      value: JSON.stringify(stats.sampleErrors.slice(0, 3)),
+    });
+  }
+  stats.pushedSinceLastPersist = 0;
+  stats.failedSinceLastPersist = 0;
 }
 
 /**
@@ -133,6 +181,9 @@ export async function quantityProgress(): Promise<{
   capDistribution: Array<{ limit: number | null; products: number }>;
   capOptOuts: number;
   offTarget: number;
+  pushedToEbay: number;
+  pushFailed: number;
+  lastErrors: string[];
 }> {
   const target = await quantityTarget();
   const cursor = Number((await getSetting("quantity_cursor")) ?? 0) || 0;
@@ -163,12 +214,23 @@ export async function quantityProgress(): Promise<{
     limit: d.limit === null || d.limit === undefined ? null : Number(d.limit),
     products: Number(d.products) || 0,
   }));
+  let lastErrors: string[] = [];
+  try {
+    const raw = (await getSetting("quantity_errors")) || "";
+    if (raw) lastErrors = JSON.parse(raw);
+  } catch {
+    lastErrors = [];
+  }
+
   return {
     target,
     cursor,
     listedTotal: row.listed_total ?? 0,
     overCap: row.over_cap ?? 0,
     remaining: row.remaining ?? 0,
+    pushedToEbay: Number((await getSetting("quantity_pushed")) ?? 0) || 0,
+    pushFailed: Number((await getSetting("quantity_failed")) ?? 0) || 0,
+    lastErrors,
     capDistribution,
     capOptOuts: (optOutQ.rows ?? optOutQ)?.[0]?.c ?? 0,
     offTarget: capDistribution
@@ -197,6 +259,8 @@ export async function runQuantitySweep(budgetMs = 250_000): Promise<QuantitySwee
     cursor: 0,
     budgetHit: false,
     sampleErrors: [],
+    pushedSinceLastPersist: 0,
+    failedSinceLastPersist: 0,
   };
 
   let cursor = Number((await getSetting("quantity_cursor")) ?? 0) || 0;
@@ -248,19 +312,31 @@ export async function runQuantitySweep(budgetMs = 250_000): Promise<QuantitySwee
       });
     }
 
-    for (let i = 0; i < toPush.length; i += PUSH_CHUNK) {
-      const r = await ebayInventoryApi.bulkUpdatePriceQuantity(toPush.slice(i, i + PUSH_CHUNK));
+    const chunks: Array<typeof toPush> = [];
+    for (let i = 0; i < toPush.length; i += PUSH_CHUNK) chunks.push(toPush.slice(i, i + PUSH_CHUNK));
+    const results = await mapPool(chunks, PUSH_CONCURRENCY, (chunk) =>
+      ebayInventoryApi.bulkUpdatePriceQuantity(chunk),
+    );
+    for (const r of results) {
       r.forEach((v) => {
-        if (v.ok) stats.pushedToEbay++;
-        else {
+        if (v.ok) {
+          stats.pushedToEbay++;
+          stats.pushedSinceLastPersist++;
+        } else {
           stats.pushFailed++;
+          stats.failedSinceLastPersist++;
           if (stats.sampleErrors.length < 3 && v.error) stats.sampleErrors.push(v.error);
         }
       });
     }
 
     cursor = (batch[batch.length - 1] as Product).id;
+    // Cursor and totals move together. A cursor that advanced while every push
+    // failed would look exactly like progress, so the counters that say
+    // whether eBay accepted anything have to survive the slice too — they are
+    // the only view an operator has of 84k writes.
     await storage.setMarketplaceSetting({ marketplace: "ebay", setting: "quantity_cursor", value: String(cursor) });
+    await persistTotals(stats);
   }
 
   stats.cursor = cursor;
