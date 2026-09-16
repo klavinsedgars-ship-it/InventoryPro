@@ -376,20 +376,39 @@ of everything costs twice the allowance per listing, so the cap decides how
 much of the catalogue can be online at once. Halving it roughly doubles
 coverage under the same limit.
 
-**What it costs.** A buyer can no longer put two of the SAME part in one
-basket. Multi-unit orders are where the margin is (1 unit averaged €4.51 net,
-4 units €29.84), so this is a bet that breadth beats depth. Whether it is a
-good bet turns on one number nobody had measured: how often a single ORDER LINE
-sold more than one unit. Order-level unit counts cannot answer it — four
-different parts and four of the same part both read as "4 units".
+**What it costs — measured, not assumed.** A buyer can no longer put two of the
+SAME part in one basket. `/api/ops/basket-mix` exists to price that, because
+order-level unit counts cannot: four different parts and four of the same part
+both read as "4 units", and only the second is lost to a cap of 1.
 
-```
-GET /api/ops/basket-mix?days=365
-```
+Measured 2026-09-16 over the 13 days of order history then present:
 
-`multi_unit_lines` is the decisive figure. Near zero → the cap is free.
-`revenue_at_risk` prices the units beyond the first on those lines (an upper
-bound: it assumes every one of them would simply have been lost).
+| | |
+|---|---|
+| Order lines | 33 |
+| Lines where one buyer took 2 of the same item | **10 (30%)** |
+| Units sold | 43 → would have been 33 |
+| Max quantity on any line | **2** — i.e. exactly the cap |
+| Gross revenue from the second units | €241.80 |
+
+The second unit on a line is the most profitable unit in the business: postage
+and eBay's fixed fee are already paid by the first. At €4.51 net for a 1-unit
+order and €13.51 for a 2-unit order, those ten second-units are worth roughly
+€90–100 per fortnight — about 40% of the €237/fortnight contribution. Every one
+of the ten sat between €15.98 and €43.98; the cheap components sell singly.
+
+`max_line_quantity` landing exactly on the cap, with ten lines piled there and
+none above, is what a censored distribution looks like. Suggestive, not proof.
+
+**The decision (2026-09-16): blanket cap at 1 anyway**, taken by the operator
+with these figures in hand, to unlock full catalogue coverage under eBay's item
+allowance. A price-banded cap (1 below ~€15, 2 above) was offered as the
+version that keeps the multi-unit revenue and was declined. Re-run
+`/api/ops/basket-mix` after a few weeks: if orders and units do not make up the
+difference, `action=apply&target=2` reverses it.
+
+Note the cap alone changes nothing about coverage — it only frees allowance.
+The listing ramp has to spend it (`POST /api/ops/list-ramp/resume`).
 
 **The number lives in `shared/stock-policy.ts`**, because three places must
 agree: the `products.ebay_stock_limit` column default, the runtime fallback in
