@@ -317,18 +317,28 @@ export async function runQuantitySweep(budgetMs = 250_000): Promise<QuantitySwee
     const results = await mapPool(chunks, PUSH_CONCURRENCY, (chunk) =>
       ebayInventoryApi.bulkUpdatePriceQuantity(chunk),
     );
-    for (const r of results) {
-      r.forEach((v) => {
-        if (v.ok) {
+    const fail = (error?: string) => {
+      stats.pushFailed++;
+      stats.failedSinceLastPersist++;
+      if (stats.sampleErrors.length < 3 && error) stats.sampleErrors.push(error);
+    };
+    results.forEach((r, i) => {
+      for (const item of chunks[i]) {
+        const v = r.get(item.sku);
+        if (!v) {
+          // Every SKU sent must come back with a verdict. eBay answering 200
+          // with no per-item responses would otherwise leave both counters
+          // flat while the cursor advanced — the exact "silent success" that
+          // these counters exist to rule out.
+          fail(`eBay returned no result for ${item.sku}`);
+        } else if (v.ok) {
           stats.pushedToEbay++;
           stats.pushedSinceLastPersist++;
         } else {
-          stats.pushFailed++;
-          stats.failedSinceLastPersist++;
-          if (stats.sampleErrors.length < 3 && v.error) stats.sampleErrors.push(v.error);
+          fail(v.error);
         }
-      });
-    }
+      }
+    });
 
     cursor = (batch[batch.length - 1] as Product).id;
     // Cursor and totals move together. A cursor that advanced while every push
