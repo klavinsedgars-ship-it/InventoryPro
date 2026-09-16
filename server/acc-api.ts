@@ -4,7 +4,11 @@
  * Shape of the API, from their specification:
  *  - POST only, every method at https://api.accdistribution.net/v1/<Method>
  *  - auth is a LicenseKey INSIDE the JSON body, not a header — so the key
- *    lands in request bodies and must never be logged
+ *    lands in request bodies and must never be logged. It is mandatory on
+ *    every call (spec §3.4, Occurs = 1) and is issued by an ACC sales manager;
+ *    it is an API credential and does not appear in the B2B portal. Locale,
+ *    Currency and CompanyId are all optional (Occurs = 0…n) with sane
+ *    published defaults
  *  - body envelope is {"request": { ... }}
  *  - 300 requests per minute overall
  *  - GetProducts additionally rejects IDENTICAL requests sent less than 15
@@ -31,13 +35,28 @@ export interface AccConfig {
 /** Their published demo key: production data, EUR, stock capped at 1. */
 export const ACC_DEMO_LICENSE_KEY = "498ec72c-e8e7-48f2-b300-d95666aeb141";
 
+/**
+ * CompanyId is NOT a per-customer credential — it selects which company of the
+ * group you are buying from, and the specification publishes the complete list
+ * (§4 Company codes). There is nothing to request from ACC here; `_al` is the
+ * one we trade with.
+ *
+ * Worth encoding rather than leaving as a free string: a typo would not fail,
+ * it would quietly return a different company's catalogue, or none.
+ */
+export const ACC_COMPANY_CODES: Record<string, string> = {
+  _al: "ACC Distribution",
+  _xl: "Avad Baltic",
+};
+export const DEFAULT_ACC_COMPANY_ID = "_al";
+
 export function getAccConfig(): AccConfig | null {
   const licenseKey = (process.env.ACC_LICENSE_KEY || "").trim();
   if (!licenseKey) return null;
   return {
     baseUrl: (process.env.ACC_BASE_URL || "https://api.accdistribution.net/v1").replace(/\/+$/, ""),
     licenseKey,
-    companyId: (process.env.ACC_COMPANY_ID || "_al").trim(),
+    companyId: (process.env.ACC_COMPANY_ID || DEFAULT_ACC_COMPANY_ID).trim(),
     locale: (process.env.ACC_LOCALE || "en").trim(),
     currency: (process.env.ACC_CURRENCY || "EUR").trim().toUpperCase(),
   };
@@ -57,19 +76,32 @@ export function describeAccConfig(): {
   configured: boolean;
   baseUrl: string | null;
   companyId: string | null;
+  /** Which group company that code selects, or null if it is not a known one. */
+  company: string | null;
   locale: string | null;
   currency: string | null;
   usingDemoKey: boolean;
+  /** The only thing ACC has to issue. Everything else is a published default. */
+  needs: string[];
   proxy: ReturnType<typeof describeProxy>;
 } {
   const cfg = getAccConfig();
+  const companyId = cfg?.companyId ?? DEFAULT_ACC_COMPANY_ID;
+  const company = ACC_COMPANY_CODES[companyId] ?? null;
+  const needs: string[] = [];
+  if (!cfg) needs.push("ACC_LICENSE_KEY — ask your ACC sales manager; it is an API credential, not something the B2B portal shows");
+  else if (cfg.licenseKey === ACC_DEMO_LICENSE_KEY) needs.push("a real ACC_LICENSE_KEY — this is their public demo key, so every stock figure is capped at 1 and nothing can be purchased");
+  if (!company) needs.push(`ACC_COMPANY_ID "${companyId}" is not a published company code (${Object.keys(ACC_COMPANY_CODES).join(", ")})`);
+  if (!describeProxy().configured) needs.push("FEED_PROXY_URL — ACC only answers the whitelisted IP");
   return {
     configured: cfg !== null,
     baseUrl: cfg?.baseUrl ?? null,
     companyId: cfg?.companyId ?? null,
+    company,
     locale: cfg?.locale ?? null,
     currency: cfg?.currency ?? null,
     usingDemoKey: cfg?.licenseKey === ACC_DEMO_LICENSE_KEY,
+    needs,
     proxy: describeProxy(),
   };
 }

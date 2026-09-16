@@ -535,10 +535,28 @@ Data quality is uneven: one of the first two live products was named
 "Vogels | Maximum weight (capacity) 10 kg  kg". Titles like that must not
 reach eBay unedited.
 
+**What ACC actually has to give you is one thing: the licence key.** Checked
+against the specification twice, because it is easy to assume otherwise:
+
+| | Spec | Where it comes from |
+|---|---|---|
+| `LicenseKey` | §3.4, Occurs **1** — required on every call | An ACC **sales manager** issues it. It is an API credential and does NOT appear in the B2B portal. |
+| `CompanyId` | Occurs 0…n — optional | **Not a credential.** §4 publishes the complete list: `_al` = ACC Distribution, `_xl` = Avad Baltic. Nothing to request. |
+| `Locale`, `Currency` | Occurs 0…n — optional | Our defaults (`en`, `EUR`). |
+| IP address | §3.1 | "All clients should send their IP address to their ACC Distribution manager before using the API." Done — 202.61.250.153. |
+
+`ACC_COMPANY_CODES` in `server/acc-api.ts` encodes the two published codes and
+`describeAccConfig()` rejects anything else, because a typo there would not
+fail — it would quietly return a different company's catalogue, or none.
+`describeAccConfig().needs` lists exactly what is still missing, so the answer
+to "what do I have to get from them" lives in the API rather than in a memory
+of this conversation.
+
 **Environment:** `ACC_LICENSE_KEY` (required), `ACC_COMPANY_ID` (default
-`_al`), `ACC_LOCALE` (`en`), `ACC_CURRENCY` (`EUR`), `ACC_BASE_URL`. Requests
-go through `FEED_PROXY_URL` and **fail** without it, because ACC whitelists one
-address and going direct means a rejection whose reason is invisible from here.
+`_al` — leave it alone), `ACC_LOCALE` (`en`), `ACC_CURRENCY` (`EUR`),
+`ACC_BASE_URL`. Requests go through `FEED_PROXY_URL` and **fail** without it,
+because ACC whitelists one address and going direct means a rejection whose
+reason is invisible from here.
 
 Their specification publishes a demo key, `498ec72c-e8e7-48f2-b300-d95666aeb141`
 — a real production account with **every stock figure capped at 1**. Useful for

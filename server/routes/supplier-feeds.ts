@@ -86,7 +86,10 @@ async function probeApiSupplier(config: SupplierFeedConfig) {
       sourceKind: "api",
       config: describe,
       error: "ACC_LICENSE_KEY is not set",
-      hint: `Set ACC_LICENSE_KEY to the key ACC issues you. To see the shape of the data before then, their published demo key is ${ACC_DEMO_LICENSE_KEY} (production demo account: EUR, and every stock figure is capped at 1).`,
+      hint:
+        `The licence key is the ONLY thing ACC has to issue — ask your sales manager for it; it is an API credential and does not appear in the B2B portal. ` +
+        `CompanyId is not a credential (it selects which group company you buy from, and _al is ACC Distribution), and the IP is already whitelisted. ` +
+        `To see the shape of the data before then, their published demo key is ${ACC_DEMO_LICENSE_KEY} — a production demo account with every stock figure capped at 1, on which nothing can be purchased.`,
     };
   }
 
