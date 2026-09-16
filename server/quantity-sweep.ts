@@ -73,16 +73,46 @@ export async function setQuantitySweepEnabled(on: boolean): Promise<void> {
  * with useStockLimit = false are the operator's explicit "sell as many as we
  * have" decision and are left alone.
  */
-export async function applyTargetToCatalogue(target: number): Promise<{ target: number; rowsChanged: number }> {
+export async function applyTargetToCatalogue(target: number): Promise<{
+  target: number;
+  offTargetBefore: number;
+  offTargetAfter: number;
+  rowsChanged: number;
+  driverRowCount: number | null;
+}> {
   const clamped = clampTarget(target);
+  // Counted either side of the UPDATE rather than trusting the driver's
+  // rowCount, which is not reliably surfaced through drizzle's db.execute on
+  // every driver — and an UPDATE has no RETURNING rows to fall back on, so a
+  // missing rowCount reads as a confident "0 rows changed" on a statement
+  // that actually rewrote the whole catalogue.
+  const offTargetBefore = await countOffTarget(clamped);
   const r: any = await db.execute(sql`
     UPDATE products
        SET ebay_stock_limit = ${clamped}, updated_at = now()
      WHERE ebay_stock_limit <> ${clamped}
        AND use_stock_limit IS DISTINCT FROM false
   `);
+  const offTargetAfter = await countOffTarget(clamped);
   await storage.setMarketplaceSetting({ marketplace: "ebay", setting: "quantity_target", value: String(clamped) });
-  return { target: clamped, rowsChanged: r.rowCount ?? r.rows?.length ?? 0 };
+  return {
+    target: clamped,
+    offTargetBefore,
+    offTargetAfter,
+    rowsChanged: Math.max(0, offTargetBefore - offTargetAfter),
+    driverRowCount: typeof r?.rowCount === "number" ? r.rowCount : null,
+  };
+}
+
+/** Products whose cap is not the target (ignoring the opt-outs). */
+async function countOffTarget(target: number): Promise<number> {
+  const q: any = await db.execute(sql`
+    SELECT count(*)::int AS c
+      FROM products
+     WHERE ebay_stock_limit <> ${target}
+       AND use_stock_limit IS DISTINCT FROM false
+  `);
+  return (q.rows ?? q)?.[0]?.c ?? 0;
 }
 
 /**
@@ -100,6 +130,9 @@ export async function quantityProgress(): Promise<{
   listedTotal: number;
   overCap: number;
   remaining: number;
+  capDistribution: Array<{ limit: number | null; products: number }>;
+  capOptOuts: number;
+  offTarget: number;
 }> {
   const target = await quantityTarget();
   const cursor = Number((await getSetting("quantity_cursor")) ?? 0) || 0;
@@ -110,13 +143,37 @@ export async function quantityProgress(): Promise<{
       FROM products
      WHERE listed_on_ebay = true AND ebay_offer_id IS NOT NULL
   `);
+  // What the products table actually holds. The sweep pushes the target to
+  // eBay regardless of this column, but the HOURLY SYNC recomputes quantity
+  // from it — so a column left on the old cap quietly puts the old quantity
+  // back, product by product, as TME stock moves. Worth being able to see.
+  const distQ: any = await db.execute(sql`
+    SELECT ebay_stock_limit AS limit, count(*)::int AS products
+      FROM products
+     WHERE use_stock_limit IS DISTINCT FROM false
+     GROUP BY ebay_stock_limit
+     ORDER BY ebay_stock_limit
+  `);
+  const optOutQ: any = await db.execute(
+    sql`SELECT count(*)::int AS c FROM products WHERE use_stock_limit = false`,
+  );
+
   const row = (q.rows ?? q)?.[0] ?? {};
+  const capDistribution = ((distQ.rows ?? distQ) as any[]).map((d) => ({
+    limit: d.limit === null || d.limit === undefined ? null : Number(d.limit),
+    products: Number(d.products) || 0,
+  }));
   return {
     target,
     cursor,
     listedTotal: row.listed_total ?? 0,
     overCap: row.over_cap ?? 0,
     remaining: row.remaining ?? 0,
+    capDistribution,
+    capOptOuts: (optOutQ.rows ?? optOutQ)?.[0]?.c ?? 0,
+    offTarget: capDistribution
+      .filter((d) => d.limit !== target)
+      .reduce((sum, d) => sum + d.products, 0),
   };
 }
 
