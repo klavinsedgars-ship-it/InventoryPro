@@ -216,7 +216,9 @@ describe("mapAccProduct", () => {
 
   it("records the Latga levy as an attribute rather than folding it into cost", () => {
     const attrs = mapAccProduct(SPEC_PRODUCT).attributes;
-    expect(attrs.latgaValue).toBe("0.795");
+    // Price.LatgaValue is the price WITH the levy — not the levy itself, and
+    // not our cost. Cost stays Price.Value.
+    expect(attrs.priceWithLatga).toBe("0.795");
     expect(mapAccProduct(SPEC_PRODUCT).price).toBe(0.75);
   });
 
@@ -289,5 +291,186 @@ describe("productsFromResponse", () => {
     expect(productsFromResponse({ Unexpected: [1, 2] })).toEqual([]);
     expect(productsFromResponse(null)).toEqual([]);
     expect(productsFromResponse("nope")).toEqual([]);
+  });
+});
+
+/**
+ * Captured verbatim from a live GetProducts call on 2026-09-16 (demo licence
+ * key, through the whitelisted proxy). The published specification's example
+ * was lost in the document's formatting, so this is the only record of what
+ * the endpoint actually returns — several fields here appear in no ACC
+ * documentation we hold.
+ */
+const LIVE_RESPONSE = {
+  "@odata.context":
+    "http://api.accdistribution.net/v1/$metadata#CustomerAPI.Interfaces.DTO.Products.GetProductsResponse",
+  Products: [
+    {
+      PID: "008031",
+      MPN: "PC-186",
+      EAN: "2000000651101",
+      Name: "Gembird | PC-186 Power cord (C13)",
+      Picture: "http://www.blobs.lt/products/1/3/0/8/0/0/bbbf39f2a6505e9e0a5c04502c8381c7",
+      Producer: { OId: "gembird", Name: "Gembird" },
+      Price: {
+        Value: 1.99,
+        OldValue: 1.99,
+        LatgaValue: 1.99,
+        LatgaOldValue: 1.99,
+        CurrencyCode: "EUR",
+        SmartPoints: null,
+        SpCampaignId: null,
+        IsSaleout: false,
+      },
+      DacPrice: null,
+      Stocks: [
+        {
+          WhId: "SALES",
+          Amount: 0.0,
+          ExpectedDate: null,
+          AmountArriving: 0.0,
+          AmountOrdered: 0.0,
+          AmountOrderedArrivingDiff: 0.0,
+          IsPreliminary: false,
+        },
+      ],
+      Rent: false,
+      ByOrder: false,
+      ByOrderOrig: false,
+      IsNew: false,
+      IsDefect: false,
+      Bundle: "",
+      EOLSale: false,
+      HasCampaign: false,
+      HasSaleOut: false,
+      HasSmartPoint: false,
+      HasGrade: false,
+      IsEsd: false,
+      LatgaValue: 0.0,
+      LatgaValueType: 0.0,
+      Campaigns: [],
+      Saleouts: [],
+      Branches: [{ OId: 1430, Name: "Accessories" }],
+      Readonly: false,
+      Reserve: null,
+      Reserves: [],
+      VisibleInB2B: true,
+      UpdatedAt: "2026-09-16T13:41:10.7151938+03:00",
+      Warranty: 12,
+      HasBid: false,
+      HasAttributes: false,
+      CurrenciesPriceForQty: [],
+      IntraCode: "85444290",
+      CountryOfOrigin: "CN",
+      ProductDimensions: [],
+      QuantityPacking: 1.0,
+      RRP: [],
+      FullPackageShipping: false,
+      CourierShippingIsForbidden: false,
+    },
+    {
+      PID: "024153",
+      MPN: "8027454",
+      EAN: "8712285311420",
+      Name: "Vogels | Maximum weight (capacity) 10 kg  kg",
+      Picture: "http://www.blobs.lt/products/3/5/1/4/2/0/67e44ddc01e0263542dbc3c918a3cb7c",
+      Producer: { OId: "vo", Name: "Vogels" },
+      Price: { Value: 154.99, OldValue: 154.99, LatgaValue: 154.99, CurrencyCode: "EUR" },
+      Stocks: [{ WhId: "SALES", Amount: 1.0, AmountArriving: 0.0 }],
+      Branches: [
+        { OId: 1464, Name: "Mounting solutions" },
+        { OId: 1940, Name: "Mounting solutions" },
+        { OId: 1849, Name: "Mounting solutions" },
+        { OId: 1824, Name: "Mounting solutions" },
+      ],
+      VisibleInB2B: true,
+      UpdatedAt: "2026-01-16T02:38:42.293+02:00",
+      Warranty: 24,
+    },
+  ],
+};
+
+describe("live GetProducts response (2026-09-16)", () => {
+  const products = productsFromResponse(LIVE_RESPONSE);
+
+  it("comes back under the Products key", () => {
+    // The spec never showed this envelope; the parser accepted three
+    // candidates. This is the one that is real.
+    expect(products).toHaveLength(2);
+    expect(products[0].PID).toBe("008031");
+  });
+
+  it("rewrites the http picture host to https", () => {
+    // The CRM is served over https, so an http image is blocked as mixed
+    // content and the browse page renders nothing.
+    const offer = mapAccProduct(products[0]);
+    expect(offer.imageUrl).toBe(
+      `https://www.blobs.lt/products/1/3/0/8/0/0/bbbf39f2a6505e9e0a5c04502c8381c7/${ACC_IMAGE_SIZE}`,
+    );
+    expect(offer.imageUrl).not.toContain("http://");
+  });
+
+  it("confirms Picture is a bare directory needing a size appended", () => {
+    expect(products[0].Picture).not.toMatch(/\.(png|jpe?g)$/i);
+  });
+
+  it("carries no Medias array, so a bulk import yields one image per product", () => {
+    expect((products[0] as any).Medias).toBeUndefined();
+    expect(mapAccProduct(products[0]).additionalImages).toEqual([]);
+  });
+
+  it("carries no weight field anywhere", () => {
+    for (const p of products) {
+      const keys = Object.keys(p).join(" ").toLowerCase();
+      expect(keys).not.toContain("weight");
+      expect(mapAccProduct(p).weightG).toBeNull();
+    }
+  });
+
+  it("keeps Price.Value as cost and does not fold the Latga levy into it", () => {
+    const offer = mapAccProduct(products[0]);
+    expect(offer.price).toBe(1.99);
+    expect(offer.currency).toBe("EUR");
+    // Price.LatgaValue is the price WITH the levy; the product-level
+    // LatgaValue is the levy itself. Here the levy is zero.
+    expect(offer.attributes.priceWithLatga).toBe("1.99");
+    // A known-zero levy is recorded as "0"; only absent values are dropped, so
+    // "no levy" and "never told us" stay distinguishable.
+    expect(offer.attributes.latgaLevy).toBe("0");
+  });
+
+  it("distinguishes zero stock from unknown stock on a real row", () => {
+    expect(mapAccProduct(products[0]).stock).toBe(0);
+    expect(mapAccProduct(products[1]).stock).toBe(1);
+  });
+
+  it("keeps every branch when a product sits under several", () => {
+    // 024153 came back under four branches, all leaf-named the same with
+    // different parents. categoryPath can only hold one.
+    const offer = mapAccProduct(products[1]);
+    expect(offer.categoryPath).toBe("Mounting solutions");
+    expect(offer.attributes.allBranches).toHaveLength(4);
+  });
+
+  it("records the shipping and visibility flags the spec never documented", () => {
+    const attrs = mapAccProduct(products[0]).attributes;
+    expect(attrs.visibleInB2B).toBe("true");
+    expect(attrs.quantityPacking).toBe("1");
+    expect(attrs.courierShippingIsForbidden).toBe("false");
+    expect(attrs.fullPackageShipping).toBe("false");
+    expect(attrs.intraCode).toBe("85444290");
+    expect(attrs.countryOfOrigin).toBe("CN");
+    expect(attrs.warrantyMonths).toBe("12");
+  });
+
+  it("maps a real row end to end without inventing anything", () => {
+    const offer = mapAccProduct(products[0]);
+    expect(offer.supplierSku).toBe("008031");
+    expect(offer.mpn).toBe("PC-186");
+    expect(offer.ean).toBe("2000000651101");
+    expect(offer.manufacturer).toBe("Gembird");
+    expect(offer.categoryPath).toBe("Accessories");
+    expect(offer.datasheetUrl).toBeNull();
+    expect(offer.productUrl).toBeNull();
   });
 });

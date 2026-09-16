@@ -502,16 +502,38 @@ Three things that will bite whoever touches this next:
   one input that decides whether an order makes money. The import result and
   the UI both report how many offers arrived weightless. Fix this before
   listing anything heavy.
-- **Picture URLs are incomplete.** `Picture` and `Medias[].Uri` are
-  directories; a size must be appended (`/440x440.png` — the largest size
-  guaranteed to exist; 1920 only exists where the source TIFF was bigger).
-  Fetched as returned, they 404.
+- **Picture URLs are incomplete, and arrive over http.** `Picture` and
+  `Medias[].Uri` are directories; a size must be appended (`/440x440.png` — the
+  largest size guaranteed to exist; 1920 only exists where the source TIFF was
+  bigger). Fetched as returned, they 404. Live responses also use `http://`
+  despite the documentation showing https, which the CRM (served over https)
+  blocks as mixed content — `accImageUrl` upgrades the scheme.
+- **`GetProducts` carries no `Medias` array** — only the single `Picture`. A
+  bulk import therefore yields one image per product; the gallery needs
+  `GetProduct` per item.
 - **A cursor belongs to one query shape.** A full-catalogue run and a filtered
   run (daily `updatedAfter` delta, or one branch) walk completely different
   result sets. Runs are tagged in `record_element`, and only full runs carry a
   resumable cursor — without that, a delta would resume a full import at an
   offset past the end of its own short result set and silently declare the
   catalogue complete.
+
+**Confirmed against the live API on 2026-09-16** (demo key, through the
+whitelisted proxy — `server/acc-map.test.ts` holds the captured response):
+the list envelope is `Products`; `Picture` really is a bare directory;
+there is no weight field on any product; `Price.Value` is the cost and
+`Price.LatgaValue` is the price *including* the levy, while the product-level
+`LatgaValue` is the levy itself (confusing the two misstates cost). The live
+response also carries fields the specification never documented —
+`VisibleInB2B`, `Readonly`, `QuantityPacking`, `FullPackageShipping`,
+`CourierShippingIsForbidden`, `DacPrice`, `ProductDimensions` — all kept in
+`attributes`. `ProductDimensions` has been empty on every product seen so far,
+so its shape is unknown and it is stored verbatim rather than parsed; it is the
+most likely home for a weight if one exists.
+
+Data quality is uneven: one of the first two live products was named
+"Vogels | Maximum weight (capacity) 10 kg  kg". Titles like that must not
+reach eBay unedited.
 
 **Environment:** `ACC_LICENSE_KEY` (required), `ACC_COMPANY_ID` (default
 `_al`), `ACC_LOCALE` (`en`), `ACC_CURRENCY` (`EUR`), `ACC_BASE_URL`. Requests

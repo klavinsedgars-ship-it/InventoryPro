@@ -73,6 +73,23 @@ export interface AccProduct {
   IntraCode?: string | null;
   CountryOfOrigin?: string | null;
   UpdatedAt?: string | null;
+  /**
+   * Present in live GetProducts but absent from the published specification.
+   * Kept because several bear directly on whether and how a product can be
+   * sold on: whether it is even visible to us, how it ships, and the copyright
+   * levy that must not be confused with the price.
+   */
+  LatgaValue?: number | null;
+  LatgaValueType?: number | null;
+  DacPrice?: number | null;
+  VisibleInB2B?: boolean | null;
+  Readonly?: boolean | null;
+  /** Units per sellable pack — a MOQ-shaped number, not yet acted on. */
+  QuantityPacking?: number | null;
+  FullPackageShipping?: boolean | null;
+  CourierShippingIsForbidden?: boolean | null;
+  /** Empty on every product seen so far; shape unknown, so kept verbatim. */
+  ProductDimensions?: unknown[] | null;
 }
 
 /**
@@ -92,9 +109,14 @@ export const ACC_IMAGE_SIZE = "440x440.png";
 export function accImageUrl(uri: string | null | undefined, size = ACC_IMAGE_SIZE): string | null {
   const raw = (uri ?? "").trim();
   if (!raw || !/^https?:\/\//i.test(raw)) return null;
-  const withoutQuery = raw.split(/[?#]/)[0];
-  if (/\.(png|jpe?g|gif|webp|tiff?|bmp)$/i.test(withoutQuery)) return raw;
-  return `${raw.replace(/\/+$/, "")}/${size}`;
+  // Live GetProducts returns http:// even though their own documentation shows
+  // https. The CRM is served over https, so an http image is blocked as mixed
+  // content and the browse page shows nothing at all; eBay also prefers https
+  // for hosted images. blobs.lt serves both, so upgrading is free.
+  const secure = raw.replace(/^http:\/\//i, "https://");
+  const withoutQuery = secure.split(/[?#]/)[0];
+  if (/\.(png|jpe?g|gif|webp|tiff?|bmp)$/i.test(withoutQuery)) return secure;
+  return `${secure.replace(/\/+$/, "")}/${size}`;
 }
 
 /** Digits-only barcode, 8–14 digits. Anything else is not an EAN. */
@@ -197,10 +219,34 @@ function attributesOf(p: AccProduct): Record<string, string | string[]> {
   put("countryOfOrigin", p.CountryOfOrigin);
   put("updatedAt", p.UpdatedAt);
   put("producerCode", p.Producer?.OId);
-  // Kept because it is a real cost component in some markets and must not be
-  // silently folded into the unit price we treat as our cost.
-  put("latgaValue", p.Price?.LatgaValue);
+  // Two different Latga numbers, and confusing them misstates the cost.
+  // Price.LatgaValue is the price WITH the levy included; the product-level
+  // LatgaValue is the levy itself. Neither is folded into `price`, which stays
+  // Price.Value.
+  put("priceWithLatga", p.Price?.LatgaValue);
+  put("latgaLevy", p.LatgaValue);
+  put("latgaLevyType", p.LatgaValueType);
   put("oldPrice", p.Price?.OldValue);
+  put("dacPrice", p.DacPrice);
+  // Whether we may sell it at all, and how it has to move.
+  put("visibleInB2B", p.VisibleInB2B);
+  put("readonly", p.Readonly);
+  put("quantityPacking", p.QuantityPacking);
+  put("fullPackageShipping", p.FullPackageShipping);
+  put("courierShippingIsForbidden", p.CourierShippingIsForbidden);
+  if (Array.isArray(p.ProductDimensions) && p.ProductDimensions.length) {
+    // Shape unknown — every product seen so far has it empty. Kept verbatim
+    // rather than parsed, so the first populated one is inspectable instead of
+    // being silently mangled by a guessed reader.
+    attrs.productDimensions = JSON.stringify(p.ProductDimensions);
+  }
+  // A live product came back under four branches, all leaf-named "Mounting
+  // solutions" with different parents. categoryPath takes one; the rest would
+  // otherwise be lost.
+  const branches = (p.Branches ?? []).filter((b) => b && (b.Name || b.OId != null));
+  if (branches.length > 1) {
+    attrs.allBranches = branches.map((b) => `${b.OId ?? "?"}:${b.Name ?? ""}`);
+  }
   const warehouses = (p.Stocks ?? [])
     .filter((s) => s && s.WhId)
     .map((s) => `${s.WhId}:${num(s.Amount) ?? 0}`);
