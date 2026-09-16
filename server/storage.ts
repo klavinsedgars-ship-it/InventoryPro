@@ -484,6 +484,12 @@ export class DatabaseStorage implements IStorage {
       // Which eBay category the live listing sits in (see shared/schema.ts).
       `ALTER TABLE products ADD COLUMN IF NOT EXISTS ebay_category_id text`,
       `ALTER TABLE products ADD COLUMN IF NOT EXISTS additional_images text`,
+      // eBay selling limits count ITEMS, not listings, so the per-listing cap
+      // decides how much of the catalogue can be online at once. Dropped from
+      // 2 to 1 on 2026-09-16 (see shared/stock-policy.ts). Existing rows are
+      // moved by the quantity sweep, not here — changing ~130k rows belongs in
+      // a deliberate, reversible pass, not in boot.
+      `ALTER TABLE products ALTER COLUMN ebay_stock_limit SET DEFAULT 1`,
       // Amazon listing state (2026-09). Offers attach to existing ASINs, so
       // the catalogue match is tracked separately from the listing itself.
       `ALTER TABLE products ADD COLUMN IF NOT EXISTS amazon_match_status text`,

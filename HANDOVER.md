@@ -368,6 +368,65 @@ That endpoint is the one to run before asking any distributor to enable
 access: a whitelist is granted for one address, and finding out it is wrong
 here beats finding out from their 403. It never echoes the proxy password.
 
+## eBay quantity cap: 2 → 1 (2026-09-16)
+
+**Why.** eBay's selling limits are denominated in ITEMS, not listings — the
+quantity on every live listing draws on the same monthly allowance. Showing two
+of everything costs twice the allowance per listing, so the cap decides how
+much of the catalogue can be online at once. Halving it roughly doubles
+coverage under the same limit.
+
+**What it costs.** A buyer can no longer put two of the SAME part in one
+basket. Multi-unit orders are where the margin is (1 unit averaged €4.51 net,
+4 units €29.84), so this is a bet that breadth beats depth. Whether it is a
+good bet turns on one number nobody had measured: how often a single ORDER LINE
+sold more than one unit. Order-level unit counts cannot answer it — four
+different parts and four of the same part both read as "4 units".
+
+```
+GET /api/ops/basket-mix?days=365
+```
+
+`multi_unit_lines` is the decisive figure. Near zero → the cap is free.
+`revenue_at_risk` prices the units beyond the first on those lines (an upper
+bound: it assumes every one of them would simply have been lost).
+
+**The number lives in `shared/stock-policy.ts`**, because three places must
+agree: the `products.ebay_stock_limit` column default, the runtime fallback in
+`calculateEbayStock`, and the quantity sweep's default target.
+
+**Changing the database is instant; changing eBay is not.** The hourly sync
+only revisits a product when TME's price or stock MOVES, so without a
+deliberate pass most of ~88k live listings would keep quantity 2 indefinitely.
+Hence `server/quantity-sweep.ts`, the same shape as reprice-sweep: cron-driven
+time-bounded slices, kill-switch `'ebay'/'quantity_sweep'`, lease, resumable
+cursor `'ebay'/'quantity_cursor'`, self-disabling at the end.
+
+```
+GET /api/ebay/quantity?action=status         where the pass is
+GET /api/ebay/quantity?action=apply&target=1 set the cap on every row (instant)
+GET /api/ebay/quantity?action=start&run=1    push it to live listings
+GET /api/ebay/quantity?action=stop           halt, keeping the cursor
+GET /api/cron/quantity                       the tick (:09, :29, :49)
+```
+
+apply and start are separate deliberately: apply changes what we believe and
+what future listings go up with; start rewrites ~90k live listings on eBay.
+
+Two things to know before touching it:
+
+- **The sweep only visits listings the cap actually binds** (`stock > target`).
+  A product with one unit in stock already shows 1 whatever the cap says, and
+  re-pushing it would spend eBay API budget writing the same number back.
+- **`overCap` in the progress output does not shrink as the sweep runs.**
+  Nothing records what was already pushed, and stock stays above the cap after
+  the push. `remaining` — what is still beyond the cursor — is the honest
+  progress number.
+
+Reversible: `action=apply&target=2` then `action=start` puts it back.
+Products with `use_stock_limit = false` are the operator's explicit "sell as
+many as we have" and are never touched by either step.
+
 ## ACC Distribution (2026-09-15)
 
 The third staged distributor, and the first that is an API rather than a feed

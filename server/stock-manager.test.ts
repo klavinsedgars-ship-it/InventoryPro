@@ -5,6 +5,7 @@ import {
   getRecommendedStockLimit,
 } from "./stock-manager";
 import type { Product } from "@shared/schema";
+import { DEFAULT_EBAY_STOCK_LIMIT, clampTarget } from "@shared/stock-policy";
 
 const p = (o: Partial<Product>): Product => o as unknown as Product;
 
@@ -38,8 +39,20 @@ describe("calculateEbayStock (eBay quantity cap — the oversell guard)", () => 
     expect(r.isLimited).toBe(false);
   });
 
-  it("defaults the limit to 2 when unset", () => {
-    expect(calculateEbayStock(p({ stock: 100, useStockLimit: true } as any)).ebayStock).toBe(2);
+  it("falls back to the shared default when no per-product limit is set", () => {
+    // The fallback, the products column default and the quantity sweep's
+    // default target must all be the same number, so it is asserted against
+    // the shared constant rather than a literal.
+    expect(calculateEbayStock(p({ stock: 100, useStockLimit: true } as any)).ebayStock).toBe(DEFAULT_EBAY_STOCK_LIMIT);
+  });
+
+  it("caps at 1 under the current policy", () => {
+    // eBay selling limits count items, not listings: a cap of 1 puts twice as
+    // much of the catalogue online for the same allowance.
+    expect(DEFAULT_EBAY_STOCK_LIMIT).toBe(1);
+    const r = calculateEbayStock(p({ stock: 500, ebayStockLimit: 1, useStockLimit: true }));
+    expect(r.ebayStock).toBe(1);
+    expect(r.isLimited).toBe(true);
   });
 });
 
@@ -60,5 +73,23 @@ describe("getRecommendedStockLimit", () => {
   it("returns the category limit, falling back to the default", () => {
     expect(getRecommendedStockLimit("Sensors")).toBe(10);
     expect(getRecommendedStockLimit("Something Unknown")).toBe(3);
+  });
+});
+
+describe("clampTarget (quantity sweep)", () => {
+  it("keeps a sane operator value", () => {
+    expect(clampTarget(1)).toBe(1);
+    expect(clampTarget(5)).toBe(5);
+  });
+
+  it("refuses a zero or negative cap, which would unlist the catalogue", () => {
+    expect(clampTarget(0)).toBe(1);
+    expect(clampTarget(-3)).toBe(1);
+  });
+
+  it("bounds an absurd cap and a non-number", () => {
+    expect(clampTarget(10_000)).toBe(999);
+    expect(clampTarget(NaN)).toBe(DEFAULT_EBAY_STOCK_LIMIT);
+    expect(clampTarget(2.7)).toBe(2);
   });
 });

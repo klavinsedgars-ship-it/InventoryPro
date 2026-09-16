@@ -171,6 +171,103 @@ export function registerPricingRoutes(app: Express) {
   app.get("/api/cron/reprice", repriceCronHandler);
   app.post("/api/cron/reprice", repriceCronHandler);
 
+  /**
+   * Catalogue-wide eBay QUANTITY cap.
+   *
+   * eBay's selling limits count items, not listings, so the quantity on every
+   * live listing draws on the same monthly allowance: halving the cap roughly
+   * doubles how much of the catalogue can be online at once.
+   *
+   *   ?action=status                 where the pass is
+   *   ?action=apply&target=1         set the cap on every product row (instant)
+   *   ?action=start[&run=1]          push the cap to the live listings
+   *   ?action=stop                   halt the pass, keeping the cursor
+   *
+   * apply and start are separate on purpose: apply changes what we believe and
+   * what future listings go up with, start changes ~90k live listings on
+   * eBay. Doing the second by accident is expensive to undo.
+   */
+  const quantityHandler = async (req: any, res: any) => {
+    try {
+      const {
+        applyTargetToCatalogue,
+        clampTarget,
+        isQuantitySweepEnabled,
+        quantityProgress,
+        runQuantitySweep,
+        setQuantitySweepEnabled,
+      } = await import("../quantity-sweep");
+      const { withLease, describeRefusal } = await import("../job-lease");
+      const { leaseStore } = await import("../storage");
+
+      const action = String(req.query.action ?? req.body?.action ?? "status").trim();
+      if (!["status", "apply", "start", "stop"].includes(action)) {
+        return res.status(400).json({ ok: false, error: "pass ?action=status|apply|start|stop" });
+      }
+
+      let applied: { target: number; rowsChanged: number } | undefined;
+      if (action === "apply") {
+        const raw = Number(req.query.target ?? req.body?.target);
+        if (!Number.isFinite(raw)) {
+          return res.status(400).json({ ok: false, error: "pass ?target=<units per listing>, e.g. target=1" });
+        }
+        applied = await applyTargetToCatalogue(clampTarget(raw));
+      }
+      if (action === "start") await setQuantitySweepEnabled(true);
+      if (action === "stop") await setQuantitySweepEnabled(false);
+
+      let slice = null;
+      if (action === "start" && (req.query.run === "1" || req.body?.run === true)) {
+        const leased = await withLease(leaseStore, "quantity", { ttlSeconds: 300 }, () => runQuantitySweep(240_000));
+        slice = leased.ran ? leased.result : { refused: describeRefusal("quantity", leased) };
+      }
+
+      res.json({
+        ok: true,
+        action,
+        ...(applied ? { applied } : {}),
+        enabled: await isQuantitySweepEnabled(),
+        progress: await quantityProgress(),
+        ...(slice ? { slice } : {}),
+        note: "apply sets the cap in the database; start pushes it to live eBay listings via the /api/cron/quantity tick, which disables itself when the cursor reaches the end",
+      });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  };
+  app.get("/api/ebay/quantity", requireAuth, quantityHandler);
+  app.post("/api/ebay/quantity", requireAuth, quantityHandler);
+
+  const quantityCronHandler = async (_req: any, res: any) => {
+    try {
+      const { isQuantitySweepEnabled, quantityProgress, runQuantitySweep } = await import("../quantity-sweep");
+      const { withLease, describeRefusal } = await import("../job-lease");
+      const { leaseStore } = await import("../storage");
+      if (!(await isQuantitySweepEnabled())) {
+        return res.json({ ok: true, skipped: true, reason: "quantity sweep not enabled" });
+      }
+      const leased = await withLease(leaseStore, "quantity", { ttlSeconds: 300 }, () => runQuantitySweep(250_000));
+      if (!leased.ran) {
+        return res.json({ ok: true, skipped: true, reason: describeRefusal("quantity", leased) });
+      }
+      const r = leased.result;
+      if (r.done) {
+        // runQuantitySweep already disabled itself; this is the audit trail.
+        await storage.createSyncLog({
+          source: "quantity",
+          operation: "sweep_complete",
+          status: "success",
+          message: `eBay quantity cap ${r.target} applied — last slice: ${r.pushedToEbay} pushed, ${r.pushFailed} push failures`,
+        });
+      }
+      res.json({ ok: true, ...r, progress: await quantityProgress() });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  };
+  app.get("/api/cron/quantity", quantityCronHandler);
+  app.post("/api/cron/quantity", quantityCronHandler);
+
   // Dynamic Pricing API routes
   app.post("/api/pricing/calculate", requireAuth, async (req, res) => {
     try {

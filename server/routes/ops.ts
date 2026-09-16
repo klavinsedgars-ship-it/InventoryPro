@@ -1,4 +1,6 @@
 import type { Express } from "express";
+import { sql } from "drizzle-orm";
+import { db } from "../db";
 import { storage } from "../storage";
 import { requireAuth } from "../middleware/auth";
 import { getRampPriceRange } from "../ramp-config";
@@ -123,6 +125,74 @@ export function registerOpsRoutes(app: Express) {
   // products.ebay_listing_error. This groups those errors by normalised
   // message with counts + sample SKUs, so one request answers "what is
   // actually blocking my listings" instead of guessing.
+  /**
+   * Basket mix: does anyone actually buy more than one of the SAME item?
+   *
+   * This is the question that decides whether capping eBay quantity at 1 is
+   * free breadth or a real loss. A cap of 1 has no effect on an order of four
+   * DIFFERENT parts; it kills an order of four of the same part outright.
+   * Orders-level unit counts cannot tell those apart, so the number that
+   * matters is per LINE, not per order.
+   *
+   * `unitsAtRisk` is an upper bound: it assumes every unit beyond the first on
+   * a line would have been lost rather than bought elsewhere in the basket.
+   */
+  app.get("/api/ops/basket-mix", requireAuth, async (req, res) => {
+    try {
+      const days = Math.max(1, Math.min(3650, parseInt(String(req.query.days ?? "365"), 10) || 365));
+      const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+      const linesQ: any = await db.execute(sql`
+        SELECT count(*)::int AS lines,
+               count(*) FILTER (WHERE oi.quantity > 1)::int AS multi_unit_lines,
+               coalesce(sum(oi.quantity), 0)::int AS units,
+               coalesce(sum(oi.quantity) FILTER (WHERE oi.quantity > 1), 0)::int AS units_on_multi_lines,
+               coalesce(max(oi.quantity), 0)::int AS max_line_quantity,
+               coalesce(sum((oi.quantity - 1) * oi.unit_price) FILTER (WHERE oi.quantity > 1), 0)::numeric AS revenue_at_risk
+          FROM order_items oi
+          JOIN orders o ON o.id = oi.order_id
+         WHERE o.order_date >= ${since}
+      `);
+      const ordersQ: any = await db.execute(sql`
+        SELECT count(*)::int AS orders,
+               count(*) FILTER (WHERE units > 1)::int AS multi_unit_orders,
+               count(*) FILTER (WHERE lines > 1)::int AS multi_line_orders
+          FROM (
+            SELECT oi.order_id, sum(oi.quantity)::int AS units, count(*)::int AS lines
+              FROM order_items oi
+              JOIN orders o ON o.id = oi.order_id
+             WHERE o.order_date >= ${since}
+             GROUP BY oi.order_id
+          ) t
+      `);
+      const topQ: any = await db.execute(sql`
+        SELECT oi.sku, oi.title, oi.quantity, oi.unit_price, o.marketplace_order_id, o.order_date
+          FROM order_items oi
+          JOIN orders o ON o.id = oi.order_id
+         WHERE o.order_date >= ${since} AND oi.quantity > 1
+         ORDER BY oi.quantity DESC, o.order_date DESC
+         LIMIT 20
+      `);
+
+      const lines = (linesQ.rows ?? linesQ)?.[0] ?? {};
+      const orders = (ordersQ.rows ?? ordersQ)?.[0] ?? {};
+      const unitsAtRisk = Math.max(0, (lines.units_on_multi_lines ?? 0) - (lines.multi_unit_lines ?? 0));
+
+      res.json({
+        success: true,
+        windowDays: days,
+        since: since.toISOString(),
+        orders,
+        lines: { ...lines, unitsAtRisk },
+        multiUnitLines: topQ.rows ?? topQ,
+        note:
+          "multi_unit_lines is the decisive figure: lines where one buyer took more than one of the SAME product. Near zero means an eBay quantity cap of 1 costs nothing. revenue_at_risk prices the units beyond the first on those lines.",
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, error: (error as Error).message });
+    }
+  });
+
   app.get("/api/ops/list-ramp/failures", requireAuth, async (_req, res) => {
     try {
       const { db } = await import("../db");
