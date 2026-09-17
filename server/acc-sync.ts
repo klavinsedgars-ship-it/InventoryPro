@@ -74,6 +74,8 @@ export interface AccImportResult {
   branchesLoaded: number;
   /** How many mapped offers carry no weight — they cannot be priced to ship. */
   missingWeight: number;
+  /** normalized field -> the ACC field it came from, for the dry-run preview. */
+  mappingSample: Record<string, string> | null;
   sample?: NormalizedOffer[];
   refresh?: SupplierRefreshStats | { skipped: string } | { error: string };
   runId?: number;
@@ -95,6 +97,7 @@ function emptyResult(dryRun: boolean): Omit<AccImportResult, "ok" | "configured"
     coverage: {},
     branchesLoaded: 0,
     missingWeight: 0,
+    mappingSample: null,
   };
 }
 
@@ -197,6 +200,9 @@ export async function runAccImport(
       branchesLoaded: branches.count,
       coverage: coverageOf(sample),
       missingWeight: sample.filter((s) => s.weightG == null).length,
+      // Same shape the XML importer reports, so the dry-run dialog can show
+      // which ACC field fed each column instead of an empty object.
+      mappingSample: sample[0]?.sourceKeys ?? null,
       sample,
     };
   }
@@ -222,6 +228,7 @@ export async function runAccImport(
   let recordsFailed = 0;
   let duplicateSkus = 0;
   let missingWeight = 0;
+  let mappingSample: Record<string, string> | null = null;
   let complete = false;
   let budgetHit = false;
   const coverageTotals: Record<string, number> = {};
@@ -306,6 +313,7 @@ export async function runAccImport(
         continue;
       }
       seenSkus.add(offer.supplierSku);
+      if (!mappingSample) mappingSample = offer.sourceKeys;
       if (offer.weightG == null) missingWeight++;
       for (const [k, v] of Object.entries(coverageOf([offer]))) {
         coverageTotals[k] = (coverageTotals[k] ?? 0) + v;
@@ -385,6 +393,7 @@ export async function runAccImport(
     branchesLoaded: branches.count,
     coverage: coverageTotals,
     missingWeight,
+    mappingSample,
     refresh,
   };
 }
