@@ -526,15 +526,19 @@ Three things that will bite whoever touches this next:
   parameters each method takes; a method not listed gets the conservative set,
   because adding an unknown parameter fails hard while omitting an optional one
   merely takes ACC's default.
-- **`QuantityPacking` may mean the price is per pack.** The first live page
-  carried a €0.38 Digitus patch cord with `QuantityPacking: 250`. If that is a
-  minimum order rather than a carton size, the real outlay is €95 and the unit
-  price understates cost 250-fold — the same shape as the TME pack-price error
-  that had to be corrected from real orders. Promotion therefore **fails
-  closed**: any offer stating a pack quantity above 1 is skipped with reason
-  `packQuantity` until ACC confirms the semantics. Relaxing it is one condition
-  in `supplier-promote.ts`; carrying the number into `multiples` would be the
-  better fix once the meaning is known.
+- **`QuantityPacking` is a carton size, NOT a minimum order.** Settled
+  2026-09-17 in ACC's own basket: PID 003192 (Digitus patch cord) reports
+  `QuantityPacking: 250`, and the portal accepts a quantity of 1 at €0.38.
+  A promotion guard that skipped these was briefly added and then removed —
+  the unit price is the unit price. The value is still kept in `attributes`
+  because a 250-piece carton may yet matter for shipping.
+- **ACC HAS product weights — their portal shows them, their API does not.**
+  The same basket reports `Svars 0.027 kg` for that patch cord. So the data
+  exists in their system; `GetProducts` simply does not carry it. That turns
+  the question for ACC from "do you have weights?" into the much more
+  answerable "your basket shows Svars per line — can the API return it, or can
+  we have it as a file?". Until then `pickWeightGrams` recovers a weight only
+  from `GetProduct`'s parameter list, and only when a unit is stated.
 - **A cursor belongs to one query shape.** A full-catalogue run and a filtered
   run (daily `updatedAfter` delta, or one branch) walk completely different
   result sets. Runs are tagged in `record_element`, and only full runs carry a
@@ -558,6 +562,11 @@ most likely home for a weight if one exists.
 Data quality is uneven: one of the first two live products was named
 "Vogels | Maximum weight (capacity) 10 kg  kg". Titles like that must not
 reach eBay unedited.
+
+A sampled page also showed two of three products at zero stock with
+`ByOrder: true` (Epson consumables). If that ratio holds, the sellable
+catalogue is much smaller than the headline count — check `in_stock` against
+`total` on `/api/acc/status` after the first import before judging ACC.
 
 **What ACC actually has to give you is one thing: the licence key.** Checked
 against the specification twice, because it is easy to assume otherwise:
