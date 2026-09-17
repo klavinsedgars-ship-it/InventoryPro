@@ -51,6 +51,41 @@ interface ProductsProps {
   user: any;
 }
 
+/**
+ * Which distributor a row came from.
+ *
+ * The stock column used to be headed "TME" because every product was TME's.
+ * With four suppliers in one table the number is meaningless without knowing
+ * whose shelf it is on — and the supplier also decides lead time, pack size
+ * and who to reorder from, so it belongs on the row rather than behind a
+ * filter.
+ */
+const SUPPLIER_TAGS: Record<string, { label: string; className: string }> = {
+  TME: { label: "TME", className: "bg-sky-50 text-sky-700 border-sky-200" },
+  GETIC: { label: "Getic", className: "bg-amber-50 text-amber-700 border-amber-200" },
+  GREENCELL: { label: "Green Cell", className: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  ACC: { label: "ACC", className: "bg-violet-50 text-violet-700 border-violet-200" },
+  manual: { label: "Manual", className: "bg-gray-50 text-gray-600 border-gray-200" },
+};
+
+function SupplierTag({ supplier }: { supplier?: string | null }) {
+  const key = (supplier || "manual").trim();
+  // An unknown supplier shows its own name rather than being silently folded
+  // into "Manual" — a row from a distributor nobody has styled yet is still
+  // information.
+  const tag = SUPPLIER_TAGS[key] ?? { label: key, className: "bg-gray-50 text-gray-600 border-gray-200" };
+  return (
+    <Badge
+      variant="outline"
+      className={`px-1.5 py-0 text-[10px] whitespace-nowrap ${tag.className}`}
+      title={`Supplier: ${tag.label}`}
+      data-testid={`tag-supplier-${key}`}
+    >
+      {tag.label}
+    </Badge>
+  );
+}
+
 export function Products({ user }: ProductsProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -695,6 +730,7 @@ export function Products({ user }: ProductsProps) {
                   <SelectItem value="TME">TME</SelectItem>
                   <SelectItem value="GETIC">Getic</SelectItem>
                   <SelectItem value="GREENCELL">Green Cell</SelectItem>
+                  <SelectItem value="ACC">ACC Distribution</SelectItem>
                   <SelectItem value="manual">Manual</SelectItem>
                 </SelectContent>
               </Select>
@@ -946,6 +982,9 @@ export function Products({ user }: ProductsProps) {
                       <th className="px-1 py-2 text-left text-xs font-medium text-gray-500 uppercase" style={{width: '110px'}}>
                         SKU
                       </th>
+                      <th className="px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase" style={{width: '70px'}}>
+                        Supplier
+                      </th>
                       <th className="px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase" style={{width: '50px'}}>
                         MOQ
                       </th>
@@ -964,9 +1003,9 @@ export function Products({ user }: ProductsProps) {
                         className="px-1 py-2 text-right text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-800"
                         style={{width: '50px'}}
                         onClick={() => toggleSort("stock")}
-                        title="Sort by TME stock"
+                        title="Sort by supplier stock"
                       >
-                        TME<span className="text-gray-400">{sortArrow("stock")}</span>
+                        Stock<span className="text-gray-400">{sortArrow("stock")}</span>
                       </th>
                       <th className="px-1 py-2 text-right text-xs font-medium text-gray-500 uppercase" style={{width: '45px'}}>
                         eBay
@@ -1014,6 +1053,9 @@ export function Products({ user }: ProductsProps) {
                         </td>
                         <td className="px-1 py-2 text-xs text-gray-900 truncate" title={product.sku}>
                           {product.sku}
+                        </td>
+                        <td className="px-1 py-2 text-center">
+                          <SupplierTag supplier={product.supplier} />
                         </td>
                         <td className="px-1 py-2 text-center">
                           {product.moq && product.moq > 1 ? (

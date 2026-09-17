@@ -102,6 +102,16 @@ export interface AccProduct {
 export const ACC_IMAGE_SIZE = "440x440.png";
 
 /**
+ * Sizes ACC documents. 440 is the largest one guaranteed to exist — 1920 is
+ * generated only where the source TIFF was bigger than 440 — but it is below
+ * the 500px eBay recommends on the longest side, so `original.jpg` may serve
+ * listings better where the source is large. Settable per deployment via
+ * ACC_IMAGE_SIZE rather than by editing code, because which is best is a
+ * question about ACC's photo library, not about this mapper.
+ */
+export const ACC_IMAGE_SIZES = ["50x50.png", "220x220.png", "440x440.png", "1920x1920.png", "original.jpg"] as const;
+
+/**
  * Complete a picture directory into a fetchable URL.
  *
  * `Picture` and `Medias[].Uri` are directories, not files. Anything that

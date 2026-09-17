@@ -381,6 +381,13 @@ export class EbayInventoryApiService {
   // publish path returns an error and the listing isn't created with the
   // watermarked image. Default stays at "best-effort fallback" to preserve
   // the current ramp behaviour until the operator opts in.
+  //
+  // ONLY for TME. The removal is a blunt crop — 15% off the right edge and
+  // 10% off the bottom, where TME puts its watermark — and running it over a
+  // distributor image that never had one silently mutilates a clean product
+  // photo. It showed up on ACC listings as a stray frame edge and an
+  // off-centre product, because the crop took the right and bottom away and
+  // left the top-left border of the source image behind.
   private async resolveImages(product: Product): Promise<string[]> {
     if (!product.imageUrl) return [];
     const fixProtocol = (u: string) => (u.startsWith("//") ? "https:" + u : u);
@@ -404,6 +411,10 @@ export class EbayInventoryApiService {
     }
     const withGallery = (primary: string) =>
       Array.from(new Set([primary, ...gallery])).slice(0, 24);
+
+    // Suppliers whose source images are already clean product shots need no
+    // processing, and would only be damaged by it.
+    if (product.supplier !== "TME") return withGallery(fixed);
 
     const hasBlob = !!process.env.BLOB_READ_WRITE_TOKEN;
     const publicBaseUrl = process.env.PUBLIC_BASE_URL || process.env.REPL_URL;

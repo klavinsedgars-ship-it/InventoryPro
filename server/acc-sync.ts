@@ -177,7 +177,10 @@ export async function runAccImport(
 
   const filters = filtersFor(opts);
   const branches = await loadBranches(api);
-  const mapOpts = { resolveBranch: branches.resolve };
+  const mapOpts = {
+    resolveBranch: branches.resolve,
+    imageSize: (process.env.ACC_IMAGE_SIZE || "").trim() || undefined,
+  };
 
   // -------------------------------------------------------------------------
   // Dry run: one page, mapped, nothing written.

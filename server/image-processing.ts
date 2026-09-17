@@ -183,6 +183,11 @@ export class ImageProcessingService {
 
     // TME watermarks are typically in bottom-right corner
     // We'll use multiple techniques to remove them
+    //
+    // NOTE: this is a TME-specific transformation and is destructive — it
+    // throws away a fifth of the picture. Callers must not run it over images
+    // from suppliers that carry no watermark (see resolveImages in
+    // ebay-inventory-api.ts); doing so crops clean product photos off-centre.
 
     // Method 1: Crop bottom-right corner (removes most TME watermarks)
     const cropWidth = Math.floor(metadata.width * 0.85); // Remove 15% from right

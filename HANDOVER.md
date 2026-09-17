@@ -368,6 +368,39 @@ That endpoint is the one to run before asking any distributor to enable
 access: a whitelist is granted for one address, and finding out it is wrong
 here beats finding out from their 403. It never echoes the proxy password.
 
+## Images: the TME watermark crop was running on everyone (2026-09-17)
+
+`imageProcessingService.removeWatermark` is not a watermark detector. It
+**crops 15% off the right edge and 10% off the bottom**, unconditionally,
+because that is where TME puts its mark. `resolveImages` called it for every
+product regardless of supplier, so clean distributor photos were being cut down
+by a fifth and left off-centre — visible on ACC listings as a stray frame edge
+along the top and left, which is the part of the source image's border the crop
+did not remove.
+
+Now confined to `product.supplier === "TME"`. Everyone else's primary image
+goes to eBay as published. The comment in `resolveImages` had said all along
+that only TME images carry a watermark; the code just never acted on it.
+
+Two things to know:
+
+- **ACC's images are clean product shots on white** — nothing needs stripping.
+- **The mapped size is `440x440.png`, below the 500px eBay recommends** on the
+  longest side. 440 is the largest size ACC guarantees (1920 exists only where
+  the source TIFF was bigger), but `original.jpg` may be larger for most
+  products. Set `ACC_IMAGE_SIZE=original.jpg` and re-import to try it; the
+  value is plumbed through rather than hard-coded because which is better is a
+  question about ACC's photo library, not about the mapper.
+
+## Products page: four suppliers in one table (2026-09-17)
+
+The stock column was headed **TME** from when every row was TME's. It is now
+**Stock**, and each row carries a **Supplier** tag, because with four
+distributors the number is meaningless without knowing whose shelf it sits on —
+and the supplier decides lead time, pack size and who to reorder from. ACC
+joined the distributor filter; `getProductsPaged` already passed arbitrary
+supplier values through, so that needed no server change.
+
 ## Listing copy: stop inventing specifications (2026-09-17)
 
 A live listing for a Xiaomi air purifier filter carried
