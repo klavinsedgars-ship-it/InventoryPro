@@ -1,7 +1,9 @@
 import type { Express } from "express";
+import { eq, sql } from "drizzle-orm";
+import { db } from "../db";
 import { storage } from "../storage";
 import { requireAuth, requireRealAuth } from "../middleware/auth";
-import { insertProductSchema } from "@shared/schema";
+import { insertProductSchema, products } from "@shared/schema";
 import { ZodError } from "zod";
 
 /**
@@ -11,7 +13,7 @@ import { ZodError } from "zod";
  */
 async function logDeletion(
   req: any,
-  kind: "delete_all" | "bulk_delete",
+  kind: "delete_all" | "bulk_delete" | "purge_supplier",
   deletedCount: number,
   scope: string,
 ): Promise<void> {
@@ -187,6 +189,91 @@ export function registerProductRoutes(app: Express): void {
     } catch (error) {
       console.error("Failed to bulk delete products:", error);
       res.status(500).json({ message: "Failed to delete selected products" });
+    }
+  });
+
+  /**
+   * Remove one supplier's promoted products and un-stamp their staging rows,
+   * so that supplier can be promoted again from scratch.
+   *
+   * Two things make this its own endpoint rather than a filtered bulk-delete:
+   *
+   *  - **Deleting a product does NOT release its supplier_offers row.** The
+   *    offer keeps `promoted_product_id`, promotion skips it as
+   *    `alreadyPromoted`, and the catalogue can never be re-promoted. Anyone
+   *    who "starts again" by selecting rows in the UI and hitting delete gets
+   *    a staging table that refuses to work and no clue why.
+   *  - **A product that is LIVE on eBay must not be deleted quietly.** The
+   *    listing stays up, a buyer can still order it, and nothing here knows
+   *    what it is any more. Those are refused unless explicitly forced.
+   *
+   * Defaults to a dry run; `confirm: true` performs it.
+   */
+  app.post("/api/products/purge-supplier", requireRealAuth, async (req, res) => {
+    try {
+      const supplier = String(req.body?.supplier ?? req.query.supplier ?? "").trim();
+      if (!supplier) {
+        return res.status(400).json({ message: "Pass a supplier, e.g. { \"supplier\": \"ACC\" }" });
+      }
+      const confirm = req.body?.confirm === true || req.query.confirm === "1";
+      const force = req.body?.force === true || req.query.force === "1";
+
+      const rows = await db
+        .select({
+          id: products.id,
+          sku: products.sku,
+          listedOnEbay: products.listedOnEbay,
+          listedOnAmazon: products.listedOnAmazon,
+        })
+        .from(products)
+        .where(eq(products.supplier, supplier));
+
+      const live = rows.filter((r) => r.listedOnEbay === true || r.listedOnAmazon === true);
+      const summary = {
+        supplier,
+        total: rows.length,
+        liveOnMarketplace: live.length,
+        liveSample: live.slice(0, 10).map((r) => r.sku),
+      };
+
+      if (!confirm) {
+        return res.json({
+          ...summary,
+          dryRun: true,
+          wouldDelete: force ? rows.length : rows.length - live.length,
+          message: live.length
+            ? `${live.length} of these are live on a marketplace and would be SKIPPED. Re-send with confirm:true, or confirm:true + force:true to delete them anyway (their listings stay up and become orphans).`
+            : "Nothing is live on a marketplace. Re-send with confirm:true to delete.",
+        });
+      }
+
+      const target = force ? rows : rows.filter((r) => !live.includes(r));
+      const ids = target.map((r) => r.id);
+      const deletedCount = await storage.deleteProducts(ids);
+
+      // The whole point: release the staging rows so the catalogue can be
+      // promoted again. Scoped by supplier, and only rows whose product is
+      // actually gone.
+      const released: any = await db.execute(sql`
+        UPDATE supplier_offers
+           SET promoted_product_id = NULL, promoted_at = NULL
+         WHERE supplier = ${supplier}
+           AND promoted_product_id IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM products p WHERE p.id = supplier_offers.promoted_product_id)
+      `);
+
+      await logDeletion(req, "purge_supplier", deletedCount, `supplier=${supplier}${force ? " (forced over live listings)" : ""}`);
+      res.json({
+        ...summary,
+        dryRun: false,
+        deletedCount,
+        skippedLive: force ? 0 : live.length,
+        offersReleased: released.rowCount ?? null,
+        message: `Deleted ${deletedCount} ${supplier} products and released their staging rows for re-promotion.`,
+      });
+    } catch (error) {
+      console.error("Failed to purge supplier products:", error);
+      res.status(500).json({ message: (error as Error).message });
     }
   });
 

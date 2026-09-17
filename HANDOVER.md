@@ -781,6 +781,28 @@ current scale (hundreds of orders, low thousands of items) that is nothing.
 If the orders table reaches six figures, the fix is a pg_trgm GIN index on
 the identifier columns, not a narrower search.
 
+## Starting a supplier over (2026-09-17)
+
+```
+POST /api/products/purge-supplier  {"supplier":"ACC"}                 dry run
+POST /api/products/purge-supplier  {"supplier":"ACC","confirm":true}  do it
+```
+
+Deleting promoted products by hand does NOT work, and fails in a way that is
+hard to diagnose: **a deleted product leaves its `supplier_offers` row still
+stamped `promoted_product_id`**, so every future promotion skips it as
+`alreadyPromoted` and the catalogue can never be re-promoted. This endpoint
+deletes the products AND releases the staging rows, scoped to one supplier.
+
+It also **refuses to delete a product that is live on a marketplace** unless
+`force: true`. Deleting one locally does not end the listing: it stays up, a
+buyer can still order it, and nothing here knows what it is any more. The dry
+run reports how many are live and lists a sample before anything happens.
+
+Requires a REAL login (`requireRealAuth`), so it is unreachable while
+`BYPASS_AUTH=true` is set — which is the correct behaviour, not an obstacle to
+work around.
+
 ## Diagnostics (all read-only unless noted)
 
 ```
