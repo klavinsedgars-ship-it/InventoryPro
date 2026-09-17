@@ -116,6 +116,7 @@ export interface PromoteResult {
     eanExists: number;
     noPrice: number;
     wrongCurrency: number;
+    packQuantity: number;
   };
   /** First 50 skips, with reasons — enough to see WHY without a log dive. */
   skippedSamples: Array<{ sku: string; reason: string }>;
@@ -129,6 +130,25 @@ export interface PromoteResult {
  * gets a partial result with `remaining` instead of a 504. Safe to re-run —
  * everything it did is stamped, everything it skipped is stable.
  */
+/**
+ * Pack quantity a supplier stated for this offer, or 1 when it said nothing.
+ *
+ * Read from the staged `attributes` blob rather than a column: only some
+ * suppliers publish it, and a malformed blob must read as "not stated" rather
+ * than throwing mid-promotion.
+ */
+function packQuantityOf(offer: { attributes?: string | null }): number {
+  if (!offer.attributes) return 1;
+  try {
+    const attrs = JSON.parse(offer.attributes) as Record<string, unknown>;
+    const raw = attrs.quantityPacking ?? attrs.packQuantity;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 1 ? Math.floor(n) : 1;
+  } catch {
+    return 1;
+  }
+}
+
 export async function promoteSupplierOffers(
   supplier: string,
   ids: number[],
@@ -142,7 +162,7 @@ export async function promoteSupplierOffers(
     ok: true,
     requested: ids.length,
     promoted: 0,
-    skipped: { alreadyPromoted: 0, blocked: 0, skuExists: 0, eanExists: 0, noPrice: 0, wrongCurrency: 0 },
+    skipped: { alreadyPromoted: 0, blocked: 0, skuExists: 0, eanExists: 0, noPrice: 0, wrongCurrency: 0, packQuantity: 0 },
     skippedSamples: [],
     budgetHit: false,
     remaining: 0,
@@ -216,6 +236,17 @@ export async function promoteSupplierOffers(
       }
       if (!isEurOrUnstated(o.currency)) {
         skip(sku, "wrongCurrency", `feed price is in ${o.currency} — only EUR can be promoted`);
+        continue;
+      }
+      // A supplier that states a pack quantity may be quoting a UNIT price for
+      // something it will only sell by the box. ACC's first live page had a
+      // €0.38 patch cord with QuantityPacking 250 — promoting that as a €0.38
+      // cost would understate the real outlay by 250x. This is the same shape
+      // as the TME pack-price error that had to be corrected from real orders,
+      // so it fails closed until the supplier confirms what the number means.
+      const pack = packQuantityOf(o);
+      if (pack > 1) {
+        skip(sku, "packQuantity", `supplier states a pack quantity of ${pack} — confirm whether the price is per unit or per pack before promoting`);
         continue;
       }
       const unit = o.price != null ? parseFloat(String(o.price)) : NaN;

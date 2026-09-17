@@ -511,6 +511,22 @@ Three things that will bite whoever touches this next:
 - **`GetProducts` carries no `Medias` array** — only the single `Picture`. A
   bulk import therefore yields one image per product; the gallery needs
   `GetProduct` per item.
+- **ACC validates the parameter SET, not just the values.** `GetTreeBranches`
+  accepts LicenseKey, Locale and CompanyId — and sending it `Currency` as well
+  is HTTP 400 `"parameters : An error has occurred."`, not a silently ignored
+  extra. `ACC_METHOD_PARAMS` in `server/acc-api.ts` says which common
+  parameters each method takes; a method not listed gets the conservative set,
+  because adding an unknown parameter fails hard while omitting an optional one
+  merely takes ACC's default.
+- **`QuantityPacking` may mean the price is per pack.** The first live page
+  carried a €0.38 Digitus patch cord with `QuantityPacking: 250`. If that is a
+  minimum order rather than a carton size, the real outlay is €95 and the unit
+  price understates cost 250-fold — the same shape as the TME pack-price error
+  that had to be corrected from real orders. Promotion therefore **fails
+  closed**: any offer stating a pack quantity above 1 is skipped with reason
+  `packQuantity` until ACC confirms the semantics. Relaxing it is one condition
+  in `supplier-promote.ts`; carrying the number into `multiples` would be the
+  better fix once the meaning is known.
 - **A cursor belongs to one query shape.** A full-catalogue run and a filtered
   run (daily `updatedAfter` delta, or one branch) walk completely different
   result sets. Runs are tagged in `record_element`, and only full runs carry a

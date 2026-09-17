@@ -151,6 +151,44 @@ const MAX_ATTEMPTS = 4;
  */
 const DEFAULT_TIMEOUT_MS = 60_000;
 
+/**
+ * Which of the common parameters each method actually accepts.
+ *
+ * ACC validates the parameter SET, not just the values: sending `Currency` to
+ * GetTreeBranches — which has no currency to speak of, its request table lists
+ * only LicenseKey, Locale and CompanyId — is rejected with HTTP 400
+ * "parameters : An error has occurred." So they cannot be blanket-injected.
+ *
+ * Methods absent from this table get the conservative set (locale + company),
+ * because adding a parameter a method does not know is a hard failure while
+ * omitting an optional one merely falls back to an ACC default.
+ */
+const ACC_METHOD_PARAMS: Record<string, { locale: boolean; currency: boolean; companyId: boolean }> = {
+  GetProducts: { locale: true, currency: true, companyId: true },
+  GetProduct: { locale: true, currency: true, companyId: true },
+  GetTreeBranches: { locale: true, currency: false, companyId: true },
+};
+
+const CONSERVATIVE_PARAMS = { locale: true, currency: false, companyId: true };
+
+/**
+ * The `request` object for a method: its own arguments plus only those common
+ * parameters the method accepts. Pure, so the table above is testable without
+ * a network — the alternative is discovering a mistake as a 400 in production.
+ */
+export function buildAccRequest(
+  cfg: Pick<AccConfig, "licenseKey" | "locale" | "currency" | "companyId">,
+  method: string,
+  request: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const allowed = ACC_METHOD_PARAMS[method] ?? CONSERVATIVE_PARAMS;
+  const body: Record<string, unknown> = { LicenseKey: cfg.licenseKey };
+  if (allowed.locale && cfg.locale) body.Locale = cfg.locale;
+  if (allowed.currency && cfg.currency) body.Currency = cfg.currency;
+  if (allowed.companyId && cfg.companyId) body.CompanyId = cfg.companyId;
+  return { ...body, ...request };
+}
+
 /** 1s, 3s, 9s — long enough for a stuck tunnel to be torn down and remade. */
 function backoffMs(attempt: number): number {
   return 1000 * Math.pow(3, attempt - 1);
@@ -250,15 +288,7 @@ export class AccApiService {
             Accept: "application/json",
             "User-Agent": "InventoryPro/1.0 (catalogue import)",
           },
-          body: JSON.stringify({
-            request: {
-              LicenseKey: this.cfg.licenseKey,
-              Locale: this.cfg.locale,
-              Currency: this.cfg.currency,
-              CompanyId: this.cfg.companyId,
-              ...request,
-            },
-          }),
+          body: JSON.stringify({ request: buildAccRequest(this.cfg, method, request) }),
         },
         // ACC whitelists one IP: going direct is worse than failing.
         { useProxy: true, requireProxy: true },
