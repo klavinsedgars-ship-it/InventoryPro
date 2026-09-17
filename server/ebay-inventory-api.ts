@@ -475,7 +475,10 @@ export class EbayInventoryApiService {
           ],
         },
       },
-      condition: "NEW",
+      // NEW unless the supplier told us otherwise. Sale-out and defective
+      // stock carry their real condition, because listing a damaged-packaging
+      // unit as brand new is an item-not-as-described case by construction.
+      condition: (product as any).listingCondition || "NEW",
       product: {
         title,
         description: title, // offer carries the rich HTML description

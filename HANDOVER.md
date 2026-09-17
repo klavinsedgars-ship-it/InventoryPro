@@ -631,6 +631,18 @@ Three things that will bite whoever touches this next:
   specifics. `GetProducts` carries no description at all, which is why ACC
   listings first went up with generic component copy.
 
+  **Condition.** Every listing this system publishes was hard-coded
+  `condition: "NEW"` — true while the catalogue was TME components. ACC also
+  sells sale-out stock: the same product, discounted, with something wrong,
+  usually the box. Their portal shows it as a `Saleout` line reading
+  `DAMAGED PACKAGING`, and `GetProducts` carries `HasSaleOut` / `IsDefect`.
+  Publishing that as NEW is an item-not-as-described case by construction, so
+  `accListingCondition()` maps it to `NEW_OTHER` (or `NEW_WITH_DEFECTS`) and
+  puts ACC's own wording at the TOP of the description, where a buyer sees it
+  before committing. The condition rides on `products.listing_condition`;
+  NULL means NEW, so TME, Getic and Green Cell publish byte-identically to
+  before.
+
   **Promotion refuses an ACC offer with no weight** (`noWeight`). This is not
   caution for its own sake. `fee-model.ts` prices an unknown weight as
   `(weightGrams ?? 0) + packaging` — the cheapest postal band there is — so a

@@ -490,6 +490,8 @@ export class DatabaseStorage implements IStorage {
       // moved by the quantity sweep, not here — changing ~130k rows belongs in
       // a deliberate, reversible pass, not in boot.
       `ALTER TABLE products ALTER COLUMN ebay_stock_limit SET DEFAULT 1`,
+      // Sale-out / defective stock must not publish as NEW (see acc-map.ts).
+      `ALTER TABLE products ADD COLUMN IF NOT EXISTS listing_condition text`,
       // Amazon listing state (2026-09). Offers attach to existing ASINs, so
       // the catalogue match is tracked separately from the listing itself.
       `ALTER TABLE products ADD COLUMN IF NOT EXISTS amazon_match_status text`,

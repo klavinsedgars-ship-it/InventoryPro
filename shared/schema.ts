@@ -50,6 +50,10 @@ export const products = pgTable("products", {
   // eBay item specifics, which measurably improve marketplace search ranking.
   // Parameters are effectively static, so they are fetched once per product.
   tmeParameters: text("tme_parameters"),
+  // eBay condition to publish under. NULL means NEW, which is what every
+  // listing was before ACC brought sale-out stock into the catalogue; only a
+  // supplier that flags a defect or clearance sets anything else.
+  listingCondition: text("listing_condition"),
   ebayItemId: text("ebay_item_id"), // legacy Trading-API listing id (migrated listings)
   // Inventory API listing state (SKU-keyed model: inventory item -> offer -> publish)
   ebayOfferId: text("ebay_offer_id"),

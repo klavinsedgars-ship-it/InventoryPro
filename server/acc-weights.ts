@@ -21,7 +21,13 @@
 import { sql } from "drizzle-orm";
 import { db } from "./db";
 import { accApi } from "./acc-api";
-import { accDescriptionFromParameters, accParameterPairs, pickWeightGrams } from "./acc-map";
+import {
+  accDescriptionFromParameters,
+  accListingCondition,
+  accParameterPairs,
+  pickWeightGrams,
+  type ListingCondition,
+} from "./acc-map";
 import { mapPool } from "./concurrency";
 
 /**
@@ -37,6 +43,10 @@ export interface AccProductDetail {
   parameters: Array<{ name: string; value: string }>;
   /** Built from the parameters ACC flags for description use. */
   description: string | null;
+  /** NEW unless ACC flagged the unit as sale-out or defective. */
+  condition: ListingCondition;
+  /** Buyer-facing note for a non-NEW condition. */
+  disclosure: string | null;
 }
 
 export interface WeightBackfillResult {
@@ -96,10 +106,13 @@ export async function backfillAccWeights(
     // expensive thing we do against ACC.
     const params = r.data?.Parameters ?? null;
     const grams = pickWeightGrams(params);
+    const verdict = accListingCondition(r.data, params);
     result.details.set(sku, {
       weightGrams: grams,
       parameters: accParameterPairs(params),
       description: accDescriptionFromParameters(params),
+      condition: verdict.condition,
+      disclosure: verdict.disclosure,
     });
     if (grams == null || grams <= 0) {
       // A clean answer of "no weight published" — not a failure to ask.

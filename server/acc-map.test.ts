@@ -10,6 +10,7 @@ import {
   productsFromResponse,
   totalStock,
   accDescriptionFromParameters,
+  accListingCondition,
   accParameterPairs,
   type AccProduct,
 } from "./acc-map";
@@ -598,5 +599,57 @@ describe("accParameterPairs / accDescriptionFromParameters", () => {
       { ParameterName: "colour", Value: "Violet" },
     ]);
     expect(pairs).toEqual([{ name: "Colour", value: "Purple" }]);
+  });
+});
+
+describe("accListingCondition", () => {
+  it("leaves ordinary stock as NEW with nothing to disclose", () => {
+    const v = accListingCondition({ IsDefect: false, HasSaleOut: false }, []);
+    expect(v.condition).toBe("NEW");
+    expect(v.disclosure).toBeNull();
+  });
+
+  it("treats an unflagged product as NEW, so other suppliers are unaffected", () => {
+    expect(accListingCondition(null, null).condition).toBe("NEW");
+    expect(accListingCondition({}, undefined).condition).toBe("NEW");
+  });
+
+  it("lists clearance stock as NEW_OTHER and quotes the distributor", () => {
+    // ACC's portal shows this as a "Saleout" line reading DAMAGED PACKAGING.
+    // Publishing it as NEW is an item-not-as-described case by construction.
+    const v = accListingCondition(
+      { HasSaleOut: true },
+      [{ ParameterName: "Saleout", Value: "DAMAGED PACKAGING" }],
+    );
+    expect(v.condition).toBe("NEW_OTHER");
+    expect(v.disclosure).toContain("DAMAGED PACKAGING");
+    expect(v.disclosure).toContain("new and unused");
+  });
+
+  it("catches a sale-out known only from the parameter", () => {
+    // The flag and the parameter come from different calls; either alone is
+    // enough to stop it going out as NEW.
+    const v = accListingCondition({}, [{ ParameterName: "Sale out", Value: "OPENED BOX" }]);
+    expect(v.condition).toBe("NEW_OTHER");
+    expect(v.disclosure).toContain("OPENED BOX");
+  });
+
+  it("catches a sale-out known only from the flag", () => {
+    const v = accListingCondition({ HasSaleOut: true }, []);
+    expect(v.condition).toBe("NEW_OTHER");
+    expect(v.disclosure).toContain("packaging");
+  });
+
+  it("ranks a defect above a sale-out", () => {
+    const v = accListingCondition(
+      { IsDefect: true, HasSaleOut: true },
+      [{ ParameterName: "Saleout", Value: "DAMAGED PACKAGING" }],
+    );
+    expect(v.condition).toBe("NEW_WITH_DEFECTS");
+    expect(v.disclosure).toContain("DAMAGED PACKAGING");
+  });
+
+  it("never invents a condition from an empty saleout value", () => {
+    expect(accListingCondition({}, [{ ParameterName: "Saleout", Value: "" }]).condition).toBe("NEW");
   });
 });

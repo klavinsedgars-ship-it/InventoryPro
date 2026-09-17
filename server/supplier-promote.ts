@@ -192,6 +192,8 @@ export async function promoteSupplierOffers(
     // product row so eBay item specifics come from data rather than from a
     // regex over the title.
     const detailParameters = new Map<string, Array<{ name: string; value: string }>>();
+    /** sku -> eBay condition, for stock the supplier flagged as not plain new. */
+    const listingConditions = new Map<string, string>();
 
     const fresh = offers.filter((o) => {
       if (o.promotedProductId != null) {
@@ -219,6 +221,14 @@ export async function promoteSupplierOffers(
             // Without this the listing template falls back to generic copy.
             if (d.description && !o.description) o.description = d.description;
             if (d.parameters.length) detailParameters.set(o.supplierSku, d.parameters);
+            if (d.condition && d.condition !== "NEW") {
+              listingConditions.set(o.supplierSku, d.condition);
+              // First line of the description, not a footnote: a buyer must
+              // see it before they commit, not after they open the box.
+              if (d.disclosure) {
+                o.description = o.description ? `${d.disclosure}\n\n${o.description}` : d.disclosure;
+              }
+            }
           }
           const w = result.weights ?? { fetched: 0, missing: 0, failed: 0, budgetHit: false, sampleErrors: [] };
           w.fetched += backfill.fetched;
@@ -326,6 +336,7 @@ export async function promoteSupplierOffers(
           // Structured specifications where the supplier published them. The
           // column is named for TME, which was the first to provide them; the
           // consumer (tme-aspects.ts) is supplier-agnostic.
+          listingCondition: listingConditions.get(o.supplierSku) ?? null,
           tmeParameters: detailParameters.has(o.supplierSku)
             ? JSON.stringify(detailParameters.get(o.supplierSku))
             : undefined,

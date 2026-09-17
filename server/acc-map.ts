@@ -492,3 +492,69 @@ export function accDescriptionFromParameters(
   }
   return lines.length ? lines.join("\n") : null;
 }
+
+// ---------------------------------------------------------------------------
+// Condition
+//
+// Every listing this system publishes has always been `condition: "NEW"`,
+// which was true while the catalogue was TME components. ACC also sells
+// sale-out stock: same product, discounted, with something wrong — most often
+// the box. Their portal shows it as a "Saleout" line reading DAMAGED
+// PACKAGING, and `GetProducts` carries `HasSaleOut` and `IsDefect` flags.
+//
+// Publishing one of those as NEW is an item-not-as-described case waiting to
+// happen, so the flags are mapped to the eBay condition that actually fits and
+// a disclosure line the buyer sees before bidding.
+// ---------------------------------------------------------------------------
+
+/** eBay Inventory API condition enum values used here. */
+export type ListingCondition = "NEW" | "NEW_OTHER" | "NEW_WITH_DEFECTS";
+
+export interface ConditionVerdict {
+  condition: ListingCondition;
+  /** Prepended to the listing description. Null when the item is plain new. */
+  disclosure: string | null;
+}
+
+const SALEOUT_PARAM_RE = /\b(saleout|sale out)\b/i;
+
+/**
+ * What condition an ACC product should be listed as.
+ *
+ * Deliberately conservative in one direction only: a product with no flags is
+ * NEW, exactly as before, so nothing about TME, Getic or Green Cell changes.
+ * A flagged one is never silently upgraded.
+ */
+export function accListingCondition(
+  product: Pick<AccProduct, "IsDefect" | "HasSaleOut"> | null | undefined,
+  parameters?: AccParameter[] | null,
+): ConditionVerdict {
+  // Whatever ACC wrote against the sale-out — "DAMAGED PACKAGING" and the
+  // like. Their own words beat anything we would compose.
+  let saleoutNote: string | null = null;
+  for (const p of parameters ?? []) {
+    if (!SALEOUT_PARAM_RE.test(String(p?.ParameterName ?? ""))) continue;
+    const value = String(p?.Value ?? "").trim();
+    if (value) saleoutNote = value;
+  }
+
+  if (product?.IsDefect === true) {
+    return {
+      condition: "NEW_WITH_DEFECTS",
+      disclosure: saleoutNote
+        ? `Condition note from the distributor: ${saleoutNote}. The item itself is new and unused.`
+        : "Condition note: this unit is sold as new with defects. The item is unused.",
+    };
+  }
+
+  if (product?.HasSaleOut === true || saleoutNote) {
+    return {
+      condition: "NEW_OTHER",
+      disclosure: saleoutNote
+        ? `Condition note from the distributor: ${saleoutNote}. The item itself is new and unused.`
+        : "Condition note: clearance stock. The item is new and unused, but the packaging may be opened or damaged.",
+    };
+  }
+
+  return { condition: "NEW", disclosure: null };
+}
