@@ -116,13 +116,63 @@ export interface AccCallResult<T> {
   status: number;
   data: T | null;
   error?: string;
-  /** Worth retrying: network, 429, 5xx, or their repeated-request refusal. */
+  /** Worth retrying right now: network, timeout, 429 or 5xx. */
   transient?: boolean;
+  /**
+   * Refused by their 15-minute identical-request rule. Distinct from
+   * `transient` because retrying it immediately is guaranteed to fail again —
+   * only a different request, or a quarter of an hour, clears it.
+   */
+  throttled?: boolean;
+  /** How many attempts it took, so a flaky path is visible in the result. */
+  attempts?: number;
   ms: number;
 }
 
 /** Their throttle message is a 200-with-text in some cases, so match on it. */
 const REPEATED_REQUEST_RE = /repeated requests not allowed/i;
+
+/**
+ * How many times to try one call before giving up.
+ *
+ * Every ACC request crosses an extra hop — a 2 EUR VPS running tinyproxy —
+ * which can fail (CONNECT refused, tunnel timeout) entirely independently of
+ * ACC being healthy. A full catalogue walk is ~25 paged calls, and without
+ * retries any single hiccup ends the slice with the cursor stuck where it was.
+ * Cheap insurance, bounded by the caller's deadline below so it cannot turn
+ * into a slice that spends its whole budget on one page.
+ */
+const MAX_ATTEMPTS = 4;
+
+/**
+ * Per-attempt timeout. A page of products comes back in a couple of seconds
+ * when the tunnel is healthy; anything near a minute is a tunnel that will not
+ * recover, and waiting two more minutes for it only burns the slice.
+ */
+const DEFAULT_TIMEOUT_MS = 60_000;
+
+/** 1s, 3s, 9s — long enough for a stuck tunnel to be torn down and remade. */
+function backoffMs(attempt: number): number {
+  return 1000 * Math.pow(3, attempt - 1);
+}
+
+/**
+ * Should this outcome be tried again?
+ *
+ * Pure, so the policy is testable without a network: a throttle refusal is
+ * never retried in-process (their window is 15 minutes), and a definite answer
+ * from ACC — success, or a 4xx that is not 429 — is the answer.
+ */
+export function shouldRetryAcc(
+  result: Pick<AccCallResult<unknown>, "ok" | "transient" | "throttled">,
+  attempt: number,
+  maxAttempts = MAX_ATTEMPTS,
+): boolean {
+  if (result.ok) return false;
+  if (result.throttled) return false;
+  if (!result.transient) return false;
+  return attempt < maxAttempts;
+}
 
 /**
  * Request budget. Their published ceiling is 300/min; we pace well under it —
@@ -153,11 +203,35 @@ export class AccApiService {
   constructor(private readonly cfg: AccConfig) {}
 
   /**
-   * One POST. Never throws for an API-level failure — callers get a result
-   * object and decide, the same contract as the Amazon client, because a
-   * half-finished import must be able to report what it did before it stopped.
+   * One POST, retried while the failure looks like the flaky tunnel rather
+   * than an answer from ACC. Never throws for an API-level failure — callers
+   * get a result object and decide, the same contract as the Amazon client,
+   * because a half-finished import must be able to report what it did before
+   * it stopped.
    */
-  async call<T = unknown>(method: string, request: Record<string, unknown>, timeoutMs = 120_000): Promise<AccCallResult<T>> {
+  async call<T = unknown>(
+    method: string,
+    request: Record<string, unknown>,
+    opts: { timeoutMs?: number; deadline?: number } = {},
+  ): Promise<AccCallResult<T>> {
+    const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    let last: AccCallResult<T> | null = null;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      last = await this.attemptCall<T>(method, request, timeoutMs);
+      if (!shouldRetryAcc(last, attempt)) return { ...last, attempts: attempt };
+      // Retries must not eat the caller's whole time budget. A slice that
+      // spends 250s retrying one stuck page makes no progress and will do the
+      // same thing on its next tick; better to stop, report, and resume.
+      const wait = backoffMs(attempt);
+      if (opts.deadline && Date.now() + wait + timeoutMs > opts.deadline) {
+        return { ...last, attempts: attempt };
+      }
+      await new Promise((r) => setTimeout(r, wait));
+    }
+    return { ...(last as AccCallResult<T>), attempts: MAX_ATTEMPTS };
+  }
+
+  private async attemptCall<T = unknown>(method: string, request: Record<string, unknown>, timeoutMs: number): Promise<AccCallResult<T>> {
     const started = Date.now();
     await this.budget.take();
 
@@ -199,7 +273,7 @@ export class AccApiService {
           status: res.status,
           data: null,
           error: "ACC refused an identical request — their GetProducts throttle is 15 minutes between identical calls",
-          transient: true,
+          throttled: true,
           ms,
         };
       }
@@ -247,13 +321,13 @@ export class AccApiService {
   }
 
   /** One page of the catalogue. */
-  async getProducts(opts: { offset?: number; limit?: number; filters?: AccFilter[] } = {}): Promise<AccCallResult<{ products: AccProduct[]; raw: unknown }>> {
+  async getProducts(opts: { offset?: number; limit?: number; filters?: AccFilter[]; deadline?: number } = {}): Promise<AccCallResult<{ products: AccProduct[]; raw: unknown }>> {
     const request: Record<string, unknown> = {};
     if (opts.offset != null) request.Offset = String(opts.offset);
     if (opts.limit != null) request.Limit = String(opts.limit);
     if (opts.filters?.length) request.Filters = opts.filters;
 
-    const r = await this.call<unknown>("GetProducts", request);
+    const r = await this.call<unknown>("GetProducts", request, { deadline: opts.deadline });
     if (!r.ok) return { ...r, data: null } as AccCallResult<{ products: AccProduct[]; raw: unknown }>;
     return { ...r, data: { products: productsFromResponse(r.data), raw: r.data } };
   }

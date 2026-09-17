@@ -269,7 +269,14 @@ export async function runAccImport(
       break;
     }
 
-    const page = await api.getProducts({ offset, limit: pageSize, filters });
+    const page = await api.getProducts({
+      offset,
+      limit: pageSize,
+      filters,
+      // Retries stop rather than overrun the slice; the cursor is already
+      // persisted, so the next tick picks up exactly here.
+      deadline: started + timeBudgetMs,
+    });
     if (!page.ok) {
       // A page that failed after real work is a partial run, not a failed one:
       // the rows already written are good and the cursor is worth keeping.
