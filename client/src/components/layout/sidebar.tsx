@@ -20,7 +20,7 @@ import {
   Scale,
   Target,
   TrendingUp,
-  Boxes, ShoppingCart, Receipt } from "lucide-react";
+  Boxes, ShoppingCart, Receipt, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const navigation = [
@@ -133,13 +133,33 @@ export function Sidebar({ user, collapsed = false, onToggle }: SidebarProps) {
                 )}
               </div>
               {!collapsed && (
-                <Link
-                  href="/settings"
-                  className="p-2 rounded-lg hover:bg-gray-100 transition-colors flex-shrink-0"
-                  data-testid="nav-settings"
-                >
-                  <Settings className="h-4 w-4 text-gray-500 hover:text-gray-700" />
-                </Link>
+                <div className="flex items-center flex-shrink-0">
+                  <Link
+                    href="/settings"
+                    className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+                    data-testid="nav-settings"
+                  >
+                    <Settings className="h-4 w-4 text-gray-500 hover:text-gray-700" />
+                  </Link>
+                  {/* Signing out and back in is the fix whenever a session
+                      predates a change in how the app authenticates — burying
+                      it in Settings made that unnecessarily hard to find. */}
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+                      } finally {
+                        window.location.href = "/";
+                      }
+                    }}
+                    className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+                    title="Sign out"
+                    data-testid="btn-logout"
+                  >
+                    <LogOut className="h-4 w-4 text-gray-500 hover:text-gray-700" />
+                  </button>
+                </div>
               )}
             </div>
           </div>

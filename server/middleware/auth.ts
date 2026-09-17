@@ -48,5 +48,17 @@ export const requireRealAuth = async (req: any, res: Response, next: NextFunctio
         "which does not authorize deletions — sign in with your admin password (or unset BYPASS_AUTH).",
     });
   }
+  // A session that has a user but no `viaLogin` was minted by BYPASS_AUTH
+  // before it was removed. Sessions live in Postgres, so they outlast the env
+  // var that created them: the app looks signed in, ordinary pages work, and
+  // only destructive endpoints refuse. Saying "Authentication required" to
+  // someone who is plainly using the app is useless — name the fix.
+  if (req.session?.userId) {
+    return res.status(401).json({
+      message:
+        "This session was not established by a password login, so it cannot authorize deletions. " +
+        "Sign out and sign back in (Settings → Sign out), then try again.",
+    });
+  }
   return res.status(401).json({ message: "Authentication required" });
 };

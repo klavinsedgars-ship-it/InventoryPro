@@ -816,6 +816,15 @@ Requires a REAL login (`requireRealAuth`), so it is unreachable while
 `BYPASS_AUTH=true` is set — which is the correct behaviour, not an obstacle to
 work around.
 
+**Removing `BYPASS_AUTH` is not enough on its own.** Sessions live in Postgres
+(`user_sessions`), so one minted by the bypass outlives the env var that
+created it: it carries `userId` but never got `viaLogin`, which only a password
+login sets. The app then looks signed in, every ordinary page works, and only
+destructive endpoints refuse — with a bare "Authentication required" that made
+no sense to someone plainly using the app. `requireRealAuth` now detects that
+case by name and says to sign out and back in, and there is a **Sign out**
+button next to the gear in the sidebar rather than only inside Settings.
+
 ## Diagnostics (all read-only unless noted)
 
 ```
