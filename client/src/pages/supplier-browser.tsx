@@ -145,6 +145,9 @@ const SORT_OPTIONS: Array<{ value: string; label: string }> = [
 export default function SupplierBrowser({ user, slug, name }: { user?: any; slug: string; name: string }) {
   const { toast } = useToast();
   const qc = useQueryClient();
+  // The `supplier` column value. The route slug is lowercase for URLs; the
+  // column is the uppercase code the importer writes.
+  const supplierCode = slug.toUpperCase();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   // Draft inputs (typed) vs applied filters (what the queries use): text and
   // price fields apply on Search/Enter so each keystroke isn't a request.
@@ -165,6 +168,8 @@ export default function SupplierBrowser({ user, slug, name }: { user?: any; slug
   const [probeOpen, setProbeOpen] = useState(false);
   const [preview, setPreview] = useState<any>(null);
   const [confirmImport, setConfirmImport] = useState(false);
+  /** Dry-run result for "remove promoted products", or null when closed. */
+  const [purgePreview, setPurgePreview] = useState<any | null>(null);
   const [confirmPromoteAll, setConfirmPromoteAll] = useState(false);
   const [promoteResult, setPromoteResult] = useState<PromoteResult | null>(null);
 
@@ -250,6 +255,42 @@ export default function SupplierBrowser({ user, slug, name }: { user?: any; slug
     onError: (e: any) => {
       setConfirmImport(false);
       toast({ title: "Import failed", description: e.message, variant: "destructive" });
+    },
+  });
+
+  /**
+   * Undo a promotion: delete this supplier's products and release their
+   * staging rows so the catalogue can be promoted again.
+   *
+   * Always previews first. The preview is not decoration — it is where you
+   * find out how many of these are LIVE on a marketplace, which is the one
+   * case where deleting locally leaves something behind that can still be
+   * bought.
+   */
+  const purgePreviewMutation = useMutation({
+    mutationFn: async () =>
+      (await apiRequest("POST", "/api/products/purge-supplier", { supplier: supplierCode })).json(),
+    onSuccess: (d: any) => setPurgePreview(d),
+    onError: (e: any) => toast({ title: "Couldn't check", description: e.message, variant: "destructive" }),
+  });
+
+  const purgeMutation = useMutation({
+    mutationFn: async (force: boolean) =>
+      (await apiRequest("POST", "/api/products/purge-supplier", { supplier: supplierCode, confirm: true, force })).json(),
+    onSuccess: (d: any) => {
+      setPurgePreview(null);
+      toast({
+        title: `Removed ${d.deletedCount ?? 0} products`,
+        description:
+          `${d.offersReleased ?? 0} catalogue rows released for re-promotion` +
+          (d.skippedLive ? `. ${d.skippedLive} left alone because they are live on a marketplace.` : "."),
+      });
+      qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith(`/api/${slug}/`) });
+      qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith("/api/products") });
+    },
+    onError: (e: any) => {
+      setPurgePreview(null);
+      toast({ title: "Removal failed", description: e.message, variant: "destructive" });
     },
   });
 
@@ -355,6 +396,19 @@ export default function SupplierBrowser({ user, slug, name }: { user?: any; slug
                     <FlaskConical className="w-4 h-4 mr-1" />
                     {dryRunMutation.isPending ? "Parsing…" : "Preview (dry run)"}
                   </Button>
+                  {(counts?.promoted ?? 0) > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-red-600 border-red-200 hover:bg-red-50"
+                      onClick={() => purgePreviewMutation.mutate()}
+                      disabled={purgePreviewMutation.isPending}
+                      data-testid="button-purge"
+                    >
+                      <AlertTriangle className="w-4 h-4 mr-1" />
+                      {purgePreviewMutation.isPending ? "Checking…" : `Remove ${counts?.promoted} promoted`}
+                    </Button>
+                  )}
                   {!confirmImport ? (
                     <Button size="sm" onClick={() => setConfirmImport(true)} disabled={importMutation.isPending} data-testid="button-import">
                       <Download className="w-4 h-4 mr-1" /> {isApi ? "Import catalogue" : "Import feed"}
@@ -705,6 +759,82 @@ export default function SupplierBrowser({ user, slug, name }: { user?: any; slug
                   </ScrollArea>
                 </div>
               )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Remove promoted products — preview, then confirm */}
+      <Dialog open={purgePreview != null} onOpenChange={(o) => !o && setPurgePreview(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Remove {name} products from the catalogue?</DialogTitle>
+            <DialogDescription>
+              Deletes them from Products and releases the staging rows here, so this catalogue can be
+              promoted again from scratch. The imported offers themselves are not touched.
+            </DialogDescription>
+          </DialogHeader>
+          {purgePreview && (
+            <div className="space-y-3 text-sm">
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="outline">{purgePreview.total ?? 0} products</Badge>
+                {(purgePreview.liveOnMarketplace ?? 0) > 0 ? (
+                  <Badge variant="destructive">{purgePreview.liveOnMarketplace} live on a marketplace</Badge>
+                ) : (
+                  <Badge variant="secondary">none are live</Badge>
+                )}
+              </div>
+
+              {(purgePreview.liveOnMarketplace ?? 0) > 0 && (
+                <div className="rounded border border-red-200 bg-red-50 p-3 text-red-800">
+                  <p className="font-medium">
+                    Deleting a live product does not end its listing.
+                  </p>
+                  <p className="mt-1">
+                    It stays on sale, a buyer can still order it, and nothing here will know what it is.
+                    End those listings on the marketplace first — or delete the rest and leave these alone.
+                  </p>
+                  {purgePreview.liveSample?.length > 0 && (
+                    <p className="mt-2 font-mono text-xs break-all">
+                      {purgePreview.liveSample.join(", ")}
+                      {purgePreview.liveOnMarketplace > purgePreview.liveSample.length ? " …" : ""}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <p className="text-gray-600">{purgePreview.message}</p>
+
+              <div className="flex flex-wrap justify-end gap-2 pt-1">
+                <Button variant="outline" size="sm" onClick={() => setPurgePreview(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => purgeMutation.mutate(false)}
+                  disabled={purgeMutation.isPending}
+                  data-testid="button-purge-confirm"
+                >
+                  {purgeMutation.isPending
+                    ? "Removing…"
+                    : (purgePreview.liveOnMarketplace ?? 0) > 0
+                      ? `Remove the other ${(purgePreview.total ?? 0) - purgePreview.liveOnMarketplace}`
+                      : `Remove ${purgePreview.total ?? 0}`}
+                </Button>
+                {(purgePreview.liveOnMarketplace ?? 0) > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-red-600"
+                    onClick={() => purgeMutation.mutate(true)}
+                    disabled={purgeMutation.isPending}
+                    data-testid="button-purge-force"
+                  >
+                    Remove all, orphan the listings
+                  </Button>
+                )}
+              </div>
             </div>
           )}
         </DialogContent>

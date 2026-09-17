@@ -783,6 +783,11 @@ the identifier columns, not a narrower search.
 
 ## Starting a supplier over (2026-09-17)
 
+In the CRM: the supplier's browser page (**ACC Browser**, **Getic Browser**, …)
+shows a red **"Remove N promoted"** button whenever that supplier has promoted
+products. It previews first and names anything live on a marketplace before
+deleting. The endpoint behind it:
+
 ```
 POST /api/products/purge-supplier  {"supplier":"ACC"}                 dry run
 POST /api/products/purge-supplier  {"supplier":"ACC","confirm":true}  do it
