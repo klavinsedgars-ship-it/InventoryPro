@@ -77,7 +77,7 @@ function isoDaysAgo(days: number): string {
  * exception, because "not credentialed yet" is the expected condition until
  * ACC issues one.
  */
-async function probeApiSupplier(config: SupplierFeedConfig) {
+async function probeApiSupplier(config: SupplierFeedConfig, offsetOverride?: number) {
   const describe = describeAccConfig();
   const api = accApi();
   if (!api) {
@@ -95,10 +95,19 @@ async function probeApiSupplier(config: SupplierFeedConfig) {
 
   const branchesR = await api.getTreeBranches();
   const resolve = branchesR.ok && branchesR.data?.length ? branchPathResolver(branchesR.data) : undefined;
-  const page = await api.getProducts({ offset: 0, limit: 3 });
+
+  // ACC refuses an IDENTICAL GetProducts inside a 15-minute window, so a probe
+  // that always asked for offset 0 could only be run once a quarter of an
+  // hour — useless for the one job it has. A varying offset sidesteps the rule
+  // and samples a different corner of the catalogue each time, which is the
+  // better diagnostic anyway.
+  const offset = offsetOverride ?? Math.floor(Math.random() * 500);
+  const page = await api.getProducts({ offset, limit: 3 });
 
   return {
-    ok: page.ok,
+    // A throttle refusal is ACC working as documented, not a broken
+    // connection: if the branch tree came back, we are talking to them.
+    ok: branchesR.ok && (page.ok || !!page.throttled),
     sourceKind: "api",
     config: describe,
     branches: {
@@ -109,7 +118,13 @@ async function probeApiSupplier(config: SupplierFeedConfig) {
     },
     products: {
       ok: page.ok,
+      offset,
+      throttled: !!page.throttled,
+      attempts: page.attempts,
       error: page.error,
+      hint: page.throttled
+        ? "Their 15-minute rule fires on identical requests. Retry — the probe picks a new offset each run — or pass ?offset=<n> to look at a specific slice now."
+        : undefined,
       ms: page.ms,
       count: page.data?.products.length ?? 0,
       // The untouched first record, so a field we never mapped is still
@@ -167,7 +182,10 @@ function registerOneSupplier(app: Express, config: SupplierFeedConfig): void {
    */
   app.get(`${base}/probe`, requireAuth, async (req, res) => {
     try {
-      if (!isXmlSource(config)) return res.json(await probeApiSupplier(config));
+      if (!isXmlSource(config)) {
+        const raw = req.query.offset != null ? parseInt(String(req.query.offset), 10) : undefined;
+        return res.json(await probeApiSupplier(config, Number.isFinite(raw) ? raw : undefined));
+      }
       const feed = await fetchSupplierFeed(config);
       const structure = sniffFeedStructure(feed.xml);
       const recordElement = (req.query.record as string) || structure.recordElement;

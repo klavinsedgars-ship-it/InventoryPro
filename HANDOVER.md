@@ -474,8 +474,16 @@ list), `GetProduct` (detail, the only place parameters live), and
 `GetProducts` separately refuses *identical* requests inside a 15-minute
 window ("Repeated requests not allowed"). Paging is safe because each page
 differs by Offset; re-running the same import twice is not. The client
-recognises that message and reports it as transient rather than as a parse
-failure.
+reports it as `throttled` rather than `transient` — the distinction matters,
+because retrying a throttle refusal in-process is guaranteed to fail again,
+while a transient one is worth another go immediately.
+
+It bit the probe first: always asking for offset 0 made a diagnostic that
+could only be run once a quarter of an hour. It now picks a random offset per
+run (override with `?offset=`), which sidesteps the rule and samples a
+different corner of the catalogue each time. The daily delta cron is immune
+for the same reason — its `updatedAfter` timestamp is computed per call, so no
+two requests are identical.
 
 **Layout:**
 
@@ -580,7 +588,8 @@ seeing the shape of the data; mistaking it for real stock would look like a
 catastrophic collapse. The UI badges it in red when that key is in use.
 
 ```
-GET  /api/acc/probe    connection, branch tree, first 3 products raw + mapped
+GET  /api/acc/probe    connection, branch tree, 3 products raw + mapped
+GET  /api/acc/probe?offset=1200             sample a specific slice
 POST /api/acc/import?dryRun=1&limit=25      map a page, write nothing
 POST /api/acc/import                         a slice; repeat while nextOffset
 POST /api/acc/import?offset=0                force a full re-walk
