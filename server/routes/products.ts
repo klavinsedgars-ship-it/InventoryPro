@@ -229,21 +229,52 @@ export function registerProductRoutes(app: Express): void {
         .where(eq(products.supplier, supplier));
 
       const live = rows.filter((r) => r.listedOnEbay === true || r.listedOnAmazon === true);
+
+      // Staging rows stamped as promoted whose product no longer exists.
+      // This is the state left behind by deleting products from the Products
+      // page: the offers still say "In Products #152709", promotion skips
+      // them as alreadyPromoted, and the catalogue is unusable until the
+      // stamps are cleared. It is the whole reason releasing is separate from
+      // deleting, and why this endpoint is worth running with nothing to
+      // delete at all.
+      const staleQ: any = await db.execute(sql`
+        SELECT count(*) FILTER (WHERE promoted_product_id IS NOT NULL)::int AS stamped,
+               count(*) FILTER (
+                 WHERE promoted_product_id IS NOT NULL
+                   AND NOT EXISTS (SELECT 1 FROM products p WHERE p.id = supplier_offers.promoted_product_id)
+               )::int AS stale
+          FROM supplier_offers
+         WHERE supplier = ${supplier}
+      `);
+      const stampRow = (staleQ.rows ?? staleQ)?.[0] ?? {};
+
       const summary = {
         supplier,
         total: rows.length,
         liveOnMarketplace: live.length,
         liveSample: live.slice(0, 10).map((r) => r.sku),
+        stampedOffers: stampRow.stamped ?? 0,
+        staleStamps: stampRow.stale ?? 0,
       };
 
       if (!confirm) {
+        const wouldDelete = force ? rows.length : rows.length - live.length;
+        const wouldRelease = (summary.staleStamps ?? 0) + wouldDelete;
+        const parts: string[] = [];
+        if (wouldDelete > 0) parts.push(`${wouldDelete} product(s) would be deleted`);
+        if (summary.staleStamps > 0) {
+          parts.push(`${summary.staleStamps} catalogue row(s) are already stamped for products that no longer exist and would be released`);
+        }
+        if (parts.length === 0) parts.push("there is nothing to do");
+        if (live.length && !force) {
+          parts.push(`${live.length} are live on a marketplace and would be SKIPPED (force:true deletes them anyway, leaving their listings up as orphans)`);
+        }
         return res.json({
           ...summary,
           dryRun: true,
-          wouldDelete: force ? rows.length : rows.length - live.length,
-          message: live.length
-            ? `${live.length} of these are live on a marketplace and would be SKIPPED. Re-send with confirm:true, or confirm:true + force:true to delete them anyway (their listings stay up and become orphans).`
-            : "Nothing is live on a marketplace. Re-send with confirm:true to delete.",
+          wouldDelete,
+          wouldRelease,
+          message: `${parts.join("; ")}.`,
         });
       }
 
@@ -269,7 +300,9 @@ export function registerProductRoutes(app: Express): void {
         deletedCount,
         skippedLive: force ? 0 : live.length,
         offersReleased: released.rowCount ?? null,
-        message: `Deleted ${deletedCount} ${supplier} products and released their staging rows for re-promotion.`,
+        message:
+          `Deleted ${deletedCount} ${supplier} product(s); released ${released.rowCount ?? 0} catalogue row(s) for re-promotion.` +
+          (force ? "" : live.length ? ` ${live.length} left alone because they are live on a marketplace.` : ""),
       });
     } catch (error) {
       console.error("Failed to purge supplier products:", error);

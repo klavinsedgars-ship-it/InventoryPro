@@ -406,7 +406,7 @@ export default function SupplierBrowser({ user, slug, name }: { user?: any; slug
                       data-testid="button-purge"
                     >
                       <AlertTriangle className="w-4 h-4 mr-1" />
-                      {purgePreviewMutation.isPending ? "Checking…" : `Remove ${counts?.promoted} promoted`}
+                      {purgePreviewMutation.isPending ? "Checking…" : `Reset ${counts?.promoted} promoted`}
                     </Button>
                   )}
                   {!confirmImport ? (
@@ -768,7 +768,7 @@ export default function SupplierBrowser({ user, slug, name }: { user?: any; slug
       <Dialog open={purgePreview != null} onOpenChange={(o) => !o && setPurgePreview(null)}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Remove {name} products from the catalogue?</DialogTitle>
+            <DialogTitle>Reset {name} promotions?</DialogTitle>
             <DialogDescription>
               Deletes them from Products and releases the staging rows here, so this catalogue can be
               promoted again from scratch. The imported offers themselves are not touched.
@@ -777,13 +777,20 @@ export default function SupplierBrowser({ user, slug, name }: { user?: any; slug
           {purgePreview && (
             <div className="space-y-3 text-sm">
               <div className="flex flex-wrap gap-2">
-                <Badge variant="outline">{purgePreview.total ?? 0} products</Badge>
-                {(purgePreview.liveOnMarketplace ?? 0) > 0 ? (
+                <Badge variant="outline">{purgePreview.total ?? 0} products to delete</Badge>
+                <Badge variant="outline">{purgePreview.wouldRelease ?? 0} catalogue rows to release</Badge>
+                {(purgePreview.liveOnMarketplace ?? 0) > 0 && (
                   <Badge variant="destructive">{purgePreview.liveOnMarketplace} live on a marketplace</Badge>
-                ) : (
-                  <Badge variant="secondary">none are live</Badge>
                 )}
               </div>
+
+              {(purgePreview.total ?? 0) === 0 && (purgePreview.staleStamps ?? 0) > 0 && (
+                <div className="rounded border border-amber-200 bg-amber-50 p-3 text-amber-900">
+                  The products are already gone, but {purgePreview.staleStamps} catalogue rows still point at
+                  them — which is why they show as <b>In Products</b> here and why promoting them again would
+                  be skipped. This releases those rows.
+                </div>
+              )}
 
               {(purgePreview.liveOnMarketplace ?? 0) > 0 && (
                 <div className="rounded border border-red-200 bg-red-50 p-3 text-red-800">
@@ -817,10 +824,12 @@ export default function SupplierBrowser({ user, slug, name }: { user?: any; slug
                   data-testid="button-purge-confirm"
                 >
                   {purgeMutation.isPending
-                    ? "Removing…"
+                    ? "Working…"
                     : (purgePreview.liveOnMarketplace ?? 0) > 0
                       ? `Remove the other ${(purgePreview.total ?? 0) - purgePreview.liveOnMarketplace}`
-                      : `Remove ${purgePreview.total ?? 0}`}
+                      : (purgePreview.total ?? 0) > 0
+                        ? `Remove ${purgePreview.total}`
+                        : `Release ${purgePreview.wouldRelease ?? 0} rows`}
                 </Button>
                 {(purgePreview.liveOnMarketplace ?? 0) > 0 && (
                   <Button

@@ -795,9 +795,17 @@ POST /api/products/purge-supplier  {"supplier":"ACC","confirm":true}  do it
 
 Deleting promoted products by hand does NOT work, and fails in a way that is
 hard to diagnose: **a deleted product leaves its `supplier_offers` row still
-stamped `promoted_product_id`**, so every future promotion skips it as
-`alreadyPromoted` and the catalogue can never be re-promoted. This endpoint
-deletes the products AND releases the staging rows, scoped to one supplier.
+stamped `promoted_product_id`**, so the browse page still shows
+"In Products #152709" for a product that no longer exists, every future
+promotion skips it as `alreadyPromoted`, and the catalogue can never be
+re-promoted. This endpoint deletes the products AND releases the staging rows,
+scoped to one supplier.
+
+The two halves are independent, which is the point: run it with **nothing left
+to delete** and it still releases the orphaned stamps. That is the state you
+are in after deleting a supplier's products from the Products page, and the
+dry run names it explicitly ("0 products to delete, 943 catalogue rows to
+release") rather than reporting a useless zero.
 
 It also **refuses to delete a product that is live on a marketplace** unless
 `force: true`. Deleting one locally does not end the listing: it stays up, a
