@@ -170,7 +170,27 @@ export function branchPath(
   return (first.Name ?? "").trim() || null;
 }
 
-const WEIGHT_PARAM_RE = /\b(weight|gross weight|net weight|svoris)\b/i;
+const WEIGHT_PARAM_RE = /\b(weight|svoris)\b/i;
+
+/**
+ * Parameters that are a weight but NOT this item's weight.
+ *
+ * ACC publishes "Weight master carton" alongside "Weight" — a 250-piece
+ * carton's weight would be read as one patch cord's by any rule that just
+ * looks for the word "weight", and the shipping cost derived from it would be
+ * wrong by the pack quantity.
+ */
+const PACKAGING_WEIGHT_RE = /\b(carton|master|pallet|packaging|package|box|shipping)\b/i;
+
+/**
+ * Some vendors put the unit in the parameter NAME ("Weight (kg)") and leave
+ * MeasureAbbr empty. That is still an explicit unit, so it counts — unlike a
+ * bare number, which is refused.
+ */
+function unitFromName(name: string): string | null {
+  const m = name.match(/\((k?g)\)/i);
+  return m ? m[1].toLowerCase() : null;
+}
 
 /**
  * Recover a weight in grams from GetProduct's parameter list.
@@ -187,9 +207,10 @@ export function pickWeightGrams(parameters: AccParameter[] | null | undefined): 
   for (const p of parameters) {
     const name = String(p?.ParameterName ?? "");
     if (!WEIGHT_PARAM_RE.test(name)) continue;
+    if (PACKAGING_WEIGHT_RE.test(name)) continue;
     const value = num(p?.Value);
     if (value === null || value <= 0) continue;
-    const unit = String(p?.MeasureAbbr ?? "").trim().toLowerCase();
+    const unit = (String(p?.MeasureAbbr ?? "").trim() || unitFromName(name) || "").toLowerCase();
     let grams: number | null = null;
     if (unit === "g" || unit === "gr" || unit === "gram" || unit === "grams") grams = value;
     else if (unit === "kg") grams = value * 1000;

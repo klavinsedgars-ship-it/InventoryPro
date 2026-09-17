@@ -474,3 +474,39 @@ describe("live GetProducts response (2026-09-16)", () => {
     expect(offer.productUrl).toBeNull();
   });
 });
+
+describe("pickWeightGrams against ACC's real parameter names", () => {
+  it("ignores the master carton weight", () => {
+    // GetProduct for PID 003192 carries both "Weight" and "Weight master
+    // carton". Reading the carton's weight as the item's would overstate a
+    // single patch cord by the pack quantity — 250x on that product.
+    expect(
+      pickWeightGrams([
+        { ParameterName: "Weight master carton", Value: "6.75", MeasureAbbr: "kg" },
+      ]),
+    ).toBeNull();
+  });
+
+  it("picks the item weight when both are present, whatever the order", () => {
+    const carton = { ParameterName: "Weight master carton", Value: "6.75", MeasureAbbr: "kg" };
+    const item = { ParameterName: "Weight", Value: "0.027", MeasureAbbr: "kg" };
+    expect(pickWeightGrams([carton, item])).toBe(27);
+    expect(pickWeightGrams([item, carton])).toBe(27);
+  });
+
+  it("accepts a unit stated in the parameter name", () => {
+    // "Weight (kg)" with an empty MeasureAbbr is still an explicit unit.
+    expect(pickWeightGrams([{ ParameterName: "Weight (kg)", Value: "0.027", MeasureAbbr: null }])).toBe(27);
+    expect(pickWeightGrams([{ ParameterName: "Weight (g)", Value: "27", MeasureAbbr: null }])).toBe(27);
+  });
+
+  it("still refuses a bare number even in a named-unit world", () => {
+    expect(pickWeightGrams([{ ParameterName: "Weight", Value: "0.027", MeasureAbbr: null }])).toBeNull();
+  });
+
+  it("ignores other packaging weights", () => {
+    for (const name of ["Package weight", "Shipping weight", "Weight pallet", "Box weight"]) {
+      expect(pickWeightGrams([{ ParameterName: name, Value: "5", MeasureAbbr: "kg" }]), name).toBeNull();
+    }
+  });
+});
