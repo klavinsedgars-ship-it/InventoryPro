@@ -532,13 +532,33 @@ Three things that will bite whoever touches this next:
   A promotion guard that skipped these was briefly added and then removed —
   the unit price is the unit price. The value is still kept in `attributes`
   because a 250-piece carton may yet matter for shipping.
-- **ACC HAS product weights — their portal shows them, their API does not.**
-  The same basket reports `Svars 0.027 kg` for that patch cord. So the data
-  exists in their system; `GetProducts` simply does not carry it. That turns
-  the question for ACC from "do you have weights?" into the much more
-  answerable "your basket shows Svars per line — can the API return it, or can
-  we have it as a file?". Until then `pickWeightGrams` recovers a weight only
-  from `GetProduct`'s parameter list, and only when a unit is stated.
+- **Weights are in `GetProduct`, not `GetProducts`.** The bulk list carries no
+  weight at all; the per-product detail call carries five of them. For PID
+  003192:
+
+  | Parameter | Value | What it is |
+  |---|---|---|
+  | Net weight | 0.0216 kg | the item |
+  | **Gross weight** | **0.0272 kg** | **the item as posted — use this** |
+  | Net weight master carton | 5.4 kg | 250 pieces |
+  | Tare weight master carton | 0.207 kg | the empty carton |
+  | Tare weight (kg) | 0.0056 kg | the item's own wrapper |
+
+  They are internally consistent (net + tare = gross; 250 × net = carton net),
+  and ACC's own basket bills shipping on **gross** — `Svars 0.027 kg`. So
+  `pickWeightGrams` prefers gross and keeps net only as a fallback for products
+  that publish no gross figure. Four of those five numbers would be wrong, one
+  of them by 200×, so the packaging names are excluded explicitly — including
+  **tare**, which contains none of the obvious packaging words.
+
+  `MeasureFraction` is 0.001 on every weight parameter and must NOT be applied:
+  `MeasureAbbr` already says kg, and multiplying would turn 27 grams into 27
+  micrograms. It appears to be display precision.
+
+  Consequence for the importer: a bulk catalogue import yields no weights.
+  Getting them means one `GetProduct` per item — cheap for the handful of
+  products actually promoted, 80 minutes of API budget for all 25,000. Fetch on
+  promotion, not as a catalogue sweep.
 - **A cursor belongs to one query shape.** A full-catalogue run and a filtered
   run (daily `updatedAfter` delta, or one branch) walk completely different
   result sets. Runs are tagged in `record_element`, and only full runs carry a

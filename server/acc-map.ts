@@ -180,7 +180,7 @@ const WEIGHT_PARAM_RE = /\b(weight|svoris)\b/i;
  * looks for the word "weight", and the shipping cost derived from it would be
  * wrong by the pack quantity.
  */
-const PACKAGING_WEIGHT_RE = /\b(carton|master|pallet|packaging|package|box|shipping)\b/i;
+const PACKAGING_WEIGHT_RE = /\b(carton|master|pallet|packaging|package|box|shipping|tare)\b/i;
 
 /**
  * Some vendors put the unit in the parameter NAME ("Weight (kg)") and leave
@@ -193,17 +193,25 @@ function unitFromName(name: string): string | null {
 }
 
 /**
- * Recover a weight in grams from GetProduct's parameter list.
+ * Recover a shipping weight in grams from GetProduct's parameter list.
  *
- * Only ever from a parameter whose unit we actually recognise: a bare number
- * with no unit could be kilograms or grams, and guessing wrong is a 1000×
- * error in the one input the shipping cost turns on. Prefers net weight —
- * gross includes packaging that the carrier does bill for, so where only gross
- * exists it is used, but net is the better estimate of the item itself.
+ * **Gross, not net.** An earlier version preferred net on the reasoning that
+ * it is the truer weight of the item; that is right and irrelevant. What the
+ * carrier weighs is the item in its retail packaging, which is exactly gross.
+ * ACC's own basket agrees: PID 003192 reports Net 0.0216, Tare 0.0056, Gross
+ * 0.0272, and the basket's `Svars` is 0.027.
+ *
+ * Only ever from a parameter whose unit we recognise: a bare number could be
+ * kilograms or grams, and guessing wrong is a 1000× error in the one input the
+ * shipping cost turns on.
+ *
+ * `MeasureFraction` (0.001 on every weight parameter seen) is deliberately NOT
+ * applied — `MeasureAbbr` already says kg, and multiplying would turn 27 grams
+ * into 27 micrograms. It appears to be display precision, not a conversion.
  */
 export function pickWeightGrams(parameters: AccParameter[] | null | undefined): number | null {
   if (!Array.isArray(parameters)) return null;
-  let gross: number | null = null;
+  let net: number | null = null;
   for (const p of parameters) {
     const name = String(p?.ParameterName ?? "");
     if (!WEIGHT_PARAM_RE.test(name)) continue;
@@ -215,10 +223,13 @@ export function pickWeightGrams(parameters: AccParameter[] | null | undefined): 
     if (unit === "g" || unit === "gr" || unit === "gram" || unit === "grams") grams = value;
     else if (unit === "kg") grams = value * 1000;
     else continue; // unknown or absent unit — refuse to guess
-    if (/\bnet\b/i.test(name)) return Math.round(grams);
-    gross = gross ?? Math.round(grams);
+    // Gross wins outright. Net is remembered only as a fallback for products
+    // that publish no gross figure — it understates the parcel by the item's
+    // own packaging, which is better than having no weight at all.
+    if (!/\bnet\b/i.test(name)) return Math.round(grams);
+    net = net ?? Math.round(grams);
   }
-  return gross;
+  return net;
 }
 
 /** Flags and codes we keep but do not model as columns. */

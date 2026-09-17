@@ -103,6 +103,15 @@ describe("pickWeightGrams", () => {
     expect(pickWeightGrams([{ ParameterName: "Weight", Value: "250", MeasureAbbr: "g" }])).toBe(250);
   });
 
+  it("prefers gross over net, because that is what the carrier weighs", () => {
+    const params = [
+      { ParameterName: "Net weight", Value: "0.0216", MeasureAbbr: "kg" },
+      { ParameterName: "Gross weight", Value: "0.0272", MeasureAbbr: "kg" },
+    ];
+    expect(pickWeightGrams(params)).toBe(27);
+    expect(pickWeightGrams([...params].reverse())).toBe(27);
+  });
+
   it("converts kilograms", () => {
     expect(pickWeightGrams([{ ParameterName: "Weight", Value: 1.4, MeasureAbbr: "kg" }])).toBe(1400);
   });
@@ -114,17 +123,10 @@ describe("pickWeightGrams", () => {
     expect(pickWeightGrams([{ ParameterName: "Weight", Value: "2", MeasureAbbr: "lbs" }])).toBeNull();
   });
 
-  it("prefers net weight over gross", () => {
-    const params = [
-      { ParameterName: "Gross weight", Value: "300", MeasureAbbr: "g" },
-      { ParameterName: "Net weight", Value: "250", MeasureAbbr: "g" },
-    ];
-    expect(pickWeightGrams(params)).toBe(250);
-    expect(pickWeightGrams([...params].reverse())).toBe(250);
-  });
-
-  it("falls back to gross when that is all there is", () => {
-    expect(pickWeightGrams([{ ParameterName: "Gross weight", Value: "300", MeasureAbbr: "g" }])).toBe(300);
+  it("falls back to net when a product publishes no gross weight", () => {
+    // Understates the parcel by the item's own packaging, which beats having
+    // no weight and pricing against the shipping model's fallback.
+    expect(pickWeightGrams([{ ParameterName: "Net weight", Value: "250", MeasureAbbr: "g" }])).toBe(250);
   });
 
   it("ignores parameters that are not weights", () => {
@@ -492,6 +494,41 @@ describe("pickWeightGrams against ACC's real parameter names", () => {
     const item = { ParameterName: "Weight", Value: "0.027", MeasureAbbr: "kg" };
     expect(pickWeightGrams([carton, item])).toBe(27);
     expect(pickWeightGrams([item, carton])).toBe(27);
+  });
+
+  /** Verbatim from GetProduct for PID 003192 on 2026-09-17. */
+  const REAL_PARAMS = [
+    { ParameterName: "Net weight", ParameterGroupName: "Technical details", Value: "0.0216", MeasureAbbr: "kg", MeasureFraction: 0.001 },
+    { ParameterName: "Gross weight", ParameterGroupName: "", Value: "0.0272", MeasureAbbr: "kg", MeasureFraction: 0.001 },
+    { ParameterName: "Net weight master carton", ParameterGroupName: "Package features", Value: "5.4", MeasureAbbr: "kg", MeasureFraction: 0.001 },
+    { ParameterName: "Tare weight master carton", ParameterGroupName: "Package features", Value: "0.207", MeasureAbbr: "kg", MeasureFraction: 0.001 },
+    { ParameterName: "Tare weight (kg)", ParameterGroupName: "Package features", Value: "0.0056", MeasureAbbr: "kg", MeasureFraction: 0.001 },
+  ];
+
+  it("matches what ACC's own basket charges shipping on", () => {
+    // The portal reported Svars 0.027 kg for this product. Gross is 0.0272.
+    expect(pickWeightGrams(REAL_PARAMS)).toBe(27);
+  });
+
+  it("is not fooled by any of the four other weights on that product", () => {
+    // 5.4 kg is 250 pieces, 0.207 kg is the empty carton, 0.0056 kg is the
+    // item's own wrapper. Each would be wrong, and one of them by 200x.
+    for (const p of REAL_PARAMS.filter((p) => p.ParameterName !== "Gross weight")) {
+      if (p.ParameterName === "Net weight") continue; // legitimate fallback
+      expect(pickWeightGrams([p]), p.ParameterName).toBeNull();
+    }
+  });
+
+  it("does not apply MeasureFraction, which would give micrograms", () => {
+    // MeasureAbbr already says kg; 0.0272 * 0.001 would be 0.0000272 kg.
+    expect(pickWeightGrams([REAL_PARAMS[1]])).toBe(27);
+  });
+
+  it("confirms the arithmetic that justifies choosing gross", () => {
+    // net + tare = gross, so gross is the item as it will be posted.
+    expect(0.0216 + 0.0056).toBeCloseTo(0.0272, 6);
+    // and 250 per carton x net = the carton's net weight
+    expect(250 * 0.0216).toBeCloseTo(5.4, 6);
   });
 
   it("accepts a unit stated in the parameter name", () => {
