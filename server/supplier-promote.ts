@@ -116,7 +116,10 @@ export interface PromoteResult {
     eanExists: number;
     noPrice: number;
     wrongCurrency: number;
+    noWeight: number;
   };
+  /** Weights fetched from the supplier's detail API during this run. */
+  weights?: { fetched: number; missing: number; failed: number; budgetHit: boolean; sampleErrors: string[] };
   /** First 50 skips, with reasons — enough to see WHY without a log dive. */
   skippedSamples: Array<{ sku: string; reason: string }>;
   budgetHit: boolean;
@@ -129,6 +132,20 @@ export interface PromoteResult {
  * gets a partial result with `remaining` instead of a 504. Safe to re-run —
  * everything it did is stamped, everything it skipped is stable.
  */
+/**
+ * Suppliers whose weights live behind a per-product detail call rather than in
+ * the catalogue feed. For these, promotion fetches the weight first and
+ * REFUSES to promote without one.
+ *
+ * That refusal is not caution for its own sake: fee-model.ts prices an unknown
+ * weight as `(weightGrams ?? 0) + packaging`, the cheapest postal band there
+ * is. Promoting a weightless ACC product does not mean "priced conservatively",
+ * it means a multi-kilo parcel priced as a letter. Feed suppliers are left
+ * alone — their weights arrive with the catalogue, and changing their
+ * behaviour is a separate decision.
+ */
+const SUPPLIERS_WITH_DETAIL_WEIGHTS = new Set(["ACC"]);
+
 export async function promoteSupplierOffers(
   supplier: string,
   ids: number[],
@@ -142,7 +159,7 @@ export async function promoteSupplierOffers(
     ok: true,
     requested: ids.length,
     promoted: 0,
-    skipped: { alreadyPromoted: 0, blocked: 0, skuExists: 0, eanExists: 0, noPrice: 0, wrongCurrency: 0 },
+    skipped: { alreadyPromoted: 0, blocked: 0, skuExists: 0, eanExists: 0, noPrice: 0, wrongCurrency: 0, noWeight: 0 },
     skippedSamples: [],
     budgetHit: false,
     remaining: 0,
@@ -180,6 +197,36 @@ export async function promoteSupplierOffers(
     });
     if (fresh.length === 0) continue;
 
+    // One detail call per product that still has no weight, before anything is
+    // priced. Deadline-bounded: what it cannot fetch in time simply is not
+    // promoted this run, and the caller can re-run.
+    if (SUPPLIERS_WITH_DETAIL_WEIGHTS.has(supplier)) {
+      const needWeight = fresh.filter((o) => o.weightG == null).map((o) => o.supplierSku);
+      if (needWeight.length > 0) {
+        try {
+          const { backfillAccWeights } = await import("./acc-weights");
+          const backfill = await backfillAccWeights(needWeight, { deadline: started + budgetMs - 20_000 });
+          for (const o of fresh) {
+            const g = backfill.weights.get(o.supplierSku);
+            if (g != null) o.weightG = String(g);
+          }
+          const w = result.weights ?? { fetched: 0, missing: 0, failed: 0, budgetHit: false, sampleErrors: [] };
+          w.fetched += backfill.fetched;
+          w.missing += backfill.missing;
+          w.failed += backfill.failed;
+          w.budgetHit = w.budgetHit || backfill.budgetHit;
+          for (const e of backfill.sampleErrors) if (w.sampleErrors.length < 3) w.sampleErrors.push(e);
+          result.weights = w;
+        } catch (e) {
+          // A weight service that will not load must not take promotion down;
+          // the per-offer noWeight skip below still protects the pricing.
+          const w = result.weights ?? { fetched: 0, missing: 0, failed: 0, budgetHit: false, sampleErrors: [] };
+          w.sampleErrors.push(`weight backfill unavailable: ${(e as Error).message}`);
+          result.weights = w;
+        }
+      }
+    }
+
     // Batch lookups once per chunk, not per offer.
     const skus = fresh.map((o) => o.supplierSku.toUpperCase());
     const blocked = await storage.filterBlockedCodes(skus);
@@ -216,6 +263,10 @@ export async function promoteSupplierOffers(
       }
       if (!isEurOrUnstated(o.currency)) {
         skip(sku, "wrongCurrency", `feed price is in ${o.currency} — only EUR can be promoted`);
+        continue;
+      }
+      if (SUPPLIERS_WITH_DETAIL_WEIGHTS.has(supplier) && o.weightG == null) {
+        skip(sku, "noWeight", "no weight available — postage would be priced as the cheapest band, which is not a safe default for this supplier");
         continue;
       }
       const unit = o.price != null ? parseFloat(String(o.price)) : NaN;

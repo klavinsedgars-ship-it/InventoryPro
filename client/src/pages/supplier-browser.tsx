@@ -119,7 +119,10 @@ interface PromoteResult {
     eanExists: number;
     noPrice: number;
     wrongCurrency: number;
+    noWeight?: number;
   };
+  /** Only for suppliers whose weights come from a per-product detail call. */
+  weights?: { fetched: number; missing: number; failed: number; budgetHit: boolean; sampleErrors: string[] };
   skippedSamples: Array<{ sku: string; reason: string }>;
   budgetHit: boolean;
   remaining: number;
@@ -668,6 +671,14 @@ export default function SupplierBrowser({ user, slug, name }: { user?: any; slug
                 {promoteResult.skipped.blocked > 0 && <Badge variant="destructive">{promoteResult.skipped.blocked} blocked</Badge>}
                 {promoteResult.skipped.noPrice > 0 && <Badge variant="destructive">{promoteResult.skipped.noPrice} without usable price</Badge>}
                 {promoteResult.skipped.wrongCurrency > 0 && <Badge variant="destructive">{promoteResult.skipped.wrongCurrency} non-EUR price</Badge>}
+                {(promoteResult.skipped.noWeight ?? 0) > 0 && <Badge variant="destructive">{promoteResult.skipped.noWeight} without a weight</Badge>}
+                {promoteResult.weights && (
+                  <Badge variant="outline" data-testid="badge-weights">
+                    {promoteResult.weights.fetched} weights fetched
+                    {promoteResult.weights.missing > 0 ? `, ${promoteResult.weights.missing} not published` : ""}
+                    {promoteResult.weights.failed > 0 ? `, ${promoteResult.weights.failed} failed` : ""}
+                  </Badge>
+                )}
               </div>
               {promoteResult.remaining > 0 && (
                 <p className="text-amber-600">

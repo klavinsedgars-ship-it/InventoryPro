@@ -556,9 +556,20 @@ Three things that will bite whoever touches this next:
   micrograms. It appears to be display precision.
 
   Consequence for the importer: a bulk catalogue import yields no weights.
-  Getting them means one `GetProduct` per item — cheap for the handful of
-  products actually promoted, 80 minutes of API budget for all 25,000. Fetch on
-  promotion, not as a catalogue sweep.
+  Getting them means one `GetProduct` per item — 80 minutes of their request
+  budget for all 25,000, seconds for the handful actually promoted. So
+  `server/acc-weights.ts` runs at **promotion**, not as a catalogue sweep, and
+  writes each answer back to `supplier_offers.weight_g` so it is paid for once.
+
+  **Promotion refuses an ACC offer with no weight** (`noWeight`). This is not
+  caution for its own sake. `fee-model.ts` prices an unknown weight as
+  `(weightGrams ?? 0) + packaging` — the cheapest postal band there is — so a
+  weightless product is not "priced conservatively", it is a multi-kilo parcel
+  priced as a letter. Feed suppliers (Getic, Green Cell, TME) are deliberately
+  left on the old behaviour: their weights arrive with the catalogue, and
+  changing what they do is a separate decision. **That `?? 0` is a live
+  exposure for every weightless product already in `products`** — worth a
+  deliberate look, separately from ACC.
 - **A cursor belongs to one query shape.** A full-catalogue run and a filtered
   run (daily `updatedAfter` delta, or one branch) walk completely different
   result sets. Runs are tagged in `record_element`, and only full runs carry a
