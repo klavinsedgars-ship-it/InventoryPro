@@ -9,6 +9,8 @@ import {
   pickWeightGrams,
   productsFromResponse,
   totalStock,
+  accDescriptionFromParameters,
+  accParameterPairs,
   type AccProduct,
 } from "./acc-map";
 
@@ -545,5 +547,56 @@ describe("pickWeightGrams against ACC's real parameter names", () => {
     for (const name of ["Package weight", "Shipping weight", "Weight pallet", "Box weight"]) {
       expect(pickWeightGrams([{ ParameterName: name, Value: "5", MeasureAbbr: "kg" }]), name).toBeNull();
     }
+  });
+});
+
+describe("accParameterPairs / accDescriptionFromParameters", () => {
+  /** Shape taken from GetProduct; parameter names are ACC's own. */
+  const PARAMS = [
+    { ParameterName: "Product family", ParameterGroupName: "Design", Value: "CD", MeasureAbbr: null, UseInDescription: true },
+    { ParameterName: "Capacity", ParameterGroupName: "Performance", Value: "0.7", MeasureAbbr: "GB", UseInDescription: true },
+    { ParameterName: "Write speed", ParameterGroupName: "Performance", Value: "4x - 12x", MeasureAbbr: "MB/s", UseInDescription: false },
+    { ParameterName: "Warranty", ParameterGroupName: "Technical details", Value: "60", MeasureAbbr: "month(s)", UseInDescription: true },
+    { ParameterName: "Tare weight master carton", ParameterGroupName: "Package features", Value: "0.207", MeasureAbbr: "kg", UseInDescription: true },
+  ];
+
+  it("turns parameters into name/value pairs with units attached", () => {
+    const pairs = accParameterPairs(PARAMS);
+    expect(pairs).toContainEqual({ name: "Capacity", value: "0.7 GB" });
+    expect(pairs).toContainEqual({ name: "Product family", value: "CD" });
+    expect(pairs).toContainEqual({ name: "Write speed", value: "4x - 12x MB/s" });
+  });
+
+  it("drops packaging parameters, which describe the box not the product", () => {
+    const names = accParameterPairs(PARAMS).map((p) => p.name);
+    expect(names).not.toContain("Tare weight master carton");
+  });
+
+  it("builds a description only from what ACC flags for it", () => {
+    const text = accDescriptionFromParameters(PARAMS);
+    expect(text).toContain("Capacity: 0.7 GB");
+    expect(text).toContain("Warranty: 60 month(s)");
+    // UseInDescription false
+    expect(text).not.toContain("Write speed");
+    // and packaging is excluded even when flagged true
+    expect(text).not.toContain("master carton");
+  });
+
+  it("returns null rather than an empty description", () => {
+    expect(accDescriptionFromParameters([])).toBeNull();
+    expect(accDescriptionFromParameters(null)).toBeNull();
+    expect(accDescriptionFromParameters([{ ParameterName: "X", Value: "1", UseInDescription: false }])).toBeNull();
+  });
+
+  it("skips a parameter with no value rather than emitting a bare label", () => {
+    expect(accParameterPairs([{ ParameterName: "Colour", Value: "", MeasureAbbr: null }])).toEqual([]);
+  });
+
+  it("keeps the first of a duplicated parameter name", () => {
+    const pairs = accParameterPairs([
+      { ParameterName: "Colour", Value: "Purple" },
+      { ParameterName: "colour", Value: "Violet" },
+    ]);
+    expect(pairs).toEqual([{ name: "Colour", value: "Purple" }]);
   });
 });

@@ -43,6 +43,8 @@ export interface AccParameter {
   ParameterGroupName?: string | null;
   Value?: string | number | null;
   MeasureAbbr?: string | null;
+  /** ACC's own judgement about which attributes a buyer should see. */
+  UseInDescription?: boolean | null;
 }
 
 export interface AccProduct {
@@ -410,4 +412,73 @@ export function branchPathResolver(branches: AccBranch[]): (oid: number) => stri
     cache.set(oid, result);
     return result;
   };
+}
+
+// ---------------------------------------------------------------------------
+// Product detail → listing copy
+//
+// GetProducts carries no description at all, which is why ACC listings fell
+// back to a generic component template. GetProduct carries a structured
+// parameter list instead — better than prose, because it can feed eBay item
+// specifics as data rather than being guessed at from a title.
+// ---------------------------------------------------------------------------
+
+/** Parameters describing the BOX, not the product. */
+const PACKAGE_GROUP_RE = /package/i;
+
+function parameterText(p: AccParameter): string {
+  const value = String(p?.Value ?? "").trim();
+  const unit = String(p?.MeasureAbbr ?? "").trim();
+  return unit ? `${value} ${unit}` : value;
+}
+
+/**
+ * Parameters as the `[{name, value}]` pairs the eBay item-specifics mapper
+ * already consumes (see products.tmeParameters and server/tme-aspects.ts).
+ *
+ * Packaging parameters are dropped: "Tare weight master carton" is not a
+ * property of the thing the buyer receives, and eBay ranks listings on
+ * specifics that match the category's real aspects.
+ */
+export function accParameterPairs(
+  parameters: AccParameter[] | null | undefined,
+): Array<{ name: string; value: string }> {
+  if (!Array.isArray(parameters)) return [];
+  const out: Array<{ name: string; value: string }> = [];
+  const seen = new Set<string>();
+  for (const p of parameters) {
+    const name = String(p?.ParameterName ?? "").trim();
+    const value = parameterText(p);
+    if (!name || !value) continue;
+    if (PACKAGE_GROUP_RE.test(String(p?.ParameterGroupName ?? ""))) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ name, value });
+  }
+  return out;
+}
+
+/**
+ * A description built from the parameters ACC itself flags for description use.
+ *
+ * `UseInDescription` is their own editorial judgement about which attributes
+ * are worth showing a buyer, so it is a better filter than anything we could
+ * invent. Returns null rather than an empty string when there is nothing to
+ * say — the listing template omits the section entirely in that case.
+ */
+export function accDescriptionFromParameters(
+  parameters: AccParameter[] | null | undefined,
+): string | null {
+  if (!Array.isArray(parameters)) return null;
+  const lines: string[] = [];
+  for (const p of parameters) {
+    if ((p as { UseInDescription?: boolean })?.UseInDescription !== true) continue;
+    const name = String(p?.ParameterName ?? "").trim();
+    const value = parameterText(p);
+    if (!name || !value) continue;
+    if (PACKAGE_GROUP_RE.test(String(p?.ParameterGroupName ?? ""))) continue;
+    lines.push(`${name}: ${value}`);
+  }
+  return lines.length ? lines.join("\n") : null;
 }

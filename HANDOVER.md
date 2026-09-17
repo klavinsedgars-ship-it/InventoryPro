@@ -368,6 +368,35 @@ That endpoint is the one to run before asking any distributor to enable
 access: a whitelist is granted for one address, and finding out it is wrong
 here beats finding out from their 403. It never echoes the proxy password.
 
+## Listing copy: stop inventing specifications (2026-09-17)
+
+A live listing for a Xiaomi air purifier filter carried
+**"Operating Temperature: 2°C"** and, under "Typical applications",
+*"Electronic circuit design / Prototyping and development / Educational
+projects"*. Both were fabricated, and both came from the same assumption: that
+everything in the catalogue is an electronic component.
+
+Three causes, all fixed:
+
+- **`extractProductSpecs` matched units inside the next word.** The temperature
+  pattern was `/(-?\d+)\s*°?c/i` with the degree sign OPTIONAL, so
+  "Xiaomi Mi **2 C**leaner" read as 2°C. Voltage, current, power and frequency
+  had the same flaw — any digit followed by a word starting with v, a, w or h.
+  Units must now stand alone (`(?![a-z])`), numbers must not be part of a
+  longer token (so `DK-1512-005` offers up nothing), and a temperature requires
+  an actual degree sign. This affected TME listings too, not just ACC.
+- **The feature bullets were unconditional.** "TECHNICAL DOCUMENTATION
+  INCLUDED" on a vacuum-cleaner filter is not a weak selling point, it is a
+  false statement. `featureLines(category)` now claims component properties
+  only for products that classified as components.
+- **The applications block had a generic fallback.** An unknown category now
+  prints nothing rather than guessing at uses.
+
+The real fix for supplier data is upstream: where a supplier publishes
+structured parameters, use them. ACC's `GetProduct` does (see the ACC section);
+TME's v2 parameters already did. Regex over a title is the last resort, not
+the first.
+
 ## eBay quantity cap: 2 → 1 (2026-09-16)
 
 **Why.** eBay's selling limits are denominated in ITEMS, not listings — the
@@ -560,6 +589,14 @@ Three things that will bite whoever touches this next:
   budget for all 25,000, seconds for the handful actually promoted. So
   `server/acc-weights.ts` runs at **promotion**, not as a catalogue sweep, and
   writes each answer back to `supplier_offers.weight_g` so it is paid for once.
+
+  The same detail call also returns `Parameters` — structured, named, unit-
+  bearing attributes — so it is fetched once and used three ways: the gross
+  weight, a description built from the parameters ACC's own `UseInDescription`
+  flag marks as buyer-facing, and `[{name, value}]` pairs written to
+  `products.tmeParameters`, which `tme-aspects.ts` already turns into eBay item
+  specifics. `GetProducts` carries no description at all, which is why ACC
+  listings first went up with generic component copy.
 
   **Promotion refuses an ACC offer with no weight** (`noWeight`). This is not
   caution for its own sake. `fee-model.ts` prices an unknown weight as

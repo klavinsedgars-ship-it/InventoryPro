@@ -21,7 +21,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "./db";
 import { accApi } from "./acc-api";
-import { pickWeightGrams } from "./acc-map";
+import { accDescriptionFromParameters, accParameterPairs, pickWeightGrams } from "./acc-map";
 import { mapPool } from "./concurrency";
 
 /**
@@ -31,9 +31,19 @@ import { mapPool } from "./concurrency";
  */
 const WEIGHT_CONCURRENCY = 6;
 
+export interface AccProductDetail {
+  weightGrams: number | null;
+  /** [{name, value}] for eBay item specifics. */
+  parameters: Array<{ name: string; value: string }>;
+  /** Built from the parameters ACC flags for description use. */
+  description: string | null;
+}
+
 export interface WeightBackfillResult {
   /** sku → gross weight in grams. Absent means ACC published none. */
   weights: Map<string, number>;
+  /** sku → everything else the detail call gave us. */
+  details: Map<string, AccProductDetail>;
   fetched: number;
   missing: number;
   failed: number;
@@ -54,6 +64,7 @@ export async function backfillAccWeights(
 ): Promise<WeightBackfillResult> {
   const result: WeightBackfillResult = {
     weights: new Map(),
+    details: new Map(),
     fetched: 0,
     missing: 0,
     failed: 0,
@@ -80,7 +91,16 @@ export async function backfillAccWeights(
       if (result.sampleErrors.length < 3 && r.error) result.sampleErrors.push(`${sku}: ${r.error}`);
       return;
     }
-    const grams = pickWeightGrams(r.data?.Parameters);
+    // One detail call, three answers. Fetching the weight and then fetching
+    // the specifications separately would double the cost of the most
+    // expensive thing we do against ACC.
+    const params = r.data?.Parameters ?? null;
+    const grams = pickWeightGrams(params);
+    result.details.set(sku, {
+      weightGrams: grams,
+      parameters: accParameterPairs(params),
+      description: accDescriptionFromParameters(params),
+    });
     if (grams == null || grams <= 0) {
       // A clean answer of "no weight published" — not a failure to ask.
       result.missing++;
@@ -90,28 +110,31 @@ export async function backfillAccWeights(
     result.fetched++;
   });
 
-  await persistWeights(result.weights);
+  await persistDetails(result.details);
   return result;
 }
 
 /**
- * Write the weights back to staging so the next promotion, and the freshness
- * refresh, do not pay for them again.
+ * Write what the detail call gave us back to staging, so the next promotion
+ * and the freshness refresh do not pay for it again.
  *
  * One statement for the whole batch via a VALUES join: a promotion of 200
  * products should not be 200 round trips to Neon on top of 200 to ACC.
+ * COALESCE keeps a previously known value when this call returned none.
  */
-async function persistWeights(weights: Map<string, number>): Promise<void> {
-  if (weights.size === 0) return;
-  const rows = Array.from(weights.entries());
+async function persistDetails(details: Map<string, AccProductDetail>): Promise<void> {
+  if (details.size === 0) return;
   const values = sql.join(
-    rows.map(([sku, grams]) => sql`(${sku}, ${String(grams)}::numeric)`),
+    Array.from(details.entries()).map(([sku, d]) =>
+      sql`(${sku}, ${d.weightGrams != null ? String(d.weightGrams) : null}::numeric, ${d.description})`,
+    ),
     sql`, `,
   );
   await db.execute(sql`
     UPDATE supplier_offers AS o
-       SET weight_g = v.grams
-      FROM (VALUES ${values}) AS v(sku, grams)
+       SET weight_g = COALESCE(v.grams, o.weight_g),
+           description = COALESCE(v.description, o.description)
+      FROM (VALUES ${values}) AS v(sku, grams, description)
      WHERE o.supplier = 'ACC' AND o.supplier_sku = v.sku
   `);
 }

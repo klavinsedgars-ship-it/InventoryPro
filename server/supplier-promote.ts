@@ -188,6 +188,11 @@ export async function promoteSupplierOffers(
       .from(supplierOffers)
       .where(and(eq(supplierOffers.supplier, supplier), inArray(supplierOffers.id, chunkIds)))) as SupplierOffer[];
 
+    // sku -> [{name, value}] from a supplier detail call, carried into the
+    // product row so eBay item specifics come from data rather than from a
+    // regex over the title.
+    const detailParameters = new Map<string, Array<{ name: string; value: string }>>();
+
     const fresh = offers.filter((o) => {
       if (o.promotedProductId != null) {
         skip(o.supplierSku, "alreadyPromoted", `already product #${o.promotedProductId}`);
@@ -207,8 +212,13 @@ export async function promoteSupplierOffers(
           const { backfillAccWeights } = await import("./acc-weights");
           const backfill = await backfillAccWeights(needWeight, { deadline: started + budgetMs - 20_000 });
           for (const o of fresh) {
-            const g = backfill.weights.get(o.supplierSku);
-            if (g != null) o.weightG = String(g);
+            const d = backfill.details.get(o.supplierSku);
+            if (!d) continue;
+            if (d.weightGrams != null) o.weightG = String(d.weightGrams);
+            // A real description, from the attributes ACC itself flags for it.
+            // Without this the listing template falls back to generic copy.
+            if (d.description && !o.description) o.description = d.description;
+            if (d.parameters.length) detailParameters.set(o.supplierSku, d.parameters);
           }
           const w = result.weights ?? { fetched: 0, missing: 0, failed: 0, budgetHit: false, sampleErrors: [] };
           w.fetched += backfill.fetched;
@@ -313,6 +323,12 @@ export async function promoteSupplierOffers(
           status: "active",
           supplier,
           supplierProductId: sku,
+          // Structured specifications where the supplier published them. The
+          // column is named for TME, which was the first to provide them; the
+          // consumer (tme-aspects.ts) is supplier-agnostic.
+          tmeParameters: detailParameters.has(o.supplierSku)
+            ? JSON.stringify(detailParameters.get(o.supplierSku))
+            : undefined,
           imageUrl: o.imageUrl,
           // Staging keeps the gallery as a JSON array; carried verbatim so
           // the eBay listing gets every picture, not just the first.

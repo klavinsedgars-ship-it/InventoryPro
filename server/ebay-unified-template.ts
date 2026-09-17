@@ -74,12 +74,11 @@ function generateUnifiedDescription(product: Product, specs: any, category: stri
     sections.push('');
   }
   
-  // Key features (always the same structure)
-  sections.push('✅ HIGH QUALITY ELECTRONIC COMPONENT');
-  sections.push('✅ GENUINE MANUFACTURER SPECIFICATIONS');
-  sections.push('✅ TECHNICAL DOCUMENTATION INCLUDED');
-  sections.push('✅ DISPATCH FROM EU WAREHOUSE WITHIN 2-3 DAYS');
-  sections.push('✅ PROFESSIONAL TECHNICAL SUPPORT');
+  // Key features. Claims that only hold for electronic components are made
+  // only for electronic components: "TECHNICAL DOCUMENTATION INCLUDED" on a
+  // vacuum-cleaner filter is not a selling point, it is a false statement, and
+  // the catalogue now contains consumer goods as well as parts.
+  for (const line of featureLines(category)) sections.push(line);
   sections.push('');
   
   // Product description (from database)
@@ -103,7 +102,9 @@ function generateUnifiedDescription(product: Product, specs: any, category: stri
   
 
   
-  // Applications (category-specific but consistent format)
+  // Applications, only where the category is actually known. The generic
+  // fallback used to print "Electronic circuit design / Prototyping and
+  // development" under everything, including air purifier filters.
   const applications = getCategoryApplications(category);
   if (applications.length > 0) {
     sections.push('💡 TYPICAL APPLICATIONS:');
@@ -165,12 +166,7 @@ function generateUnifiedHtmlDescription(product: Product, specs: any, category: 
   <!-- Quality Features -->
   <div style="background-color: #f0f8ff; border: 2px solid #0066cc; padding: 15px; margin-bottom: 15px;">
     <div style="font-weight: bold; color: #006600;">
-      ✅ HIGH QUALITY ELECTRONIC COMPONENT<br>
-      ✅ GENUINE MANUFACTURER SPECIFICATIONS<br>
-      ✅ TECHNICAL DOCUMENTATION INCLUDED<br>
-      ✅ DISPATCH FROM EU WAREHOUSE WITHIN 2-3 DAYS<br>
-      ✅ PROFESSIONAL TECHNICAL SUPPORT<br>
-      ✅ 30-DAY RETURN GUARANTEE
+      ${featureLines(category).join('<br>\n      ')}
     </div>
   </div>
   
@@ -249,35 +245,54 @@ function generateUnifiedHtmlDescription(product: Product, specs: any, category: 
 /**
  * Extract specifications from product data
  */
+/**
+ * A number, not preceded by anything that would make it part of a longer
+ * token. Stops "DK-1512-005" offering up "1512" as a measurement.
+ */
+const NUMBER = String.raw`(?<![\w.,-])(-?\d+(?:[.,]\d+)?)`;
+
+/**
+ * A unit only counts when it stands alone. `(?![a-z])` is the whole fix: the
+ * original patterns let a unit letter match the FIRST LETTER OF THE NEXT WORD,
+ * so "Xiaomi Mi 2 Cleaner" produced "Operating Temperature: 2°C" — the "2 C"
+ * of "2 Cleaner" — on a live listing. Every unit here had the same flaw.
+ */
+const unitPattern = (unit: string) => new RegExp(`${NUMBER}\\s*(?:${unit})(?![a-z])`, "i");
+
+const SPEC_PATTERNS: Array<{ key: string; re: RegExp }> = [
+  { key: "voltage", re: unitPattern("v|volts?") },
+  { key: "current", re: unitPattern("ma|a|amps?") },
+  { key: "power", re: unitPattern("w|watts?") },
+  { key: "frequency", re: unitPattern("hz|khz|mhz|ghz") },
+  // Temperature REQUIRES the degree sign. Without it "2 C" is indistinguishable
+  // from the start of any word beginning with c, and a fabricated operating
+  // temperature on a vacuum-cleaner filter is worse than none.
+  { key: "temperature", re: new RegExp(`${NUMBER}\\s*°\\s*c(?![a-z])`, "i") },
+];
+
+/**
+ * Extract specifications from free text.
+ *
+ * A last resort. Where the supplier publishes structured parameters they are
+ * used instead (see products.tmeParameters and tme-aspects.ts) — reading
+ * "230 V" out of a field beats inferring it from a title, and a title is full
+ * of numbers that are not measurements.
+ */
 export function extractProductSpecs(product: Product): any {
   const specs: any = {};
-  const text = `${product.name || ''} ${product.description || ''}`.toLowerCase();
-  
-  // Extract voltage
-  const voltageMatch = text.match(/(\d+(?:\.\d+)?)\s*v(?:olt)?/i);
-  if (voltageMatch) specs.voltage = voltageMatch[1];
-  
-  // Extract current
-  const currentMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:ma|a|amp)/i);
-  if (currentMatch) specs.current = currentMatch[1];
-  
-  // Extract power
-  const powerMatch = text.match(/(\d+(?:\.\d+)?)\s*w(?:att)?/i);
-  if (powerMatch) specs.power = powerMatch[1];
-  
-  // Extract frequency
-  const freqMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:hz|khz|mhz|ghz)/i);
-  if (freqMatch) specs.frequency = freqMatch[1];
-  
-  // Extract temperature
-  const tempMatch = text.match(/(-?\d+(?:\.\d+)?)\s*°?c/i);
-  if (tempMatch) specs.temperature = tempMatch[1];
-  
+  const text = `${product.name || ''} ${product.description || ''}`;
+
+  for (const { key, re } of SPEC_PATTERNS) {
+    const m = text.match(re);
+    if (m) specs[key] = m[1].replace(",", ".");
+  }
+
   // Extract brand
-  if (text.includes('arduino')) specs.brand = 'Arduino';
-  if (text.includes('esp32')) specs.brand = 'Espressif';
-  if (text.includes('raspberry')) specs.brand = 'Raspberry Pi Foundation';
-  
+  const lower = text.toLowerCase();
+  if (lower.includes('arduino')) specs.brand = 'Arduino';
+  if (lower.includes('esp32')) specs.brand = 'Espressif';
+  if (lower.includes('raspberry')) specs.brand = 'Raspberry Pi Foundation';
+
   return specs;
 }
 
@@ -295,6 +310,30 @@ function determineCategory(product: Product): string {
   if (text.includes('display') || text.includes('lcd') || text.includes('oled')) return 'Displays';
   
   return 'Electronics';
+}
+
+/**
+ * The feature bullets, honest for what the product actually is.
+ *
+ * `determineCategory` returns a real category only when the text matched one;
+ * its fallback means "unclassified", which for this catalogue now mostly means
+ * a consumer product rather than a part.
+ */
+export function featureLines(category: string): string[] {
+  const common = [
+    '✅ DISPATCH FROM EU WAREHOUSE WITHIN 2-3 DAYS',
+    '✅ 30-DAY RETURN GUARANTEE',
+  ];
+  if (category === 'Electronics') {
+    return ['✅ BRAND-NEW, ORIGINAL PRODUCT', '✅ GENUINE MANUFACTURER SPECIFICATIONS', ...common];
+  }
+  return [
+    '✅ HIGH QUALITY ELECTRONIC COMPONENT',
+    '✅ GENUINE MANUFACTURER SPECIFICATIONS',
+    '✅ TECHNICAL DOCUMENTATION INCLUDED',
+    ...common,
+    '✅ PROFESSIONAL TECHNICAL SUPPORT',
+  ];
 }
 
 /**
@@ -346,11 +385,8 @@ function getCategoryApplications(category: string): string[] {
     ]
   };
   
-  return applicationMap[category] || [
-    'Electronic circuit design',
-    'Prototyping and development',
-    'Educational projects',
-    'Repair and maintenance',
-    'Professional applications'
-  ];
+  // No entry means we do not know what this product is for. Saying nothing is
+  // better than telling a buyer their air purifier filter suits "prototyping
+  // and development".
+  return applicationMap[category] ?? [];
 }
