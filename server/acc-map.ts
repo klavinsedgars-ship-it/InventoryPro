@@ -558,3 +558,25 @@ export function accListingCondition(
 
   return { condition: "NEW", disclosure: null };
 }
+
+/**
+ * Is a staged offer clearance or defective stock, judged from the attributes
+ * the BULK import wrote?
+ *
+ * Answering from staging matters: detail calls are made only for offers still
+ * missing a weight, so a second promotion attempt would otherwise have no idea
+ * what it was looking at. Returns the reason, or null for ordinary stock.
+ */
+export function accSaleOutReason(attributesJson: string | null | undefined): string | null {
+  if (!attributesJson) return null;
+  try {
+    const a = JSON.parse(attributesJson) as Record<string, unknown>;
+    if (String(a.isDefect) === "true") return "flagged defective by the supplier";
+    if (String(a.hasSaleOut) === "true") return "clearance / sale-out stock";
+    return null;
+  } catch {
+    // A malformed blob is not evidence of anything; treat it as ordinary and
+    // let the detail call decide.
+    return null;
+  }
+}

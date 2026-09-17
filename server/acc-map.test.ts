@@ -12,6 +12,7 @@ import {
   accDescriptionFromParameters,
   accListingCondition,
   accParameterPairs,
+  accSaleOutReason,
   type AccProduct,
 } from "./acc-map";
 
@@ -651,5 +652,37 @@ describe("accListingCondition", () => {
 
   it("never invents a condition from an empty saleout value", () => {
     expect(accListingCondition({}, [{ ParameterName: "Saleout", Value: "" }]).condition).toBe("NEW");
+  });
+});
+
+describe("accSaleOutReason", () => {
+  const attrs = (o: Record<string, unknown>) => JSON.stringify(o);
+
+  it("recognises clearance stock from the staged flags", () => {
+    expect(accSaleOutReason(attrs({ hasSaleOut: "true" }))).toContain("clearance");
+  });
+
+  it("recognises defective stock, and says so specifically", () => {
+    expect(accSaleOutReason(attrs({ isDefect: "true" }))).toContain("defective");
+  });
+
+  it("reports the defect when a product is both", () => {
+    expect(accSaleOutReason(attrs({ isDefect: "true", hasSaleOut: "true" }))).toContain("defective");
+  });
+
+  it("passes ordinary stock through", () => {
+    expect(accSaleOutReason(attrs({ hasSaleOut: "false", isDefect: "false" }))).toBeNull();
+    expect(accSaleOutReason(attrs({}))).toBeNull();
+    expect(accSaleOutReason(null)).toBeNull();
+    expect(accSaleOutReason("")).toBeNull();
+  });
+
+  it("treats a malformed blob as ordinary rather than throwing mid-promotion", () => {
+    expect(accSaleOutReason("{not json")).toBeNull();
+  });
+
+  it("is not fooled by a truthy-looking non-flag", () => {
+    expect(accSaleOutReason(attrs({ hasSaleOut: "0" }))).toBeNull();
+    expect(accSaleOutReason(attrs({ hasSaleOut: 1 }))).toBeNull();
   });
 });

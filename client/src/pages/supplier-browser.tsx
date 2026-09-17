@@ -120,6 +120,7 @@ interface PromoteResult {
     noPrice: number;
     wrongCurrency: number;
     noWeight?: number;
+    saleOut?: number;
   };
   /** Only for suppliers whose weights come from a per-product detail call. */
   weights?: { fetched: number; missing: number; failed: number; budgetHit: boolean; sampleErrors: string[] };
@@ -672,6 +673,7 @@ export default function SupplierBrowser({ user, slug, name }: { user?: any; slug
                 {promoteResult.skipped.noPrice > 0 && <Badge variant="destructive">{promoteResult.skipped.noPrice} without usable price</Badge>}
                 {promoteResult.skipped.wrongCurrency > 0 && <Badge variant="destructive">{promoteResult.skipped.wrongCurrency} non-EUR price</Badge>}
                 {(promoteResult.skipped.noWeight ?? 0) > 0 && <Badge variant="destructive">{promoteResult.skipped.noWeight} without a weight</Badge>}
+                {(promoteResult.skipped.saleOut ?? 0) > 0 && <Badge variant="secondary">{promoteResult.skipped.saleOut} clearance / damaged stock</Badge>}
                 {promoteResult.weights && (
                   <Badge variant="outline" data-testid="badge-weights">
                     {promoteResult.weights.fetched} weights fetched

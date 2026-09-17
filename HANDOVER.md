@@ -631,6 +631,16 @@ Three things that will bite whoever touches this next:
   specifics. `GetProducts` carries no description at all, which is why ACC
   listings first went up with generic component copy.
 
+  **Sale-out stock is excluded from promotion entirely** (operator decision,
+  2026-09-17), skip reason `saleOut`. The condition machinery below still
+  exists and still works; this is a commercial choice, not a technical limit —
+  a shop whose first ACC listings are damaged-box units buys returns and
+  feedback risk it does not need while the supplier is unproven. Set
+  `ACC_ALLOW_SALEOUT=true` to promote them again, under their real condition.
+  The flags are read from what the BULK import staged (`hasSaleOut`,
+  `isDefect`), so the answer survives a second promotion attempt, when no
+  detail call is made because the weight is already known.
+
   **Condition.** Every listing this system publishes was hard-coded
   `condition: "NEW"` — true while the catalogue was TME components. ACC also
   sells sale-out stock: the same product, discounted, with something wrong,

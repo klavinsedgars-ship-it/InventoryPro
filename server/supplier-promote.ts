@@ -37,6 +37,7 @@ import {
   dbTiersToPricingTiers,
 } from "./dynamic-pricing";
 import { getFeeConfig } from "./fee-config";
+import { accSaleOutReason } from "./acc-map";
 
 /** EUR, or an unstated currency we take to be EUR. */
 function isEurOrUnstated(currency: string | null): boolean {
@@ -117,6 +118,7 @@ export interface PromoteResult {
     noPrice: number;
     wrongCurrency: number;
     noWeight: number;
+    saleOut: number;
   };
   /** Weights fetched from the supplier's detail API during this run. */
   weights?: { fetched: number; missing: number; failed: number; budgetHit: boolean; sampleErrors: string[] };
@@ -146,6 +148,22 @@ export interface PromoteResult {
  */
 const SUPPLIERS_WITH_DETAIL_WEIGHTS = new Set(["ACC"]);
 
+/**
+ * Clearance and defective stock is excluded from promotion entirely
+ * (2026-09-17, operator decision). It is sellable and correctly describable —
+ * accListingCondition maps it to NEW_OTHER with the distributor's own wording
+ * — but a shop whose first ACC listings are damaged-box units buys returns and
+ * feedback risk it does not need while the supplier is still being proven.
+ *
+ * Set ACC_ALLOW_SALEOUT=true to promote them again; they will then list under
+ * their real condition rather than as NEW, never silently upgraded.
+ */
+function saleOutExcluded(): boolean {
+  return process.env.ACC_ALLOW_SALEOUT !== "true";
+}
+
+
+
 export async function promoteSupplierOffers(
   supplier: string,
   ids: number[],
@@ -159,7 +177,7 @@ export async function promoteSupplierOffers(
     ok: true,
     requested: ids.length,
     promoted: 0,
-    skipped: { alreadyPromoted: 0, blocked: 0, skuExists: 0, eanExists: 0, noPrice: 0, wrongCurrency: 0, noWeight: 0 },
+    skipped: { alreadyPromoted: 0, blocked: 0, skuExists: 0, eanExists: 0, noPrice: 0, wrongCurrency: 0, noWeight: 0, saleOut: 0 },
     skippedSamples: [],
     budgetHit: false,
     remaining: 0,
@@ -208,7 +226,12 @@ export async function promoteSupplierOffers(
     // priced. Deadline-bounded: what it cannot fetch in time simply is not
     // promoted this run, and the caller can re-run.
     if (SUPPLIERS_WITH_DETAIL_WEIGHTS.has(supplier)) {
-      const needWeight = fresh.filter((o) => o.weightG == null).map((o) => o.supplierSku);
+      const needWeight = fresh
+        .filter((o) => o.weightG == null)
+        // No point paying for a detail call on something the sale-out rule
+        // below is going to refuse anyway.
+        .filter((o) => !(saleOutExcluded() && accSaleOutReason(o.attributes)))
+        .map((o) => o.supplierSku);
       if (needWeight.length > 0) {
         try {
           const { backfillAccWeights } = await import("./acc-weights");
@@ -284,6 +307,16 @@ export async function promoteSupplierOffers(
       if (!isEurOrUnstated(o.currency)) {
         skip(sku, "wrongCurrency", `feed price is in ${o.currency} — only EUR can be promoted`);
         continue;
+      }
+      // Before anything else: clearance stock is not being listed at all for
+      // now. Checked against the staged flags AND anything the detail call
+      // turned up, since either can be the only source.
+      if (saleOutExcluded()) {
+        const reason = accSaleOutReason(o.attributes) ?? (listingConditions.has(o.supplierSku) ? "clearance / sale-out stock" : null);
+        if (reason) {
+          skip(sku, "saleOut", `${reason} — excluded from promotion (set ACC_ALLOW_SALEOUT=true to list these under their real condition)`);
+          continue;
+        }
       }
       if (SUPPLIERS_WITH_DETAIL_WEIGHTS.has(supplier) && o.weightG == null) {
         skip(sku, "noWeight", "no weight available — postage would be priced as the cheapest band, which is not a safe default for this supplier");
