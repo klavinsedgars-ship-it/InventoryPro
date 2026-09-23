@@ -781,6 +781,54 @@ current scale (hundreds of orders, low thousands of items) that is nothing.
 If the orders table reaches six figures, the fix is a pg_trgm GIN index on
 the identifier columns, not a narrower search.
 
+## TME catalogue sweep (2026-09-23)
+
+Getting TME products into `products` meant opening a category in the TME
+Browser, paging through it, selecting everything and starting a sync job — by
+hand, per category, against a supplier with over 500,000 products. 129k got in
+that way over months. The rest never would.
+
+`server/tme-catalogue-sweep.ts` walks TME's category tree server-side and
+imports what passes an **ingest filter**. House pattern: cron slices,
+kill-switch `'ebay'/'catalogue_sweep'`, lease, resumable cursor
+(`{categoryIndex, page}`), self-disabling.
+
+```
+GET /api/tme/catalogue?action=dry-run      what the filter admits — writes NOTHING
+GET /api/tme/catalogue?action=filter&maxWeightGrams=500&maxPrice=40
+GET /api/tme/catalogue?action=start&run=1  begin
+GET /api/tme/catalogue?action=status       cursor, totals, rejection breakdown
+GET /api/cron/tme-catalogue                the tick (:13, :43)
+```
+
+**The filter is the point, not a safety rail.** Importing everything would be
+the wrong outcome: every row in `products` is re-priced and stock-synced for as
+long as it exists, so an unfiltered 500k import quadruples that standing cost
+to carry stock that would never sell. Defaults come from what this business has
+measured — postage has exceeded supplier cost on real orders, so weight is
+capped at 500 g; eBay refuses a listing with no image; TME lists plenty of
+items priced in fractions of a cent that cannot clear the floor.
+
+Three things worth knowing:
+
+- **An unknown weight is REJECTED when a weight cap is set.** `fee-model.ts`
+  reads a missing weight as zero grams — the cheapest postal band — so
+  "unknown" silently becomes "free to ship", and the products that flatters are
+  exactly the heavy ones that lose money. With no cap set, weight is not
+  deciding anything and unknown passes.
+- **Only leaf categories are walked.** TME reports `TotalProducts` on parents
+  inclusive of children, so walking every node would fetch most of the
+  catalogue several times and make the progress total meaningless.
+- **Discovery is separated from enrichment.** TME allows 10 req/sec for search
+  but only 2–4/sec for price/stock, so the sweep pages a category for symbols
+  only, drops the ones already in `products`, and pays for detail exclusively
+  on what is new.
+
+Run `dry-run` before `start`, always. The pass rate turns entirely on how many
+TME products publish a weight, which is not knowable without asking, and the
+projection it reports is an extrapolation from a few hundred products — an
+estimate, labelled as one, not a count.
+
 ## Starting a supplier over (2026-09-17)
 
 In the CRM: the supplier's browser page (**ACC Browser**, **Getic Browser**, …)

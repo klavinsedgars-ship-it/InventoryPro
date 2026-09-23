@@ -8,6 +8,12 @@
  */
 
 import { storage } from "./storage";
+import {
+  emptyRejectionCounts,
+  passesIngestFilter,
+  type IngestFilter,
+  type IngestRejection,
+} from "@shared/ingest-filter";
 import { tmeApi } from "./tme-api";
 import {
   calculatePriceWithFloor,
@@ -19,6 +25,13 @@ import { getFeeConfig } from "./fee-config";
 
 export interface TmeSyncSettings {
   applyDynamicPricing?: boolean;
+  /**
+   * Skip products that do not meet these criteria instead of importing them.
+   * Undefined = import everything fetched, which is what the TME Browser does
+   * (a human already chose those). The catalogue sweep sets it, because
+   * nobody is choosing 500k products one at a time.
+   */
+  ingestFilter?: IngestFilter;
   [key: string]: any;
 }
 
@@ -26,6 +39,10 @@ export interface TmeChunkResult {
   syncedCount: number;
   updatedCount: number;
   failedCount: number;
+  /** Fetched from TME but not imported, because the filter refused them. */
+  filteredCount: number;
+  /** Why, by reason — so a sweep that imports nothing explains itself. */
+  filteredBy: Record<IngestRejection, number>;
   errors: string[];
 }
 
@@ -41,6 +58,8 @@ export async function processTmeSyncChunk(
     syncedCount: 0,
     updatedCount: 0,
     failedCount: 0,
+    filteredCount: 0,
+    filteredBy: emptyRejectionCounts(),
     errors: [],
   };
 
@@ -126,6 +145,27 @@ export async function processTmeSyncChunk(
           marginTier: calc.marginTier,
           marginPercentage: calc.marginPercentage,
         };
+      }
+
+      // The filter sits HERE, between TME's answer and the write: the data it
+      // judges (price for the actual MOQ, weight, stock, image) only exists
+      // after the fetch, so a cheaper earlier check is not available.
+      if (settings.ingestFilter) {
+        const verdict = passesIngestFilter(
+          {
+            supplierPrice: supplierPrice > 0 ? supplierPrice : null,
+            weightGrams,
+            stock: stock?.Amount ?? null,
+            imageUrl: product.Photo ?? null,
+            ean: product.EAN ?? null,
+          },
+          settings.ingestFilter,
+        );
+        if (!verdict.ok) {
+          result.filteredCount++;
+          result.filteredBy[verdict.reason]++;
+          continue;
+        }
       }
 
       const productData: any = {

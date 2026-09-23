@@ -19,6 +19,7 @@
     { "path": "/api/cron/recategorize", "schedule": "*/10 * * * *" },
     { "path": "/api/cron/reprice", "schedule": "6,16,26,36,46,56 * * * *" },
     { "path": "/api/cron/quantity", "schedule": "4,9,14,19,24,29,34,39,44,49,54,59 * * * *" },
+    { "path": "/api/cron/tme-catalogue", "schedule": "13,43 * * * *" },
     { "path": "/api/cron/getic-import", "schedule": "24 * * * *" },
     { "path": "/api/cron/greencell-import", "schedule": "42 * * * *" },
     { "path": "/api/cron/acc-import", "schedule": "51 * * * *" },

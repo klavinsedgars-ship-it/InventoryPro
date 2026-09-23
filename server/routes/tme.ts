@@ -734,6 +734,110 @@ export function registerTmeRoutes(app: Express): void {
     // refreshes, and the client drives + polls real progress.
 
     // 1) Create a job, return its id immediately (no long-running work here).
+    /**
+     * Whole-catalogue ingest: walk TME's category tree server-side and import
+     * what passes the filter, instead of a human selecting categories in the
+     * browser one at a time against 500k products.
+     *
+     *   ?action=status                 where it is, and the current filter
+     *   ?action=dry-run                what the filter would admit — writes nothing
+     *   ?action=filter&maxWeightGrams=500&maxPrice=40&...   set the filter
+     *   ?action=start[&run=1]          begin; the cron works it
+     *   ?action=stop                   halt, keeping the cursor
+     *
+     * dry-run before start, always. The pass rate turns entirely on how many
+     * TME products publish a weight, which is not knowable without asking.
+     */
+    const catalogueHandler = async (req: any, res: any) => {
+      try {
+        const m = await import("../tme-catalogue-sweep");
+        const { withLease, describeRefusal } = await import("../job-lease");
+        const { leaseStore } = await import("../storage");
+        const action = String(req.query.action ?? req.body?.action ?? "status").trim();
+        if (!["status", "dry-run", "filter", "start", "stop"].includes(action)) {
+          return res.status(400).json({ ok: false, error: "pass ?action=status|dry-run|filter|start|stop" });
+        }
+
+        if (action === "dry-run") {
+          const categories = req.query.categories ? parseInt(String(req.query.categories), 10) : undefined;
+          const pagesPerCategory = req.query.pages ? parseInt(String(req.query.pages), 10) : undefined;
+          return res.json({ ok: true, action, dryRun: await m.dryRunCatalogue({ categories, pagesPerCategory }) });
+        }
+
+        let applied;
+        if (action === "filter") {
+          const src = { ...(req.query || {}), ...(req.body || {}) } as Record<string, unknown>;
+          const current = await m.getIngestFilter();
+          const pick = (k: string, fallback: unknown) => (src[k] === undefined ? fallback : src[k]);
+          const bool = (v: unknown) => v === true || v === "true" || v === "1";
+          applied = await m.setIngestFilter({
+            minPrice: pick("minPrice", current.minPrice) as number,
+            maxPrice: pick("maxPrice", current.maxPrice) as number,
+            maxWeightGrams: pick("maxWeightGrams", current.maxWeightGrams) as number,
+            inStockOnly: src.inStockOnly === undefined ? current.inStockOnly : bool(src.inStockOnly),
+            requireImage: src.requireImage === undefined ? current.requireImage : bool(src.requireImage),
+            requireEan: src.requireEan === undefined ? current.requireEan : bool(src.requireEan),
+          });
+        }
+
+        if (action === "start") {
+          // Refresh the category tree on a fresh start: a stale cached tree
+          // would walk a catalogue shape that no longer exists.
+          await m.loadLeafCategories(true);
+          await m.setCatalogueSweepEnabled(true);
+        }
+        if (action === "stop") await m.setCatalogueSweepEnabled(false);
+
+        let slice = null;
+        if (action === "start" && (req.query.run === "1" || req.body?.run === true)) {
+          const leased = await withLease(leaseStore, "tme-catalogue", { ttlSeconds: 300 }, () => m.runCatalogueSweep(240_000));
+          slice = leased.ran ? leased.result : { refused: describeRefusal("tme-catalogue", leased) };
+        }
+
+        res.json({
+          ok: true,
+          action,
+          ...(applied ? { filterApplied: applied } : {}),
+          progress: await m.catalogueProgress(),
+          ...(slice ? { slice } : {}),
+          note: "the /api/cron/tme-catalogue tick works the sweep while enabled; it disables itself when the last category is done",
+        });
+      } catch (error) {
+        res.status(500).json({ ok: false, error: (error as Error).message });
+      }
+    };
+    app.get("/api/tme/catalogue", requireAuth, catalogueHandler);
+    app.post("/api/tme/catalogue", requireAuth, catalogueHandler);
+
+    const catalogueCronHandler = async (_req: any, res: any) => {
+      try {
+        const m = await import("../tme-catalogue-sweep");
+        const { withLease, describeRefusal } = await import("../job-lease");
+        const { leaseStore } = await import("../storage");
+        if (!(await m.isCatalogueSweepEnabled())) {
+          return res.json({ ok: true, skipped: true, reason: "catalogue sweep not enabled" });
+        }
+        const leased = await withLease(leaseStore, "tme-catalogue", { ttlSeconds: 300 }, () => m.runCatalogueSweep(250_000));
+        if (!leased.ran) {
+          return res.json({ ok: true, skipped: true, reason: describeRefusal("tme-catalogue", leased) });
+        }
+        const r = leased.result;
+        if (r.done) {
+          await storage.createSyncLog({
+            source: "tme_catalogue",
+            operation: "sweep_complete",
+            status: "success",
+            message: `catalogue sweep complete — ${r.imported} imported, ${r.filtered} filtered out, ${r.alreadyHad} already held`,
+          });
+        }
+        res.json({ ok: true, ...r });
+      } catch (error) {
+        res.status(500).json({ ok: false, error: (error as Error).message });
+      }
+    };
+    app.get("/api/cron/tme-catalogue", catalogueCronHandler);
+    app.post("/api/cron/tme-catalogue", catalogueCronHandler);
+
     app.post("/api/tme/sync-job-start", async (req, res) => {
       try {
         const { productSymbols, settings } = req.body;
