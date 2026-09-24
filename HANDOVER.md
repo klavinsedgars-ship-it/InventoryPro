@@ -781,6 +781,55 @@ current scale (hundreds of orders, low thousands of items) that is nothing.
 If the orders table reaches six figures, the fix is a pg_trgm GIN index on
 the identifier columns, not a narrower search.
 
+## Shipping labels print to the QL-800 (2026-09-24)
+
+The Print button on an order used to call bare `window.print()`, which sends
+the whole orders screen to the printer. So the real workflow was: copy the
+address, open Brother P-touch Editor, paste, set Arial Bold 12, centre it,
+print. Every parcel, in a second application.
+
+Now the dialog prints the label itself:
+
+- `shared/label-layout.ts` builds a standalone HTML document sized to the
+  physical die-cut label — `@page { size: 62mm 29mm; margin: 0 }`, a 3 mm
+  quiet zone, Arial Bold centred. No stylesheet, no script, no dependency on
+  the app around it. `estimateFontPt()` picks a starting type size from the
+  line count and the longest line.
+- `client/src/lib/print-label.ts` renders that document into an offscreen
+  iframe and prints *the iframe*, so nothing else on the page goes to the
+  printer. Before printing it measures the text and shrinks it a quarter point
+  at a time until it fits — the estimate is close, but only the browser knows
+  how wide "Hanfgartenweg" really is.
+- `client/src/components/label-preview.tsx` shows that same document, at true
+  proportions, in the dialog. What is checked is what prints.
+
+Two settings are remembered in `localStorage` because they belong to the
+printer on the packing desk, not to the order: the label stock (62 × 29 mm by
+default, the roll in the machine) and a **Rotate 90°** toggle. Rotation exists
+because Brother driver/OS combinations disagree about whether 62 × 29 media is
+a landscape or a portrait page; the toggle swaps the `@page` size *and* turns
+the content into it, so the label still comes out the right way round.
+
+Two things that were wrong on the way and are easy to get wrong again:
+
+- **Measure layout boxes, not bounding rectangles.** `getBoundingClientRect()`
+  on rotated content returns the axis-aligned box, so its *height* is the
+  content's *width*. The fitting loop read 211 px against 87 px of room and
+  shrank every rotated label to the 5 pt floor. `offsetHeight`/`scrollWidth`
+  are unaffected by transforms.
+- **Rotation needs the translate.** Turning a box 90° about its top left
+  leaves it off the page to the left; it has to be slid back by the page
+  width or the label prints blank.
+
+Verified in Chromium: the generated PDF's MediaBox is 62.1 × 29.0 mm, and
+29.0 × 62.1 mm rotated, so the `@page` size is honoured. A real five-line
+German address fits at 11.25 pt (P-touch was set to 12), a deliberately
+overlong one wraps and settles at 8.5 pt.
+
+The browser's print dialog still appears — it has to, since that is where the
+QL-800 is chosen. Set margins to None and scale to 100% once; the browser
+remembers the printer, so every label after the first is one click.
+
 ## TME Browser "Hide synced" (2026-09-24)
 
 Reported as broken. The toggle derives "synced" from products we hold, and it

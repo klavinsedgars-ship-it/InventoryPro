@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
@@ -29,6 +29,15 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { countryName, labelAddressLines } from "@shared/country-names";
+import { QL_LABEL_SIZES, labelSizeById, type LabelOptions } from "@shared/label-layout";
+import {
+  loadLabelSettings,
+  saveLabelSettings,
+  printAddressLabel,
+  type LabelSettings,
+} from "@/lib/print-label";
+import { LabelPreview } from "@/components/label-preview";
+import { Switch } from "@/components/ui/switch";
 import { previousStatus, revertLabel } from "@shared/order-status";
 import {
   ORDER_SEARCH_FIELDS,
@@ -104,6 +113,10 @@ export function Orders({ user }: OrdersProps) {
   const [showHistory, setShowHistory] = useState(false);
   const [showFinancials, setShowFinancials] = useState(false);
   const [printLabelOpen, setPrintLabelOpen] = useState(false);
+  // Label stock is a property of the printer on the packing desk, not of the
+  // order, so it is remembered rather than chosen again for every parcel.
+  const [labelSettings, setLabelSettings] = useState<LabelSettings>(() => loadLabelSettings());
+  const [printingLabel, setPrintingLabel] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
 
   const statusFilter = activeTab === "to-pack" ? "new" : activeTab === "to-ship" ? "packed" : undefined;
@@ -324,6 +337,59 @@ export function Orders({ user }: OrdersProps) {
     if (!selectedOrder) return;
     navigator.clipboard.writeText(labelAddressLines(selectedOrder).join("\n"));
     toast({ title: "Copied", description: "Address copied to clipboard" });
+  };
+
+  /** The label the packing desk is set up for, plus this order's title. */
+  const labelOptions: LabelOptions = useMemo(() => {
+    const size = labelSizeById(labelSettings.sizeId);
+    return {
+      widthMm: size.widthMm,
+      heightMm: size.heightMm,
+      paddingMm: labelSettings.paddingMm,
+      rotate: labelSettings.rotate,
+      maxFontPt: labelSettings.maxFontPt,
+      title: selectedOrder
+        ? `Label ${selectedOrder.marketplaceOrderId}`
+        : "Shipping label",
+    };
+  }, [labelSettings, selectedOrder?.marketplaceOrderId]);
+
+  const updateLabelSettings = (patch: Partial<LabelSettings>) => {
+    setLabelSettings((prev) => {
+      const next = { ...prev, ...patch };
+      saveLabelSettings(next);
+      return next;
+    });
+  };
+
+  /**
+   * Straight to the label printer: the address alone, at 62 × 29 mm, instead
+   * of pasting it into P-touch Editor and setting the font there every time.
+   */
+  const handlePrintLabel = async () => {
+    if (!selectedOrder) return;
+    const lines = labelAddressLines(selectedOrder);
+    if (!lines.length) {
+      toast({
+        title: "Nothing to print",
+        description: "This order has no shipping address on it.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setPrintingLabel(true);
+    try {
+      await printAddressLabel(lines, labelOptions);
+    } catch (err) {
+      toast({
+        title: "Could not print",
+        description:
+          err instanceof Error ? err.message : "The browser refused to open the print dialog.",
+        variant: "destructive",
+      });
+    } finally {
+      setPrintingLabel(false);
+    }
   };
 
   /**
@@ -879,20 +945,46 @@ export function Orders({ user }: OrdersProps) {
 
           {selectedOrder && (
             <div className="space-y-4">
-              {/* Postal order, country spelled out, phone included — carriers
-                  require a contact number for international services. */}
-              <div className="p-4 bg-white border-2 border-black font-mono text-sm" style={{ fontFamily: 'monospace' }}>
-                <p className="font-bold text-lg mb-2">{selectedOrder.shippingName}</p>
-                <p>{selectedOrder.shippingAddressLine1}</p>
-                {selectedOrder.shippingAddressLine2 && <p>{selectedOrder.shippingAddressLine2}</p>}
-                <p className="font-bold text-lg">
-                  {[selectedOrder.shippingPostalCode, selectedOrder.shippingCity].filter(Boolean).join(" ")}
-                </p>
-                {selectedOrder.shippingStateOrProvince && <p>{selectedOrder.shippingStateOrProvince}</p>}
-                <p className="font-bold text-lg uppercase">{countryName(selectedOrder.shippingCountry)}</p>
-                {selectedOrder.shippingPhone && (
-                  <p className="mt-2">Tel: {selectedOrder.shippingPhone}</p>
-                )}
+              {/* What the printer gets, at true size. The lines are in postal
+                  order with the country spelled out and the phone included —
+                  carriers require a contact number for international parcels. */}
+              <LabelPreview
+                lines={labelAddressLines(selectedOrder)}
+                options={labelOptions}
+              />
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Label stock</Label>
+                  <Select
+                    value={labelSettings.sizeId}
+                    onValueChange={(v) => updateLabelSettings({ sizeId: v })}
+                  >
+                    <SelectTrigger className="h-8" data-testid="select-label-size">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {QL_LABEL_SIZES.map((size) => (
+                        <SelectItem key={size.id} value={size.id}>
+                          {size.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Rotate 90°</Label>
+                  <div className="flex items-center gap-2 h-8">
+                    <Switch
+                      checked={labelSettings.rotate}
+                      onCheckedChange={(v) => updateLabelSettings({ rotate: v })}
+                      data-testid="switch-label-rotate"
+                    />
+                    <span className="text-xs text-gray-500">
+                      Only if it comes out sideways
+                    </span>
+                  </div>
+                </div>
               </div>
 
               <div className="text-xs text-gray-500 space-y-1">
@@ -906,9 +998,18 @@ export function Orders({ user }: OrdersProps) {
               </div>
 
               <div className="flex gap-2">
-                <Button className="flex-1" onClick={() => window.print()} data-testid="btn-dialog-print">
-                  <Printer className="w-4 h-4 mr-2" />
-                  Print
+                <Button
+                  className="flex-1"
+                  onClick={handlePrintLabel}
+                  disabled={printingLabel}
+                  data-testid="btn-dialog-print"
+                >
+                  {printingLabel ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Printer className="w-4 h-4 mr-2" />
+                  )}
+                  Print to QL-800
                 </Button>
                 <Button variant="outline" className="flex-1" onClick={copyAddress} data-testid="btn-dialog-copy-address">
                   <Copy className="w-4 h-4 mr-2" />
@@ -916,8 +1017,10 @@ export function Orders({ user }: OrdersProps) {
                 </Button>
               </div>
 
-              <p className="text-xs text-gray-400 text-center">
-                Latvian Post API integration coming soon
+              <p className="text-xs text-gray-400 leading-relaxed">
+                In the print dialog choose <span className="font-medium">Brother QL-800</span>, set margins
+                to None and scale to 100%, and switch headers and footers off. The browser remembers those
+                settings, so every label after the first is one click.
               </p>
             </div>
           )}
