@@ -858,6 +858,17 @@ dies with it, which a branch of that size cannot survive. The confirm dialog
 names the leaf and product counts first, and says the filter will admit far
 fewer.
 
+**`action=start` does not block.** It enables the sweep, fires the cron
+endpoint WITHOUT awaiting it (the same fire-and-forget the listing ramp uses)
+and answers immediately. The first version passed `run=1` from the button,
+which held the request open for the four minutes a slice takes — a background
+job that felt like a hung button, and the reason it was first reported as
+"clicked it, nothing happened". `run=1` still exists for debugging.
+
+Everything runs on the server: Vercel's cron works it at :13 and :43, so
+closing the browser or shutting the computer down does not stop or lose it,
+and the cursor means it resumes rather than restarts.
+
 **Progress is shown on the TME Browser** while a sweep is enabled: a banner
 with the branch name, sub-categories done, counts of added / already held /
 filtered out (with the top rejection reasons), and a Stop button. It polls only

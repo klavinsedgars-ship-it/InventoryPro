@@ -842,9 +842,25 @@ export function registerTmeRoutes(app: Express): void {
         if (action === "stop") await m.setCatalogueSweepEnabled(false);
 
         let slice = null;
-        if (action === "start" && (req.query.run === "1" || req.body?.run === true)) {
-          const leased = await withLease(leaseStore, "tme-catalogue", { ttlSeconds: 300 }, () => m.runCatalogueSweep(240_000));
-          slice = leased.ran ? leased.result : { refused: describeRefusal("tme-catalogue", leased) };
+        if (action === "start") {
+          if (req.query.run === "1" || req.body?.run === true) {
+            // Explicit opt-in, for debugging: blocks for up to four minutes
+            // while a slice runs. Never what a button should do.
+            const leased = await withLease(leaseStore, "tme-catalogue", { ttlSeconds: 300 }, () => m.runCatalogueSweep(240_000));
+            slice = leased.ran ? leased.result : { refused: describeRefusal("tme-catalogue", leased) };
+          } else {
+            // Kick the first slice WITHOUT waiting for it, the same pattern
+            // the listing ramp uses. The sweep is a background job: the
+            // operator should get an answer immediately, work should begin
+            // immediately, and neither should depend on a browser staying
+            // open. The cron carries it from there.
+            const base = process.env.PUBLIC_BASE_URL || `https://${req.headers.host}`;
+            const secret = process.env.CRON_SECRET;
+            fetch(`${base}/api/cron/tme-catalogue`, {
+              method: "POST",
+              headers: secret ? { authorization: `Bearer ${secret}` } : {},
+            }).catch(() => {});
+          }
         }
 
         res.json({
@@ -853,7 +869,8 @@ export function registerTmeRoutes(app: Express): void {
           ...(applied ? { filterApplied: applied } : {}),
           progress: await m.catalogueProgress(),
           ...(slice ? { slice } : {}),
-          note: "the /api/cron/tme-catalogue tick works the sweep while enabled; it disables itself when the last category is done",
+          note:
+            "This runs on the server. The /api/cron/tme-catalogue tick (:13 and :43) works it while enabled and it disables itself when the last category is done — closing the browser, or the computer, does not stop it.",
         });
       } catch (error) {
         res.status(500).json({ ok: false, error: (error as Error).message });

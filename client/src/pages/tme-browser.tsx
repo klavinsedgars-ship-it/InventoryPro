@@ -269,7 +269,7 @@ function CatalogueSweepBanner({ onChanged }: { onChanged: () => void }) {
           <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-700">{t.failed.toLocaleString()} failed</span>
         )}
         <span className="px-1.5 py-0.5 rounded bg-white text-gray-500">
-          runs in the background · safe to close this page
+          runs on the server · safe to close the browser or shut down
         </span>
       </div>
     </Card>
@@ -313,12 +313,16 @@ function AddBranchButton({
       const ok = window.confirm(
         `Import "${category.Name}" and everything under it?\n\n` +
           `${branch?.leafCategories ?? "?"} sub-categories · ${(branch?.products ?? count).toLocaleString()} products at TME\n\n` +
-          `Runs in the background and applies the ingest filter (price, weight, stock, image), so far fewer than that will actually be added. ` +
-          `You can close this page; progress is on the Operations page.`,
+          `Runs on the server and applies the ingest filter (price, weight, stock, image), so far fewer than that will actually be added.\n\n` +
+          `You can close this page and turn the computer off — it keeps going and picks up where it left off.`,
       );
       if (!ok) return;
+      // No run=1: the server enables the sweep, kicks the first slice without
+      // waiting for it, and answers immediately. Blocking here for the four
+      // minutes a slice takes would make a background job feel like a hung
+      // button — which is how this first landed.
       const res = await fetch(
-        `/api/tme/catalogue?action=start&rootCategoryId=${encodeURIComponent(category.CategoryId)}&run=1`,
+        `/api/tme/catalogue?action=start&rootCategoryId=${encodeURIComponent(category.CategoryId)}`,
         { method: "POST", credentials: "include" },
       );
       const data = await res.json();
