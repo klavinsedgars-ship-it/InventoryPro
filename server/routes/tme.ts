@@ -735,6 +735,43 @@ export function registerTmeRoutes(app: Express): void {
 
     // 1) Create a job, return its id immediately (no long-running work here).
     /**
+     * Which TME categories we already hold products from.
+     *
+     * Replaces the TME Browser's GET /api/products with no filters, which
+     * downloaded the entire products table to the browser to derive this same
+     * set. Returns counts too, so the UI can say "412 of 4,047 synced" rather
+     * than only a binary.
+     */
+    app.get("/api/tme/synced-categories", requireAuth, async (_req, res) => {
+      try {
+        const rows = await storage.getSyncedTmeCategoryCounts();
+        res.json({
+          ok: true,
+          categories: rows,
+          totalProducts: rows.reduce((sum, r) => sum + r.products, 0),
+        });
+      } catch (error) {
+        res.status(500).json({ ok: false, error: (error as Error).message });
+      }
+    });
+
+    /**
+     * Which of these TME symbols do we already hold? Scoped to the symbols the
+     * caller can actually see (one grid page), so the answer is a few hundred
+     * strings rather than the whole catalogue.
+     */
+    app.post("/api/tme/known-symbols", requireAuth, async (req, res) => {
+      try {
+        const symbols = Array.isArray(req.body?.symbols) ? req.body.symbols.map(String) : [];
+        if (symbols.length === 0) return res.json({ ok: true, known: [] });
+        const found = await storage.getProductsBySkus(symbols.slice(0, 1000));
+        res.json({ ok: true, known: found.map((p) => p.sku) });
+      } catch (error) {
+        res.status(500).json({ ok: false, error: (error as Error).message });
+      }
+    });
+
+    /**
      * Whole-catalogue ingest: walk TME's category tree server-side and import
      * what passes the filter, instead of a human selecting categories in the
      * browser one at a time against 500k products.

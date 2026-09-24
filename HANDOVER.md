@@ -781,6 +781,28 @@ current scale (hundreds of orders, low thousands of items) that is nothing.
 If the orders table reaches six figures, the fix is a pg_trgm GIN index on
 the identifier columns, not a narrower search.
 
+## TME Browser "Hide synced" (2026-09-24)
+
+Reported as broken. The toggle derives "synced" from products we hold, and it
+was doing so by calling **`GET /api/products` with no filters — the entire
+products table, downloaded to the browser** — then reading `tme_category_id`
+off every row. Two consequences:
+
+- At 129k rows that is a six-figure JSON payload on every visit to the page.
+- `((existingProducts as any[]) || [])` turned a failed or slow request into an
+  empty array, which is indistinguishable from "nothing is synced". The toggle
+  then hid nothing, silently, and looked broken.
+
+And with the catalogue emptied, "nothing is synced" is *also* the correct
+answer — so the two states looked identical on screen with no way to tell them
+apart.
+
+Now: `GET /api/tme/synced-categories` (a `GROUP BY tme_category_id`, a few
+hundred rows) for the tree, and `POST /api/tme/known-symbols` scoped to the
+symbols on the current grid page for the product list. The panel states which
+case it is in — an error, "no products synced yet, so nothing can be hidden",
+or "N categories synced · M products".
+
 ## TME catalogue sweep (2026-09-23)
 
 Getting TME products into `products` meant opening a category in the TME

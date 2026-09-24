@@ -105,6 +105,7 @@ export interface IStorage {
   getProduct(id: number): Promise<Product | undefined>;
   getProductBySku(sku: string): Promise<Product | undefined>;
   getProductsBySkus(skus: string[]): Promise<Product[]>;
+  getSyncedTmeCategoryCounts(): Promise<Array<{ categoryId: string; products: number }>>;
   createProduct(product: InsertProduct): Promise<Product>;
   updateProduct(id: number, product: Partial<InsertProduct>): Promise<Product | undefined>;
   deleteProduct(id: number): Promise<boolean>;
@@ -1087,6 +1088,29 @@ export class DatabaseStorage implements IStorage {
       LIMIT 25
     `);
     return (q.rows ?? q ?? []) as any[];
+  }
+
+  /**
+   * Which TME categories we already hold products from, and how many.
+   *
+   * Exists to replace a GET /api/products with no filters — the TME Browser
+   * was downloading EVERY product row to the browser just to compute this set.
+   * At 129k rows that is a six-figure JSON payload on every page load, and
+   * when it failed the page could not tell "the fetch died" from "nothing is
+   * synced": both produced an empty set and a Hide-synced toggle that appeared
+   * to do nothing.
+   */
+  async getSyncedTmeCategoryCounts(): Promise<Array<{ categoryId: string; products: number }>> {
+    const rows: any = await db.execute(sql`
+      SELECT tme_category_id AS category_id, count(*)::int AS products
+        FROM products
+       WHERE supplier = 'TME' AND tme_category_id IS NOT NULL AND tme_category_id <> ''
+       GROUP BY tme_category_id
+    `);
+    return ((rows.rows ?? rows) as any[]).map((r) => ({
+      categoryId: String(r.category_id),
+      products: Number(r.products) || 0,
+    }));
   }
 
   async getTmeProductCount(): Promise<number> {

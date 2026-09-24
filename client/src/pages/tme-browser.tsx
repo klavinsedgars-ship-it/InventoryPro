@@ -310,10 +310,38 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     }
   }, [filters.search, filters.priceMin, filters.priceMax, filters.producer, filters.inStockOnly]);
 
-  // Fetch existing products to check sync status
-  const { data: existingProducts } = useQuery({
-    queryKey: ["/api/products"],
-    staleTime: 1 * 60 * 1000
+  // Which TME categories we already hold products from.
+  //
+  // This used to be GET /api/products with no filters — the ENTIRE products
+  // table, downloaded to the browser, to derive a set of category ids. Besides
+  // being a six-figure JSON payload, it failed silently: `|| []` turned a dead
+  // request into "nothing is synced", so Hide synced quietly stopped hiding
+  // and looked broken. The error is now surfaced instead.
+  const {
+    data: syncedCategoryData,
+    isError: syncedCategoriesError,
+    error: syncedCategoriesErrorObj,
+  } = useQuery<{ ok: boolean; categories: Array<{ categoryId: string; products: number }>; totalProducts: number }>({
+    queryKey: ["/api/tme/synced-categories"],
+    staleTime: 60_000,
+  });
+
+  // Only the symbols on the current grid page, not the whole catalogue.
+  const pageSymbols = ((productsData as any)?.products || []).map((p: TMEProduct) => p.Symbol).filter(Boolean);
+  const { data: knownSymbolsData } = useQuery<{ ok: boolean; known: string[] }>({
+    queryKey: ["/api/tme/known-symbols", pageSymbols.join(",")],
+    enabled: pageSymbols.length > 0,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const res = await fetch("/api/tme/known-symbols", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ symbols: pageSymbols }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
   });
 
   // TME API usage query - faster refetch during sync
@@ -418,10 +446,9 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   
   // Get synced category IDs from existing products (normalize to strings for comparison)
   const syncedCategoryIds = new Set(
-    ((existingProducts as any[]) || [])
-      .filter(p => p.tmeCategoryId)
-      .map(p => String(p.tmeCategoryId))
+    (syncedCategoryData?.categories ?? []).map((c) => String(c.categoryId)),
   );
+  const syncedProductTotal = syncedCategoryData?.totalProducts ?? 0;
   
   // Check if a category itself is directly synced (has products synced from it)
   const isCategoryDirectlySynced = (category: TMECategory): boolean => {
@@ -487,7 +514,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   // uses this to drop already-synced products from the grid so you only see
   // NEW products to add — the reliable, per-product meaning of "synced"
   // (category-level coverage isn't computable; see notes).
-  const syncedSymbols = new Set(((existingProducts as any[]) || []).map((p: any) => p.sku));
+  const syncedSymbols = new Set(knownSymbolsData?.known ?? []);
   const visibleProducts: TMEProduct[] = hideSyncedCategories
     ? products.filter((p: TMEProduct) => !syncedSymbols.has(p.Symbol))
     : products;
@@ -834,7 +861,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
   };
 
   const isProductSynced = (productSymbol: string): boolean => {
-    return (existingProducts as any)?.some((p: any) => p.sku === productSymbol) || false;
+    return syncedSymbols.has(productSymbol);
   };
 
   const getEnhancedProductInfo = (symbol: string): EnhancedProduct | null => {
@@ -1025,8 +1052,25 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                     </div>
                   </CardTitle>
                   <div className="flex items-center justify-between mt-2">
-                    <CardDescription className="text-xs">
+                    <CardDescription className="text-xs" data-testid="text-category-summary">
                       {categoryTree.length} main categories
+                      {/* Say what "synced" currently means. With an empty
+                          catalogue nothing CAN be hidden, which is correct but
+                          indistinguishable from a broken toggle unless the
+                          page says so. */}
+                      {syncedCategoriesError ? (
+                        <span className="block text-red-600">
+                          Sync status unavailable — {(syncedCategoriesErrorObj as Error)?.message || "request failed"}
+                        </span>
+                      ) : syncedCategoryIds.size === 0 ? (
+                        <span className="block text-amber-600">
+                          No products synced yet, so nothing can be hidden
+                        </span>
+                      ) : (
+                        <span className="block text-gray-400">
+                          {syncedCategoryIds.size} categories synced · {syncedProductTotal.toLocaleString()} products
+                        </span>
+                      )}
                     </CardDescription>
                     <div className="flex items-center gap-1.5">
                       <Checkbox
