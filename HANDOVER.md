@@ -822,7 +822,7 @@ GET /api/tme/catalogue?action=filter&maxWeightGrams=500&maxPrice=40
 GET /api/tme/catalogue?action=start&run=1  begin (whole catalogue)
 GET /api/tme/catalogue?action=start&rootCategoryId=<id>&run=1   one branch
 GET /api/tme/catalogue?action=status       cursor, totals, rejection breakdown
-GET /api/cron/tme-catalogue                the tick (:13, :43)
+GET /api/cron/tme-catalogue                the tick (every 5 min)
 ```
 
 **The filter is the point, not a safety rail.** Importing everything would be
@@ -865,9 +865,15 @@ which held the request open for the four minutes a slice takes — a background
 job that felt like a hung button, and the reason it was first reported as
 "clicked it, nothing happened". `run=1` still exists for debugging.
 
-Everything runs on the server: Vercel's cron works it at :13 and :43, so
+Everything runs on the server: Vercel's cron works it every five minutes, so
 closing the browser or shutting the computer down does not stop or lose it,
 and the cursor means it resumes rather than restarts.
+
+Throughput is the number of 250-second slices the cron grants, so the tick
+interval sets the pace almost linearly — it was twice an hour, which put
+Passives (372,878 products) at roughly 37 hours. A tick that overlaps a
+running slice is refused by the lease, costing one wasted invocation and
+nothing else, so a short interval is safe.
 
 **Progress is measured in PRODUCTS, not categories.** Leaf categories range
 from 1 product to 191,026, and the sweep walks them biggest-first, so
