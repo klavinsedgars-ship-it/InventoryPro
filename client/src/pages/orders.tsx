@@ -44,6 +44,7 @@ import {
   type LabelSettings,
 } from "@/lib/print-label";
 import { LabelPreview } from "@/components/label-preview";
+import { PtouchLabelPanel } from "@/components/ptouch-label-panel";
 import { Switch } from "@/components/ui/switch";
 import { previousStatus, revertLabel } from "@shared/order-status";
 import {
@@ -124,6 +125,7 @@ export function Orders({ user }: OrdersProps) {
   // order, so it is remembered rather than chosen again for every parcel.
   const [labelSettings, setLabelSettings] = useState<LabelSettings>(() => loadLabelSettings());
   const [printingLabel, setPrintingLabel] = useState(false);
+  const [browserPrintOpen, setBrowserPrintOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
 
   const statusFilter = activeTab === "to-pack" ? "new" : activeTab === "to-ship" ? "packed" : undefined;
@@ -955,74 +957,10 @@ export function Orders({ user }: OrdersProps) {
                 options={labelOptions}
               />
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-xs">Label stock</Label>
-                  <Select
-                    value={labelSettings.sizeId}
-                    onValueChange={(v) => updateLabelSettings({ sizeId: v })}
-                  >
-                    <SelectTrigger className="h-8" data-testid="select-label-size">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {[...QL_LABEL_SIZES, CUSTOM_LABEL_SIZE].map((size) => (
-                        <SelectItem key={size.id} value={size.id}>
-                          {size.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Rotate 90°</Label>
-                  <div className="flex items-center gap-2 h-8">
-                    <Switch
-                      checked={labelSettings.rotate}
-                      onCheckedChange={(v) => updateLabelSettings({ rotate: v })}
-                      data-testid="switch-label-rotate"
-                    />
-                    <span className="text-xs text-gray-500">
-                      Only if it comes out sideways
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {labelSettings.sizeId === CUSTOM_LABEL_SIZE_ID && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <Label className="text-xs">Width (mm)</Label>
-                    <Input
-                      type="number"
-                      min={10}
-                      max={300}
-                      step={1}
-                      className="h-8"
-                      value={labelSettings.customWidthMm}
-                      onChange={(e) =>
-                        updateLabelSettings({ customWidthMm: clampLabelMm(Number(e.target.value), 62) })
-                      }
-                      data-testid="input-label-width"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Height (mm)</Label>
-                    <Input
-                      type="number"
-                      min={10}
-                      max={300}
-                      step={1}
-                      className="h-8"
-                      value={labelSettings.customHeightMm}
-                      onChange={(e) =>
-                        updateLabelSettings({ customHeightMm: clampLabelMm(Number(e.target.value), 29) })
-                      }
-                      data-testid="input-label-height"
-                    />
-                  </div>
-                </div>
-              )}
+              <PtouchLabelPanel
+                orderId={selectedOrder.id}
+                orderRef={String(selectedOrder.marketplaceOrderId ?? selectedOrder.id)}
+              />
 
               <div className="text-xs text-gray-500 space-y-1">
                 <p>Order: #{selectedOrder.marketplaceOrderId}</p>
@@ -1034,9 +972,92 @@ export function Orders({ user }: OrdersProps) {
                 )}
               </div>
 
-              <div className="flex gap-2">
+              <Button variant="outline" className="w-full" onClick={copyAddress} data-testid="btn-dialog-copy-address">
+                <Copy className="w-4 h-4 mr-2" />
+                Copy address
+              </Button>
+
+              {/* Kept, but second: this machine's QL-800 refuses a browser
+                  print job whose media is not the roll on the spool. */}
+              <Collapsible open={browserPrintOpen} onOpenChange={setBrowserPrintOpen}>
+                <CollapsibleTrigger asChild>
+                  <Button variant="ghost" size="sm" className="w-full justify-between text-xs" data-testid="btn-toggle-browser-print">
+                    Print from the browser instead
+                    {browserPrintOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="space-y-3 pt-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Label stock</Label>
+                    <Select
+                      value={labelSettings.sizeId}
+                      onValueChange={(v) => updateLabelSettings({ sizeId: v })}
+                    >
+                      <SelectTrigger className="h-8" data-testid="select-label-size">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[...QL_LABEL_SIZES, CUSTOM_LABEL_SIZE].map((size) => (
+                          <SelectItem key={size.id} value={size.id}>
+                            {size.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Rotate 90°</Label>
+                    <div className="flex items-center gap-2 h-8">
+                      <Switch
+                        checked={labelSettings.rotate}
+                        onCheckedChange={(v) => updateLabelSettings({ rotate: v })}
+                        data-testid="switch-label-rotate"
+                      />
+                      <span className="text-xs text-gray-500">
+                        Only if it comes out sideways
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {labelSettings.sizeId === CUSTOM_LABEL_SIZE_ID && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Width (mm)</Label>
+                      <Input
+                        type="number"
+                        min={10}
+                        max={300}
+                        step={1}
+                        className="h-8"
+                        value={labelSettings.customWidthMm}
+                        onChange={(e) =>
+                          updateLabelSettings({ customWidthMm: clampLabelMm(Number(e.target.value), 62) })
+                        }
+                        data-testid="input-label-width"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Height (mm)</Label>
+                      <Input
+                        type="number"
+                        min={10}
+                        max={300}
+                        step={1}
+                        className="h-8"
+                        value={labelSettings.customHeightMm}
+                        onChange={(e) =>
+                          updateLabelSettings({ customHeightMm: clampLabelMm(Number(e.target.value), 29) })
+                        }
+                        data-testid="input-label-height"
+                      />
+                    </div>
+                  </div>
+                )}
+
                 <Button
-                  className="flex-1"
+                  className="w-full"
                   onClick={handlePrintLabel}
                   disabled={printingLabel}
                   data-testid="btn-dialog-print"
@@ -1046,31 +1067,28 @@ export function Orders({ user }: OrdersProps) {
                   ) : (
                     <Printer className="w-4 h-4 mr-2" />
                   )}
-                  Print to QL-800
+                  Print from the browser
                 </Button>
-                <Button variant="outline" className="flex-1" onClick={copyAddress} data-testid="btn-dialog-copy-address">
-                  <Copy className="w-4 h-4 mr-2" />
-                  Copy
-                </Button>
-              </div>
 
-              <div className="text-xs text-gray-500 leading-relaxed space-y-2 border-t pt-3">
-                <p>
-                  In the print dialog choose <span className="font-medium">Brother QL-800</span>, set
-                  margins to None and scale to 100%, and switch headers and footers off. The browser
-                  remembers that, so every label after the first is one click.
-                </p>
-                <p>
-                  <span className="font-medium text-gray-700">
-                    "The roll inside the machine does not match the one selected"
-                  </span>{" "}
-                  means the print dialog's <span className="font-medium">Paper size</span> is not the roll
-                  that is loaded — the browser cannot pick the roll, only that dialog can. Set the paper
-                  size to the loaded roll, set Label stock above to the same numbers, and turn Rotate 90°
-                  off, since it swaps the page the printer is asked for. On a Mac, "Print using system
-                  dialog…" shows Brother's own paper list.
-                </p>
-              </div>
+                <div className="text-xs text-gray-500 leading-relaxed space-y-2 border-t pt-3">
+                  <p>
+                    In the print dialog choose <span className="font-medium">Brother QL-800</span>, set
+                    margins to None and scale to 100%, and switch headers and footers off. The browser
+                    remembers that, so every label after the first is one click.
+                  </p>
+                  <p>
+                    <span className="font-medium text-gray-700">
+                      "The roll inside the machine does not match the one selected"
+                    </span>{" "}
+                    means the print dialog's <span className="font-medium">Paper size</span> is not the roll
+                    that is loaded — the browser cannot pick the roll, only that dialog can. Set the paper
+                    size to the loaded roll, set Label stock above to the same numbers, and turn Rotate 90°
+                    off, since it swaps the page the printer is asked for. On a Mac, "Print using system
+                    dialog…" shows Brother's own paper list.
+                  </p>
+                </div>
+                </CollapsibleContent>
+              </Collapsible>
             </div>
           )}
         </DialogContent>

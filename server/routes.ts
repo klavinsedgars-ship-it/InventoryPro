@@ -5,6 +5,7 @@ import { requireAuth } from "./middleware/auth";
 import { registerRepricingRoutes } from "./routes/repricing";
 import { registerMessageRoutes } from "./routes/messages";
 import { registerOrderRoutes } from "./routes/orders";
+import { registerLabelRoutes } from "./routes/labels";
 import { registerEbayConfigRoutes } from "./routes/ebay-config";
 import { registerTmeRoutes } from "./routes/tme";
 import { registerProductRoutes } from "./routes/products";
@@ -576,6 +577,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Get all orders with filtering
   registerOrderRoutes(app);
+  registerLabelRoutes(app);
 
   // ==========================================
   // MESSAGING SYSTEM ROUTES

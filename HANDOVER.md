@@ -853,6 +853,40 @@ The browser's print dialog still appears — it has to, since that is where the
 QL-800 is chosen. Set margins to None and scale to 100% once; the browser
 remembers the printer, so every label after the first is one click.
 
+### P-touch Editor is the only thing that drives this printer (2026-09-24)
+
+Matching the media did not rescue browser printing — on this Mac the QL-800
+only prints properly from P-touch Editor. Rather than keep fighting the
+driver, the CRM stopped trying to be the printer and became the thing that
+fills in the label.
+
+The operator uploads the `.lbx` they already print from, once. Every order then
+hands back that same file with the address merged in: media, margins, font,
+alignment and layout are the template's, untouched. Download, double-click,
+⌘P. Ticking Chrome's "Always open files of this type" on the first download
+makes it a single click from then on.
+
+- `server/zip.ts` — an `.lbx` is a ZIP of XML, so this reads and writes one.
+  About 150 lines against a dependency, a bundle entry and a supply chain;
+  verified both ways against the system `zip`/`unzip`.
+- `server/lbx-template.ts` — finds `label.xml`, replaces the text in the chosen
+  `<pt:data>` element and re-tags the `text:stringItem` runs that describe it.
+  The edit is textual on purpose: P-touch writes attributes this code knows
+  nothing about, and a parse-and-serialise round trip would quietly drop them.
+  Leaving stale `charLen` values behind is what makes P-touch open a label and
+  show nothing, so that is tested both ways.
+- `server/routes/labels.ts` — upload (parsed before it is stored, so a bad
+  template fails at the desk and not on the parcel), text-box selection when
+  the template has more than one, and `GET /api/orders/:id/label.lbx`.
+- The template lives in `marketplace_settings` as base64. Serverless has no
+  disk, and at a few tens of KB it is cheaper than a table.
+
+If a real template ever fails to parse, the error names every file inside the
+archive — that list is the one thing needed to work out what P-touch wrote.
+
+Browser printing is still there, one fold down, with the media guidance above.
+It costs nothing to keep and it is the fallback if the Mac is not to hand.
+
 ## TME Browser "Hide synced" (2026-09-24)
 
 Reported as broken. The toggle derives "synced" from products we hold, and it
