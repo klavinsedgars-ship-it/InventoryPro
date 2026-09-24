@@ -22,21 +22,54 @@ export interface LabelSize {
 }
 
 /**
- * The DK media a QL-800 takes. Sizes are written width × height as the label
- * comes out of the printer, which is also how P-touch lists them.
+ * The DK media a QL-800 takes, written width × height as the label leaves the
+ * printer — which is how P-touch lists them.
+ *
+ * These are only what the *document* is sized to. The printer's own media is
+ * chosen in the browser's print dialog, and a QL-800 reads the roll's ID off
+ * the spool: ask it for a size that is not the roll it can feel, and it
+ * refuses with "the roll of labels or tape inside the machine does not match
+ * the one selected in the application". So this list has to be matched to the
+ * paper size picked in that dialog, and both to the roll in the machine.
  */
 export const QL_LABEL_SIZES: LabelSize[] = [
-  { id: "62x29", name: "62 × 29 mm — small address", widthMm: 62, heightMm: 29 },
+  { id: "62x29", name: "62 × 29 mm — 62 mm roll", widthMm: 62, heightMm: 29 },
+  { id: "62x50", name: "62 × 50 mm — 62 mm roll", widthMm: 62, heightMm: 50 },
   { id: "62x100", name: "62 × 100 mm — shipping", widthMm: 62, heightMm: 100 },
-  { id: "62x50", name: "62 mm continuous, 50 mm long", widthMm: 62, heightMm: 50 },
+  { id: "29x62", name: "29 × 62 mm — small address", widthMm: 29, heightMm: 62 },
   { id: "29x90", name: "29 × 90 mm — standard address", widthMm: 29, heightMm: 90 },
   { id: "38x90", name: "38 × 90 mm — large address", widthMm: 38, heightMm: 90 },
+  { id: "17x54", name: "17 × 54 mm — multi-purpose", widthMm: 17, heightMm: 54 },
 ];
 
-/** What the shop actually has loaded. */
+/** What the shop had loaded when this was built. */
 export const DEFAULT_LABEL_SIZE_ID = "62x29";
 
+/**
+ * Anything else the print dialog offers. Brother's driver names media
+ * differently per platform and per roll, so rather than guess at a list, the
+ * operator can type the size the dialog shows.
+ */
+export const CUSTOM_LABEL_SIZE_ID = "custom";
+
+export const CUSTOM_LABEL_SIZE: LabelSize = {
+  id: CUSTOM_LABEL_SIZE_ID,
+  name: "Custom — type the size the print dialog shows",
+  widthMm: 62,
+  heightMm: 29,
+};
+
+/** Smaller than this is not a label; larger is not a QL roll. */
+export const MIN_LABEL_MM = 10;
+export const MAX_LABEL_MM = 300;
+
+export function clampLabelMm(value: number | null | undefined, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.min(MAX_LABEL_MM, Math.max(MIN_LABEL_MM, Math.round(value * 10) / 10));
+}
+
 export function labelSizeById(id: string | null | undefined): LabelSize {
+  if (id === CUSTOM_LABEL_SIZE_ID) return CUSTOM_LABEL_SIZE;
   return QL_LABEL_SIZES.find((s) => s.id === id)
     ?? QL_LABEL_SIZES.find((s) => s.id === DEFAULT_LABEL_SIZE_ID)!;
 }

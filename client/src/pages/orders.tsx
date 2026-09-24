@@ -29,10 +29,17 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { countryName, labelAddressLines } from "@shared/country-names";
-import { QL_LABEL_SIZES, labelSizeById, type LabelOptions } from "@shared/label-layout";
+import {
+  QL_LABEL_SIZES,
+  CUSTOM_LABEL_SIZE,
+  CUSTOM_LABEL_SIZE_ID,
+  clampLabelMm,
+  type LabelOptions,
+} from "@shared/label-layout";
 import {
   loadLabelSettings,
   saveLabelSettings,
+  labelOptionsFrom,
   printAddressLabel,
   type LabelSettings,
 } from "@/lib/print-label";
@@ -340,19 +347,14 @@ export function Orders({ user }: OrdersProps) {
   };
 
   /** The label the packing desk is set up for, plus this order's title. */
-  const labelOptions: LabelOptions = useMemo(() => {
-    const size = labelSizeById(labelSettings.sizeId);
-    return {
-      widthMm: size.widthMm,
-      heightMm: size.heightMm,
-      paddingMm: labelSettings.paddingMm,
-      rotate: labelSettings.rotate,
-      maxFontPt: labelSettings.maxFontPt,
-      title: selectedOrder
-        ? `Label ${selectedOrder.marketplaceOrderId}`
-        : "Shipping label",
-    };
-  }, [labelSettings, selectedOrder?.marketplaceOrderId]);
+  const labelOptions: LabelOptions = useMemo(
+    () =>
+      labelOptionsFrom(
+        labelSettings,
+        selectedOrder ? `Label ${selectedOrder.marketplaceOrderId}` : "Shipping label",
+      ),
+    [labelSettings, selectedOrder?.marketplaceOrderId],
+  );
 
   const updateLabelSettings = (patch: Partial<LabelSettings>) => {
     setLabelSettings((prev) => {
@@ -964,7 +966,7 @@ export function Orders({ user }: OrdersProps) {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {QL_LABEL_SIZES.map((size) => (
+                      {[...QL_LABEL_SIZES, CUSTOM_LABEL_SIZE].map((size) => (
                         <SelectItem key={size.id} value={size.id}>
                           {size.name}
                         </SelectItem>
@@ -986,6 +988,41 @@ export function Orders({ user }: OrdersProps) {
                   </div>
                 </div>
               </div>
+
+              {labelSettings.sizeId === CUSTOM_LABEL_SIZE_ID && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Width (mm)</Label>
+                    <Input
+                      type="number"
+                      min={10}
+                      max={300}
+                      step={1}
+                      className="h-8"
+                      value={labelSettings.customWidthMm}
+                      onChange={(e) =>
+                        updateLabelSettings({ customWidthMm: clampLabelMm(Number(e.target.value), 62) })
+                      }
+                      data-testid="input-label-width"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Height (mm)</Label>
+                    <Input
+                      type="number"
+                      min={10}
+                      max={300}
+                      step={1}
+                      className="h-8"
+                      value={labelSettings.customHeightMm}
+                      onChange={(e) =>
+                        updateLabelSettings({ customHeightMm: clampLabelMm(Number(e.target.value), 29) })
+                      }
+                      data-testid="input-label-height"
+                    />
+                  </div>
+                </div>
+              )}
 
               <div className="text-xs text-gray-500 space-y-1">
                 <p>Order: #{selectedOrder.marketplaceOrderId}</p>
@@ -1017,11 +1054,23 @@ export function Orders({ user }: OrdersProps) {
                 </Button>
               </div>
 
-              <p className="text-xs text-gray-400 leading-relaxed">
-                In the print dialog choose <span className="font-medium">Brother QL-800</span>, set margins
-                to None and scale to 100%, and switch headers and footers off. The browser remembers those
-                settings, so every label after the first is one click.
-              </p>
+              <div className="text-xs text-gray-500 leading-relaxed space-y-2 border-t pt-3">
+                <p>
+                  In the print dialog choose <span className="font-medium">Brother QL-800</span>, set
+                  margins to None and scale to 100%, and switch headers and footers off. The browser
+                  remembers that, so every label after the first is one click.
+                </p>
+                <p>
+                  <span className="font-medium text-gray-700">
+                    "The roll inside the machine does not match the one selected"
+                  </span>{" "}
+                  means the print dialog's <span className="font-medium">Paper size</span> is not the roll
+                  that is loaded — the browser cannot pick the roll, only that dialog can. Set the paper
+                  size to the loaded roll, set Label stock above to the same numbers, and turn Rotate 90°
+                  off, since it swaps the page the printer is asked for. On a Mac, "Print using system
+                  dialog…" shows Brother's own paper list.
+                </p>
+              </div>
             </div>
           )}
         </DialogContent>

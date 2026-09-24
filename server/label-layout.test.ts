@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
+  CUSTOM_LABEL_SIZE_ID,
+  MAX_LABEL_MM,
+  MIN_LABEL_MM,
   QL_LABEL_SIZES,
+  clampLabelMm,
   buildLabelHtml,
   escapeHtml,
   estimateFontPt,
@@ -32,9 +36,29 @@ describe("labelSizeById", () => {
     expect(shipping.heightMm).toBe(100);
   });
 
+  it("keeps the custom size out of the fallback path", () => {
+    // "custom" is not in the list, and must not quietly become 62 × 29 —
+    // the dimensions come from what the operator typed.
+    expect(labelSizeById(CUSTOM_LABEL_SIZE_ID).id).toBe(CUSTOM_LABEL_SIZE_ID);
+  });
+
   it("has no duplicate ids", () => {
     const ids = QL_LABEL_SIZES.map((s) => s.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe("clampLabelMm", () => {
+  it("keeps a typed size inside what a QL roll can be", () => {
+    expect(clampLabelMm(0, 62)).toBe(MIN_LABEL_MM);
+    expect(clampLabelMm(5000, 62)).toBe(MAX_LABEL_MM);
+    expect(clampLabelMm(62.44, 29)).toBe(62.4);
+  });
+
+  it("falls back when the field is empty or not a number", () => {
+    expect(clampLabelMm(Number.NaN, 62)).toBe(62);
+    expect(clampLabelMm(undefined, 29)).toBe(29);
+    expect(clampLabelMm(null, 29)).toBe(29);
   });
 });
 

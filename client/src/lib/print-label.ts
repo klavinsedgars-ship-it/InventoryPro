@@ -1,6 +1,10 @@
 import {
   buildLabelHtml,
+  clampLabelMm,
   estimateFontPt,
+  labelSizeById,
+  CUSTOM_LABEL_SIZE_ID,
+  DEFAULT_LABEL_SIZE_ID,
   type LabelOptions,
 } from "@shared/label-layout";
 
@@ -127,16 +131,35 @@ export interface LabelSettings {
   rotate: boolean;
   paddingMm: number;
   maxFontPt: number;
+  /** Used when sizeId is "custom" — the size the print dialog offers. */
+  customWidthMm: number;
+  customHeightMm: number;
 }
 
 const SETTINGS_KEY = "inventorypro.labelPrint.v1";
 
 export const DEFAULT_LABEL_SETTINGS: LabelSettings = {
-  sizeId: "62x29",
+  sizeId: DEFAULT_LABEL_SIZE_ID,
   rotate: false,
   paddingMm: 3,
   maxFontPt: 12,
+  customWidthMm: 62,
+  customHeightMm: 29,
 };
+
+/** The page to compose, from whatever the operator has chosen. */
+export function labelOptionsFrom(settings: LabelSettings, title?: string): LabelOptions {
+  const size = labelSizeById(settings.sizeId);
+  const custom = settings.sizeId === CUSTOM_LABEL_SIZE_ID;
+  return {
+    widthMm: custom ? clampLabelMm(settings.customWidthMm, 62) : size.widthMm,
+    heightMm: custom ? clampLabelMm(settings.customHeightMm, 29) : size.heightMm,
+    paddingMm: settings.paddingMm,
+    rotate: settings.rotate,
+    maxFontPt: settings.maxFontPt,
+    title,
+  };
+}
 
 export function loadLabelSettings(): LabelSettings {
   try {
@@ -154,6 +177,8 @@ export function loadLabelSettings(): LabelSettings {
         typeof parsed.maxFontPt === "number" && parsed.maxFontPt >= 5 && parsed.maxFontPt <= 40
           ? parsed.maxFontPt
           : DEFAULT_LABEL_SETTINGS.maxFontPt,
+      customWidthMm: clampLabelMm(parsed.customWidthMm, DEFAULT_LABEL_SETTINGS.customWidthMm),
+      customHeightMm: clampLabelMm(parsed.customHeightMm, DEFAULT_LABEL_SETTINGS.customHeightMm),
     };
   } catch {
     // Private windows and locked-down browsers throw on localStorage.

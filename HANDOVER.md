@@ -826,6 +826,29 @@ Verified in Chromium: the generated PDF's MediaBox is 62.1 × 29.0 mm, and
 German address fits at 11.25 pt (P-touch was set to 12), a deliberately
 overlong one wraps and settles at 8.5 pt.
 
+### The roll that isn't the paper (2026-09-24)
+
+First real print came back with Brother's driver refusing: *"The roll of labels
+or tape inside the machine does not match the one selected in the
+application"*, and a preview showing the address small and sideways in a
+corner.
+
+`@page { size: … }` does **not** choose the printer's media. It sizes the page
+box; the paper comes from the print dialog, and a QL-800 reads the roll's ID
+off the spool — ask it for media that is not the roll it can feel and it
+refuses outright. The small-in-a-corner preview is the same fact from the
+other side: a 62 × 29 mm page box placed on a larger sheet.
+
+So the three things have to agree: the roll in the machine, the **Paper size**
+in the print dialog, and **Label stock** in ours. The dialog now says that in
+those words, the stock list covers the common DK media, and a **Custom** entry
+takes typed millimetres for whatever Brother's driver happens to call the roll
+on that machine — the names differ by platform and by roll, so guessing at a
+list would have been worse than asking.
+
+Note that **Rotate 90° swaps the page size too**, so it can cause the mismatch
+by itself. It is the second thing to try, not the first.
+
 The browser's print dialog still appears — it has to, since that is where the
 QL-800 is chosen. Set margins to None and scale to 100% once; the browser
 remembers the printer, so every label after the first is one click.
