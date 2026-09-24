@@ -858,6 +858,14 @@ dies with it, which a branch of that size cannot survive. The confirm dialog
 names the leaf and product counts first, and says the filter will admit far
 fewer.
 
+**Progress is shown on the TME Browser** while a sweep is enabled: a banner
+with the branch name, sub-categories done, counts of added / already held /
+filtered out (with the top rejection reasons), and a Stop button. It polls only
+while a sweep is running. Without it the sweep is invisible — "Add all" returns
+instantly, the cron does the work minutes later, and the only evidence is the
+category counts quietly rising, which is exactly how it was first reported as
+"nothing happened".
+
 Run `dry-run` before `start`, always. The pass rate turns entirely on how many
 TME products publish a weight, which is not knowable without asking, and the
 projection it reports is an extrapolation from a few hundred products — an

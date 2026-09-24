@@ -201,6 +201,82 @@ function buildCategoryTree(categories: TMECategory[]): TMECategory[] {
 }
 
 /**
+ * Live state of the background catalogue sweep.
+ *
+ * Without this the sweep is invisible: "Add all" returns instantly, the cron
+ * does the work minutes later, and the only evidence is the category counts
+ * quietly rising. An operator has no way to tell a running import from one
+ * that never started, which is exactly how it was first reported.
+ *
+ * Polls only while a sweep is enabled, so an idle page costs nothing.
+ */
+function CatalogueSweepBanner({ onChanged }: { onChanged: () => void }) {
+  const { data } = useQuery<any>({
+    queryKey: ["/api/tme/catalogue?action=status"],
+    refetchInterval: (q) => ((q.state.data as any)?.progress?.enabled ? 5000 : 30000),
+  });
+  const [stopping, setStopping] = useState(false);
+  const p = data?.progress;
+  if (!p?.enabled) return null;
+
+  const done = p.categoriesDone ?? 0;
+  const total = p.categoriesTotal ?? 0;
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  const t = p.totals ?? {};
+  const rejected: Array<[string, number]> = Object.entries(t.filteredBy ?? {})
+    .filter(([, n]) => (n as number) > 0)
+    .sort((a, b) => (b[1] as number) - (a[1] as number))
+    .slice(0, 3) as Array<[string, number]>;
+
+  const stop = async () => {
+    setStopping(true);
+    try {
+      await fetch("/api/tme/catalogue?action=stop", { method: "POST", credentials: "include" });
+      onChanged();
+    } finally {
+      setStopping(false);
+    }
+  };
+
+  return (
+    <Card className="p-3 border-blue-200 bg-blue-50" data-testid="catalogue-sweep-banner">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="text-sm font-medium text-blue-900">
+          Importing {p.scope?.rootName ?? "the TME catalogue"} — {done.toLocaleString()} of{" "}
+          {total.toLocaleString()} sub-categories ({pct}%)
+        </div>
+        <Button size="sm" variant="outline" onClick={stop} disabled={stopping} data-testid="btn-stop-sweep">
+          {stopping ? "Stopping…" : "Stop"}
+        </Button>
+      </div>
+      <div className="mt-2 h-1.5 w-full rounded bg-blue-100 overflow-hidden">
+        <div className="h-full bg-blue-600 transition-all" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
+        <span className="px-1.5 py-0.5 rounded bg-green-100 text-green-800">
+          {(t.imported ?? 0).toLocaleString()} added
+        </span>
+        <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">
+          {(t.alreadyHad ?? 0).toLocaleString()} already held
+        </span>
+        {/* Why the filter refused things — otherwise a sweep that imports
+            almost nothing looks like a broken sweep rather than a strict one. */}
+        <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
+          {(t.filtered ?? 0).toLocaleString()} filtered out
+          {rejected.length > 0 ? ` (${rejected.map(([k, n]) => `${k} ${n}`).join(", ")})` : ""}
+        </span>
+        {(t.failed ?? 0) > 0 && (
+          <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-700">{t.failed.toLocaleString()} failed</span>
+        )}
+        <span className="px-1.5 py-0.5 rounded bg-white text-gray-500">
+          runs in the background · safe to close this page
+        </span>
+      </div>
+    </Card>
+  );
+}
+
+/**
  * "Add the whole branch" — start a scoped catalogue sweep for this category
  * and everything beneath it.
  *
@@ -248,7 +324,7 @@ function AddBranchButton({
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data?.error || `HTTP ${res.status}`);
       onStarted(
-        `Importing ${category.Name} in the background — ${data.progress?.categoriesTotal ?? 0} sub-categories queued.`,
+        `Importing ${category.Name} in the background — ${data.progress?.categoriesTotal ?? 0} sub-categories queued. Progress is shown at the top of this page.`,
       );
     } catch (err) {
       onStarted(`Could not start: ${(err as Error).message}`);
@@ -1110,6 +1186,7 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
         </div>
         <main className="p-4">
           <div className="space-y-6">
+            <CatalogueSweepBanner onChanged={() => queryClient.invalidateQueries({ queryKey: ["/api/tme/catalogue?action=status"] })} />
             {/* API Status and Sync Button - Moved to Header */}
 
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
