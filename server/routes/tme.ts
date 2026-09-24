@@ -870,7 +870,7 @@ export function registerTmeRoutes(app: Express): void {
           progress: await m.catalogueProgress(),
           ...(slice ? { slice } : {}),
           note:
-            "This runs on the server. The /api/cron/tme-catalogue tick (:13 and :43) works it while enabled and it disables itself when the last category is done — closing the browser, or the computer, does not stop it.",
+            "This runs on the server. The /api/cron/tme-catalogue tick works it while enabled and it disables itself when the last category is done — closing the browser, or the computer, does not stop it. Changing the filter affects products the sweep has NOT reached yet; anything already walked past keeps the verdict it got, so widening a filter mid-run means restarting the branch to pick those up.",
         });
       } catch (error) {
         res.status(500).json({ ok: false, error: (error as Error).message });
