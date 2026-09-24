@@ -219,9 +219,14 @@ function CatalogueSweepBanner({ onChanged }: { onChanged: () => void }) {
   const p = data?.progress;
   if (!p?.enabled) return null;
 
-  const done = p.categoriesDone ?? 0;
-  const total = p.categoriesTotal ?? 0;
-  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  // Percentage of PRODUCTS, not categories. Sub-categories here range from 1
+  // product to 191,026, so a category-based bar reads 0% for hours while the
+  // sweep works through the biggest one — which is exactly how this was
+  // reported as "not working".
+  const pct = p.percentComplete ?? 0;
+  const seen = p.totals?.discovered ?? 0;
+  const inBranch = p.productsInCategories ?? 0;
+  const cur = p.currentCategory;
   const t = p.totals ?? {};
   const rejected: Array<[string, number]> = Object.entries(t.filteredBy ?? {})
     .filter(([, n]) => (n as number) > 0)
@@ -242,8 +247,14 @@ function CatalogueSweepBanner({ onChanged }: { onChanged: () => void }) {
     <Card className="p-3 border-blue-200 bg-blue-50" data-testid="catalogue-sweep-banner">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="text-sm font-medium text-blue-900">
-          Importing {p.scope?.rootName ?? "the TME catalogue"} — {done.toLocaleString()} of{" "}
-          {total.toLocaleString()} sub-categories ({pct}%)
+          Importing {p.scope?.rootName ?? "the TME catalogue"} — {seen.toLocaleString()} of{" "}
+          {inBranch.toLocaleString()} products checked ({pct}%)
+          {cur && (
+            <span className="block text-xs font-normal text-blue-700">
+              now: {cur.name} ({cur.products.toLocaleString()} products), page {cur.page} · sub-category{" "}
+              {(p.categoriesDone ?? 0) + 1} of {(p.categoriesTotal ?? 0).toLocaleString()}
+            </span>
+          )}
         </div>
         <Button size="sm" variant="outline" onClick={stop} disabled={stopping} data-testid="btn-stop-sweep">
           {stopping ? "Stopping…" : "Stop"}

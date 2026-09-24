@@ -284,12 +284,24 @@ export async function catalogueProgress(): Promise<{
   categoriesTotal: number;
   categoriesDone: number;
   productsInCategories: number;
+  /**
+   * Percentage of the branch's PRODUCTS looked at, which is the only honest
+   * measure here. Categories range from 1 product to 191,026, so
+   * categoriesDone sits at 0 for hours while the sweep grinds through the
+   * largest one — accurate, and completely useless as a progress bar.
+   */
+  percentComplete: number;
+  /** What it is working on right now, so the display is visibly alive. */
+  currentCategory: { name: string; index: number; page: number; products: number } | null;
   totals: CatalogueTotals;
   tmeProductsHeld: number;
 }> {
   const categories = await readJson<LeafCategory[]>("catalogue_categories", []);
   const cursor = await readJson<Cursor>("catalogue_cursor", { categoryIndex: 0, page: 1 });
   const held = await storage.getTmeProductCount().catch(() => 0);
+  const totals = await readJson<CatalogueTotals>("catalogue_totals", emptyTotals());
+  const productsInCategories = categories.reduce((sum, c) => sum + (c.count || 0), 0);
+  const current = categories[cursor.categoryIndex] ?? null;
   return {
     enabled: await isCatalogueSweepEnabled(),
     scope: await getCatalogueScope(),
@@ -297,8 +309,15 @@ export async function catalogueProgress(): Promise<{
     cursor,
     categoriesTotal: categories.length,
     categoriesDone: Math.min(cursor.categoryIndex, categories.length),
-    productsInCategories: categories.reduce((sum, c) => sum + (c.count || 0), 0),
-    totals: await readJson<CatalogueTotals>("catalogue_totals", emptyTotals()),
+    productsInCategories,
+    percentComplete:
+      productsInCategories > 0
+        ? Math.min(100, Math.round((totals.discovered / productsInCategories) * 1000) / 10)
+        : 0,
+    currentCategory: current
+      ? { name: current.name, index: cursor.categoryIndex, page: cursor.page, products: current.count }
+      : null,
+    totals,
     tmeProductsHeld: held,
   };
 }

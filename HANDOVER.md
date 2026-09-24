@@ -869,9 +869,17 @@ Everything runs on the server: Vercel's cron works it at :13 and :43, so
 closing the browser or shutting the computer down does not stop or lose it,
 and the cursor means it resumes rather than restarts.
 
-**Progress is shown on the TME Browser** while a sweep is enabled: a banner
-with the branch name, sub-categories done, counts of added / already held /
-filtered out (with the top rejection reasons), and a Stop button. It polls only
+**Progress is measured in PRODUCTS, not categories.** Leaf categories range
+from 1 product to 191,026, and the sweep walks them biggest-first, so
+`categoriesDone` sits at 0 for hours while it grinds through the largest one.
+That is accurate and useless: it read "0 of 122 sub-categories (0%)" two hours
+into a run that had already checked 20,100 products, and was reported as
+broken. The bar now uses `discovered / productsInCategories` and names the
+category and page it is on, so it is visibly alive.
+
+**The banner on the TME Browser** shows that bar, the branch name, counts of
+added / already held / filtered out (with the top rejection reasons), and a
+Stop button. It polls only
 while a sweep is running. Without it the sweep is invisible — "Add all" returns
 instantly, the cron does the work minutes later, and the only evidence is the
 category counts quietly rising, which is exactly how it was first reported as
