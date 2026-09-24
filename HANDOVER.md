@@ -816,9 +816,11 @@ kill-switch `'ebay'/'catalogue_sweep'`, lease, resumable cursor
 (`{categoryIndex, page}`), self-disabling.
 
 ```
+GET /api/tme/catalogue?action=branch&rootCategoryId=<id>   size a branch
 GET /api/tme/catalogue?action=dry-run      what the filter admits — writes NOTHING
 GET /api/tme/catalogue?action=filter&maxWeightGrams=500&maxPrice=40
-GET /api/tme/catalogue?action=start&run=1  begin
+GET /api/tme/catalogue?action=start&run=1  begin (whole catalogue)
+GET /api/tme/catalogue?action=start&rootCategoryId=<id>&run=1   one branch
 GET /api/tme/catalogue?action=status       cursor, totals, rejection breakdown
 GET /api/cron/tme-catalogue                the tick (:13, :43)
 ```
@@ -845,6 +847,16 @@ Three things worth knowing:
   but only 2–4/sec for price/stock, so the sweep pages a category for symbols
   only, drops the ones already in `products`, and pays for detail exclusively
   on what is new.
+
+**"Add all" on a category row** (TME Browser) starts a sweep scoped to that
+branch — every leaf beneath the node, expanded server-side from `ParentId`.
+That is the fast path an operator actually wants: "Fuses and Circuit Breakers"
+is 53,104 products across eleven sub-trees, and the alternative is opening each
+one and selecting its products by hand. It is a background job on purpose —
+the browser-driven sync the product grid uses pages through the open tab and
+dies with it, which a branch of that size cannot survive. The confirm dialog
+names the leaf and product counts first, and says the filter will admit far
+fewer.
 
 Run `dry-run` before `start`, always. The pass rate turns entirely on how many
 TME products publish a weight, which is not knowable without asking, and the

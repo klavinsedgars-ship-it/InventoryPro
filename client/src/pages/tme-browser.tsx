@@ -200,6 +200,77 @@ function buildCategoryTree(categories: TMECategory[]): TMECategory[] {
   return rootCategories;
 }
 
+/**
+ * "Add the whole branch" — start a scoped catalogue sweep for this category
+ * and everything beneath it.
+ *
+ * Exists because the alternative is opening every sub-sub-category in turn and
+ * selecting its products by hand: "Fuses and Circuit Breakers" is 53,104
+ * products across eleven sub-trees, and nobody is clicking through that.
+ *
+ * Deliberately a BACKGROUND job rather than the browser-driven sync the grid
+ * uses. That one pages products through this tab and dies if it is closed;
+ * a branch of this size needs something that survives, resumes, and applies
+ * the ingest filter so the import is not simply everything.
+ */
+function AddBranchButton({
+  category,
+  onStarted,
+}: {
+  category: TMECategory;
+  onStarted: (message: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const count = category.ProductCount ?? 0;
+
+  const start = async (e: React.MouseEvent) => {
+    // The row itself expands/selects; this must not do both.
+    e.stopPropagation();
+    if (busy) return;
+    setBusy(true);
+    try {
+      const describe = await fetch(
+        `/api/tme/catalogue?action=branch&rootCategoryId=${encodeURIComponent(category.CategoryId)}`,
+        { credentials: "include" },
+      ).then((r) => r.json());
+      const branch = describe?.branch;
+      const ok = window.confirm(
+        `Import "${category.Name}" and everything under it?\n\n` +
+          `${branch?.leafCategories ?? "?"} sub-categories · ${(branch?.products ?? count).toLocaleString()} products at TME\n\n` +
+          `Runs in the background and applies the ingest filter (price, weight, stock, image), so far fewer than that will actually be added. ` +
+          `You can close this page; progress is on the Operations page.`,
+      );
+      if (!ok) return;
+      const res = await fetch(
+        `/api/tme/catalogue?action=start&rootCategoryId=${encodeURIComponent(category.CategoryId)}&run=1`,
+        { method: "POST", credentials: "include" },
+      );
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      onStarted(
+        `Importing ${category.Name} in the background — ${data.progress?.categoriesTotal ?? 0} sub-categories queued.`,
+      );
+    } catch (err) {
+      onStarted(`Could not start: ${(err as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={start}
+      disabled={busy}
+      title={`Import all ${count.toLocaleString()} products under ${category.Name}`}
+      className="px-1.5 py-0 text-[10px] rounded border border-blue-200 text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+      data-testid={`btn-add-branch-${category.CategoryId}`}
+    >
+      {busy ? "…" : "Add all"}
+    </button>
+  );
+}
+
 export default function TMEBrowser({ user }: TMEBrowserProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>("");
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
@@ -1162,6 +1233,12 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                       </Badge>
                                     )}
                                     {hasChildren && (
+                                      <AddBranchButton
+                                        category={mainCategory}
+                                        onStarted={(message) => toast({ title: "Catalogue import", description: message })}
+                                      />
+                                    )}
+                                    {hasChildren && (
                                       isExpanded ? (
                                         <ChevronDown className="h-4 w-4 text-gray-400" />
                                       ) : (
@@ -1218,6 +1295,12 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                                   <Badge variant="outline" className="text-[9px] px-1 py-0 h-4">
                                                     {subCategory.ProductCount.toLocaleString()}
                                                   </Badge>
+                                                )}
+                                                {subHasChildren && (
+                                                  <AddBranchButton
+                                                    category={subCategory}
+                                                    onStarted={(message) => toast({ title: "Catalogue import", description: message })}
+                                                  />
                                                 )}
                                                 {subHasChildren && (
                                                   subIsExpanded ? (

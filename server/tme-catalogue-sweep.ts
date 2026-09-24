@@ -47,6 +47,19 @@ interface LeafCategory {
   count: number;
 }
 
+interface RawCategory {
+  id: string;
+  name: string;
+  count: number;
+  parentId: string | null;
+}
+
+/** Restrict a sweep to one branch of the tree, or null for the whole thing. */
+export interface CatalogueScope {
+  rootCategoryId: string | null;
+  rootName: string | null;
+}
+
 export interface CatalogueTotals {
   discovered: number;
   alreadyHad: number;
@@ -141,21 +154,98 @@ function numOrNull(v: unknown): number | null {
  * Cached in settings for the life of a sweep: the tree is thousands of nodes
  * and does not change during a run.
  */
-export async function loadLeafCategories(refresh = false): Promise<LeafCategory[]> {
+async function loadRawCategories(refresh = false): Promise<RawCategory[]> {
+  if (!refresh) {
+    const cached = await readJson<RawCategory[]>("catalogue_tree", []);
+    if (cached.length > 0) return cached;
+  }
+  const all = await tmeApi.getAllCategories();
+  const raw: RawCategory[] = all.map((c) => ({
+    id: String(c.CategoryId),
+    name: c.Name,
+    count: c.ProductCount ?? 0,
+    parentId: c.ParentId ? String(c.ParentId) : null,
+  }));
+  await setSetting("catalogue_tree", JSON.stringify(raw));
+  return raw;
+}
+
+/**
+ * Every category beneath `rootId`, inclusive — the branch an operator means
+ * when they point at "Fuses and Circuit Breakers" rather than its eleven
+ * sub-categories and their sub-categories.
+ */
+function descendantsOf(all: RawCategory[], rootId: string): Set<string> {
+  const byParent = new Map<string, RawCategory[]>();
+  for (const c of all) {
+    if (!c.parentId) continue;
+    const list = byParent.get(c.parentId) ?? [];
+    list.push(c);
+    byParent.set(c.parentId, list);
+  }
+  const out = new Set<string>([rootId]);
+  const queue = [rootId];
+  while (queue.length) {
+    const id = queue.pop()!;
+    for (const child of byParent.get(id) ?? []) {
+      // Guard a malformed tree: a cycle must not hang the walk.
+      if (out.has(child.id)) continue;
+      out.add(child.id);
+      queue.push(child.id);
+    }
+  }
+  return out;
+}
+
+export async function getCatalogueScope(): Promise<CatalogueScope> {
+  return readJson<CatalogueScope>("catalogue_scope", { rootCategoryId: null, rootName: null });
+}
+
+/**
+ * Leaf categories the sweep should walk, honouring the current scope.
+ *
+ * Leaves only, because TME reports `TotalProducts` on parents INCLUSIVE of
+ * their children: walking every node would fetch most of the branch several
+ * times over and make the progress total meaningless.
+ */
+export async function loadLeafCategories(refresh = false, scope?: CatalogueScope): Promise<LeafCategory[]> {
   if (!refresh) {
     const cached = await readJson<LeafCategory[]>("catalogue_categories", []);
     if (cached.length > 0) return cached;
   }
-  const all = await tmeApi.getAllCategories();
-  const parents = new Set(all.map((c) => c.ParentId).filter((p): p is string => !!p));
+  const all = await loadRawCategories(refresh);
+  const parents = new Set(all.map((c) => c.parentId).filter((p): p is string => !!p));
+  const effective = scope ?? (await getCatalogueScope());
+  const inScope = effective.rootCategoryId ? descendantsOf(all, effective.rootCategoryId) : null;
+
   const leaves = all
-    .filter((c) => !parents.has(String(c.CategoryId)))
-    .map((c) => ({ id: String(c.CategoryId), name: c.Name, count: c.ProductCount ?? 0 }))
+    .filter((c) => !parents.has(c.id))
+    .filter((c) => !inScope || inScope.has(c.id))
+    .map((c) => ({ id: c.id, name: c.name, count: c.count }))
     // Biggest first: if a sweep is stopped early, it will have covered the
     // most of the catalogue it could in the time it had.
     .sort((a, b) => b.count - a.count);
   await setSetting("catalogue_categories", JSON.stringify(leaves));
   return leaves;
+}
+
+/** Name and leaf/product totals for a branch, without starting anything. */
+export async function describeBranch(rootCategoryId: string): Promise<{
+  rootCategoryId: string;
+  rootName: string | null;
+  leafCategories: number;
+  products: number;
+}> {
+  const all = await loadRawCategories();
+  const ids = descendantsOf(all, rootCategoryId);
+  const parents = new Set(all.map((c) => c.parentId).filter((p): p is string => !!p));
+  const leaves = all.filter((c) => ids.has(c.id) && !parents.has(c.id));
+  return {
+    rootCategoryId,
+    rootName: all.find((c) => c.id === rootCategoryId)?.name ?? null,
+    leafCategories: leaves.length,
+    products: leaves.reduce((sum, c) => sum + (c.count || 0), 0),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -166,9 +256,10 @@ export async function isCatalogueSweepEnabled(): Promise<boolean> {
   return (await getSetting("catalogue_sweep")) === "on";
 }
 
-export async function setCatalogueSweepEnabled(on: boolean): Promise<void> {
+export async function setCatalogueSweepEnabled(on: boolean, scope?: CatalogueScope): Promise<void> {
   await setSetting("catalogue_sweep", on ? "on" : "off");
   if (on) {
+    await setSetting("catalogue_scope", JSON.stringify(scope ?? { rootCategoryId: null, rootName: null }));
     await setSetting("catalogue_cursor", JSON.stringify({ categoryIndex: 0, page: 1 } satisfies Cursor));
     await setSetting("catalogue_totals", JSON.stringify(emptyTotals()));
   }
@@ -187,6 +278,7 @@ function emptyTotals(): CatalogueTotals {
 
 export async function catalogueProgress(): Promise<{
   enabled: boolean;
+  scope: CatalogueScope;
   filter: IngestFilter;
   cursor: Cursor;
   categoriesTotal: number;
@@ -200,6 +292,7 @@ export async function catalogueProgress(): Promise<{
   const held = await storage.getTmeProductCount().catch(() => 0);
   return {
     enabled: await isCatalogueSweepEnabled(),
+    scope: await getCatalogueScope(),
     filter: await getIngestFilter(),
     cursor,
     categoriesTotal: categories.length,

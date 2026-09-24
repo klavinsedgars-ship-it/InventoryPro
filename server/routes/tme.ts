@@ -791,8 +791,16 @@ export function registerTmeRoutes(app: Express): void {
         const { withLease, describeRefusal } = await import("../job-lease");
         const { leaseStore } = await import("../storage");
         const action = String(req.query.action ?? req.body?.action ?? "status").trim();
-        if (!["status", "dry-run", "filter", "start", "stop"].includes(action)) {
-          return res.status(400).json({ ok: false, error: "pass ?action=status|dry-run|filter|start|stop" });
+        if (!["status", "branch", "dry-run", "filter", "start", "stop"].includes(action)) {
+          return res.status(400).json({ ok: false, error: "pass ?action=status|branch|dry-run|filter|start|stop" });
+        }
+
+        if (action === "branch") {
+          const rootCategoryId = String(req.query.rootCategoryId ?? req.body?.rootCategoryId ?? "").trim();
+          if (!rootCategoryId) {
+            return res.status(400).json({ ok: false, error: "pass rootCategoryId" });
+          }
+          return res.json({ ok: true, action, branch: await m.describeBranch(rootCategoryId) });
         }
 
         if (action === "dry-run") {
@@ -818,10 +826,18 @@ export function registerTmeRoutes(app: Express): void {
         }
 
         if (action === "start") {
+          // Optional branch scope: "add this whole category" rather than the
+          // whole of TME. The id is a parent node; the sweep expands it to
+          // every leaf beneath it.
+          const rootCategoryId = String(req.query.rootCategoryId ?? req.body?.rootCategoryId ?? "").trim() || null;
+          const scope = rootCategoryId
+            ? { rootCategoryId, rootName: (await m.describeBranch(rootCategoryId)).rootName }
+            : { rootCategoryId: null, rootName: null };
+          await m.setCatalogueSweepEnabled(true, scope);
           // Refresh the category tree on a fresh start: a stale cached tree
-          // would walk a catalogue shape that no longer exists.
-          await m.loadLeafCategories(true);
-          await m.setCatalogueSweepEnabled(true);
+          // would walk a catalogue shape that no longer exists. Done AFTER the
+          // scope is stored, so the cached leaf list is the scoped one.
+          await m.loadLeafCategories(true, scope);
         }
         if (action === "stop") await m.setCatalogueSweepEnabled(false);
 
