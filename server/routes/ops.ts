@@ -232,6 +232,37 @@ export function registerOpsRoutes(app: Express) {
     }
   });
 
+  /**
+   * Why the ramp queue is the size it is, rule by rule.
+   *
+   * A GET so it can be opened in the browser when the dashboard says nothing
+   * and the operator needs an answer rather than another button.
+   */
+  app.get("/api/ops/list-ramp/funnel", requireAuth, async (_req, res) => {
+    try {
+      const range = await getRampPriceRange();
+      const funnel = await storage.getListingCandidateFunnel(range);
+      const worst = [...funnel.stages].sort((a, b) => b.removed - a.removed)[0];
+      res.json({
+        ok: true,
+        priceBand: range,
+        ...funnel,
+        verdict:
+          funnel.candidates > 0
+            ? `${funnel.candidates} products are ready to list.`
+            : worst
+              ? `Nothing to list. The biggest exclusion is "${worst.name}", which removes ${worst.removed.toLocaleString()} products.`
+              : "Nothing to list, and no rule removed anything — the products table is empty.",
+        bandAdvice:
+          funnel.blockedByBand && funnel.blockedByBand.count > 0
+            ? `${funnel.blockedByBand.count.toLocaleString()} products pass every rule except the price band (their sale prices run ${funnel.blockedByBand.minPrice}–${funnel.blockedByBand.maxPrice}, median ${funnel.blockedByBand.medianPrice}). Widen the band on the Operations page to include them.`
+            : null,
+      });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  });
+
   app.post("/api/ops/list-ramp/preview", requireAuth, async (_req, res) => {
     try {
       // Compute inline (no internal HTTP hop) — a server-to-server fetch to
@@ -244,12 +275,17 @@ export function registerOpsRoutes(app: Express) {
         storage.getListingCandidateCount(range),
         storage.getListingBlockedByMissingImageCount(range),
       ]);
+      // When the queue is empty, "0 candidates" is not an answer — eleven
+      // rules are ANDed together and any one of them can empty it. The funnel
+      // says which, and it walks the same conditions the query does.
+      const funnel = totalCandidatesRemaining === 0 ? await storage.getListingCandidateFunnel(range) : null;
       res.json({
         success: true,
         dryRun: true,
         priceRange: range,
         wouldPublishNow: candidates.length,
         totalCandidatesRemaining,
+        funnel,
         // Excluded, not failing: eBay refuses an item with no image.
         blockedNoImage,
         sample: candidates.map((p: any) => ({

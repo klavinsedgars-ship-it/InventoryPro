@@ -1273,47 +1273,127 @@ export class DatabaseStorage implements IStorage {
   // load). Eligible-to-list products. Optional sale-price band (min/max,
   // inclusive) lets the ramp target a price range. salePrice is the eBay
   // list price.
-  private listingCandidateConds(opts?: { minPrice?: number; maxPrice?: number }) {
+  /**
+   * The ramp's candidate rules, one labelled condition at a time.
+   *
+   * Labelled because "the ramp shows no products" is otherwise unanswerable:
+   * eleven conditions are ANDed together and any one of them can empty the
+   * queue. The funnel below counts what each one removes, and it walks THESE
+   * stages, so the diagnosis cannot drift away from the real query.
+   */
+  private listingCandidateStages(opts?: { minPrice?: number; maxPrice?: number }) {
     const maxAttempts = Math.max(1, Number(process.env.EBAY_LIST_MAX_ATTEMPTS) || 3);
-    const conds = [
+    const stages: Array<{ name: string; cond: any }> = [
       // The supplier allowlist is the quarantine boundary (see
       // LISTING_SUPPLIERS in ramp-config.ts) — was eq(supplier, "TME") until
       // the Getic promotion step went live.
-      inArray(products.supplier, [...LISTING_SUPPLIERS]),
-      eq(products.listedOnEbay, false),
-      gte(products.stock, 1),
-      or(eq(products.excludeFromListing, false), isNull(products.excludeFromListing)),
+      { name: `supplier is listable (${[...LISTING_SUPPLIERS].join(", ")})`, cond: inArray(products.supplier, [...LISTING_SUPPLIERS]) },
+      { name: "not already listed on eBay", cond: eq(products.listedOnEbay, false) },
+      { name: "stock at least 1", cond: gte(products.stock, 1) },
+      { name: "not excluded from listing", cond: or(eq(products.excludeFromListing, false), isNull(products.excludeFromListing)) },
       // Skip products we auto-ended for being out of stock — sync-chunk
       // re-publishes their existing offer when stock returns, so the ramp
       // must not create a parallel offer for the same SKU.
-      or(isNull(products.ebayListingStatus), ne(products.ebayListingStatus, "ended_oos")),
+      { name: "not auto-ended for being out of stock", cond: or(isNull(products.ebayListingStatus), ne(products.ebayListingStatus, "ended_oos")) },
       // Park failing SKUs after N attempts so they stop wasting eBay quota
       // and starving fresh candidates. Operator can reset via the
       // /api/ebay/reset-list-attempts endpoint to retry.
-      lt(products.ebayListAttempts, maxAttempts),
+      { name: `fewer than ${maxAttempts} failed listing attempts`, cond: lt(products.ebayListAttempts, maxAttempts) },
       // A blocked product must never reach eBay again, whatever else its row
       // says — this is the guarantee the blocklist exists to provide.
-      sql`NOT EXISTS (SELECT 1 FROM blocked_products b WHERE b.code = upper(${products.sku}))`,
+      { name: "not on the blocklist", cond: sql`NOT EXISTS (SELECT 1 FROM blocked_products b WHERE b.code = upper(${products.sku}))` },
       // eBay rejects an inventory item with no image ("imageUrls darf nicht
       // Null oder leer sein"), so a product without one can never list. Excluded
       // here rather than attempted: the check is free and local, whereas letting
       // it through spends three eBay round-trips per product to be told the same
       // thing, three times, before it parks. The condition is re-evaluated every
       // run, so a product returns to the queue the moment sync gives it an image.
-      isNotNull(products.imageUrl),
-      ne(products.imageUrl, ""),
+      { name: "has an image", cond: and(isNotNull(products.imageUrl), ne(products.imageUrl, "")) },
       // Never list what TME will not sell us. These statuses mean the item is
       // unavailable in our country, withdrawn from the offer, blocked, or
       // orderable only by contacting their sales desk — any of them would
       // produce an order we cannot fulfil. NULL = never checked (pre-v2 rows).
-      sql`(
+      {
+        name: "TME will actually sell it",
+        cond: sql`(
         ${products.tmeProductStatus} IS NULL
         OR ${products.tmeProductStatus} !~ 'CANNOT_BE_ORDERED|NOT_IN_OFFER|PRODUCT_BLOCKED|ONLY_FOR_SPECIAL_ORDER|INVALID|DANGEROUS'
       )`,
+      },
     ];
-    if (opts?.minPrice != null) conds.push(gte(products.salePrice, String(opts.minPrice)));
-    if (opts?.maxPrice != null) conds.push(lte(products.salePrice, String(opts.maxPrice)));
-    return and(...conds);
+    // Last, so the funnel shows the band's cost separately from everything else.
+    if (opts?.minPrice != null) {
+      stages.push({ name: `sale price at least ${opts.minPrice}`, cond: gte(products.salePrice, String(opts.minPrice)) });
+    }
+    if (opts?.maxPrice != null) {
+      stages.push({ name: `sale price at most ${opts.maxPrice}`, cond: lte(products.salePrice, String(opts.maxPrice)) });
+    }
+    return stages;
+  }
+
+  private listingCandidateConds(opts?: { minPrice?: number; maxPrice?: number }) {
+    return and(...this.listingCandidateStages(opts).map((s) => s.cond));
+  }
+
+  /**
+   * Why the ramp queue is the size it is: what each rule removes, in order.
+   *
+   * An empty queue and a fully-listed catalogue look identical from the
+   * outside, and the difference is usually one rule — most often the price
+   * band, which is set once and then silently excludes every product a later
+   * import brings in.
+   */
+  async getListingCandidateFunnel(opts?: { minPrice?: number; maxPrice?: number }): Promise<{
+    totalProducts: number;
+    stages: Array<{ name: string; remaining: number; removed: number }>;
+    candidates: number;
+    /** Sale prices of rows that pass everything EXCEPT the band — where to set it. */
+    blockedByBand: { count: number; minPrice: number | null; maxPrice: number | null; medianPrice: number | null } | null;
+  }> {
+    const stages = this.listingCandidateStages(opts);
+    const [{ c: totalProducts }] = await db.select({ c: count() }).from(products);
+
+    const applied: any[] = [];
+    let previous = totalProducts;
+    const out: Array<{ name: string; remaining: number; removed: number }> = [];
+    for (const stage of stages) {
+      applied.push(stage.cond);
+      const [{ c }] = await db.select({ c: count() }).from(products).where(and(...applied));
+      out.push({ name: stage.name, remaining: c, removed: previous - c });
+      previous = c;
+    }
+
+    // Everything but the band, so the band's exclusions can be priced.
+    let blockedByBand: { count: number; minPrice: number | null; maxPrice: number | null; medianPrice: number | null } | null = null;
+    if (opts?.minPrice != null || opts?.maxPrice != null) {
+      try {
+      const withoutBand = this.listingCandidateStages({}).map((s) => s.cond);
+      const bandConds: any[] = [];
+      if (opts?.minPrice != null) bandConds.push(sql`${products.salePrice} < ${String(opts.minPrice)}`);
+      if (opts?.maxPrice != null) bandConds.push(sql`${products.salePrice} > ${String(opts.maxPrice)}`);
+      const rows: any = await db.execute(sql`
+        SELECT COUNT(*)::int AS n,
+               MIN(sale_price)::float AS min_price,
+               MAX(sale_price)::float AS max_price,
+               PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY sale_price)::float AS median_price
+        FROM products
+        WHERE ${and(...withoutBand)} AND (${sql.join(bandConds, sql` OR `)})
+      `);
+      const r = (rows.rows ?? rows)[0] ?? {};
+      blockedByBand = {
+        count: Number(r.n) || 0,
+        minPrice: r.min_price ?? null,
+        maxPrice: r.max_price ?? null,
+        medianPrice: r.median_price ?? null,
+      };
+      } catch {
+        // The price statistics are the nice-to-have; the funnel above is the
+        // answer, and it must not be lost to a percentile query.
+        blockedByBand = null;
+      }
+    }
+
+    return { totalProducts, stages: out, candidates: previous, blockedByBand };
   }
 
   async getListingCandidates(

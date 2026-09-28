@@ -445,6 +445,42 @@ export function OpsDashboard({ user, embedded = false }: OpsProps) {
                           <b>{preview.totalCandidatesRemaining}</b> total candidates remaining.
                           {" "}<span className="text-gray-400">Nothing was sent to eBay.</span>
                         </div>
+                        {/* "0 candidates" is not an answer: eleven rules are
+                            ANDed together and any one of them empties the
+                            queue. This says which, from the same conditions
+                            the query uses. */}
+                        {preview.funnel && (
+                          <div className="mb-3 rounded border border-amber-200 bg-amber-50 p-3">
+                            <p className="text-xs font-medium text-amber-900 mb-2">
+                              Nothing is ready to list. What each rule removes, from{" "}
+                              {preview.funnel.totalProducts.toLocaleString()} products:
+                            </p>
+                            <table className="w-full text-xs">
+                              <tbody>
+                                {preview.funnel.stages.map((st: any) => (
+                                  <tr key={st.name} className={st.removed > 0 ? "text-amber-900" : "text-amber-700/60"}>
+                                    <td className="py-0.5 pr-2">{st.name}</td>
+                                    <td className="py-0.5 text-right tabular-nums w-24">
+                                      {st.removed > 0 ? `−${st.removed.toLocaleString()}` : "—"}
+                                    </td>
+                                    <td className="py-0.5 text-right tabular-nums w-28 text-amber-700">
+                                      {st.remaining.toLocaleString()} left
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            {preview.funnel.blockedByBand?.count > 0 && (
+                              <p className="mt-2 text-xs text-amber-900">
+                                {preview.funnel.blockedByBand.count.toLocaleString()} products pass every rule except
+                                the price band ({preview.priceRange?.minPrice ?? "—"}–{preview.priceRange?.maxPrice ?? "—"} €).
+                                Their sale prices run {preview.funnel.blockedByBand.minPrice}–
+                                {preview.funnel.blockedByBand.maxPrice} €, median {preview.funnel.blockedByBand.medianPrice} € —
+                                widen the band above to include them.
+                              </p>
+                            )}
+                          </div>
+                        )}
                         <div className="overflow-x-auto border rounded">
                           <table className="w-full text-xs">
                             <thead className="bg-gray-50 text-gray-500">
