@@ -1349,6 +1349,8 @@ export class DatabaseStorage implements IStorage {
     candidates: number;
     /** Sale prices of rows that pass everything EXCEPT the band — where to set it. */
     blockedByBand: { count: number; minPrice: number | null; maxPrice: number | null; medianPrice: number | null } | null;
+    /** Of the rows the ramp skips as listed, how many actually carry a listing id. */
+    alreadyListed?: { total: number; withListingId: number; withoutListingId: number } | null;
   }> {
     const stages = this.listingCandidateStages(opts);
     const [{ c: totalProducts }] = await db.select({ c: count() }).from(products);
@@ -1393,7 +1395,33 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
-    return { totalProducts, stages: out, candidates: previous, blockedByBand };
+    // "Already listed" is the single biggest exclusion, and it is taken on
+    // trust from a boolean. A row marked listed that carries no eBay listing
+    // id is not listed anywhere — it is stuck, invisible to the ramp forever,
+    // and counted as success on the dashboard.
+    let alreadyListed: { total: number; withListingId: number; withoutListingId: number } | null = null;
+    try {
+      const [{ c: total }] = await db
+        .select({ c: count() })
+        .from(products)
+        .where(and(inArray(products.supplier, [...LISTING_SUPPLIERS]), eq(products.listedOnEbay, true)));
+      const [{ c: withId }] = await db
+        .select({ c: count() })
+        .from(products)
+        .where(
+          and(
+            inArray(products.supplier, [...LISTING_SUPPLIERS]),
+            eq(products.listedOnEbay, true),
+            isNotNull(products.ebayListingId),
+            ne(products.ebayListingId, ""),
+          ),
+        );
+      alreadyListed = { total, withListingId: withId, withoutListingId: total - withId };
+    } catch {
+      alreadyListed = null;
+    }
+
+    return { totalProducts, stages: out, candidates: previous, blockedByBand, alreadyListed };
   }
 
   async getListingCandidates(

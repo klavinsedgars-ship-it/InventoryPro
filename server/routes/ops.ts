@@ -253,6 +253,10 @@ export function registerOpsRoutes(app: Express) {
             : worst
               ? `Nothing to list. The biggest exclusion is "${worst.name}", which removes ${worst.removed.toLocaleString()} products.`
               : "Nothing to list, and no rule removed anything — the products table is empty.",
+        listedCheck:
+          funnel.alreadyListed && funnel.alreadyListed.withoutListingId > 0
+            ? `${funnel.alreadyListed.withoutListingId.toLocaleString()} of the ${funnel.alreadyListed.total.toLocaleString()} products the ramp skips as "already listed" carry no eBay listing id — they are not on eBay, and the ramp will never pick them up again. Reset them with /api/ebay/reset-list-attempts or the products page.`
+            : null,
         bandAdvice:
           funnel.blockedByBand && funnel.blockedByBand.count > 0
             ? `${funnel.blockedByBand.count.toLocaleString()} products pass every rule except the price band (their sale prices run ${funnel.blockedByBand.minPrice}–${funnel.blockedByBand.maxPrice}, median ${funnel.blockedByBand.medianPrice}). Widen the band on the Operations page to include them.`
