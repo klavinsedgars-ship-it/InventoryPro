@@ -1207,6 +1207,29 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
+  /**
+   * A random handful of products the DB believes are listed.
+   *
+   * Random, not the first N by id: the oldest rows are the ones most likely
+   * to have been ended long ago, and a sample taken from them would read as a
+   * catastrophe whatever the truth is.
+   */
+  async sampleListedProducts(n: number): Promise<Array<{ sku: string; ebayListingId: string | null; ebayOfferId: string | null; supplier: string | null }>> {
+    const r: any = await db.execute(sql`
+      SELECT sku, ebay_listing_id, ebay_offer_id, supplier
+      FROM products
+      WHERE listed_on_ebay = true
+      ORDER BY random()
+      LIMIT ${Math.max(1, Math.min(50, Math.floor(n)))}
+    `);
+    return ((r.rows ?? r) as any[]).map((x) => ({
+      sku: String(x.sku),
+      ebayListingId: x.ebay_listing_id ?? null,
+      ebayOfferId: x.ebay_offer_id ?? null,
+      supplier: x.supplier ?? null,
+    }));
+  }
+
   async getEbayListingStats(): Promise<{
     totalTme: number;
     listed: number;

@@ -35,16 +35,89 @@ export function registerEbayListingRoutes(app: Express) {
    * Read-only, and cheap enough to open in a browser. The repair is
    * /api/ebay/reconcile (dry run by default, ?apply=1 to write).
    */
-  app.get("/api/ebay/listing-count", requireAuth, async (_req, res) => {
+  app.get("/api/ebay/listing-count", requireAuth, async (req, res) => {
     try {
       const local = await storage.getListedStateBySupplier();
 
       let ebay: any;
       try {
         const page = await ebayApi.getMyActiveListings(1, 25);
-        ebay = { ok: true, activeListings: page.totalEntries, pagesOf25: page.totalPages };
+        ebay = {
+          ok: true,
+          activeListings: page.totalEntries,
+          pagesOf25: page.totalPages,
+          // GetMyeBaySelling's ActiveList does not return an unbounded count.
+          // Exactly 25,000 is the number to distrust: it is as likely to be
+          // the call's ceiling as the account's true total, and the two lead
+          // to opposite actions.
+          countMayBeCapped: page.totalEntries === 25000 || page.totalEntries % 25000 === 0,
+        };
       } catch (error) {
         ebay = { ok: false, error: (error as Error).message.slice(0, 300) };
+      }
+
+      // The account's own listing allowance. If it reads 25,000, the number
+      // above is the account being full rather than the API truncating.
+      let sellingLimit: any = null;
+      try {
+        const { ebayAccountApi } = await import("../ebay-account-api");
+        const r = await ebayAccountApi.getSellerLimitsWithUsage();
+        // Only eBay's half of that answer: the "itemsListed" it reports comes
+        // from the same local flag this endpoint exists to question.
+        sellingLimit = {
+          items: r.limits?.itemLimit ?? null,
+          value: r.limits?.valueLimit ?? null,
+          currency: r.limits?.currency ?? null,
+          raw: r.ebayApiResponse ?? null,
+          error: r.error ?? null,
+        };
+      } catch (error) {
+        sellingLimit = { error: (error as Error).message.slice(0, 200) };
+      }
+
+      /**
+       * Ask eBay about a random handful of the rows we think are listed.
+       *
+       * A count can be capped or stale; an offer lookup per SKU cannot. Twenty
+       * calls turn "169,253 or 25,000?" into a percentage, and the statuses
+       * say which way it failed: ENDED means eBay removed them, "no offer"
+       * means the offer itself is gone.
+       */
+      let sample: any = null;
+      const sampleSize = Math.min(50, Math.max(0, Number(req.query.sample) || 0));
+      if (sampleSize > 0) {
+        const rows = await storage.sampleListedProducts(sampleSize);
+        const statuses: Record<string, number> = {};
+        const checked: any[] = [];
+        for (const row of rows) {
+          try {
+            const offer = await ebayInventoryApi.getOfferBySku(row.sku);
+            const status = offer ? (offer.status ?? "unknown") : "no offer at eBay";
+            statuses[status] = (statuses[status] ?? 0) + 1;
+            checked.push({
+              sku: row.sku,
+              supplier: row.supplier,
+              dbListingId: row.ebayListingId,
+              ebayStatus: status,
+              ebayListingId: offer?.listingId ?? null,
+              listingIdMatches: offer?.listingId != null && offer.listingId === row.ebayListingId,
+            });
+          } catch (error) {
+            statuses["lookup failed"] = (statuses["lookup failed"] ?? 0) + 1;
+            checked.push({ sku: row.sku, error: (error as Error).message.slice(0, 120) });
+          }
+        }
+        const live = checked.filter((c) => String(c.ebayStatus).toUpperCase() === "PUBLISHED").length;
+        sample = {
+          size: rows.length,
+          statuses,
+          publishedShare: rows.length ? Math.round((live / rows.length) * 1000) / 10 : null,
+          projectedLive:
+            rows.length && local.totals.listed
+              ? Math.round((live / rows.length) * local.totals.listed)
+              : null,
+          checked,
+        };
       }
 
       const notes: string[] = [];
@@ -73,7 +146,17 @@ export function registerEbayListingRoutes(app: Express) {
         );
       }
 
-      res.json({ ok: true, ebay, db: local, notes });
+      if (sellingLimit?.items && ebay.ok && sellingLimit.items === ebay.activeListings) {
+        notes.push(
+          `The account's eBay listing allowance is ${sellingLimit.items.toLocaleString()} items and the active count equals it exactly — the account is full, and further publishes will be refused until listings end or the allowance is raised.`,
+        );
+      }
+      if (ebay.ok && ebay.countMayBeCapped) {
+        notes.push(
+          `eBay reported exactly ${ebay.activeListings.toLocaleString()} active listings, which is as likely to be this call's ceiling as a real total. Add ?sample=20 to ask eBay about twenty of our "listed" SKUs directly — that answer cannot be capped.`,
+        );
+      }
+      res.json({ ok: true, ebay, sellingLimit, sample, db: local, notes });
     } catch (error) {
       res.status(500).json({ ok: false, error: (error as Error).message });
     }
