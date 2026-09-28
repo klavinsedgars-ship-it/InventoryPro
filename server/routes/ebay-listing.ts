@@ -21,6 +21,64 @@ export function registerEbayListingRoutes(app: Express) {
   // it. Run this BEFORE any bulk re-listing after a database rebuild —
   // otherwise live listings are invisible to the sync (oversell risk) and
   // re-listing the same SKUs creates duplicates.
+  /**
+   * How many listings the account really has, against what the DB believes.
+   *
+   * One Trading API call: GetMyeBaySelling's ActiveList reports
+   * TotalNumberOfEntries, which is every live listing on the account whether
+   * it was created through the Inventory API or the old Trading API. That
+   * number is the truth; `listed_on_ebay` is only our record of it, and the
+   * ramp treats a true value as final — so a row marked listed that eBay has
+   * never heard of is removed from the queue permanently and counted as a
+   * success on the dashboard.
+   *
+   * Read-only, and cheap enough to open in a browser. The repair is
+   * /api/ebay/reconcile (dry run by default, ?apply=1 to write).
+   */
+  app.get("/api/ebay/listing-count", requireAuth, async (_req, res) => {
+    try {
+      const local = await storage.getListedStateBySupplier();
+
+      let ebay: any;
+      try {
+        const page = await ebayApi.getMyActiveListings(1, 25);
+        ebay = { ok: true, activeListings: page.totalEntries, pagesOf25: page.totalPages };
+      } catch (error) {
+        ebay = { ok: false, error: (error as Error).message.slice(0, 300) };
+      }
+
+      const notes: string[] = [];
+      if (ebay.ok) {
+        const gap = local.totals.listed - ebay.activeListings;
+        if (gap > 0) {
+          notes.push(
+            `The DB marks ${local.totals.listed.toLocaleString()} products as listed; eBay has ${ebay.activeListings.toLocaleString()} active listings. ${gap.toLocaleString()} rows claim a listing the account does not have — the ramp skips every one of them forever. /api/ebay/reconcile clears them (add ?apply=1 after reading the dry run).`,
+          );
+        } else if (gap < 0) {
+          notes.push(
+            `eBay has ${Math.abs(gap).toLocaleString()} more active listings than the DB knows about. Those listings get no stock or price updates from us, which is an oversell risk. /api/ebay/reconcile?apply=1 matches them back by SKU.`,
+          );
+        } else {
+          notes.push("The DB and eBay agree on the number of listings.");
+        }
+      }
+      if (local.totals.listedNoEvidence > 0) {
+        notes.push(
+          `${local.totals.listedNoEvidence.toLocaleString()} products are marked listed with no listing id, item id or offer id at all — there is nothing to reconcile them against except the SKU.`,
+        );
+      }
+      if (local.totals.listed > 0 && local.totals.distinctListingIds > 0 && local.totals.distinctListingIds < local.totals.withListingId) {
+        notes.push(
+          `${(local.totals.withListingId - local.totals.distinctListingIds).toLocaleString()} products share an eBay listing id with another product — an oversell risk, because stock for one SKU is pushed to a listing selling another.`,
+        );
+      }
+
+      res.json({ ok: true, ebay, db: local, notes });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: (error as Error).message });
+    }
+  });
+
   app.get("/api/ebay/reconcile", requireAuth, async (req, res) => {
     try {
       const { reconcileEbayListings } = await import("../ebay-reconcile");

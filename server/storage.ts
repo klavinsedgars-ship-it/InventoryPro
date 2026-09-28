@@ -1124,6 +1124,89 @@ export class DatabaseStorage implements IStorage {
   // an Inventory-API ebay_offer_id. Legacy Trading-API listings have only
   // ebay_item_id and are currently skipped, so this split tells us how many
   // changed products the cron can actually update on eBay vs silently skips.
+  /**
+   * What the DB believes about eBay, per supplier, with the evidence.
+   *
+   * `listed_on_ebay` is a boolean the ramp trusts absolutely: a true value
+   * removes the product from the queue for good. Counting it beside the ids
+   * that would prove it — listing id, item id, offer id — is the only way to
+   * tell a listed catalogue from a stuck one.
+   */
+  async getListedStateBySupplier(): Promise<{
+    bySupplier: Array<{
+      supplier: string;
+      total: number;
+      listed: number;
+      withListingId: number;
+      withItemId: number;
+      withOfferId: number;
+      listedNoEvidence: number;
+    }>;
+    totals: {
+      products: number;
+      listed: number;
+      withListingId: number;
+      withItemId: number;
+      withOfferId: number;
+      listedNoEvidence: number;
+      distinctListingIds: number;
+      distinctItemIds: number;
+    };
+  }> {
+    const r: any = await db.execute(sql`
+      SELECT COALESCE(supplier, '(none)') AS supplier,
+             COUNT(*)::int AS total,
+             COUNT(*) FILTER (WHERE listed_on_ebay = true)::int AS listed,
+             COUNT(*) FILTER (WHERE listed_on_ebay = true AND ebay_listing_id IS NOT NULL AND ebay_listing_id <> '')::int AS with_listing_id,
+             COUNT(*) FILTER (WHERE listed_on_ebay = true AND ebay_item_id IS NOT NULL AND ebay_item_id <> '')::int AS with_item_id,
+             COUNT(*) FILTER (WHERE listed_on_ebay = true AND ebay_offer_id IS NOT NULL AND ebay_offer_id <> '')::int AS with_offer_id,
+             COUNT(*) FILTER (
+               WHERE listed_on_ebay = true
+                 AND (ebay_listing_id IS NULL OR ebay_listing_id = '')
+                 AND (ebay_item_id IS NULL OR ebay_item_id = '')
+                 AND (ebay_offer_id IS NULL OR ebay_offer_id = '')
+             )::int AS listed_no_evidence
+      FROM products
+      GROUP BY 1
+      ORDER BY listed DESC
+    `);
+    const rows = (r.rows ?? r) as any[];
+    const bySupplier = rows.map((x) => ({
+      supplier: String(x.supplier),
+      total: Number(x.total) || 0,
+      listed: Number(x.listed) || 0,
+      withListingId: Number(x.with_listing_id) || 0,
+      withItemId: Number(x.with_item_id) || 0,
+      withOfferId: Number(x.with_offer_id) || 0,
+      listedNoEvidence: Number(x.listed_no_evidence) || 0,
+    }));
+
+    const d: any = await db.execute(sql`
+      SELECT COUNT(DISTINCT ebay_listing_id)::int AS listing_ids,
+             COUNT(DISTINCT ebay_item_id)::int AS item_ids
+      FROM products
+      WHERE listed_on_ebay = true
+    `);
+    const dist = (d.rows ?? d)[0] ?? {};
+
+    const sum = (k: keyof (typeof bySupplier)[number]) =>
+      bySupplier.reduce((n, x) => n + (x[k] as number), 0);
+
+    return {
+      bySupplier,
+      totals: {
+        products: sum("total"),
+        listed: sum("listed"),
+        withListingId: sum("withListingId"),
+        withItemId: sum("withItemId"),
+        withOfferId: sum("withOfferId"),
+        listedNoEvidence: sum("listedNoEvidence"),
+        distinctListingIds: Number(dist.listing_ids) || 0,
+        distinctItemIds: Number(dist.item_ids) || 0,
+      },
+    };
+  }
+
   async getEbayListingStats(): Promise<{
     totalTme: number;
     listed: number;
