@@ -875,6 +875,66 @@ symbols on the current grid page for the product list. The panel states which
 case it is in — an error, "no products synced yet, so nothing can be hidden",
 or "N categories synced · M products".
 
+## TME Browser showed nothing, and the sweep switched itself off (2026-09-28)
+
+Reported together, and they share a cause: **every TME failure in this code
+path had a substitute result instead of an error.**
+
+- `getAllCategories()` answered any failure with a hardcoded list of twenty
+  invented categories, with invented ids. Unlabelled, that is a working
+  category tree in which every category happens to be empty.
+- `getProductsByCategory()` answered a failure with a keyword search across
+  the whole catalogue — products from other categories, shown as this
+  category's — and if that came back empty, with fabricated `MOCK-xxx` rows,
+  in a screen where one click syncs a product into the CRM.
+- The grid threw away the server's reason (`throw new Error('Failed to fetch
+  products')`) and rendered "No products found" for a failed request.
+- The sweep skipped a category on any page error. So when TME stops
+  answering, it walks the entire leaf list a failure at a time, reaches the
+  end, calls itself finished and **disables itself** — having imported
+  nothing. `CatalogueSweepBanner` returns null for a disabled sweep, so the
+  banner disappears too, and the page ends up with no products, no banner and
+  no error.
+
+What changed:
+
+- No invented data. `getCategoriesWithSource()` reports `source: "tme" |
+  "fallback"`; `getAllCategoriesStrict()` throws instead, and the sweep uses
+  it — walking twenty made-up ids to completion was the whole failure. The
+  keyword and mock product generators are deleted; an empty category is empty
+  and a failure is thrown.
+- The browser says which it is: a red banner when the tree is the placeholder
+  (and it is never cached to localStorage), the real error plus a Retry in the
+  grid, and "TME returned no products for this category" only when that is
+  what happened.
+- The sweep pauses instead of burning the list: immediately on a 401/403/429
+  (TME's own words: "if we see high traffic we can cut the traffic"), else
+  after five consecutive failures, leaving the cursor and the sweep enabled.
+  Only a walk that reached the end counts as finished — `shared/catalogue-walk.ts`,
+  tested.
+- Every tick records `catalogue_last_run` (when, what it added, what stopped
+  it). The banner now shows the last tick, says when one failed, and says when
+  no tick has arrived for fifteen minutes — which is the cron not running, and
+  nothing a person could previously see.
+- An empty category list is never "done": it means the tree failed to load or
+  the branch matched nothing, and `?action=start` now refuses rather than
+  enabling a sweep with nothing to walk.
+- `/api/__system-check` gained the answers: category-tree source, the TME
+  daily-cap counter, a v2 probe (run whatever `TME_API_VERSION` says, because
+  the sweep uses v2 either way), and the sweep's cursor and last tick, each
+  with a verdict line.
+
+Two smaller things found on the way:
+
+- **A daily cap nobody set.** `api_usage_tracking.daily_limit` defaults to
+  10000 and the v1 client enforced the *stored* value, so a row carrying that
+  default refuses every TME call once a busy day crosses it. The configured
+  limit (`TME_DAILY_LIMIT`, default 0 = none) now wins and is written back.
+- **Settings reads were dragging the catalogue tree.** `getSetting` read every
+  `ebay` row, and that table holds the cached category tree — hundreds of KB
+  of JSON — so "is the sweep enabled?" fetched the whole catalogue shape, six
+  times per poll of the status endpoint. There is a single-row read now.
+
 ## TME catalogue sweep (2026-09-23)
 
 Getting TME products into `products` meant opening a category in the TME

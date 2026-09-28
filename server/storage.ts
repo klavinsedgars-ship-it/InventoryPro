@@ -127,6 +127,7 @@ export interface IStorage {
 
   // Marketplace Settings
   getMarketplaceSettings(marketplace: string): Promise<MarketplaceSettings[]>;
+  getMarketplaceSetting(marketplace: string, setting: string): Promise<string | undefined>;
   setMarketplaceSetting(setting: InsertMarketplaceSettings): Promise<MarketplaceSettings>;
 
   // Sync Logs
@@ -1562,6 +1563,22 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(marketplaceSettings).where(eq(marketplaceSettings.marketplace, marketplace));
   }
 
+  /**
+   * One setting, by name.
+   *
+   * The whole-marketplace read above is the wrong tool for a single flag: this
+   * table also holds the cached TME category tree, several hundred kilobytes
+   * of JSON, so "is the sweep enabled?" was dragging the entire catalogue
+   * shape out of Neon — six times per poll of the status endpoint.
+   */
+  async getMarketplaceSetting(marketplace: string, setting: string): Promise<string | undefined> {
+    const [row] = await db
+      .select({ value: marketplaceSettings.value })
+      .from(marketplaceSettings)
+      .where(and(eq(marketplaceSettings.marketplace, marketplace), eq(marketplaceSettings.setting, setting)));
+    return row?.value;
+  }
+
   async setMarketplaceSetting(insertSetting: InsertMarketplaceSettings): Promise<MarketplaceSettings> {
     // Upsert on (marketplace, setting): update the existing row's value, else
     // insert. The table has no unique constraint, so do it explicitly.
@@ -2038,10 +2055,20 @@ export class DatabaseStorage implements IStorage {
           .where(eq(apiUsageTracking.provider, provider));
         return { callsToday: 1, dailyLimit: configuredLimit };
       } else {
+        // The CONFIGURED limit wins, not the stored one. The column defaults
+        // to 10000, and that default was being enforced as a real cap — an
+        // invisible ceiling nobody set, which silently refuses every TME call
+        // for the rest of the day once a busy sweep crosses it. Storing it
+        // back keeps the row honest without waiting for the midnight reset.
+        const changedLimit = existing.dailyLimit !== configuredLimit;
         await db.update(apiUsageTracking)
-          .set({ callsToday: existing.callsToday + 1, updatedAt: now })
+          .set({
+            callsToday: existing.callsToday + 1,
+            updatedAt: now,
+            ...(changedLimit ? { dailyLimit: configuredLimit } : {}),
+          })
           .where(eq(apiUsageTracking.provider, provider));
-        return { callsToday: existing.callsToday + 1, dailyLimit: existing.dailyLimit ?? configuredLimit };
+        return { callsToday: existing.callsToday + 1, dailyLimit: configuredLimit };
       }
     } else {
       await db.insert(apiUsageTracking).values({

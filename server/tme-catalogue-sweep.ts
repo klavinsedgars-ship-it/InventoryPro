@@ -29,6 +29,13 @@ import {
   type IngestFilter,
   type IngestRejection,
 } from "@shared/ingest-filter";
+import {
+  MAX_CONSECUTIVE_FAILURES,
+  isSupplierRefusal,
+  nextCursor,
+  shouldPauseSweep,
+  sweepFinished,
+} from "@shared/catalogue-walk";
 
 /** TME's search endpoint caps a page at 100. */
 const PAGE_SIZE = 100;
@@ -69,9 +76,23 @@ export interface CatalogueTotals {
   filteredBy: Record<IngestRejection, number>;
 }
 
+/** What the last cron tick actually did, so "nothing is happening" is answerable. */
+export interface CatalogueLastRun {
+  at: string;
+  /** Deltas for that one slice, not the running totals. */
+  discovered: number;
+  imported: number;
+  budgetHit: boolean;
+  done: boolean;
+  /** Why the slice did nothing, when it did nothing. */
+  error: string | null;
+}
+
 export interface CatalogueSweepStats extends CatalogueTotals {
   enabled: boolean;
   done: boolean;
+  /** Set when the slice could not run at all (no categories, tree unavailable). */
+  blocked?: string | null;
   categoriesDone: number;
   categoriesTotal: number;
   cursor: Cursor;
@@ -80,8 +101,10 @@ export interface CatalogueSweepStats extends CatalogueTotals {
 }
 
 async function getSetting(name: string): Promise<string | undefined> {
-  const rows = await storage.getMarketplaceSettings("ebay");
-  return (rows as any[]).find((s) => s.setting === name)?.value;
+  // One row, not the whole marketplace: this table also holds the cached
+  // category tree (hundreds of KB of JSON), and the status endpoint reads
+  // half a dozen settings per poll.
+  return storage.getMarketplaceSetting("ebay", name);
 }
 
 async function setSetting(name: string, value: string): Promise<void> {
@@ -159,7 +182,10 @@ async function loadRawCategories(refresh = false): Promise<RawCategory[]> {
     const cached = await readJson<RawCategory[]>("catalogue_tree", []);
     if (cached.length > 0) return cached;
   }
-  const all = await tmeApi.getAllCategories();
+  // Strict: the fallback category list is twenty invented ids, and a sweep
+  // that walks those finds nothing, calls itself finished and switches itself
+  // off — which is precisely how this came to look broken.
+  const all = await tmeApi.getAllCategoriesStrict();
   const raw: RawCategory[] = all.map((c) => ({
     id: String(c.CategoryId),
     name: c.Name,
@@ -295,6 +321,8 @@ export async function catalogueProgress(): Promise<{
   currentCategory: { name: string; index: number; page: number; products: number } | null;
   totals: CatalogueTotals;
   tmeProductsHeld: number;
+  /** The last tick: when, what it did, and what stopped it. */
+  lastRun: CatalogueLastRun | null;
 }> {
   const categories = await readJson<LeafCategory[]>("catalogue_categories", []);
   const cursor = await readJson<Cursor>("catalogue_cursor", { categoryIndex: 0, page: 1 });
@@ -319,7 +347,12 @@ export async function catalogueProgress(): Promise<{
       : null,
     totals,
     tmeProductsHeld: held,
+    lastRun: await readJson<CatalogueLastRun | null>("catalogue_last_run", null),
   };
+}
+
+export async function recordLastRun(run: CatalogueLastRun): Promise<void> {
+  await setSetting("catalogue_last_run", JSON.stringify(run));
 }
 
 // ---------------------------------------------------------------------------
@@ -332,12 +365,14 @@ export async function runCatalogueSweep(budgetMs = DEFAULT_BUDGET_MS): Promise<C
   const filter = await getIngestFilter();
   const categories = await loadLeafCategories();
   const totals = await readJson<CatalogueTotals>("catalogue_totals", emptyTotals());
+  const startedWith = { discovered: totals.discovered, imported: totals.imported };
   let cursor = await readJson<Cursor>("catalogue_cursor", { categoryIndex: 0, page: 1 });
 
   const stats: CatalogueSweepStats = {
     ...totals,
     enabled: true,
     done: false,
+    blocked: null,
     categoriesDone: cursor.categoryIndex,
     categoriesTotal: categories.length,
     cursor,
@@ -345,7 +380,36 @@ export async function runCatalogueSweep(budgetMs = DEFAULT_BUDGET_MS): Promise<C
     sampleErrors: [],
   };
 
+  // An empty list is not a finished sweep. It means the category tree could
+  // not be loaded, or the chosen branch matched no leaves — and treating it as
+  // "done" is what silently switched the sweep off and removed the banner
+  // with it, leaving nothing on screen to explain the silence.
+  if (categories.length === 0) {
+    const scope = await getCatalogueScope();
+    stats.blocked = scope.rootCategoryId
+      ? `No sub-categories found under ${scope.rootName ?? scope.rootCategoryId}. The category tree may be unavailable — reopen the branch and start it again.`
+      : "No categories to walk. TME's category tree could not be loaded, so there is nothing to sweep.";
+    stats.sampleErrors.push(stats.blocked);
+    await recordLastRun({
+      at: new Date().toISOString(),
+      discovered: 0,
+      imported: 0,
+      budgetHit: false,
+      done: false,
+      error: stats.blocked,
+    });
+    return stats;
+  }
+
   const { tmeApiV2 } = await import("./tme-api-v2");
+
+  // A page that will not load is usually a bad category; five in a row is
+  // TME refusing us. The difference matters enormously: skipping a category
+  // per failure means that when TME is down the sweep walks the entire
+  // category list in a couple of ticks, reaches the end, calls itself
+  // finished and switches itself off — having imported nothing. That is
+  // exactly how a working sweep turns into a silently disabled one.
+  let consecutiveFailures = 0;
 
   while (cursor.categoryIndex < categories.length) {
     if (Date.now() - started > budgetMs) {
@@ -364,14 +428,29 @@ export async function runCatalogueSweep(budgetMs = DEFAULT_BUDGET_MS): Promise<C
         withStock: false,
       });
     } catch (e) {
+      const message = (e as Error).message;
+      consecutiveFailures += 1;
       if (stats.sampleErrors.length < 3) {
-        stats.sampleErrors.push(`category ${category.id} page ${cursor.page}: ${(e as Error).message}`);
+        stats.sampleErrors.push(`category ${category.id} page ${cursor.page}: ${message}`);
       }
-      // A category that will not page is not worth stalling the whole sweep.
+      if (isSupplierRefusal(message)) {
+        // No point walking further: this is TME turning us away, not a
+        // category that cannot page.
+        stats.blocked = `TME refused the request (${message}). Paused here; the next tick tries again.`;
+        break;
+      }
+      if (shouldPauseSweep(consecutiveFailures, MAX_CONSECUTIVE_FAILURES)) {
+        // Leave the cursor where it is and leave the sweep enabled: this is
+        // TME being unavailable, not a run that is finished.
+        stats.blocked = `TME refused ${consecutiveFailures} category pages in a row (${message}). Paused here; the next tick tries again.`;
+        break;
+      }
+      // A single category that will not page is not worth stalling the sweep.
       cursor = { categoryIndex: cursor.categoryIndex + 1, page: 1 };
       await setSetting("catalogue_cursor", JSON.stringify(cursor));
       continue;
     }
+    consecutiveFailures = 0;
 
     const symbols = page.products.map((p: any) => String(p.Symbol)).filter(Boolean);
     totals.discovered += symbols.length;
@@ -410,15 +489,19 @@ export async function runCatalogueSweep(budgetMs = DEFAULT_BUDGET_MS): Promise<C
     }
 
     // Advance. A page past the end of a category moves to the next one.
-    cursor =
-      cursor.page >= (page.pages || 1)
-        ? { categoryIndex: cursor.categoryIndex + 1, page: 1 }
-        : { categoryIndex: cursor.categoryIndex, page: cursor.page + 1 };
+    cursor = nextCursor(cursor, page.pages || 1);
     await setSetting("catalogue_cursor", JSON.stringify(cursor));
     await setSetting("catalogue_totals", JSON.stringify(totals));
   }
 
-  if (cursor.categoryIndex >= categories.length) {
+  // Only a walk that actually reached the end is finished. A slice that gave
+  // up because TME stopped answering must stay enabled, or the failure
+  // becomes permanent the moment it happens.
+  if (sweepFinished({
+    blocked: !!stats.blocked,
+    categoryIndex: cursor.categoryIndex,
+    categoriesTotal: categories.length,
+  })) {
     stats.done = true;
     await setCatalogueSweepEnabled(false);
   }
@@ -427,6 +510,14 @@ export async function runCatalogueSweep(budgetMs = DEFAULT_BUDGET_MS): Promise<C
   Object.assign(stats, totals);
   stats.cursor = cursor;
   stats.categoriesDone = Math.min(cursor.categoryIndex, categories.length);
+  await recordLastRun({
+    at: new Date().toISOString(),
+    discovered: totals.discovered - startedWith.discovered,
+    imported: totals.imported - startedWith.imported,
+    budgetHit: stats.budgetHit,
+    done: stats.done,
+    error: stats.blocked ?? stats.sampleErrors[0] ?? null,
+  });
   return stats;
 }
 

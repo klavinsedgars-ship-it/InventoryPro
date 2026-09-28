@@ -117,13 +117,22 @@ export function registerTmeRoutes(app: Express): void {
       try {
         console.log("Fetching TME categories...");
 
-        const categories = await tmeApi.getAllCategories();
+        // `source` matters: on any TME failure this falls back to a small
+        // hardcoded list whose ids match nothing at TME. Unlabelled, that
+        // looks like a working category tree in which every category is
+        // empty, which is exactly how it was reported.
+        const { categories, source, error: categoryError } = await tmeApi.getCategoriesWithSource();
 
         res.json({
           success: true,
           categories: categories,
           totalCategories: categories.length,
-          message: `Found ${categories.length} categories`
+          source,
+          categoryError,
+          message:
+            source === "tme"
+              ? `Found ${categories.length} categories`
+              : `TME's category list is unavailable (${categoryError}); showing a placeholder list whose ids will not match any products.`,
         });
 
       } catch (error) {
@@ -833,11 +842,21 @@ export function registerTmeRoutes(app: Express): void {
           const scope = rootCategoryId
             ? { rootCategoryId, rootName: (await m.describeBranch(rootCategoryId)).rootName }
             : { rootCategoryId: null, rootName: null };
+          // Build the leaf list BEFORE enabling anything. It refreshes the
+          // tree from TME (a stale cache would walk a catalogue shape that no
+          // longer exists) and it throws if TME is unreachable — in which
+          // case nothing should be switched on, because a sweep with no
+          // categories used to declare itself finished and switch itself off.
+          const leaves = await m.loadLeafCategories(true, scope);
+          if (leaves.length === 0) {
+            return res.status(400).json({
+              ok: false,
+              error: scope.rootCategoryId
+                ? `No sub-categories found under ${scope.rootName ?? scope.rootCategoryId} — nothing to import.`
+                : "TME returned no categories, so there is nothing to sweep.",
+            });
+          }
           await m.setCatalogueSweepEnabled(true, scope);
-          // Refresh the category tree on a fresh start: a stale cached tree
-          // would walk a catalogue shape that no longer exists. Done AFTER the
-          // scope is stored, so the cached leaf list is the scoped one.
-          await m.loadLeafCategories(true, scope);
         }
         if (action === "stop") await m.setCatalogueSweepEnabled(false);
 
@@ -889,7 +908,16 @@ export function registerTmeRoutes(app: Express): void {
         }
         const leased = await withLease(leaseStore, "tme-catalogue", { ttlSeconds: 300 }, () => m.runCatalogueSweep(250_000));
         if (!leased.ran) {
-          return res.json({ ok: true, skipped: true, reason: describeRefusal("tme-catalogue", leased) });
+          const reason = describeRefusal("tme-catalogue", leased);
+          await m.recordLastRun({
+            at: new Date().toISOString(),
+            discovered: 0,
+            imported: 0,
+            budgetHit: false,
+            done: false,
+            error: `skipped: ${reason}`,
+          }).catch(() => undefined);
+          return res.json({ ok: true, skipped: true, reason });
         }
         const r = leased.result;
         if (r.done) {
@@ -902,6 +930,20 @@ export function registerTmeRoutes(app: Express): void {
         }
         res.json({ ok: true, ...r });
       } catch (error) {
+        // A tick that throws (TME unreachable, DB blip) left no trace at all
+        // before this: the status endpoint kept showing the same cursor and
+        // the only honest reading was "nothing is happening".
+        const m = await import("../tme-catalogue-sweep");
+        await m
+          .recordLastRun({
+            at: new Date().toISOString(),
+            discovered: 0,
+            imported: 0,
+            budgetHit: false,
+            done: false,
+            error: (error as Error).message,
+          })
+          .catch(() => undefined);
         res.status(500).json({ ok: false, error: (error as Error).message });
       }
     };

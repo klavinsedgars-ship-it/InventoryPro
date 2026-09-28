@@ -217,7 +217,43 @@ function CatalogueSweepBanner({ onChanged }: { onChanged: () => void }) {
   });
   const [stopping, setStopping] = useState(false);
   const p = data?.progress;
-  if (!p?.enabled) return null;
+  const last = p?.lastRun as
+    | { at: string; discovered: number; imported: number; budgetHit: boolean; done: boolean; error: string | null }
+    | null
+    | undefined;
+
+  const minutesAgo = (iso?: string | null) =>
+    iso ? Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60_000)) : null;
+  const sinceLastTick = minutesAgo(last?.at);
+  // The cron ticks every five minutes; a quarter of an hour of silence means
+  // it is not arriving, which the operator can do nothing about without being
+  // told it is happening.
+  const tickOverdue = p?.enabled && sinceLastTick != null && sinceLastTick > 15;
+
+  if (!p?.enabled) {
+    // A finished sweep needs no banner. One that stopped with work left, or
+    // whose last tick failed, absolutely does: the old code returned null for
+    // every disabled sweep, so a sweep that switched itself off after doing
+    // nothing left an empty page and no way to tell it had ever started.
+    if (!last || (last.done && !last.error)) return null;
+    return (
+      <Card className="p-3 border-amber-200 bg-amber-50" data-testid="catalogue-sweep-stopped">
+        <div className="flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+          <div className="text-sm text-amber-900">
+            <p className="font-medium">The catalogue import is not running.</p>
+            <p className="text-xs mt-1 text-amber-800">
+              Last tick {sinceLastTick != null ? `${sinceLastTick} min ago` : "unknown"}
+              {last.error ? `: ${last.error}` : ` — stopped with ${(p?.totals?.imported ?? 0).toLocaleString()} added.`}
+            </p>
+            <p className="text-xs mt-1 text-amber-700">
+              Pick a category and use "Add all" to start it again.
+            </p>
+          </div>
+        </div>
+      </Card>
+    );
+  }
 
   // Percentage of PRODUCTS, not categories. Sub-categories here range from 1
   // product to 191,026, so a category-based bar reads 0% for hours while the
@@ -260,6 +296,13 @@ function CatalogueSweepBanner({ onChanged }: { onChanged: () => void }) {
           {stopping ? "Stopping…" : "Stop"}
         </Button>
       </div>
+      {(last?.error || tickOverdue) && (
+        <p className="mt-1 text-xs text-red-700" data-testid="text-sweep-trouble">
+          {last?.error
+            ? `Last tick did nothing: ${last.error}`
+            : `No tick for ${sinceLastTick} minutes — the every-5-minute job is not reaching the server.`}
+        </p>
+      )}
       <div className="mt-2 h-1.5 w-full rounded bg-blue-100 overflow-hidden">
         <div className="h-full bg-blue-600 transition-all" style={{ width: `${pct}%` }} />
       </div>
@@ -282,6 +325,11 @@ function CatalogueSweepBanner({ onChanged }: { onChanged: () => void }) {
         <span className="px-1.5 py-0.5 rounded bg-white text-gray-500">
           runs on the server · safe to close the browser or shut down
         </span>
+        {last && (
+          <span className="px-1.5 py-0.5 rounded bg-white text-gray-500" data-testid="text-sweep-last-tick">
+            last tick {sinceLastTick} min ago (+{last.imported.toLocaleString()} added)
+          </span>
+        )}
       </div>
     </Card>
   );
@@ -427,16 +475,27 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
     initialData: loadCachedCategoriesResponse,
   });
 
-  // Persist successful responses so the next mount hydrates from cache.
+  // Persist successful responses so the next mount hydrates from cache — but
+  // only TME's own tree. The server falls back to a small hardcoded list when
+  // TME is unreachable, and caching that would pin a tree of ids that match no
+  // products into the browser for good.
+  const categorySource = (categoriesData as any)?.source as "tme" | "fallback" | undefined;
+  const categoryError = (categoriesData as any)?.categoryError as string | undefined;
   useEffect(() => {
     const cats = (categoriesData as any)?.categories as TMECategory[] | undefined;
-    if (cats && cats.length > 0) {
+    if (cats && cats.length > 0 && categorySource !== "fallback") {
       saveCachedCategoriesResponse(cats);
     }
-  }, [categoriesData]);
+  }, [categoriesData, categorySource]);
 
   // Fetch products for selected category
-  const { data: productsData, isLoading: productsLoading, refetch: refetchProducts } = useQuery({
+  const {
+    data: productsData,
+    isLoading: productsLoading,
+    isError: productsIsError,
+    error: productsError,
+    refetch: refetchProducts,
+  } = useQuery({
     queryKey: ["/api/tme/products", selectedCategory, currentPage, productsPerPage, filters],
     queryFn: async () => {
       if (!selectedCategory) return { products: [], total: 0 };
@@ -455,9 +514,13 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
       if (filters.producer) params.append('producer', filters.producer);
       params.append('inStockOnly', filters.inStockOnly.toString());
 
-      const response = await fetch(`/api/tme/products?${params}`);
+      const response = await fetch(`/api/tme/products?${params}`, { credentials: "include" });
       if (!response.ok) {
-        throw new Error('Failed to fetch products');
+        // Carry the server's reason. "Failed to fetch products" swallowed by
+        // an empty grid is how this looked like "no products in this
+        // category" for days.
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.error || `${response.status} ${response.statusText}`);
       }
       return response.json();
     },
@@ -1201,6 +1264,34 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
         </div>
         <main className="p-4">
           <div className="space-y-6">
+            {/* The single failure that empties this whole page: when TME's
+                category endpoint fails the server answers with a small
+                hardcoded list, whose ids match nothing at TME. Every category
+                then opens empty and the sweep has nothing real to walk. */}
+            {categorySource === "fallback" && (
+              <Card className="p-3 border-red-200 bg-red-50" data-testid="banner-category-fallback">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
+                  <div className="text-sm text-red-900">
+                    <p className="font-medium">TME's category list is unavailable — this is a placeholder.</p>
+                    <p className="text-xs mt-1 text-red-800">
+                      {categoryError || "The category request failed."} The categories below are not TME's, so
+                      they contain no products and nothing can be imported until this clears. Open{" "}
+                      <code className="px-1 bg-white rounded">/api/__system-check</code> for the reason.
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="mt-2 h-7 text-xs"
+                      onClick={() => refetchCategories()}
+                      data-testid="btn-retry-categories"
+                    >
+                      <RefreshCw className="w-3 h-3 mr-1" /> Retry
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            )}
             <CatalogueSweepBanner onChanged={() => queryClient.invalidateQueries({ queryKey: ["/api/tme/catalogue?action=status"] })} />
             {/* API Status and Sync Button - Moved to Header */}
 
@@ -1682,13 +1773,32 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                             <div key={i} className="h-20 bg-gray-200 rounded animate-pulse"></div>
                           ))}
                         </div>
+                      ) : productsIsError ? (
+                        <div className="text-center py-8">
+                          <AlertTriangle className="h-10 w-10 mx-auto mb-3 text-red-400" />
+                          <p className="text-sm font-medium text-red-700">Could not load products from TME</p>
+                          <p className="mt-1 text-xs text-gray-600 max-w-md mx-auto break-words">
+                            {(productsError as Error)?.message || "The request failed."}
+                          </p>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="mt-3"
+                            onClick={() => refetchProducts()}
+                            data-testid="btn-retry-products"
+                          >
+                            <RefreshCw className="w-3 h-3 mr-1" /> Try again
+                          </Button>
+                        </div>
                       ) : visibleProducts.length === 0 ? (
                         <div className="text-center py-8">
                           <Package className="h-10 w-10 mx-auto mb-3 text-gray-400" />
                           <p className="text-sm text-gray-500">
                             {products.length > 0 && hideSyncedCategories
                               ? "All products on this page are already synced. Untick \"Hide synced\" to see them."
-                              : "No products found"}
+                              : categorySource === "fallback"
+                                ? "TME's category list is unavailable, so this category id does not exist at TME. Nothing can load until that is fixed."
+                                : "TME returned no products for this category and page."}
                           </p>
                         </div>
                       ) : (

@@ -339,15 +339,86 @@ export function registerDebugRoutes(app: Express) {
       const p = await (tmeApi as any).getPricesAndStocks([PROBE_SYMBOL]);
       tme.getPricesAndStocks = { ok: true, results: p.length };
     } catch (e) { tme.getPricesAndStocks = { ok: false, error: (e as Error).message.slice(0, 160) }; }
-    if (process.env.TME_API_VERSION === "v2") {
-      try {
-        const { tmeApiV2 } = await import("../tme-api-v2");
-        const rows = await tmeApiV2.getPricesAndStocksCompat([PROBE_SYMBOL + "-DIO"]);
-        tme.v2 = { ok: true, results: rows.length, sampleStock: rows[0]?.Amount ?? null, samplePrice: rows[0]?.PriceList?.[0]?.PriceValue ?? null };
-      } catch (e) {
-        tme.v2 = { ok: false, error: (e as Error).message.slice(0, 200) };
+    // v2 is probed whatever TME_API_VERSION says, because the catalogue sweep
+    // uses the v2 client regardless of that flag: "v1 works so TME is fine"
+    // has been a wrong conclusion here before.
+    try {
+      const { tmeApiV2 } = await import("../tme-api-v2");
+      const rows = await tmeApiV2.getPricesAndStocksCompat([PROBE_SYMBOL + "-DIO"]);
+      tme.v2 = { ok: true, results: rows.length, sampleStock: rows[0]?.Amount ?? null, samplePrice: rows[0]?.PriceList?.[0]?.PriceValue ?? null };
+    } catch (e) {
+      tme.v2 = { ok: false, error: (e as Error).message.slice(0, 200) };
+      if (process.env.TME_API_VERSION === "v2") {
         verdicts.push("TME_API_VERSION=v2 is set but the v2 client is failing — the sync cannot fetch prices/stock. Unset it to fall back to v1.");
+      } else {
+        verdicts.push("The TME v2 client is failing — the catalogue sweep uses it regardless of TME_API_VERSION, so background importing cannot work.");
       }
+    }
+
+    // The category tree, and whether it is TME's or the hardcoded placeholder.
+    // A placeholder tree is the single failure that makes the TME Browser show
+    // empty categories AND makes the sweep finish instantly: its ids match
+    // nothing at TME.
+    try {
+      const cats = await tmeApi.getCategoriesWithSource();
+      tme.categories = { source: cats.source, count: cats.categories.length, error: cats.error };
+      if (cats.source !== "tme") {
+        verdicts.push(
+          `TME category tree unavailable (${cats.error}) — the browser is showing a placeholder list whose ids match no products, and the catalogue sweep has nothing real to walk.`,
+        );
+      }
+    } catch (e) {
+      tme.categories = { source: "error", error: (e as Error).message.slice(0, 200) };
+    }
+
+    // The self-imposed daily cap. It is enforced inside the v1 client from the
+    // DB counter, so a cap reached at noon looks exactly like a broken API for
+    // the rest of the day.
+    try {
+      const usage = await storage.getApiUsage("tme");
+      tme.usage = {
+        callsToday: usage?.callsToday ?? 0,
+        dailyLimit: usage?.dailyLimit ?? 0,
+        lastResetAt: usage?.lastResetAt ?? null,
+        envLimit: process.env.TME_DAILY_LIMIT ?? "(unset -> no cap)",
+      };
+      if ((usage?.dailyLimit ?? 0) > 0 && (usage?.callsToday ?? 0) > (usage?.dailyLimit ?? 0)) {
+        verdicts.push(
+          `TME daily cap reached (${usage!.callsToday}/${usage!.dailyLimit}) — every v1 call is being refused by our own limiter until midnight. Raise or clear TME_DAILY_LIMIT.`,
+        );
+      }
+    } catch (e) {
+      tme.usage = { error: (e as Error).message.slice(0, 120) };
+    }
+
+    // What the background sweep is actually doing, and when it last ticked.
+    try {
+      const sweep = await import("../tme-catalogue-sweep");
+      const progress = await sweep.catalogueProgress();
+      tme.catalogue = {
+        enabled: progress.enabled,
+        scope: progress.scope,
+        cursor: progress.cursor,
+        categoriesTotal: progress.categoriesTotal,
+        percentComplete: progress.percentComplete,
+        imported: progress.totals.imported,
+        discovered: progress.totals.discovered,
+        lastRun: progress.lastRun,
+      };
+      const last = progress.lastRun;
+      if (progress.enabled && last?.error) {
+        verdicts.push(`Catalogue sweep is enabled but its last tick did nothing: ${last.error}`);
+      }
+      if (progress.enabled && last && Date.now() - Date.parse(last.at) > 30 * 60 * 1000) {
+        verdicts.push(
+          `Catalogue sweep is enabled but has not ticked since ${last.at} — the cron is not reaching /api/cron/tme-catalogue.`,
+        );
+      }
+      if (progress.enabled && progress.categoriesTotal === 0) {
+        verdicts.push("Catalogue sweep is enabled with no categories to walk — start the branch again once TME's category tree is back.");
+      }
+    } catch (e) {
+      tme.catalogue = { error: (e as Error).message.slice(0, 160) };
     }
     report.tme = tme;
     if (!tme.search.ok && !tme.getProducts.ok) {

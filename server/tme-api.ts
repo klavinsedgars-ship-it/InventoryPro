@@ -7,6 +7,7 @@
 import crypto from 'crypto';
 import type { IStorage } from './storage';
 import { storage } from './storage';
+import { readCategoryTree } from '@shared/tme-category-tree';
 
 interface TMECredentials {
   token: string;
@@ -443,52 +444,65 @@ export class TMEApiService {
     }
   }
 
-  // Get all available categories with real product counts from TME
-  async getAllCategories(): Promise<TMECategory[]> {
+  /**
+   * The category tree, and WHERE IT CAME FROM.
+   *
+   * There is a hardcoded fallback list below, and for a long time this method
+   * quietly returned it whenever TME failed — twenty invented categories with
+   * invented ids, presented to the browser as if they were TME's. The browser
+   * then showed a tree whose ids match nothing, every category opened empty,
+   * and the catalogue sweep walked those same twenty ids, found nothing,
+   * declared itself finished and switched itself off. Two features looking
+   * broken, no error anywhere.
+   *
+   * The fallback still exists so the page is not blank, but it is now labelled
+   * at every call site, and callers that must not act on invented data use
+   * `getAllCategoriesStrict`.
+   */
+  async getCategoriesWithSource(): Promise<{
+    categories: TMECategory[];
+    source: "tme" | "fallback";
+    error: string | null;
+  }> {
     try {
       const response = await this.makeRequest<any>("/Products/GetCategories.json");
-      
-      if (response.Data && response.Data.CategoryTree) {
-        // TME returns CategoryTree as a single root object with SubTree array
-        const rootCategory = response.Data.CategoryTree;
-        const categories = this.parseCategoryTree(rootCategory);
+      const { categories, error } = readCategoryTree(response);
+
+      if (categories.length > 0) {
         console.log(`📁 Parsed ${categories.length} categories from TME with real product counts`);
-        return categories;
+        return { categories, source: "tme", error: null };
       }
-      
-      // Fallback with comprehensive category structure
-      console.log('⚠️ Using fallback categories - TME response format unexpected');
-      return this.getFallbackCategories();
+
+      console.log(`⚠️ Using fallback categories - ${error}`);
+      return { categories: this.getFallbackCategories(), source: "fallback", error };
     } catch (error) {
-      console.warn('Failed to fetch categories from TME API, using fallback:', error);
-      return this.getFallbackCategories();
+      console.warn("Failed to fetch categories from TME API, using fallback:", error);
+      return {
+        categories: this.getFallbackCategories(),
+        source: "fallback",
+        error: (error as Error).message,
+      };
     }
   }
 
-  // Parse TME's nested CategoryTree structure into flat array
-  private parseCategoryTree(node: any, parentId: string | null = null): TMECategory[] {
-    const categories: TMECategory[] = [];
-    
-    // Add current node as a category (skip root if Id is 111000)
-    if (node.Id && node.Name) {
-      const category: TMECategory = {
-        CategoryId: String(node.Id),
-        Name: node.Name,
-        ParentId: parentId,
-        ProductCount: node.TotalProducts || 0
-      };
-      categories.push(category);
+  // Get all available categories with real product counts from TME
+  async getAllCategories(): Promise<TMECategory[]> {
+    return (await this.getCategoriesWithSource()).categories;
+  }
+
+  /**
+   * The category tree, or an error — never the invented one.
+   *
+   * Anything that WRITES based on the tree (the catalogue sweep) must use
+   * this: walking twenty made-up ids to completion is how the sweep came to
+   * disable itself minutes after being started.
+   */
+  async getAllCategoriesStrict(): Promise<TMECategory[]> {
+    const r = await this.getCategoriesWithSource();
+    if (r.source !== "tme") {
+      throw new Error(`TME category tree unavailable: ${r.error ?? "unknown error"}`);
     }
-    
-    // Recursively process children if they exist
-    if (node.SubTree && Array.isArray(node.SubTree) && node.SubTree.length > 0) {
-      for (const childNode of node.SubTree) {
-        const childCategories = this.parseCategoryTree(childNode, node.Id ? String(node.Id) : null);
-        categories.push(...childCategories);
-      }
-    }
-    
-    return categories;
+    return r.categories;
   }
 
   private getFallbackCategories(): TMECategory[] {
@@ -574,110 +588,17 @@ export class TMEApiService {
       
       console.log(`✅ TME returned ${products.length} products for category ${categoryId} (page ${pageNumber}), total: ${totalProducts}`);
       
-      if (products.length > 0) {
-        return {
-          products: products,
-          total: totalProducts
-        };
-      }
-      
-      // If no products from SearchCategory, fall back to keyword search
-      console.log(`🔄 No products found with SearchCategory filter, falling back to keyword search`);
-      return this.searchProductsByCategoryKeywords(categoryId, page, limit);
-      
+      // Empty is empty. This used to substitute a keyword search across the
+      // whole catalogue — products from other categories, presented as this
+      // category's — and if that came back empty too, fabricated MOCK-xxx
+      // rows, in a screen where one click syncs a product into the CRM.
+      return { products, total: totalProducts };
     } catch (error: any) {
+      // And a failure is a failure: swallowing it behind substitute results
+      // is why a dead TME looked like an empty catalogue for days.
       console.error(`❌ Failed to get products for category ${categoryId}:`, error);
-      return this.searchProductsByCategoryKeywords(categoryId, page, limit);
+      throw error;
     }
-  }
-
-  // Fallback: search products by category using keywords  
-  private async searchProductsByCategoryKeywords(categoryId: string, page: number, limit: number): Promise<{products: TMEProduct[], total: number}> {
-    const searchTerms = this.getCategorySearchTerms(categoryId);
-    let allProducts: TMEProduct[] = [];
-    
-    // Use 2-3 search terms per page for variety
-    const termsPerPage = 3;
-    const startTermIndex = ((page - 1) * termsPerPage) % searchTerms.length;
-    
-    for (let i = 0; i < termsPerPage && i < searchTerms.length; i++) {
-      const termIndex = (startTermIndex + i) % searchTerms.length;
-      const searchTerm = searchTerms[termIndex];
-      
-      try {
-        const products = await this.searchProducts(searchTerm, 50);
-        const newProducts = products.filter(
-          product => !allProducts.some(existing => existing.Symbol === product.Symbol)
-        );
-        allProducts = allProducts.concat(newProducts);
-        
-        if (allProducts.length >= limit * 2) break;
-        await new Promise(resolve => setTimeout(resolve, 500));
-      } catch (e) {
-        console.warn(`Search failed for "${searchTerm}":`, e);
-      }
-    }
-    
-    if (allProducts.length === 0) {
-      return this.getMockProductsForCategory(categoryId, page, limit);
-    }
-    
-    return {
-      products: allProducts.slice(0, limit),
-      total: searchTerms.length * 100
-    };
-  }
-
-  private async searchProductsByCategory(categoryId: string, page: number, limit: number): Promise<{products: TMEProduct[], total: number}> {
-    const searchTerms = this.getCategorySearchTerms(categoryId);
-    let allProducts: TMEProduct[] = [];
-    
-    for (const term of searchTerms.slice(0, 5)) { // Limit to 5 searches per category
-      try {
-        const products = await this.searchProducts(term, 50);
-        
-        // Filter duplicates
-        const newProducts = products.filter(
-          product => !allProducts.some(existing => existing.Symbol === product.Symbol)
-        );
-        
-        allProducts = allProducts.concat(newProducts);
-        
-        if (allProducts.length >= limit * 2) break; // Get enough for pagination
-        
-        // Rate limiting between searches
-        await new Promise(resolve => setTimeout(resolve, 300));
-      } catch (error) {
-        console.warn(`Search failed for term "${term}":`, error);
-      }
-    }
-    
-    const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + limit;
-    
-    return {
-      products: allProducts.slice(startIndex, endIndex),
-      total: allProducts.length
-    };
-  }
-
-  private getCategorySearchTerms(categoryId: string): string[] {
-    const categoryTerms: Record<string, string[]> = {
-      "1000": ["microcontroller", "atmega", "stm32", "esp32", "arduino", "pic", "arm"],
-      "1001": ["arduino", "uno", "nano", "mega", "esp32", "nodemcu"],
-      "2000": ["transistor", "mosfet", "diode", "ic", "semiconductor"],
-      "2001": ["transistor", "mosfet", "bjt", "fet"],
-      "2002": ["diode", "rectifier", "schottky", "zener"],
-      "3000": ["led", "display", "opto", "laser"],
-      "3001": ["led", "rgb", "smd", "through hole"],
-      "5000": ["resistor", "capacitor", "inductor"],
-      "5001": ["resistor", "ohm", "smd", "through hole"],
-      "5002": ["capacitor", "ceramic", "electrolytic", "tantalum"],
-      "6000": ["connector", "header", "terminal", "socket"],
-      "10000": ["sensor", "temperature", "humidity", "pressure"]
-    };
-    
-    return categoryTerms[categoryId] || ["electronic", "component"];
   }
 
   // Batch get product details
@@ -859,89 +780,6 @@ export class TMEApiService {
     return this.callCount < this.dailyLimit && this.callsThisMinute < this.rateLimitPerMinute;
   }
 
-  // Mock products for development when API fails
-  private getMockProductsForCategory(categoryId: string, page: number, limit: number): {products: TMEProduct[], total: number} {
-    const mockProducts: TMEProduct[] = [];
-    const categoryInfo = this.getFallbackCategories().find(cat => cat.CategoryId === categoryId);
-    const categoryName = categoryInfo?.Name || "Electronics";
-    
-    // Generate mock products based on category
-    const productCount = Math.min(50, categoryInfo?.ProductCount || 25);
-    
-    for (let i = 1; i <= productCount; i++) {
-      mockProducts.push({
-        Symbol: `MOCK-${categoryId}-${String(i).padStart(3, '0')}`,
-        CustomerSymbol: `MOCK-${categoryId}-${String(i).padStart(3, '0')}`,
-        OriginalSymbol: `MOCK-${categoryId}-${String(i).padStart(3, '0')}`,
-        EAN: `123456789${String(i).padStart(4, '0')}`,
-        Producer: this.getMockProducer(categoryId),
-        Description: `${categoryName} Component - Model ${i}`,
-        CategoryId: parseInt(categoryId),
-        Category: categoryName,
-        Photo: "",
-        Thumbnail: "",
-        DataSheet: "",
-        ProductInformationPage: "",
-        Weight: Math.floor(Math.random() * 100) + 1,
-        WeightUnit: "g",
-        SuppliedAmount: 1,
-        MinAmount: 1,
-        Multiples: 1,
-        Unit: "pcs",
-        Parameters: [
-          {
-            ParameterId: 1,
-            ParameterName: "Operating Temperature",
-            ParameterValue: "-40...+85",
-            ParameterUnit: "°C"
-          },
-          {
-            ParameterId: 2,
-            ParameterName: "Package",
-            ParameterValue: this.getMockPackage(categoryId),
-            ParameterUnit: ""
-          }
-        ]
-      });
-    }
-    
-    // Apply pagination
-    const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + limit;
-    
-    return {
-      products: mockProducts.slice(startIndex, endIndex),
-      total: mockProducts.length
-    };
-  }
-
-  private getMockProducer(categoryId: string): string {
-    const producers: Record<string, string[]> = {
-      "1000": ["Microchip", "STMicroelectronics", "Texas Instruments"],
-      "1001": ["Arduino", "SparkFun", "Adafruit"],
-      "2000": ["Infineon", "ON Semiconductor", "Vishay"],
-      "3000": ["Osram", "Cree", "Lumileds"],
-      "5000": ["Yageo", "Murata", "TDK"],
-      "6000": ["Molex", "TE Connectivity", "JST"]
-    };
-    
-    const categoryProducers = producers[categoryId] || ["Generic Electronics"];
-    return categoryProducers[Math.floor(Math.random() * categoryProducers.length)];
-  }
-
-  private getMockPackage(categoryId: string): string {
-    const packages: Record<string, string[]> = {
-      "1000": ["TQFP-64", "QFN-32", "SOIC-20"],
-      "1001": ["Through Hole", "Shield", "Module"],
-      "2000": ["SOT-23", "TO-220", "SOIC-8"],
-      "3000": ["0603", "5mm", "SMD"],
-      "5000": ["0805", "1206", "Through Hole"],
-      "6000": ["2.54mm", "1.27mm", "JST-XH"]
-    };
-    
-    const categoryPackages = packages[categoryId] || ["Standard"];
-    return categoryPackages[Math.floor(Math.random() * categoryPackages.length)];
-  }
 }
 
 export const tmeApi = new TMEApiService();
