@@ -14,6 +14,7 @@
  * writes only the local DB.
  */
 import { ebayApi } from "./ebay-api";
+import { activeListLooksTruncated, canClearMissingFlags } from "@shared/ebay-active-list";
 import { ebayInventoryApi } from "./ebay-inventory-api";
 import { storage } from "./storage";
 
@@ -35,6 +36,10 @@ export interface ReconcileReport {
   noSkuOnEbay: Array<{ itemId: string; title: string }>;
   dbListedNotOnEbay: number;  // products flagged listed locally but absent from eBay
   dbFlagsCleared: number;     // those flags cleared (apply mode + full fetch only)
+  /** True when eBay stopped counting rather than running out of listings. */
+  ceilingHit: boolean;
+  /** Why flags were not cleared, when they were not. */
+  clearSkipped: string | null;
   errors: string[];
 }
 
@@ -67,11 +72,15 @@ export async function reconcileEbayListings(opts: {
   const live: Array<{ itemId: string; sku: string | null; title: string; price: number | null; quantity: number | null }> = [];
   let page = startPage;
   let totalPages = 1;
+  // What eBay SAYS it has, which is not the same as what it has: the count
+  // stops at 25,000 however many listings the account holds.
+  let totalEntriesReported = 0;
   let ranOutOfTime = false;
   do {
     const r = await ebayApi.getMyActiveListings(page);
     live.push(...r.items);
     totalPages = r.totalPages || 1;
+    totalEntriesReported = Math.max(totalEntriesReported, r.totalEntries || 0);
     page++;
     if (Date.now() - started > budgetMs) { ranOutOfTime = true; break; }
   } while (page <= totalPages && page < startPage + maxPages);
@@ -147,17 +156,25 @@ export async function reconcileEbayListings(opts: {
   // show as active. Only trustworthy — and only cleared — when every page of
   // the active list was actually fetched.
   const liveSkus = new Set(withSku.map((l) => l.sku as string));
+  // eBay's ActiveList stops counting at 25,000. A walk that reaches that
+  // ceiling has seen every page eBay admits to and still knows nothing about
+  // the rest of the account, so "missing from eBay" is meaningless here —
+  // computing it would name 144,000 live listings as ghosts.
+  const ceilingHit = activeListLooksTruncated(totalEntriesReported);
+  const clearDecision = canClearMissingFlags({ apply, fetchedAllPages, activeOnEbay: totalEntriesReported });
+  if (ceilingHit) errors.push(`CAPPED: ${clearDecision.reason}`);
+
   let dbListed: any[] = [];
   try {
     // Only meaningful against the COMPLETE active list: on a partial walk
     // every unread listing would be reported as missing from eBay.
-    if (fetchedAllPages) dbListed = await storage.getProductsWithFilters({ listedOnEbay: true });
+    if (fetchedAllPages && !ceilingHit) dbListed = await storage.getProductsWithFilters({ listedOnEbay: true });
   } catch (e) {
     errors.push(`db listed-products query: ${(e as Error).message}`);
   }
   const dbGhosts = dbListed.filter((p) => p.sku && !liveSkus.has(p.sku));
   let dbFlagsCleared = 0;
-  if (apply && fetchedAllPages) {
+  if (clearDecision.allowed) {
     for (const p of dbGhosts) {
       try {
         await storage.updateProduct(p.id, {
@@ -188,6 +205,8 @@ export async function reconcileEbayListings(opts: {
     noSkuOnEbay: noSkuOnEbay.slice(0, 100),
     dbListedNotOnEbay: dbGhosts.length,
     dbFlagsCleared,
+    ceilingHit,
+    clearSkipped: clearDecision.allowed ? null : clearDecision.reason,
     errors: errors.slice(0, 30),
   };
 

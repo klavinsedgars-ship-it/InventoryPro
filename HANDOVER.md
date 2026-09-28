@@ -875,6 +875,41 @@ symbols on the current grid page for the product list. The panel states which
 case it is in — an error, "no products synced yet, so nothing can be hidden",
 or "N categories synced · M products".
 
+## eBay's listing count stops at 25,000 (2026-09-28)
+
+`GetMyeBaySelling`'s ActiveList does not report an unbounded total. On this
+account it answered **exactly 25,000 across exactly 1,000 pages** while:
+
+- the selling privilege allowed **190,756** items,
+- the DB held **169,244** rows marked listed, every one with a listing id, an
+  item id and an offer id, all distinct, none missing,
+- and **20 of 20** randomly sampled SKUs came back `PUBLISHED` with listing
+  ids matching ours exactly.
+
+So the 25,000 is a ceiling, and the listings are real. The DB was right.
+
+This was one command away from being expensive. `reconcileEbayListings`
+clears `listed_on_ebay` for every product it does not find in the active
+list, and it decided the list was complete from eBay's own page count — which
+a capped answer satisfies. Running it with `?apply=1` would have unlisted
+**144,244 products that are live on eBay**, inviting a duplicate listing for
+each one and stopping stock updates to all of them. The diagnostic endpoint
+was recommending exactly that, in those words.
+
+`shared/ebay-active-list.ts` now holds the rule: a walk that reaches 25,000
+entries has seen every page eBay admits to and still knows nothing about the
+rest of the account, so "missing from eBay" is not computed and no flag is
+cleared. Three conditions gate a clear — apply mode, a complete walk, and an
+uncapped count — and the refusal always says which one failed.
+
+**To count listings, do not count listings.** Use
+`/api/ebay/listing-count?sample=20`: the selling privilege for the allowance,
+and per-SKU offer lookups for the truth. An offer lookup cannot be capped.
+
+Standing numbers from that run: 169,244 listed of 249,957 products, about
+21,500 listing slots left before the account allowance, and 2,951 products
+ready for the ramp today.
+
 ## TME Browser showed nothing, and the sweep switched itself off (2026-09-28)
 
 Reported together, and they share a cause: **every TME failure in this code

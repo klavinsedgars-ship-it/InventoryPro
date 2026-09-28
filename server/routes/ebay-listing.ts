@@ -121,7 +121,14 @@ export function registerEbayListingRoutes(app: Express) {
       }
 
       const notes: string[] = [];
-      if (ebay.ok) {
+      if (ebay.ok && ebay.countMayBeCapped) {
+        // The gap is not evidence of anything while the count is at its
+        // ceiling, and saying otherwise here would send someone to clear the
+        // flags on every live listing past the first 25,000.
+        notes.push(
+          `eBay reported ${ebay.activeListings.toLocaleString()} active listings, which is the counting ceiling of this call rather than a total — do NOT read the difference from ${local.totals.listed.toLocaleString()} as missing listings, and do not run /api/ebay/reconcile?apply=1 on this answer. Add ?sample=20 for a per-SKU check, which cannot be capped.`,
+        );
+      } else if (ebay.ok) {
         const gap = local.totals.listed - ebay.activeListings;
         if (gap > 0) {
           notes.push(
@@ -146,6 +153,14 @@ export function registerEbayListingRoutes(app: Express) {
         );
       }
 
+      if (sample && sample.size > 0) {
+        notes.push(
+          `${sample.statuses.PUBLISHED ?? 0} of ${sample.size} sampled SKUs are PUBLISHED at eBay right now` +
+            (sample.projectedLive != null
+              ? `, which puts roughly ${sample.projectedLive.toLocaleString()} of the ${local.totals.listed.toLocaleString()} listed rows genuinely live.`
+              : "."),
+        );
+      }
       if (sellingLimit?.items && ebay.ok && sellingLimit.items === ebay.activeListings) {
         notes.push(
           `The account's eBay listing allowance is ${sellingLimit.items.toLocaleString()} items and the active count equals it exactly — the account is full, and further publishes will be refused until listings end or the allowance is raised.`,
@@ -154,6 +169,14 @@ export function registerEbayListingRoutes(app: Express) {
       if (ebay.ok && ebay.countMayBeCapped) {
         notes.push(
           `eBay reported exactly ${ebay.activeListings.toLocaleString()} active listings, which is as likely to be this call's ceiling as a real total. Add ?sample=20 to ask eBay about twenty of our "listed" SKUs directly — that answer cannot be capped.`,
+        );
+      }
+      if (sellingLimit?.items) {
+        const headroom = sellingLimit.items - local.totals.listed;
+        notes.push(
+          headroom > 0
+            ? `eBay allows this account ${sellingLimit.items.toLocaleString()} items; ${local.totals.listed.toLocaleString()} are listed, leaving room for about ${headroom.toLocaleString()} more.`
+            : `eBay allows this account ${sellingLimit.items.toLocaleString()} items and ${local.totals.listed.toLocaleString()} are listed — there is no headroom, so publishes will be refused until listings end or the allowance is raised.`,
         );
       }
       res.json({ ok: true, ebay, sellingLimit, sample, db: local, notes });
