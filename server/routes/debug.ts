@@ -359,9 +359,11 @@ export function registerDebugRoutes(app: Express) {
     // A placeholder tree is the single failure that makes the TME Browser show
     // empty categories AND makes the sweep finish instantly: its ids match
     // nothing at TME.
+    let treeCategories: any[] = [];
     try {
       const cats = await tmeApi.getCategoriesWithSource();
       tme.categories = { source: cats.source, count: cats.categories.length, error: cats.error };
+      if (cats.source === "tme") treeCategories = cats.categories;
       if (cats.source !== "tme") {
         verdicts.push(
           `TME category tree unavailable (${cats.error}) — the browser is showing a placeholder list whose ids match no products, and the catalogue sweep has nothing real to walk.`,
@@ -369,6 +371,53 @@ export function registerDebugRoutes(app: Express) {
       }
     } catch (e) {
       tme.categories = { source: "error", error: (e as Error).message.slice(0, 200) };
+    }
+
+    // The exact call the TME Browser grid makes, which none of the probes
+    // above cover: they all search by KEYWORD, and the grid searches by
+    // CATEGORY. A token that keyword-searches happily can still return
+    // nothing for a category id, and that difference is invisible until it is
+    // measured — the grid then just looks empty.
+    try {
+      // Reuses the tree fetched above rather than paying for it twice.
+      const parents = new Set(treeCategories.map((c: any) => c.ParentId).filter(Boolean));
+      const leaf = treeCategories
+        .filter((c: any) => !parents.has(c.CategoryId) && (c.ProductCount ?? 0) > 50)
+        .sort((a: any, b: any) => (b.ProductCount ?? 0) - (a.ProductCount ?? 0))[0];
+
+      if (!leaf) {
+        tme.categoryProducts = { skipped: "no leaf category with products in the tree" };
+      } else {
+        const probeCat: any = { categoryId: leaf.CategoryId, name: leaf.Name, treeCount: leaf.ProductCount };
+        try {
+          const v1 = await tmeApi.getProductsByCategory(String(leaf.CategoryId), 1, 20);
+          probeCat.v1 = { ok: true, returned: v1.products.length, total: v1.total };
+        } catch (e) {
+          probeCat.v1 = { ok: false, error: (e as Error).message.slice(0, 200) };
+        }
+        try {
+          const { tmeApiV2 } = await import("../tme-api-v2");
+          const v2 = await tmeApiV2.getCategoryPageEnriched(String(leaf.CategoryId), 1, { limit: 20, inStockOnly: true });
+          probeCat.v2 = { ok: true, returned: v2.products.length, total: v2.total };
+        } catch (e) {
+          probeCat.v2 = { ok: false, error: (e as Error).message.slice(0, 200) };
+        }
+        tme.categoryProducts = probeCat;
+
+        const v1Empty = probeCat.v1?.ok && probeCat.v1.returned === 0;
+        const v2Works = probeCat.v2?.ok && probeCat.v2.returned > 0;
+        if (v1Empty && v2Works) {
+          verdicts.push(
+            `TME Browser is on v1, and v1 returns no products for category ${leaf.CategoryId} (${leaf.Name}) while v2 returns ${probeCat.v2.returned}. Set TME_API_VERSION=v2 and redeploy — the grid is empty for this reason.`,
+          );
+        } else if (v1Empty && !v2Works) {
+          verdicts.push(
+            `Neither client returns products for category ${leaf.CategoryId} (${leaf.Name}), which the tree says holds ${leaf.ProductCount}. The category browse path is broken at TME's end, not ours.`,
+          );
+        }
+      }
+    } catch (e) {
+      tme.categoryProducts = { error: (e as Error).message.slice(0, 160) };
     }
 
     // The self-imposed daily cap. It is enforced inside the v1 client from the
