@@ -508,6 +508,11 @@ export class DatabaseStorage implements IStorage {
       `ALTER TABLE orders ADD COLUMN IF NOT EXISTS actual_postage_source text`,
       `ALTER TABLE orders ADD COLUMN IF NOT EXISTS postage_receipt_ref text`,
       `ALTER TABLE orders ADD COLUMN IF NOT EXISTS postal_class_used text`,
+      // The catalogue sweep is gone (2026-09-28), and its settings rows are
+      // not inert: marketplace_settings is read whole in several places, and
+      // catalogue_tree alone is a few hundred kilobytes of cached category
+      // JSON dragged along by every one of those reads.
+      `DELETE FROM marketplace_settings WHERE marketplace = 'ebay' AND setting LIKE 'catalogue_%'`,
       `CREATE INDEX IF NOT EXISTS products_supplier_stale_idx ON products (supplier, last_synced_at)`,
       `CREATE INDEX IF NOT EXISTS products_status_idx ON products (status)`,
       `CREATE INDEX IF NOT EXISTS products_ebay_idx ON products (listed_on_ebay, ebay_item_id)`,

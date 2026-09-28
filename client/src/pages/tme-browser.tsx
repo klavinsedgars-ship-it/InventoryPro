@@ -200,216 +200,6 @@ function buildCategoryTree(categories: TMECategory[]): TMECategory[] {
   return rootCategories;
 }
 
-/**
- * Live state of the background catalogue sweep.
- *
- * Without this the sweep is invisible: "Add all" returns instantly, the cron
- * does the work minutes later, and the only evidence is the category counts
- * quietly rising. An operator has no way to tell a running import from one
- * that never started, which is exactly how it was first reported.
- *
- * Polls only while a sweep is enabled, so an idle page costs nothing.
- */
-function CatalogueSweepBanner({ onChanged }: { onChanged: () => void }) {
-  const { data } = useQuery<any>({
-    queryKey: ["/api/tme/catalogue?action=status"],
-    refetchInterval: (q) => ((q.state.data as any)?.progress?.enabled ? 5000 : 30000),
-  });
-  const [stopping, setStopping] = useState(false);
-  const p = data?.progress;
-  const last = p?.lastRun as
-    | { at: string; discovered: number; imported: number; budgetHit: boolean; done: boolean; error: string | null }
-    | null
-    | undefined;
-
-  const minutesAgo = (iso?: string | null) =>
-    iso ? Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60_000)) : null;
-  const sinceLastTick = minutesAgo(last?.at);
-  // The cron ticks every five minutes; a quarter of an hour of silence means
-  // it is not arriving, which the operator can do nothing about without being
-  // told it is happening.
-  const tickOverdue = p?.enabled && sinceLastTick != null && sinceLastTick > 15;
-
-  if (!p?.enabled) {
-    // A finished sweep needs no banner. One that stopped with work left, or
-    // whose last tick failed, absolutely does: the old code returned null for
-    // every disabled sweep, so a sweep that switched itself off after doing
-    // nothing left an empty page and no way to tell it had ever started.
-    if (!last || (last.done && !last.error)) return null;
-    return (
-      <Card className="p-3 border-amber-200 bg-amber-50" data-testid="catalogue-sweep-stopped">
-        <div className="flex items-start gap-2">
-          <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
-          <div className="text-sm text-amber-900">
-            <p className="font-medium">The catalogue import is not running.</p>
-            <p className="text-xs mt-1 text-amber-800">
-              Last tick {sinceLastTick != null ? `${sinceLastTick} min ago` : "unknown"}
-              {last.error ? `: ${last.error}` : ` — stopped with ${(p?.totals?.imported ?? 0).toLocaleString()} added.`}
-            </p>
-            <p className="text-xs mt-1 text-amber-700">
-              Pick a category and use "Add all" to start it again.
-            </p>
-          </div>
-        </div>
-      </Card>
-    );
-  }
-
-  // Percentage of PRODUCTS, not categories. Sub-categories here range from 1
-  // product to 191,026, so a category-based bar reads 0% for hours while the
-  // sweep works through the biggest one — which is exactly how this was
-  // reported as "not working".
-  const pct = p.percentComplete ?? 0;
-  const seen = p.totals?.discovered ?? 0;
-  const inBranch = p.productsInCategories ?? 0;
-  const cur = p.currentCategory;
-  const t = p.totals ?? {};
-  const rejected: Array<[string, number]> = Object.entries(t.filteredBy ?? {})
-    .filter(([, n]) => (n as number) > 0)
-    .sort((a, b) => (b[1] as number) - (a[1] as number))
-    .slice(0, 3) as Array<[string, number]>;
-
-  const stop = async () => {
-    setStopping(true);
-    try {
-      await fetch("/api/tme/catalogue?action=stop", { method: "POST", credentials: "include" });
-      onChanged();
-    } finally {
-      setStopping(false);
-    }
-  };
-
-  return (
-    <Card className="p-3 border-blue-200 bg-blue-50" data-testid="catalogue-sweep-banner">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="text-sm font-medium text-blue-900">
-          Importing {p.scope?.rootName ?? "the TME catalogue"} — {seen.toLocaleString()} of{" "}
-          {inBranch.toLocaleString()} products checked ({pct}%)
-          {cur && (
-            <span className="block text-xs font-normal text-blue-700">
-              now: {cur.name} ({cur.products.toLocaleString()} products), page {cur.page} · sub-category{" "}
-              {(p.categoriesDone ?? 0) + 1} of {(p.categoriesTotal ?? 0).toLocaleString()}
-            </span>
-          )}
-        </div>
-        <Button size="sm" variant="outline" onClick={stop} disabled={stopping} data-testid="btn-stop-sweep">
-          {stopping ? "Stopping…" : "Stop"}
-        </Button>
-      </div>
-      {(last?.error || tickOverdue) && (
-        <p className="mt-1 text-xs text-red-700" data-testid="text-sweep-trouble">
-          {last?.error
-            ? `Last tick did nothing: ${last.error}`
-            : `No tick for ${sinceLastTick} minutes — the every-5-minute job is not reaching the server.`}
-        </p>
-      )}
-      <div className="mt-2 h-1.5 w-full rounded bg-blue-100 overflow-hidden">
-        <div className="h-full bg-blue-600 transition-all" style={{ width: `${pct}%` }} />
-      </div>
-      <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
-        <span className="px-1.5 py-0.5 rounded bg-green-100 text-green-800">
-          {(t.imported ?? 0).toLocaleString()} added
-        </span>
-        <span className="px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">
-          {(t.alreadyHad ?? 0).toLocaleString()} already held
-        </span>
-        {/* Why the filter refused things — otherwise a sweep that imports
-            almost nothing looks like a broken sweep rather than a strict one. */}
-        <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
-          {(t.filtered ?? 0).toLocaleString()} filtered out
-          {rejected.length > 0 ? ` (${rejected.map(([k, n]) => `${k} ${n}`).join(", ")})` : ""}
-        </span>
-        {(t.failed ?? 0) > 0 && (
-          <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-700">{t.failed.toLocaleString()} failed</span>
-        )}
-        <span className="px-1.5 py-0.5 rounded bg-white text-gray-500">
-          runs on the server · safe to close the browser or shut down
-        </span>
-        {last && (
-          <span className="px-1.5 py-0.5 rounded bg-white text-gray-500" data-testid="text-sweep-last-tick">
-            last tick {sinceLastTick} min ago (+{last.imported.toLocaleString()} added)
-          </span>
-        )}
-      </div>
-    </Card>
-  );
-}
-
-/**
- * "Add the whole branch" — start a scoped catalogue sweep for this category
- * and everything beneath it.
- *
- * Exists because the alternative is opening every sub-sub-category in turn and
- * selecting its products by hand: "Fuses and Circuit Breakers" is 53,104
- * products across eleven sub-trees, and nobody is clicking through that.
- *
- * Deliberately a BACKGROUND job rather than the browser-driven sync the grid
- * uses. That one pages products through this tab and dies if it is closed;
- * a branch of this size needs something that survives, resumes, and applies
- * the ingest filter so the import is not simply everything.
- */
-function AddBranchButton({
-  category,
-  onStarted,
-}: {
-  category: TMECategory;
-  onStarted: (message: string) => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const count = category.ProductCount ?? 0;
-
-  const start = async (e: React.MouseEvent) => {
-    // The row itself expands/selects; this must not do both.
-    e.stopPropagation();
-    if (busy) return;
-    setBusy(true);
-    try {
-      const describe = await fetch(
-        `/api/tme/catalogue?action=branch&rootCategoryId=${encodeURIComponent(category.CategoryId)}`,
-        { credentials: "include" },
-      ).then((r) => r.json());
-      const branch = describe?.branch;
-      const ok = window.confirm(
-        `Import "${category.Name}" and everything under it?\n\n` +
-          `${branch?.leafCategories ?? "?"} sub-categories · ${(branch?.products ?? count).toLocaleString()} products at TME\n\n` +
-          `Runs on the server and applies the ingest filter (price, weight, stock, image), so far fewer than that will actually be added.\n\n` +
-          `You can close this page and turn the computer off — it keeps going and picks up where it left off.`,
-      );
-      if (!ok) return;
-      // No run=1: the server enables the sweep, kicks the first slice without
-      // waiting for it, and answers immediately. Blocking here for the four
-      // minutes a slice takes would make a background job feel like a hung
-      // button — which is how this first landed.
-      const res = await fetch(
-        `/api/tme/catalogue?action=start&rootCategoryId=${encodeURIComponent(category.CategoryId)}`,
-        { method: "POST", credentials: "include" },
-      );
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data?.error || `HTTP ${res.status}`);
-      onStarted(
-        `Importing ${category.Name} in the background — ${data.progress?.categoriesTotal ?? 0} sub-categories queued. Progress is shown at the top of this page.`,
-      );
-    } catch (err) {
-      onStarted(`Could not start: ${(err as Error).message}`);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <button
-      type="button"
-      onClick={start}
-      disabled={busy}
-      title={`Import all ${count.toLocaleString()} products under ${category.Name}`}
-      className="px-1.5 py-0 text-[10px] rounded border border-blue-200 text-blue-700 hover:bg-blue-50 disabled:opacity-50"
-      data-testid={`btn-add-branch-${category.CategoryId}`}
-    >
-      {busy ? "…" : "Add all"}
-    </button>
-  );
-}
-
 export default function TMEBrowser({ user }: TMEBrowserProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>("");
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
@@ -1292,7 +1082,6 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                 </div>
               </Card>
             )}
-            <CatalogueSweepBanner onChanged={() => queryClient.invalidateQueries({ queryKey: ["/api/tme/catalogue?action=status"] })} />
             {/* API Status and Sync Button - Moved to Header */}
 
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
@@ -1416,12 +1205,6 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                       </Badge>
                                     )}
                                     {hasChildren && (
-                                      <AddBranchButton
-                                        category={mainCategory}
-                                        onStarted={(message) => toast({ title: "Catalogue import", description: message })}
-                                      />
-                                    )}
-                                    {hasChildren && (
                                       isExpanded ? (
                                         <ChevronDown className="h-4 w-4 text-gray-400" />
                                       ) : (
@@ -1478,12 +1261,6 @@ export default function TMEBrowser({ user }: TMEBrowserProps) {
                                                   <Badge variant="outline" className="text-[9px] px-1 py-0 h-4">
                                                     {subCategory.ProductCount.toLocaleString()}
                                                   </Badge>
-                                                )}
-                                                {subHasChildren && (
-                                                  <AddBranchButton
-                                                    category={subCategory}
-                                                    onStarted={(message) => toast({ title: "Catalogue import", description: message })}
-                                                  />
                                                 )}
                                                 {subHasChildren && (
                                                   subIsExpanded ? (

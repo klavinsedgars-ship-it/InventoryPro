@@ -942,7 +942,9 @@ What changed:
   (and it is never cached to localStorage), the real error plus a Retry in the
   grid, and "TME returned no products for this category" only when that is
   what happened.
-- The sweep pauses instead of burning the list: immediately on a 401/403/429
+- (The sweep was removed on 2026-09-28; the rest of this entry still
+  applies to the browser and the API client.) The sweep paused instead of
+  burning the list: immediately on a 401/403/429
   (TME's own words: "if we see high traffic we can cut the traffic"), else
   after five consecutive failures, leaving the cursor and the sweep enabled.
   Only a walk that reached the end counts as finished — `shared/catalogue-walk.ts`,
@@ -970,98 +972,34 @@ Two smaller things found on the way:
   of JSON — so "is the sweep enabled?" fetched the whole catalogue shape, six
   times per poll of the status endpoint. There is a single-row read now.
 
-## TME catalogue sweep (2026-09-23)
+## TME catalogue sweep — built, used, removed (2026-09-23 → 2026-09-28)
 
-Getting TME products into `products` meant opening a category in the TME
-Browser, paging through it, selecting everything and starting a sync job — by
-hand, per category, against a supplier with over 500,000 products. 129k got in
-that way over months. The rest never would.
+A server-side walk of TME's category tree that imported whatever passed an
+ingest filter, so a whole branch could be added with one click instead of
+paging through sub-categories by hand. It ran as cron-driven slices with a
+kill switch, a lease, a resumable cursor and a progress banner.
 
-`server/tme-catalogue-sweep.ts` walks TME's category tree server-side and
-imports what passes an **ingest filter**. House pattern: cron slices,
-kill-switch `'ebay'/'catalogue_sweep'`, lease, resumable cursor
-(`{categoryIndex, page}`), self-disabling.
+It did work: one run took the Passives branch to completion — 123 of 123 leaf
+categories, 379,743 products checked, 33,808 imported.
 
-```
-GET /api/tme/catalogue?action=branch&rootCategoryId=<id>   size a branch
-GET /api/tme/catalogue?action=dry-run      what the filter admits — writes NOTHING
-GET /api/tme/catalogue?action=filter&maxWeightGrams=500&maxPrice=40
-GET /api/tme/catalogue?action=start&run=1  begin (whole catalogue)
-GET /api/tme/catalogue?action=start&rootCategoryId=<id>&run=1   one branch
-GET /api/tme/catalogue?action=status       cursor, totals, rejection breakdown
-GET /api/cron/tme-catalogue                the tick (every 5 min)
-```
+**Removed at the operator's request on 2026-09-28**: the results were not what
+the business wanted (see the ramp funnel — most of what it imported is
+pack-priced stock above the listing band), and selecting products by hand is
+the workflow they prefer. Gone: the `Add all` branch button, the progress
+banner, `/api/tme/catalogue`, `/api/cron/tme-catalogue` and its cron entry,
+`server/tme-catalogue-sweep.ts`, `shared/catalogue-walk.ts`. The boot
+migration deletes the `catalogue_*` settings rows, because
+`marketplace_settings` is read whole in several places and `catalogue_tree`
+alone was a few hundred kilobytes of cached JSON dragged along by every one
+of those reads.
 
-**The filter is the point, not a safety rail.** Importing everything would be
-the wrong outcome: every row in `products` is re-priced and stock-synced for as
-long as it exists, so an unfiltered 500k import quadruples that standing cost
-to carry stock that would never sell. Defaults come from what this business has
-measured — postage has exceeded supplier cost on real orders, so weight is
-capped at 500 g; eBay refuses a listing with no image; TME lists plenty of
-items priced in fractions of a cent that cannot clear the floor.
+The TME Browser's manual flow is untouched: browse a category, filter, select,
+sync. `shared/ingest-filter.ts` stays — it is tested and `processTmeSyncChunk`
+still accepts a filter, so a future manual import can use it.
 
-Three things worth knowing:
-
-- **An unknown weight is REJECTED when a weight cap is set.** `fee-model.ts`
-  reads a missing weight as zero grams — the cheapest postal band — so
-  "unknown" silently becomes "free to ship", and the products that flatters are
-  exactly the heavy ones that lose money. With no cap set, weight is not
-  deciding anything and unknown passes.
-- **Only leaf categories are walked.** TME reports `TotalProducts` on parents
-  inclusive of children, so walking every node would fetch most of the
-  catalogue several times and make the progress total meaningless.
-- **Discovery is separated from enrichment.** TME allows 10 req/sec for search
-  but only 2–4/sec for price/stock, so the sweep pages a category for symbols
-  only, drops the ones already in `products`, and pays for detail exclusively
-  on what is new.
-
-**"Add all" on a category row** (TME Browser) starts a sweep scoped to that
-branch — every leaf beneath the node, expanded server-side from `ParentId`.
-That is the fast path an operator actually wants: "Fuses and Circuit Breakers"
-is 53,104 products across eleven sub-trees, and the alternative is opening each
-one and selecting its products by hand. It is a background job on purpose —
-the browser-driven sync the product grid uses pages through the open tab and
-dies with it, which a branch of that size cannot survive. The confirm dialog
-names the leaf and product counts first, and says the filter will admit far
-fewer.
-
-**`action=start` does not block.** It enables the sweep, fires the cron
-endpoint WITHOUT awaiting it (the same fire-and-forget the listing ramp uses)
-and answers immediately. The first version passed `run=1` from the button,
-which held the request open for the four minutes a slice takes — a background
-job that felt like a hung button, and the reason it was first reported as
-"clicked it, nothing happened". `run=1` still exists for debugging.
-
-Everything runs on the server: Vercel's cron works it every five minutes, so
-closing the browser or shutting the computer down does not stop or lose it,
-and the cursor means it resumes rather than restarts.
-
-Throughput is the number of 250-second slices the cron grants, so the tick
-interval sets the pace almost linearly — it was twice an hour, which put
-Passives (372,878 products) at roughly 37 hours. A tick that overlaps a
-running slice is refused by the lease, costing one wasted invocation and
-nothing else, so a short interval is safe.
-
-**Progress is measured in PRODUCTS, not categories.** Leaf categories range
-from 1 product to 191,026, and the sweep walks them biggest-first, so
-`categoriesDone` sits at 0 for hours while it grinds through the largest one.
-That is accurate and useless: it read "0 of 122 sub-categories (0%)" two hours
-into a run that had already checked 20,100 products, and was reported as
-broken. The bar now uses `discovered / productsInCategories` and names the
-category and page it is on, so it is visibly alive.
-
-**The banner on the TME Browser** shows that bar, the branch name, counts of
-added / already held / filtered out (with the top rejection reasons), and a
-Stop button. It polls only
-while a sweep is running. Without it the sweep is invisible — "Add all" returns
-instantly, the cron does the work minutes later, and the only evidence is the
-category counts quietly rising, which is exactly how it was first reported as
-"nothing happened".
-
-Run `dry-run` before `start`, always. The pass rate turns entirely on how many
-TME products publish a weight, which is not knowable without asking, and the
-projection it reports is an extrapolation from a few hundred products — an
-estimate, labelled as one, not a count.
+Worth keeping from it, if anything like it is ever built again: measure
+progress in products rather than categories (leaf sizes range from 1 to
+191,026), and never treat a supplier that stops answering as a finished walk.
 
 ## Starting a supplier over (2026-09-17)
 

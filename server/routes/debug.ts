@@ -440,35 +440,6 @@ export function registerDebugRoutes(app: Express) {
       tme.usage = { error: (e as Error).message.slice(0, 120) };
     }
 
-    // What the background sweep is actually doing, and when it last ticked.
-    try {
-      const sweep = await import("../tme-catalogue-sweep");
-      const progress = await sweep.catalogueProgress();
-      tme.catalogue = {
-        enabled: progress.enabled,
-        scope: progress.scope,
-        cursor: progress.cursor,
-        categoriesTotal: progress.categoriesTotal,
-        percentComplete: progress.percentComplete,
-        imported: progress.totals.imported,
-        discovered: progress.totals.discovered,
-        lastRun: progress.lastRun,
-      };
-      const last = progress.lastRun;
-      if (progress.enabled && last?.error) {
-        verdicts.push(`Catalogue sweep is enabled but its last tick did nothing: ${last.error}`);
-      }
-      if (progress.enabled && last && Date.now() - Date.parse(last.at) > 30 * 60 * 1000) {
-        verdicts.push(
-          `Catalogue sweep is enabled but has not ticked since ${last.at} — the cron is not reaching /api/cron/tme-catalogue.`,
-        );
-      }
-      if (progress.enabled && progress.categoriesTotal === 0) {
-        verdicts.push("Catalogue sweep is enabled with no categories to walk — start the branch again once TME's category tree is back.");
-      }
-    } catch (e) {
-      tme.catalogue = { error: (e as Error).message.slice(0, 160) };
-    }
     report.tme = tme;
     if (!tme.search.ok && !tme.getProducts.ok) {
       verdicts.push("TME API fully down/denied — imports and sync cannot work. Check TME_TOKEN/TME_APPLICATION_SECRET (v2 tokens: developers.tme.eu).");
