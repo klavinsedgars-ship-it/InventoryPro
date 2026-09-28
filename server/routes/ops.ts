@@ -242,10 +242,53 @@ export function registerOpsRoutes(app: Express) {
     try {
       const range = await getRampPriceRange();
       const funnel = await storage.getListingCandidateFunnel(range);
+
+      /**
+       * Is the stored weight actually in grams?
+       *
+       * TME publishes a weight with a unit and nothing in the import reads
+       * that unit — the number is written into a column called `weight` and
+       * fed to the postage model as grams. If these values are kilograms, the
+       * model prices every parcel as if it were a thousandth of its real
+       * weight, which is precisely the failure this business has already paid
+       * for once. A median tells us in one query.
+       */
+      let weightSanity: any = null;
+      try {
+        const { db } = await import("../db");
+        const { sql } = await import("drizzle-orm");
+        const rows: any = await db.execute(sql`
+          SELECT COUNT(*)::int AS rows_with_weight,
+                 MIN(weight::float) AS min_weight,
+                 MAX(weight::float) AS max_weight,
+                 PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY weight::float) AS median_weight,
+                 COUNT(*) FILTER (WHERE weight::float < 1)::int AS under_1,
+                 COUNT(*) FILTER (WHERE weight::float >= 1)::int AS at_least_1
+          FROM products
+          WHERE supplier = 'TME' AND weight IS NOT NULL AND weight <> ''
+        `);
+        const w = (rows.rows ?? rows)[0] ?? {};
+        weightSanity = {
+          rowsWithWeight: Number(w.rows_with_weight) || 0,
+          medianWeight: w.median_weight ?? null,
+          minWeight: w.min_weight ?? null,
+          maxWeight: w.max_weight ?? null,
+          under1: Number(w.under_1) || 0,
+          atLeast1: Number(w.at_least_1) || 0,
+          reading:
+            Number(w.rows_with_weight) > 0 && Number(w.under_1) > Number(w.at_least_1)
+              ? "Most stored weights are below 1, which is what kilograms look like in a column read as grams. Postage would be priced at a thousandth of the real parcel weight."
+              : "Stored weights look like grams.",
+        };
+      } catch {
+        weightSanity = null;
+      }
+
       const worst = [...funnel.stages].sort((a, b) => b.removed - a.removed)[0];
       res.json({
         ok: true,
         priceBand: range,
+        weightSanity,
         ...funnel,
         verdict:
           funnel.candidates > 0
