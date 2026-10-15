@@ -991,7 +991,8 @@ export function registerDebugRoutes(app: Express) {
       if (candidates.length === 0) return res.json({ ok: true, candidates: 0, note: "no ramp candidates in the current price band" });
 
       const symbols = candidates.map((p: any) => p.supplierProductId || p.sku);
-      const wanted = candidates.map((p: any) => Math.max(1, calculateEbayStock(p).ebayStock));
+      const { packSize } = await import("../stock-manager");
+      const wanted = candidates.map((p: any) => Math.max(1, calculateEbayStock(p).ebayStock) * packSize(p));
 
       // The exact call the guard makes, plus a no-deliveries call for the same
       // symbols so warehouse stock can be compared against the delivery split.

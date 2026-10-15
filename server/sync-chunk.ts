@@ -24,6 +24,7 @@ import {
 import { getFeeConfig } from "./fee-config";
 import { ebayInventoryApi } from "./ebay-inventory-api";
 import { extractStock, staleCutoffs, sliceEvenly } from "./sync-utils";
+import { packSize, packsInStock } from "./stock-manager";
 
 // Marks a listing we ended automatically because TME stock hit 0, so we can
 // tell it apart from manual unlists and auto-republish it when stock returns.
@@ -233,11 +234,15 @@ export async function processSyncSlice(slice: any[], ctx: SyncContext): Promise<
 
     if (priceChanged || stockChanged) changed++;
 
-    // Effective sellable quantity after any per-product eBay stock cap.
+    // Effective sellable quantity, in eBay units, after any per-product eBay
+    // stock cap. An MOQ>1 product is listed as a pack of MOQ units, so TME
+    // stock below one pack is 0 here — it must be withdrawn, not left live
+    // with a quantity no order can be filled from.
+    const packs = packsInStock(stock, packSize(product));
     const limited =
       product.useStockLimit && product.ebayStockLimit != null
-        ? Math.min(stock, product.ebayStockLimit)
-        : stock;
+        ? Math.min(packs, product.ebayStockLimit)
+        : packs;
     const hasOffer = !!product.ebayOfferId;
     const changedFlag = priceChanged || stockChanged;
 

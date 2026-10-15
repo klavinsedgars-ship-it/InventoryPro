@@ -8,7 +8,7 @@ import type { Product } from "@shared/schema";
 import { storage } from "./storage";
 import { ebayInventoryApi } from "./ebay-inventory-api";
 import { validateListingEnv } from "./ebay-env";
-import { calculateEbayStock } from "./stock-manager";
+import { calculateEbayStock, packSize } from "./stock-manager";
 import { mapPool } from "./concurrency";
 
 /** Category lookups per batch to run at once — cache hits or Taxonomy calls. */
@@ -61,9 +61,10 @@ export async function listProductsViaInventory(allProducts: Product[]): Promise<
 
   // Never list out-of-stock items (eBay won't publish a 0-qty offer, and
   // it's an oversell risk). Report them as skipped.
-  const products = allProducts.filter((p) => (p.stock ?? 0) > 0);
+  // Below one pack is out of stock for an MOQ>1 listing.
+  const products = allProducts.filter((p) => calculateEbayStock(p).ebayStock > 0);
   const skipped = allProducts.length - products.length;
-  for (const p of allProducts.filter((p) => (p.stock ?? 0) <= 0)) {
+  for (const p of allProducts.filter((p) => calculateEbayStock(p).ebayStock <= 0)) {
     results.push({ sku: p.sku, ok: false, error: "skipped: out of stock" });
   }
 
@@ -220,9 +221,10 @@ export async function listProductsViaInventoryBulk(
     };
   }
 
-  const products = allProducts.filter((p) => (p.stock ?? 0) > 0);
+  // Below one pack is out of stock for an MOQ>1 listing.
+  const products = allProducts.filter((p) => calculateEbayStock(p).ebayStock > 0);
   const skipped = allProducts.length - products.length;
-  for (const p of allProducts.filter((p) => (p.stock ?? 0) <= 0)) {
+  for (const p of allProducts.filter((p) => calculateEbayStock(p).ebayStock <= 0)) {
     results.push({ sku: p.sku, ok: false, error: "skipped: out of stock" });
   }
 
@@ -260,13 +262,14 @@ export async function listProductsViaInventoryBulk(
       try {
         const { tmeApiV2 } = await import("./tme-api-v2");
         const symbols = batch.map((p) => p.supplierProductId || p.sku);
-        const wanted = batch.map((p) => Math.max(1, calculateEbayStock(p).ebayStock));
+        // In TME units: each eBay unit of an MOQ>1 listing is a whole pack.
+        const wanted = batch.map((p) => Math.max(1, calculateEbayStock(p).ebayStock) * packSize(p));
         const ship = await tmeApiV2.checkShippable(symbols, wanted);
         const blocked: typeof batch = [];
         batch = batch.flatMap((p, idx) => {
           const r = ship.get(symbols[idx]);
           if (!r) return [p]; // TME said nothing about it — don't invent a block
-          if (r.shippableNow <= 0) { blocked.push(p); return []; }
+          if (r.shippableNow < packSize(p)) { blocked.push(p); return []; }
           // Partial availability is a smaller listing, not a skipped one. A
           // product with 1 unit shippable of the 2 we wanted was being dropped
           // entirely; now it lists at 1. Capping stock here is enough — every
@@ -278,7 +281,7 @@ export async function listProductsViaInventoryBulk(
         });
         for (const p of blocked) {
           const r = ship.get(p.supplierProductId || p.sku);
-          const msg = `TME cannot ship today (0 available${r?.supplyDate ? `, next supply ${r.supplyDate}` : ""})`;
+          const msg = `TME cannot ship today (${r?.shippableNow ?? 0} available, pack of ${packSize(p)}${r?.supplyDate ? `, next supply ${r.supplyDate}` : ""})`;
           failed++;
           results.push({ sku: p.sku, ok: false, error: msg });
           // Record what TME actually says is sellable. Not burning an attempt
