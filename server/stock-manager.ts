@@ -13,40 +13,65 @@ export interface StockInfo {
 }
 
 /**
- * Calculate eBay stock based on real TME stock and product settings
+ * TME units consumed by ONE eBay sale. A product with MOQ > 1 is listed as a
+ * pack of MOQ units ("10x capacitor ..." — see generateTitle and the package
+ * pricing), so every eBay unit sold is an order for MOQ units at TME.
+ */
+export function packSize(product: Pick<Product, 'moq'>): number {
+  const moq = Number(product.moq);
+  return Number.isFinite(moq) && moq > 1 ? Math.floor(moq) : 1;
+}
+
+/**
+ * Whole packs TME can fill from `stock` units. 7 units of a 10-pack is ZERO
+ * sellable listings, not 7: counting units here is what kept 10x packs live
+ * on eBay (and "available" in the CRM) after TME fell below one pack.
+ */
+export function packsInStock(stock: number | null | undefined, moq: number): number {
+  const units = Math.max(0, Number(stock) || 0);
+  return Math.floor(units / Math.max(1, moq));
+}
+
+/**
+ * Calculate eBay stock based on real TME stock and product settings.
+ * `ebayStock` is in eBay units (packs); `tmeStock` stays in TME units.
  */
 export function calculateEbayStock(product: Product): StockInfo {
   const tmeStock = product.stock;
+  const moq = packSize(product);
+  const packs = packsInStock(tmeStock, moq);
   const ebayLimit = product.ebayStockLimit || 2;
   const useLimit = product.useStockLimit !== false; // default to true
-  
+
+  if (packs === 0) {
+    return {
+      tmeStock,
+      ebayStock: 0,
+      isLimited: false,
+      limitReason: moq > 1 && tmeStock > 0
+        ? `Below one pack (${tmeStock} of ${moq} units)`
+        : 'Out of stock'
+    };
+  }
+
   if (!useLimit) {
     return {
       tmeStock,
-      ebayStock: tmeStock,
+      ebayStock: packs,
       isLimited: false,
       limitReason: 'Stock limit disabled for this product'
     };
   }
-  
-  if (tmeStock === 0) {
-    return {
-      tmeStock: 0,
-      ebayStock: 0,
-      isLimited: false,
-      limitReason: 'Out of stock'
-    };
-  }
-  
-  if (tmeStock <= ebayLimit) {
+
+  if (packs <= ebayLimit) {
     return {
       tmeStock,
-      ebayStock: tmeStock,
+      ebayStock: packs,
       isLimited: false,
       limitReason: 'TME stock below eBay limit'
     };
   }
-  
+
   return {
     tmeStock,
     ebayStock: ebayLimit,

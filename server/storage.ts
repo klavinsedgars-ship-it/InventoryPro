@@ -1227,7 +1227,9 @@ export class DatabaseStorage implements IStorage {
     const conds = [
       eq(products.supplier, "TME"),
       eq(products.listedOnEbay, false),
-      gte(products.stock, 1),
+      // At least one whole pack: an MOQ>1 product with fewer units than its
+      // pack size can't be filled, and the lister would skip it every tick.
+      sql`${products.stock} >= GREATEST(${products.moq}, 1)`,
       or(eq(products.excludeFromListing, false), isNull(products.excludeFromListing)),
       // Skip products we auto-ended for being out of stock — sync-chunk
       // re-publishes their existing offer when stock returns, so the ramp
